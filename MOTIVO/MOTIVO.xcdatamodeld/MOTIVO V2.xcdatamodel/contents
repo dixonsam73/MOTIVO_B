@@ -16,9 +16,18 @@
     </entity>
     <entity name="Session" representedClassName="Session" syncable="YES" codeGenerationType="class">
         <attribute name="durationSeconds" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
+        <attribute name="effort" attributeType="Integer 16" defaultValueString="5" usesScalarValueType="YES"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isPublic" attributeType="Boolean" defaultValueString="YES" usesScalarValueType="YES"/>
+        <attribute name="mood" attributeType="Integer 16" defaultValueString="5" usesScalarValueType="YES"/>
         <attribute name="notes" optional="YES" attributeType="String"/>
         <attribute name="timestamp" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="title" attributeType="String"/>
+        <relationship name="tags" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Tag" inverseName="sessions" inverseEntity="Tag"/>
+    </entity>
+    <entity name="Tag" representedClassName="Tag" syncable="YES" codeGenerationType="class">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <relationship name="sessions" optional="YES" toMany="YES" deletionRule="Nullify" destinationEntity="Session" inverseName="tags" inverseEntity="Session"/>
     </entity>
 </model>

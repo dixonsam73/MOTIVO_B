@@ -1,7 +1,18 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="23788.4" systemVersion="24G90" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="Instrument" representedClassName="Instrument" syncable="YES" codeGenerationType="class">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <relationship name="profile" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Profile" inverseName="relationship" inverseEntity="Profile"/>
+    </entity>
     <entity name="Item" representedClassName="Item" syncable="YES" codeGenerationType="class">
         <attribute name="timestamp" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
+    </entity>
+    <entity name="Profile" representedClassName="Profile" syncable="YES" codeGenerationType="class">
+        <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="name" attributeType="String"/>
+        <attribute name="primaryInstrument" attributeType="String"/>
+        <relationship name="relationship" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Instrument" inverseName="profile" inverseEntity="Instrument"/>
     </entity>
     <entity name="Session" representedClassName="Session" syncable="YES" codeGenerationType="class">
         <attribute name="durationSeconds" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
