@@ -14,6 +14,7 @@ struct SessionDetailView: View {
 
     @ObservedObject var session: Session
     @State private var showDeleteAlert = false
+    @State private var showingEdit = false
 
     var body: some View {
         NavigationStack {
@@ -79,6 +80,9 @@ struct SessionDetailView: View {
             .navigationTitle("Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Edit") { showingEdit = true }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(role: .destructive) {
                         showDeleteAlert = true
@@ -93,6 +97,10 @@ struct SessionDetailView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This action cannot be undone.")
+            }
+            .sheet(isPresented: $showingEdit) {
+                AddEditSessionView(session: session)
+                    .environment(\.managedObjectContext, moc)
             }
         }
     }
@@ -136,8 +144,8 @@ private struct KeyValueRow: View {
 
 private struct MeterRow: View {
     let name: String
-    let value: Double    // current
-    let maxValue: Double // maximum
+    let value: Double
+    let maxValue: Double
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -203,6 +211,5 @@ private func formatDuration(_ value: Int64) -> String {
 }
 
 private func clampedInt16(_ v: Int16) -> Int {
-    // Defensive clamp to 0...10 in case defaults differ
     return Swift.max(0, Swift.min(10, Int(v)))
 }
