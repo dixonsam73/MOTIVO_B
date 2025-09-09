@@ -9,78 +9,129 @@ import SwiftUI
 import CoreData
 
 struct ContentView: View {
-    @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.managedObjectContext) private var moc
 
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Item.timestamp, ascending: true)],
-        animation: .default)
-    private var items: FetchedResults<Item>
+        sortDescriptors: [NSSortDescriptor(keyPath: \Session.timestamp, ascending: false)],
+        animation: .default
+    )
+    private var sessions: FetchedResults<Session>
+
+    @State private var showingAdd = false
 
     var body: some View {
-        NavigationView {
-            List {
-                ForEach(items) { item in
-                    NavigationLink {
-                        Text("Item at \(item.timestamp!, formatter: itemFormatter)")
-                    } label: {
-                        Text(item.timestamp!, formatter: itemFormatter)
+        NavigationStack {
+            Group {
+                if sessions.isEmpty {
+                    EmptyStateView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(Color(.systemGroupedBackground))
+                } else {
+                    List {
+                        ForEach(sessions) { session in
+                            NavigationLink {
+                                SessionDetailView(session: session)
+                            } label: {
+                                SessionRow(session: session)
+                            }
+                        }
+                        .onDelete(perform: delete)
                     }
+                    .listStyle(.insetGrouped)
                 }
-                .onDelete(perform: deleteItems)
             }
+            .navigationTitle("Motivo")
             .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    EditButton()
+                ToolbarItem(placement: .topBarLeading) {
+                    EditButton().disabled(sessions.isEmpty)
                 }
-                ToolbarItem {
-                    Button(action: addItem) {
-                        Label("Add Item", systemImage: "plus")
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showingAdd = true
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
+                            .imageScale(.large)
                     }
+                    .accessibilityLabel("Add Session")
                 }
             }
-            Text("Select an item")
-        }
-    }
-
-    private func addItem() {
-        withAnimation {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
+            .sheet(isPresented: $showingAdd) {
+                AddEditSessionView()
+                    .environment(\.managedObjectContext, moc)
             }
         }
     }
 
-    private func deleteItems(offsets: IndexSet) {
-        withAnimation {
-            offsets.map { items[$0] }.forEach(viewContext.delete)
-
-            do {
-                try viewContext.save()
-            } catch {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-                let nsError = error as NSError
-                fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-            }
+    private func delete(at offsets: IndexSet) {
+        for index in offsets {
+            let s = sessions[index]
+            moc.delete(s)
         }
+        try? moc.save()
     }
 }
 
-private let itemFormatter: DateFormatter = {
-    let formatter = DateFormatter()
-    formatter.dateStyle = .short
-    formatter.timeStyle = .medium
-    return formatter
-}()
+// MARK: - Row
+fileprivate struct SessionRow: View {
+    let session: Session
 
-#Preview {
-    ContentView().environment(\.managedObjectContext, PersistenceController.preview.container.viewContext)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text((session.title ?? "").isEmpty ? "Untitled" : (session.title ?? "Untitled"))
+                .font(.headline)
+
+            if let notes = session.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+
+            HStack(spacing: 8) {
+                Text(formatDuration(session.durationSeconds))
+                Text("•")
+                Text(relativeTimestamp(session.timestamp))
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 6)
+    }
 }
+
+// MARK: - Empty State
+fileprivate struct EmptyStateView: View {
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: "metronome.fill")
+                .font(.system(size: 44))
+                .symbolRenderingMode(.hierarchical)
+            Text("No sessions yet")
+                .font(.headline)
+            Text("Tap the + button to log your first practice session.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .padding()
+    }
+}
+
+// MARK: - Format helpers
+fileprivate func formatDuration(_ value: Int64) -> String {
+    let total = Int(value)
+    let h = total / 3600
+    let m = (total % 3600) / 60
+    let s = total % 60
+    if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
+    return String(format: "%d:%02d", m, s)
+}
+
+
+fileprivate func relativeTimestamp(_ date: Date?) -> String {
+    let date = date ?? Date()
+    let rel = RelativeDateTimeFormatter()
+    rel.unitsStyle = .short
+    return rel.localizedString(for: date, relativeTo: Date())
+}
+
