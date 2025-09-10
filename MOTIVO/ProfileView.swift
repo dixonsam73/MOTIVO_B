@@ -9,68 +9,54 @@ import SwiftUI
 import CoreData
 
 struct ProfileView: View {
-    @Environment(\.managedObjectContext) private var moc
+    @Environment(\.managedObjectContext) private var ctx
     @Environment(\.dismiss) private var dismiss
 
-    // Single profile
-    @FetchRequest(sortDescriptors: [], animation: .default)
-    private var profiles: FetchedResults<Profile>
-
-    // All instruments (we’ll filter by profile in code)
+    // Instruments for the current profile (string-key sort descriptor per convention)
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(keyPath: \Instrument.name, ascending: true)],
-        animation: .default
-    )
-    private var allInstruments: FetchedResults<Instrument>
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
+    ) private var instruments: FetchedResults<Instrument>
 
+    // Local form state
     @State private var name: String = ""
-    @State private var primaryInstrument: String = ""
-    @State private var newInstrument: String = ""
+    @State private var primaryInstrumentName: String = ""
+    @State private var defaultPrivacy: Bool = false
+
+    // Routing
+    @State private var showInstrumentManager: Bool = false
+
+    // Cached profile reference
+    @State private var profile: Profile?
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             Form {
-                // MARK: - Basic info
-                Section("Your Details") {
+                Section(header: Text("Profile")) {
                     TextField("Name", text: $name)
-                        .textContentType(.name)
-                        .autocorrectionDisabled()
+                        .textInputAutocapitalization(.words)
 
-                    Picker("Primary instrument", selection: $primaryInstrument) {
-                        ForEach(instrumentNames, id: \.self) { inst in
-                            Text(inst).tag(inst)
-                        }
-                    }
-
-                    if instrumentNames.isEmpty {
-                        Text("Add at least one instrument below to choose a primary.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Toggle("Default public posts", isOn: $defaultPrivacy)
+                        .accessibilityHint("When enabled, new sessions default to Public")
                 }
 
-                // MARK: - Instruments
-                Section("Your Instruments") {
-                    HStack {
-                        TextField("Add instrument (e.g. Bass, Piano)", text: $newInstrument)
-                            .textInputAutocapitalization(.words)
-                            .autocorrectionDisabled()
-                        Button("Add") { addInstrument() }
-                            .disabled(newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-
-                    if profileInstruments.isEmpty {
-                        Text("No instruments yet").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(profileInstruments, id: \.objectID) { instrument in
-                            InstrumentRow(
-                                name: instrument.name ?? "",
-                                isPrimary: (instrument.name ?? "") == primaryInstrument,
-                                setPrimary: { primaryInstrument = instrument.name ?? "" },
-                                delete: { deleteInstrument(instrument) }
-                            )
+                Section(header: Text("Primary Instrument")) {
+                    if instruments.isEmpty {
+                        HStack {
+                            Text("No instruments added yet")
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            Button("Manage…") { showInstrumentManager = true }
                         }
-                        .onDelete(perform: deleteInstrumentsAt)
+                    } else {
+                        Picker("Primary", selection: $primaryInstrumentName) {
+                            ForEach(instrumentsArray, id: \.self) { ins in
+                                Text(ins).tag(ins)
+                            }
+                        }
+                        HStack {
+                            Spacer()
+                            Button("Manage instruments…") { showInstrumentManager = true }
+                        }
                     }
                 }
             }
@@ -81,143 +67,58 @@ struct ProfileView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .onAppear { ensureProfileLoaded() }
-        }
-    }
-
-    // MARK: - Derived data
-
-    private var profileInstruments: [Instrument] {
-        guard let p = profiles.first else { return [] }
-        return allInstruments.filter { inst in
-            inst.profile == p
-        }
-    }
-
-    private var instrumentNames: [String] {
-        var names: [String] = []
-        for inst in profileInstruments {
-            if let n = inst.name?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
-                names.append(n)
+            .onAppear { loadOrCreateProfile() }
+            .sheet(isPresented: $showInstrumentManager) {
+                InstrumentListView()
             }
         }
-        return names
     }
 
-    // MARK: - Lifecycle & actions
+    // MARK: - Derived
+    private var instrumentsArray: [String] {
+        instruments
+            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
 
-    private func ensureProfileLoaded() {
-        if profiles.first == nil {
-            let p = Profile(context: moc)
+    // MARK: - Data flow
+    private func loadOrCreateProfile() {
+        // Fetch (or create) singleton Profile
+        let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
+        fr.fetchLimit = 1
+        if let existing = (try? ctx.fetch(fr))?.first {
+            profile = existing
+        } else {
+            let p = Profile(context: ctx)
             p.id = UUID()
             p.name = ""
             p.primaryInstrument = ""
-            try? moc.save()
+            p.defaultPrivacy = false  // private by default
+            try? ctx.save()
+            profile = p
         }
 
-        if let p = profiles.first {
-            name = p.name ?? ""
-            primaryInstrument = (p.primaryInstrument ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-
-            if primaryInstrument.isEmpty, let first = instrumentNames.first {
-                primaryInstrument = first
-            }
-        }
+        // Bind to form
+        name = profile?.name ?? ""
+        primaryInstrumentName = (profile?.primaryInstrument ?? "").isEmpty
+            ? (instrumentsArray.first ?? "")
+            : (profile?.primaryInstrument ?? "")
+        defaultPrivacy = profile?.defaultPrivacy ?? false
     }
 
     private func save() {
-        guard let p = profiles.first else { return }
+        guard let p = profile else { return }
         p.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        p.primaryInstrument = primaryInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        try? moc.save()
-        dismiss()
-    }
-
-    private func addInstrument() {
-        let value = newInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.isEmpty { return }
-
-        // Avoid duplicates (case-insensitive)
-        let lowerExisting = instrumentNames.map { $0.lowercased() }
-        if lowerExisting.contains(value.lowercased()) {
-            newInstrument = ""
-            return
-        }
-
-        let inst = Instrument(context: moc)
-        inst.id = UUID()
-        inst.name = value
-        inst.profile = profiles.first
-        try? moc.save()
-
-        if primaryInstrument.isEmpty {
-            primaryInstrument = value
-        }
-
-        newInstrument = ""
-    }
-
-    private func deleteInstrument(_ inst: Instrument) {
-        let removed = inst.name ?? ""
-        moc.delete(inst)
-        try? moc.save()
-
-        if removed == primaryInstrument {
-            primaryInstrument = instrumentNames.first ?? ""
-        }
-    }
-
-    private func deleteInstrumentsAt(_ offsets: IndexSet) {
-        let items = profileInstruments
-        var removedPrimary = false
-
-        for index in offsets {
-            let inst = items[index]
-            if (inst.name ?? "") == primaryInstrument {
-                removedPrimary = true
-            }
-            moc.delete(inst)
-        }
-        try? moc.save()
-
-        if removedPrimary {
-            primaryInstrument = instrumentNames.first ?? ""
-        }
-    }
-}
-
-// MARK: - Small row
-
-private struct InstrumentRow: View {
-    let name: String
-    let isPrimary: Bool
-    let setPrimary: () -> Void
-    let delete: () -> Void
-
-    var body: some View {
-        HStack {
-            Image(systemName: isPrimary ? "largecircle.fill.circle" : "circle")
-                .foregroundStyle(.tint) // <-- was .accent
-
-            Text(name)
-                .lineLimit(1)
-
-            Spacer()
-
-            if isPrimary {
-                Text("Primary")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .contentShape(Rectangle())
-        .onTapGesture { setPrimary() }
-        .contextMenu {
-            Button("Set as Primary") { setPrimary() }
-            Button("Delete", role: .destructive) { delete() }
+        p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        p.defaultPrivacy = defaultPrivacy
+        do {
+            try ctx.save()
+            dismiss()
+        } catch {
+            // Minimal error handling per your guardrails
         }
     }
 }

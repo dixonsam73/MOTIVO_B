@@ -9,281 +9,290 @@ import SwiftUI
 import CoreData
 
 struct AddEditSessionView: View {
-    @Environment(\.managedObjectContext) private var moc
+    @Environment(\.managedObjectContext) private var ctx
     @Environment(\.dismiss) private var dismiss
 
-    // If nil = creating; if non-nil = editing this session
-    let session: Session?
+    /// Pass a Session to edit; leave nil to create new
+    var session: Session?
 
-    // Fetches (string-key to avoid keypath inference issues)
-    @FetchRequest(
-        entity: Instrument.entity(),
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
-    ) private var instruments: FetchedResults<Instrument>
-
-    @FetchRequest(entity: Profile.entity(), sortDescriptors: [])
-    private var profiles: FetchedResults<Profile>
-
-    // Form state
-    @State private var selectedInstrument: String = ""     // NEW
+    // MARK: - State (form fields)
     @State private var title: String = ""
     @State private var notes: String = ""
     @State private var when: Date = Date()
-    @State private var durationSeconds: Int = 0
-    @State private var isPublic: Bool = true
+    @State private var isPublic: Bool = false
     @State private var mood: Double = 5
     @State private var effort: Double = 5
-    @State private var tagsInput: String = "" // comma-separated
-    @State private var didAutoSetTitle: Bool = true        // NEW
+    @State private var instrumentName: String = ""
+    @State private var tagsCSV: String = ""
 
-    @State private var showingInstruments = false          // NEW
+    // Duration entry: minutes + seconds (text fields + ± buttons)
+    @State private var durMinutes: String = "0"
+    @State private var durSeconds: String = "0"
 
-    // MARK: - Init overloads for backwards compatibility
-    init() { self.session = nil }                    // ContentView calls this for “Add manually”
-    init(session: Session) { self.session = session } // Detail view will use this for Edit
+    // Track whether user overrode auto-title
+    @State private var userEditedTitle: Bool = false
+
+    init(session: Session? = nil) {
+        self.session = session
+    }
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             Form {
-                // MARK: Instrument + manage (affects default title)
-                Section("Instrument") {
-                    HStack {
-                        Picker("Instrument", selection: $selectedInstrument) {
-                            ForEach(instrumentList(), id: \.self) { inst in
-                                Text(inst).tag(inst)
-                            }
-                        }
-                        Button {
-                            showingInstruments = true
-                        } label: {
-                            Image(systemName: "plus.circle")
-                        }
-                        .accessibilityLabel("Manage Instruments")
-                    }
-                    .onChange(of: selectedInstrument) { _, newValue in
-                        // Only auto-update title if the user hasn't customized it
-                        if didAutoSetTitle {
-                            title = defaultTitle(for: newValue)
-                        }
-                    }
+                Section(header: Text("When")) {
+                    DatePicker("Date & time", selection: $when, displayedComponents: [.date, .hourAndMinute])
                 }
 
-                // MARK: Session basics
-                Section("Session") {
+                Section(header: Text("Instrument")) {
+                    TextField("Instrument", text: $instrumentName)
+                        .textInputAutocapitalization(.words)
+                        .onChange(of: instrumentName) { _, _ in
+                            applyAutoTitleIfNeeded()
+                        }
+                }
+
+                Section(header: Text("Title")) {
                     TextField("Title", text: $title)
                         .textInputAutocapitalization(.words)
-                        .onChange(of: title) { _, newValue in
-                            let def = defaultTitle(for: selectedInstrument)
-                            let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                            didAutoSetTitle = (trimmed.isEmpty || trimmed == def)
-                        }
+                        .onChange(of: title) { _, _ in userEditedTitle = true }
+                }
 
-                    DatePicker("When", selection: $when, displayedComponents: [.date, .hourAndMinute])
+                Section(header: Text("Duration")) {
+                    DurationEditor(
+                        minutes: $durMinutes,
+                        seconds: $durSeconds,
+                        incMin: { adjustMinutes(+1) },
+                        decMin: { adjustMinutes(-1) },
+                        incSec: { adjustSeconds(+1) },
+                        decSec: { adjustSeconds(-1) }
+                    )
+                }
 
-                    DurationEditor(seconds: $durationSeconds)
-
+                Section(header: Text("Privacy & Feel")) {
                     Toggle("Public", isOn: $isPublic)
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("Mood")
+                            Spacer()
+                            Text("\(Int(mood))").foregroundStyle(.secondary)
+                        }
+                        Slider(value: $mood, in: 0...10, step: 1)
+                    }
+                    VStack(alignment: .leading) {
+                        HStack {
+                            Text("Effort")
+                            Spacer()
+                            Text("\(Int(effort))").foregroundStyle(.secondary)
+                        }
+                        Slider(value: $effort, in: 0...10, step: 1)
+                    }
                 }
 
-                Section("How it felt") {
-                    sliderRow("Mood", value: $mood)
-                    sliderRow("Effort", value: $effort)
+                Section(header: Text("Tags")) {
+                    TextField("Comma-separated (e.g. scales, repertoire)", text: $tagsCSV)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
                 }
 
-                Section("Tags") {
-                    TextField("Add tags (comma-separated)", text: $tagsInput)
-                    Text("Example: scales, tone, repertoire")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Notes") {
-                    TextField("What did you work on?", text: $notes, axis: .vertical)
-                        .lineLimit(4...8)
+                Section(header: Text("Notes")) {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 120)
                 }
             }
-            .navigationTitle(session == nil ? "Add Session" : "Edit Session")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(session == nil ? "New Session" : "Edit Session")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(durationSeconds <= 0 && title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(totalDurationSeconds == 0)
                 }
             }
-            .sheet(isPresented: $showingInstruments) {
-                InstrumentListView()
-                    .environment(\.managedObjectContext, moc)
-            }
-            .onAppear { seedForm() }
+            .onAppear(perform: loadIfEditing)
         }
     }
 
-    // MARK: - Derived data
-
-    private func instrumentList() -> [String] {
-        // Prefer Instrument entities; fallback to profile primary; else "Practice"
-        var names: [String] = instruments.compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        names = names.filter { !$0.isEmpty }
-        if names.isEmpty {
-            let primary = profiles.first?.primaryInstrument?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return primary.isEmpty ? ["Practice"] : [primary]
-        }
-        return names
-    }
-
-    private func defaultTitle(for instrument: String) -> String {
-        let inst = instrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (inst.isEmpty || inst.lowercased() == "practice") ? "Practice Session" : "\(inst) Practice"
+    // MARK: - Derived
+    private var totalDurationSeconds: Int {
+        let mins = Int(durMinutes.filter(\.isNumber)) ?? 0
+        let rawSecs = Int(durSeconds.filter(\.isNumber)) ?? 0
+        let secs = min(max(rawSecs, 0), 59) // clamp 0...59
+        let clampedMins = max(mins, 0)
+        return clampedMins * 60 + secs
     }
 
     // MARK: - Actions
-
-    private func seedForm() {
-        // Choose instrument first (affects title default)
-        let list = instrumentList()
-        selectedInstrument = list.first ?? "Practice"
-
+    private func loadIfEditing() {
         if let s = session {
-            // Existing session → load values
-            title = (s.title ?? "")
-            notes = (s.notes ?? "")
+            // Editing existing
+            title = s.title ?? ""
+            notes = s.notes ?? ""
             when = s.timestamp ?? Date()
-            durationSeconds = max(0, Int(s.durationSeconds))
             isPublic = s.isPublic
             mood = Double(s.mood)
             effort = Double(s.effort)
+            instrumentName = s.instrument ?? ""
 
-            if let set = s.tags as? Set<Tag> {
-                let names = set
-                    .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                    .sorted()
-                tagsInput = names.joined(separator: ", ")
-            } else {
-                tagsInput = ""
-            }
+            let secs = max(0, Int(s.durationSeconds))
+            durMinutes = String(secs / 60)
+            durSeconds = String(secs % 60)
 
-            // If the stored title matches the default, keep auto-title behavior ON
-            let def = defaultTitle(for: selectedInstrument)
-            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            didAutoSetTitle = (trimmed.isEmpty || trimmed == def)
-            if trimmed.isEmpty { title = def }
+            tagsCSV = ((s.tags as? Set<Tag>) ?? [])
+                .compactMap { $0.name }
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                .joined(separator: ", ")
         } else {
-            // New session defaults
-            let def = defaultTitle(for: selectedInstrument)
-            title = def
-            notes = ""
-            when = Date()
-            durationSeconds = 0
-            isPublic = true
-            mood = 5
-            effort = 5
-            tagsInput = ""
-            didAutoSetTitle = true
+            // Creating new
+            applyAutoTitleIfNeeded()
+            durMinutes = "0"
+            durSeconds = "0"
+
+            // NEW: Pull default privacy from Profile.defaultPrivacy (Boolean)
+            let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
+            fr.fetchLimit = 1
+            if let p = try? ctx.fetch(fr).first {
+                isPublic = p.defaultPrivacy
+            } else {
+                isPublic = false // fallback if no profile exists yet
+            }
         }
+    }
+
+    private func applyAutoTitleIfNeeded() {
+        guard !userEditedTitle else { return }
+        let trimmed = instrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        title = trimmed.isEmpty ? "Practice Session" : "\(trimmed) Practice"
+    }
+
+    // MARK: - Duration adjustments (+ / -)
+    private func adjustMinutes(_ delta: Int) {
+        var m = Int(durMinutes.filter(\.isNumber)) ?? 0
+        m = max(0, m + delta)
+        durMinutes = String(m)
+    }
+
+    private func adjustSeconds(_ delta: Int) {
+        var m = Int(durMinutes.filter(\.isNumber)) ?? 0
+        var s = Int(durSeconds.filter(\.isNumber)) ?? 0
+        s += delta
+
+        if s >= 60 {
+            m += s / 60
+            s = s % 60
+        } else if s < 0 {
+            let borrow = (abs(s) + 59) / 60
+            if m >= borrow {
+                m -= borrow
+                s += borrow * 60
+            } else {
+                m = 0
+                s = 0
+            }
+        }
+
+        durMinutes = String(max(0, m))
+        durSeconds = String(max(0, min(59, s)))
     }
 
     private func save() {
-        let s: Session = session ?? Session(context: moc)
+        let isEditing = (session != nil)
+        let s: Session = session ?? Session(context: ctx)
         if s.id == nil { s.id = UUID() }
 
-        // Title (respect user override; otherwise default from instrument)
-        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        s.title = trimmedTitle.isEmpty ? defaultTitle(for: selectedInstrument) : trimmedTitle
-
+        s.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
         s.notes = notes
         s.timestamp = when
-        s.durationSeconds = Int64(max(0, durationSeconds))
         s.isPublic = isPublic
-        s.mood = Int16(clamp(mood, 0, 10))
-        s.effort = Int16(clamp(effort, 0, 10))
+        s.mood = Int16(min(max(Int(mood), 0), 10))
+        s.effort = Int16(min(max(Int(effort), 0), 10))
+        s.instrument = instrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.durationSeconds = Int64(totalDurationSeconds)
 
-        // Upsert tags
-        let names = tagsInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-
-        var newTagObjects: [Tag] = []
-        for name in names {
-            if let existing = fetchTag(named: name) {
-                newTagObjects.append(existing)
-            } else {
-                let t = Tag(context: moc)
-                t.id = UUID()
-                t.name = name
-                newTagObjects.append(t)
-            }
+        // Upsert tags from CSV (case-insensitive)
+        do {
+            let tags = try TagCanonicalizer.upsertCSV(in: ctx, csv: tagsCSV)
+            s.removeFromTags((s.tags) ?? NSSet()) // clear existing
+            for t in tags { s.addToTags(t) }
+        } catch {
+            // If tag upsert fails, still attempt to save the session.
         }
-        s.tags = NSSet(array: newTagObjects)
 
-        try? moc.save()
-        dismiss()
-    }
-
-    private func fetchTag(named: String) -> Tag? {
-        let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-        req.fetchLimit = 1
-        req.predicate = NSPredicate(format: "name ==[c] %@", named)
-        return try? moc.fetch(req).first
-    }
-
-    private func clamp(_ v: Double, _ a: Double, _ b: Double) -> Double { max(a, min(b, v)) }
-
-    // MARK: - Tiny UI bits
-
-    private func sliderRow(_ label: String, value: Binding<Double>) -> some View {
-        HStack {
-            Text(label)
-            Slider(value: value, in: 0...10, step: 1)
-            Text("\(Int(value.wrappedValue))").frame(width: 28, alignment: .trailing)
+        do {
+            try ctx.save()
+            dismiss()
+        } catch {
+            if !isEditing { ctx.delete(s) } // rollback create failure
         }
     }
 }
 
-// Simple editor: minutes & seconds with normalization to total seconds
+// MARK: - DurationEditor subview (text fields + +/- buttons)
 private struct DurationEditor: View {
-    @Binding var seconds: Int
-    @State private var minutesPart: Int = 0
-    @State private var secondsPart: Int = 0
+    @Binding var minutes: String
+    @Binding var seconds: String
+
+    let incMin: () -> Void
+    let decMin: () -> Void
+    let incSec: () -> Void
+    let decSec: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack {
-                Text("Duration")
-                Spacer()
-                Text(formatted(seconds))
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 10) {
+            // Minutes row
+            HStack(spacing: 8) {
+                TextField("0", text: $minutes)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(minWidth: 52)
+                    .onChange(of: minutes) { _, new in
+                        sanitizeMinutes(new)
+                    }
+                Text("min").foregroundStyle(.secondary)
+                StepButton(system: "minus.circle.fill", action: decMin)
+                StepButton(system: "plus.circle.fill", action: incMin)
             }
-            HStack(spacing: 16) {
-                Stepper(value: $minutesPart, in: 0...599) {
-                    Text("\(minutesPart) min")
-                }
-                Stepper(value: $secondsPart, in: 0...59) {
-                    Text("\(secondsPart) sec")
-                }
+
+            // Seconds row
+            HStack(spacing: 8) {
+                TextField("0", text: $seconds)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(minWidth: 52)
+                    .onChange(of: seconds) { _, new in
+                        sanitizeSeconds(new)
+                    }
+                Text("sec").foregroundStyle(.secondary)
+                StepButton(system: "minus.circle.fill", action: decSec)
+                StepButton(system: "plus.circle.fill", action: incSec)
             }
-        }
-        .onAppear {
-            minutesPart = seconds / 60
-            secondsPart = seconds % 60
-        }
-        .onChange(of: minutesPart) { _, _ in
-            seconds = minutesPart * 60 + secondsPart
-        }
-        .onChange(of: secondsPart) { _, _ in
-            seconds = minutesPart * 60 + secondsPart
         }
     }
 
-    private func formatted(_ total: Int) -> String {
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
-        return String(format: "%d:%02d", m, s)
+    private func sanitizeMinutes(_ value: String) {
+        let digits = value.filter(\.isNumber)
+        if digits != value { minutes = digits }
+        if digits.count > 5 { minutes = String(digits.prefix(5)) }
+    }
+
+    private func sanitizeSeconds(_ value: String) {
+        let digits = value.filter(\.isNumber)
+        if digits != value { seconds = digits }
+        if let n = Int(digits), n > 59 { seconds = "59" }
+        if digits.count > 2 { seconds = String(digits.prefix(2)) }
+    }
+}
+
+private struct StepButton: View {
+    let system: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: system)
+                .font(.title3)
+        }
+        .buttonStyle(.plain)
+        .frame(minWidth: 32, minHeight: 32)
+        .contentShape(Rectangle())
     }
 }

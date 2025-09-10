@@ -9,207 +9,124 @@ import SwiftUI
 import CoreData
 
 struct SessionDetailView: View {
-    @Environment(\.managedObjectContext) private var moc
+    @Environment(\.managedObjectContext) private var ctx
     @Environment(\.dismiss) private var dismiss
 
-    @ObservedObject var session: Session
-    @State private var showDeleteAlert = false
-    @State private var showingEdit = false
+    let session: Session
 
     var body: some View {
-        NavigationStack {
-            List {
-                // SUMMARY
-                Section {
-                    KeyValueRow(label: "When", value: absoluteTimestamp(session.timestamp))
-                    KeyValueRow(label: "Duration", value: formatDuration(session.durationSeconds))
-                    HStack {
-                        Text("Privacy")
-                        Spacer()
-                        HStack(spacing: 6) {
-                            Image(systemName: session.isPublic ? "globe" : "lock.fill")
-                                .imageScale(.small)
-                            Text(session.isPublic ? "Public" : "Private")
-                        }
+        List {
+            // Summary
+            Section(header: Text("Summary")) {
+                HStack {
+                    Text("When")
+                    Spacer()
+                    Text(dateTime(session.timestamp))
                         .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text(displayTitle)
-                } footer: {
-                    Text(relativeTimestamp(session.timestamp))
                 }
-
-                // FEEL
-                Section("How it felt") {
-                    MeterRow(name: "Mood",
-                             value: Double(clampedInt16(session.mood)),
-                             maxValue: 10)
-                    MeterRow(name: "Effort",
-                             value: Double(clampedInt16(session.effort)),
-                             maxValue: 10)
+                HStack {
+                    Text("Duration")
+                    Spacer()
+                    Text(formatDuration(Int(session.durationSeconds)))
+                        .foregroundStyle(.secondary)
                 }
-
-                // TAGS
-                if !tagNames.isEmpty {
-                    Section("Tags") {
-                        TagsGrid(names: tagNames)
-                    }
+                HStack {
+                    Text("Instrument")
+                    Spacer()
+                    Text(session.instrument?.isEmpty == false ? session.instrument! : "—")
+                        .foregroundStyle(.secondary)
                 }
-
-                // NOTES
-                Section("Notes") {
-                    if let notes = session.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                        Text(notes)
-                            .font(.body)
-                            .foregroundStyle(.primary)
-                            .textSelection(.enabled)
-                            .padding(.vertical, 2)
-                    } else {
-                        Text("No notes")
-                            .foregroundStyle(.secondary)
-                    }
-                }
-
-                // ATTACHMENTS (placeholder)
-                Section("Attachments") {
-                    Label("Add photo / audio / video (coming soon)", systemImage: "paperclip")
+                HStack {
+                    Text("Privacy")
+                    Spacer()
+                    Text(session.isPublic ? "Public" : "Private")
                         .foregroundStyle(.secondary)
                 }
             }
-            .listStyle(.insetGrouped)
-            .navigationTitle("Session")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Edit") { showingEdit = true }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .destructive) {
-                        showDeleteAlert = true
-                    } label: {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel("Delete Session")
+
+            // Mood / Effort
+            Section(header: Text("Feel")) {
+                MeterRow(label: "Mood", value: Int(session.mood))
+                MeterRow(label: "Effort", value: Int(session.effort))
+            }
+
+            // Tags
+            if let tags = (session.tags as? Set<Tag>)?.compactMap({ $0.name }).sorted(), !tags.isEmpty {
+                Section(header: Text("Tags")) {
+                    Text(tags.joined(separator: ", "))
+                        .foregroundStyle(.secondary)
                 }
             }
-            .alert("Delete this session?", isPresented: $showDeleteAlert) {
-                Button("Delete", role: .destructive) { deleteSession() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This action cannot be undone.")
+
+            // Notes
+            if let notes = session.notes, !notes.isEmpty {
+                Section(header: Text("Notes")) {
+                    Text(notes)
+                }
             }
-            .sheet(isPresented: $showingEdit) {
-                AddEditSessionView(session: session)
-                    .environment(\.managedObjectContext, moc)
+
+            // Attachments (new)
+            AttachmentsSectionView(attachments: attachmentsArray)
+        }
+        .navigationTitle(session.title?.isEmpty == false ? session.title! : "Practice Session")
+        .toolbar {
+            ToolbarItemGroup(placement: .navigationBarTrailing) {
+                NavigationLink("Edit") {
+                    AddEditSessionView(session: session)
+                }
+                Button(role: .destructive) {
+                    deleteSession()
+                } label: {
+                    Image(systemName: "trash")
+                }
             }
         }
     }
 
     // MARK: - Derived
-
-    private var displayTitle: String {
-        let t = (session.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? "Practice Session" : t
-    }
-
-    private var tagNames: [String] {
-        guard let set = session.tags as? Set<Tag> else { return [] }
-        return set.compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    private var attachmentsArray: [Attachment] {
+        ((session.attachments as? Set<Attachment>) ?? []).sorted {
+            ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast)
+        }
     }
 
     // MARK: - Actions
-
     private func deleteSession() {
-        moc.delete(session)
-        try? moc.save()
+        ctx.delete(session)
+        try? ctx.save()
         dismiss()
     }
 }
 
-// MARK: - Small components
-
-private struct KeyValueRow: View {
-    let label: String
-    let value: String
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value).foregroundStyle(.secondary)
-        }
-    }
-}
-
+// MARK: - Subviews
 private struct MeterRow: View {
-    let name: String
-    let value: Double
-    let maxValue: Double
-
+    let label: String
+    let value: Int
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading) {
             HStack {
-                Text(name)
+                Text(label)
                 Spacer()
-                Text("\(Int(value))/\(Int(maxValue))")
+                Text("\(value)")
                     .foregroundStyle(.secondary)
             }
-            ProgressView(value: normalized, total: 1.0)
-                .progressViewStyle(.linear)
-                .tint(.accentColor)
+            ProgressView(value: Double(value), total: 10)
         }
-        .padding(.vertical, 2)
-    }
-
-    private var normalized: Double {
-        let denom = maxValue > 0 ? maxValue : 1
-        return Swift.min(Swift.max(value / denom, 0), 1)
-    }
-}
-
-private struct TagsGrid: View {
-    let names: [String]
-    private var columns: [GridItem] { [GridItem(.adaptive(minimum: 80), spacing: 8)] }
-
-    var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-            ForEach(names, id: \.self) { tag in
-                Text(tag)
-                    .font(.footnote)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color.gray.opacity(0.12))
-                    .clipShape(Capsule())
-            }
-        }
-        .padding(.vertical, 2)
     }
 }
 
 // MARK: - Helpers
+private func formatDuration(_ seconds: Int) -> String {
+    let m = seconds / 60
+    let s = seconds % 60
+    if s == 0 { return "\(m)m" }
+    return String(format: "%dm %02ds", m, s)
+}
 
-private func absoluteTimestamp(_ date: Date?) -> String {
-    let d = date ?? Date()
+private func dateTime(_ date: Date?) -> String {
+    guard let date else { return "—" }
     let df = DateFormatter()
     df.dateStyle = .medium
     df.timeStyle = .short
-    return df.string(from: d)
-}
-private func relativeTimestamp(_ date: Date?) -> String {
-    let d = date ?? Date()
-    let f = RelativeDateTimeFormatter()
-    f.unitsStyle = .full
-    return f.localizedString(for: d, relativeTo: Date())
-}
-
-private func formatDuration(_ value: Int64) -> String {
-    let total = Int(value)
-    let h = total / 3600, m = (total % 3600) / 60, s = total % 60
-    return h > 0 ? String(format: "%d:%02d:%02d", h, m, s)
-                 : String(format: "%d:%02d", m, s)
-}
-
-private func clampedInt16(_ v: Int16) -> Int {
-    return Swift.max(0, Swift.min(10, Int(v)))
+    return df.string(from: date)
 }
