@@ -9,135 +9,167 @@ import SwiftUI
 import CoreData
 
 struct PostRecordDetailsView: View {
-    @Environment(\.managedObjectContext) private var moc
+    @Environment(\.managedObjectContext) private var ctx
     @Environment(\.dismiss) private var dismiss
 
-    // From timer
+    // Inputs from timer
     let proposedTitle: String
     let startedAt: Date
     let durationSeconds: Int
-    let existingNotes: String
-    let onSaved: () -> Void   // <-- callback to close parent
+    let notes: String
+    let instrumentName: String
+    let onSaved: () -> Void
 
-    // Editable
-    @State private var title: String
-    @State private var notes: String
-    @State private var mood: Double = 5   // 0...10
-    @State private var effort: Double = 5 // 0...10
-    @State private var isPublic: Bool = true
-    @State private var tagsInput: String = "" // comma-separated
+    // Local form
+    @State private var title: String = ""
+    @State private var when: Date = Date()
+    @State private var isPublic: Bool = false
+    @State private var mood: Double = 5
+    @State private var effort: Double = 5
+    @State private var selectedInstrument: String = ""
+    @State private var tagsCSV: String = ""
+    @State private var extraNotes: String = ""
+    @State private var userEditedTitle: Bool = false
 
-    init(proposedTitle: String, startedAt: Date, durationSeconds: Int, existingNotes: String, onSaved: @escaping () -> Void) {
-        self.proposedTitle = proposedTitle
-        self.startedAt = startedAt
-        self.durationSeconds = durationSeconds
-        self.existingNotes = existingNotes
-        self.onSaved = onSaved
-        _title = State(initialValue: proposedTitle)
-        _notes = State(initialValue: existingNotes)
-    }
+    // Instruments for picker
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
+    ) private var instruments: FetchedResults<Instrument>
 
     var body: some View {
-        NavigationStack {
+        NavigationView {
             Form {
-                Section("Session") {
-                    TextField("Title", text: $title)
-                    keyValue("When", absoluteTimestamp(startedAt))
-                    keyValue("Duration", formatDuration(Int64(durationSeconds)))
-                }
+                // Title (no header)
+                TextField("Title", text: $title)
+                    .textInputAutocapitalization(.words)
+                    .onChange(of: title) { _, _ in userEditedTitle = true }
 
-                Section("How did it feel?") {
-                    sliderRow("Mood", value: $mood)
-                    sliderRow("Effort", value: $effort)
-                }
-
-                Section("Privacy") {
-                    Toggle("Make this session public", isOn: $isPublic)
-                }
-
-                Section("Tags") {
-                    TextField("Add tags (comma-separated)", text: $tagsInput)
-                    Text("Example: scales, tone, repertoire")
-                        .font(.caption)
+                // When & duration (compact, no header)
+                DatePicker("Start", selection: $when, displayedComponents: [.date, .hourAndMinute])
+                HStack {
+                    Text("Duration")
+                    Spacer()
+                    Text(formatDuration(durationSeconds))
                         .foregroundStyle(.secondary)
                 }
 
-                Section("Notes") {
-                    TextField("What did you work on?", text: $notes, axis: .vertical)
-                        .lineLimit(4...8)
+                // Instrument (no header)
+                Picker("Instrument", selection: $selectedInstrument) {
+                    Text("—").tag("")
+                    ForEach(instrumentNames, id: \.self) { ins in
+                        Text(ins).tag(ins)
+                    }
+                }
+                .onChange(of: selectedInstrument) { old, new in
+                    let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let newAuto = trimmed.isEmpty ? "Practice Session" : "\(trimmed) Practice"
+                    if !userEditedTitle || title == autoTitleForInstrument(old) || title == proposedTitle {
+                        title = newAuto
+                        userEditedTitle = false
+                    }
+                }
+
+                // Privacy & Feel (kept grouped)
+                Section(header: Text("Privacy & Feel")) {
+                    Toggle("Public", isOn: $isPublic)
+                    VStack(alignment: .leading) {
+                        HStack { Text("Mood"); Spacer(); Text("\(Int(mood))").foregroundStyle(.secondary) }
+                        Slider(value: $mood, in: 0...10, step: 1)
+                    }
+                    VStack(alignment: .leading) {
+                        HStack { Text("Effort"); Spacer(); Text("\(Int(effort))").foregroundStyle(.secondary) }
+                        Slider(value: $effort, in: 0...10, step: 1)
+                    }
+                }
+
+                // Tags (no header)
+                TextField("Tags (comma-separated: e.g. scales, repertoire)", text: $tagsCSV)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+
+                // Notes (no header)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Notes")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $extraNotes)
+                        .frame(minHeight: 120)
                 }
             }
-            .navigationTitle("Session Details")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Review & Save")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { save() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { save() }
+                }
             }
+            .onAppear { primeForm() }
         }
+    }
+
+    // MARK: - Derived
+    private var instrumentNames: [String] {
+        instruments
+            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    private func autoTitleForInstrument(_ instrument: String?) -> String {
+        let ins = (instrument ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return ins.isEmpty ? "Practice Session" : "\(ins) Practice"
+    }
+
+    // MARK: - Actions
+    private func primeForm() {
+        title = proposedTitle
+        when = startedAt
+        selectedInstrument = instrumentName
+        extraNotes = notes
+
+        let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
+        fr.fetchLimit = 1
+        if let p = try? ctx.fetch(fr).first {
+            isPublic = p.defaultPrivacy
+        } else {
+            isPublic = false
+        }
+        userEditedTitle = false
     }
 
     private func save() {
-        let s = Session(context: moc)
+        let s = Session(context: ctx)
         s.id = UUID()
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        s.title = t.isEmpty ? proposedTitle : t
-        s.notes = notes
-        s.durationSeconds = Int64(max(0, durationSeconds))
-        s.timestamp = startedAt
+        s.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.notes = extraNotes
+        s.timestamp = when
         s.isPublic = isPublic
-        s.mood = Int16(mood)
-        s.effort = Int16(effort)
+        s.mood = Int16(min(max(Int(mood), 0), 10))
+        s.effort = Int16(min(max(Int(effort), 0), 10))
+        s.instrument = selectedInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.durationSeconds = Int64(max(0, durationSeconds))
 
-        // Upsert tags
-        let names = tagsInput
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        do {
+            let tags = try TagCanonicalizer.upsertCSV(in: ctx, csv: tagsCSV)
+            for t in tags { s.addToTags(t) }
+        } catch { }
 
-        var tagObjects: [Tag] = []
-        for name in names {
-            if let tag = fetchTag(named: name) {
-                tagObjects.append(tag)
-            } else {
-                let tag = Tag(context: moc)
-                tag.id = UUID()
-                tag.name = name
-                tagObjects.append(tag)
-            }
-        }
-        s.tags = NSSet(array: tagObjects)
-
-        try? moc.save()
-
-        // Close details and tell the timer to close itself
-        onSaved()
-    }
-
-    private func fetchTag(named: String) -> Tag? {
-        let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-        req.fetchLimit = 1
-        req.predicate = NSPredicate(format: "name ==[c] %@", named)
-        return try? moc.fetch(req).first
-    }
-
-    // Helpers
-    private func keyValue(_ label: String, _ value: String) -> some View {
-        HStack { Text(label); Spacer(); Text(value).foregroundStyle(.secondary) }
-    }
-    private func sliderRow(_ label: String, value: Binding<Double>) -> some View {
-        HStack {
-            Text(label)
-            Slider(value: value, in: 0...10, step: 1)
-            Text("\(Int(value.wrappedValue))").frame(width: 28, alignment: .trailing)
+        do {
+            try ctx.save()
+            onSaved()
+            dismiss()
+        } catch {
+            // Minimal handling
         }
     }
 }
 
-private func absoluteTimestamp(_ date: Date) -> String {
-    let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .short
-    return df.string(from: date)
-}
-private func formatDuration(_ value: Int64) -> String {
-    let total = Int(value), h = total / 3600, m = (total % 3600) / 60, s = total % 60
-    return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
+// MARK: - Helpers
+private func formatDuration(_ seconds: Int) -> String {
+    let m = seconds / 60
+    let s = seconds % 60
+    if s == 0 { return "\(m)m" }
+    return String(format: "%dm %02ds", m, s)
 }

@@ -10,6 +10,7 @@ import AVKit
 
 struct AttachmentsSectionView: View {
     let attachments: [Attachment]
+    let onOpen: (Attachment) -> Void
 
     var body: some View {
         if attachments.isEmpty {
@@ -29,6 +30,8 @@ struct AttachmentsSectionView: View {
                         }
                         Spacer()
                     }
+                    .contentShape(Rectangle())
+                    .onTapGesture { onOpen(a) }
                 }
             }
         }
@@ -48,4 +51,3 @@ struct AttachmentsSectionView: View {
         return URL(fileURLWithPath: path).lastPathComponent
     }
 }
-

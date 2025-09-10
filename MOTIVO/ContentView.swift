@@ -11,7 +11,7 @@ import CoreData
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var ctx
 
-    // Core Data fetches — string-key sort descriptors per convention
+    // Core Data fetches
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
         animation: .default
@@ -22,9 +22,11 @@ struct ContentView: View {
     ) private var allTags: FetchedResults<Tag>
 
     // Filters
-    @State private var selectedTagKeys: Set<String> = [] // lowercased
+    @AppStorage("showFilters") private var showFilters: Bool = true
+    @State private var selectedTagKeys: Set<String> = []
     @State private var showPublicOnly: Bool = false
     @State private var selectedInstrument: String? = nil
+    @State private var showTagsDisclosure: Bool = false
 
     // Sheet routing
     @State private var showAddEdit: Bool = false
@@ -34,39 +36,99 @@ struct ContentView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 0) {
-                // Stats Banner
                 StatsBannerView(sessions: Array(sessions))
                     .padding(.horizontal)
                     .padding(.top, 8)
 
-                // Filters: Tags + Public + Instrument
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        // Tag chips
-                        ForEach(allTagsArray, id: \.self) { name in
-                            Chip(label: name, isSelected: selectedTagKeys.contains(name.lowercased())) {
-                                toggleTag(name)
+                // Filters
+                VStack(alignment: .leading, spacing: 8) {
+                    DisclosureGroup(isExpanded: $showFilters) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Toggle("Public only", isOn: $showPublicOnly)
+
+                            HStack {
+                                Text("Instrument")
+                                Spacer()
+                                Picker("Instrument", selection: Binding(
+                                    get: { selectedInstrument ?? "All" },
+                                    set: { newValue in
+                                        selectedInstrument = (newValue == "All") ? nil : newValue
+                                    }
+                                )) {
+                                    Text("All").tag("All")
+                                    ForEach(instruments, id: \.self) { ins in
+                                        Text(ins).tag(ins)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            }
+
+                            if !allTagsArray.isEmpty {
+                                DisclosureGroup(isExpanded: $showTagsDisclosure) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ScrollView {
+                                            LazyVStack(alignment: .leading, spacing: 4) {
+                                                ForEach(allTagsArray, id: \.self) { name in
+                                                    let key = name.lowercased()
+                                                    Button {
+                                                        if selectedTagKeys.contains(key) { selectedTagKeys.remove(key) }
+                                                        else { selectedTagKeys.insert(key) }
+                                                    } label: {
+                                                        HStack {
+                                                            Image(systemName: selectedTagKeys.contains(key) ? "checkmark.circle.fill" : "circle")
+                                                                .foregroundStyle(.secondary)
+                                                            Text(name)
+                                                            Spacer()
+                                                        }
+                                                    }
+                                                    .buttonStyle(.plain)
+                                                    .padding(.vertical, 4)
+                                                }
+                                            }
+                                            .padding(.vertical, 4)
+                                        }
+                                        .frame(maxHeight: 180)
+
+                                        if !selectedTagKeys.isEmpty {
+                                            Button {
+                                                selectedTagKeys.removeAll()
+                                            } label: {
+                                                Label("Clear selected tags", systemImage: "xmark.circle")
+                                            }
+                                            .font(.footnote)
+                                            .foregroundStyle(.secondary)
+                                            .padding(.top, 4)
+                                        }
+                                    }
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "tag")
+                                        Text("Tags")
+                                        if !selectedTagKeys.isEmpty {
+                                            Spacer()
+                                            TagPill(text: "\(selectedTagKeys.count) selected")
+                                        }
+                                    }
+                                }
                             }
                         }
-                        Divider().frame(height: 20)
-
-                        // Public toggle
-                        ToggleChip(label: "Public", isOn: $showPublicOnly)
-
-                        Divider().frame(height: 20)
-
-                        // Instrument filter (built from existing sessions)
-                        ForEach(instruments, id: \.self) { ins in
-                            Chip(label: ins, isSelected: selectedInstrument == ins) {
-                                selectedInstrument = (selectedInstrument == ins) ? nil : ins
-                            }
+                        .padding(.top, 8)
+                    } label: {
+                        HStack {
+                            Image(systemName: "slider.horizontal.3")
+                            Text("Filters")
+                            Spacer()
+                            if let ins = selectedInstrument { TagPill(text: ins) }
+                            if showPublicOnly { TagPill(text: "Public") }
+                            if !selectedTagKeys.isEmpty { TagPill(text: "\(selectedTagKeys.count) tag\(selectedTagKeys.count == 1 ? "" : "s")") }
                         }
+                        .contentShape(Rectangle())
                     }
                     .padding(.horizontal)
-                    .padding(.vertical, 8)
+                    .padding(.bottom, 8)
                 }
 
-                // List of sessions
+                // Feed
                 List(filteredSessions, id: \.objectID) { s in
                     NavigationLink(destination: SessionDetailView(session: s)) {
                         SessionRow(session: s)
@@ -77,50 +139,31 @@ struct ContentView: View {
             .navigationTitle("Motivo")
             .toolbar {
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Record (icon)
-                    Button {
-                        showTimer = true
-                    } label: {
+                    Button { showTimer = true } label: {
                         Image(systemName: "record.circle")
                             .imageScale(.large)
                             .accessibilityLabel("Record")
                     }
-
-                    // Add (icon)
-                    Button {
-                        showAddEdit = true
-                    } label: {
+                    Button { showAddEdit = true } label: {
                         Image(systemName: "plus.circle")
                             .imageScale(.large)
                             .accessibilityLabel("Add Session")
                     }
-
-                    // Profile (text for now; later swap to avatar)
-                    Button("Profile") {
-                        showProfile = true
-                    }
+                    Button("Profile") { showProfile = true }
                 }
             }
         }
-        .sheet(isPresented: $showTimer) {
-            PracticeTimerView()
-        }
-        .sheet(isPresented: $showAddEdit) {
-            AddEditSessionView()
-        }
-        .sheet(isPresented: $showProfile) {
-            ProfileView()
-        }
+        .sheet(isPresented: $showTimer) { PracticeTimerView() }
+        .sheet(isPresented: $showAddEdit) { AddEditSessionView() }
+        .sheet(isPresented: $showProfile) { ProfileView() }
         .onAppear {
-            // Optional one-time cleanup to prevent duplicate Tags differing only by case
             try? TagCanonicalizer.dedupe(in: ctx)
         }
     }
 
     // MARK: - Derived
     private var allTagsArray: [String] {
-        allTags
-            .compactMap { $0.name }
+        allTags.compactMap { $0.name }
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
@@ -144,54 +187,25 @@ struct ContentView: View {
             return true
         }
     }
-
-    // MARK: - Actions
-    private func toggleTag(_ name: String) {
-        let key = name.lowercased()
-        if selectedTagKeys.contains(key) { selectedTagKeys.remove(key) } else { selectedTagKeys.insert(key) }
-    }
 }
 
 // MARK: - Subviews
-private struct Chip: View {
-    let label: String
-    let isSelected: Bool
-    let action: () -> Void
+private struct TagPill: View {
+    let text: String
     var body: some View {
-        Button(action: action) {
-            Text(label)
-                .font(.callout)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(isSelected ? Color.secondary.opacity(0.2) : Color.secondary.opacity(0.08))
-                .cornerRadius(10)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-private struct ToggleChip: View {
-    let label: String
-    @Binding var isOn: Bool
-    var body: some View {
-        Button(action: { isOn.toggle() }) {
-            HStack(spacing: 6) {
-                Image(systemName: isOn ? "checkmark.circle.fill" : "circle")
-                Text(label)
-            }
-            .font(.callout)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(isOn ? Color.secondary.opacity(0.2) : Color.secondary.opacity(0.08))
-            .cornerRadius(10)
-        }
-        .buttonStyle(.plain)
+        Text(text)
+            .font(.caption)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Color.secondary.opacity(0.12))
+            .cornerRadius(8)
     }
 }
 
 private struct SessionRow: View {
     let session: Session
     var body: some View {
+        let attachCount = ((session.attachments as? Set<Attachment>) ?? []).count
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(session.title?.isEmpty == false
@@ -199,13 +213,23 @@ private struct SessionRow: View {
                      : (session.instrument?.isEmpty == false ? "\(session.instrument!) Practice" : "Practice Session"))
                     .font(.headline)
                 Spacer()
-                if session.isPublic { Image(systemName: "globe") }
+                if attachCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperclip")
+                        Text("\(attachCount)")
+                    }
+                    .font(.footnote)
+                    .foregroundColor(.secondary)
+                }
+                // 🔄 Show eye.slash only if private
+                if !session.isPublic {
+                    Image(systemName: "eye.slash")
+                        .foregroundStyle(.secondary)
+                }
             }
             HStack(spacing: 12) {
                 Text(formatDuration(Int(session.durationSeconds)))
-                if let ts = session.timestamp {
-                    Text(relative(ts))
-                }
+                if let ts = session.timestamp { Text(relative(ts)) }
             }
             .font(.subheadline)
             .foregroundColor(.secondary)

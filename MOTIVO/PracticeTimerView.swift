@@ -9,358 +9,201 @@ import SwiftUI
 import CoreData
 
 struct PracticeTimerView: View {
-    @Environment(\.managedObjectContext) private var moc
+    @Environment(\.managedObjectContext) private var ctx
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var scenePhase
 
+    // Instruments
     @FetchRequest(
-        entity: Instrument.entity(),
         sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
     ) private var instruments: FetchedResults<Instrument>
 
-    @FetchRequest(entity: Profile.entity(), sortDescriptors: [])
-    private var profiles: FetchedResults<Profile>
-
-    // Form state
-    @State private var selectedInstrument: String = ""
-    @State private var title: String = ""
-    @State private var notes: String = ""
-    @State private var didAutoSetTitle: Bool = true
-
-    // Timing (clock-true)
-    @State private var hasStarted: Bool = false
+    // Timer state
+    @StateObject private var recovery = TimerStateRecovery.shared
+    @State private var startedAt: Date?
     @State private var isRunning: Bool = false
-    @State private var startedAt: Date = Date()
-    @State private var elapsedDisplay: Int = 0
-    @State private var totalPausedSeconds: Int = 0
-    @State private var pauseBeganAt: Date? = nil
 
-    // UI flags
-    @State private var showingDiscardAlert: Bool = false
-    @State private var showingInstruments: Bool = false
-    @State private var showingDetails: Bool = false
-    @State private var finishedDuration: Int = 0
+    // Live ticking
+    @State private var now = Date()
+    private let uiTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
-    // Foreground ticker
-    @State private var ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    // Selection
+    @State private var selectedInstrument: String = ""
+
+    // Notes
+    @State private var quickNotes: String = ""
+
+    // Routing
+    @State private var showDetailsSheet: Bool = false
 
     var body: some View {
-        NavigationStack {
-            Form {
-                SetupSection(
-                    instrumentList: instrumentList(),
-                    selectedInstrument: $selectedInstrument,
-                    title: $title,
-                    isRunning: isRunning,
-                    manageInstruments: { showingInstruments = true },
-                    onSelectedInstrumentChange: { newValue in
-                        if didAutoSetTitle { title = defaultTitle(for: newValue) }
-                    },
-                    onTitleChange: { newValue in
-                        let def = defaultTitle(for: selectedInstrument)
-                        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if trimmed != def { didAutoSetTitle = false }
-                    },
-                    startedAt: $startedAt
-                )
+        NavigationView {
+            VStack(spacing: 24) {
 
-                RecordingSection(
-                    hasStarted: hasStarted,
-                    isRunning: isRunning,
-                    elapsedText: formatted(elapsedDisplay),
-                    onStart: start,
-                    onPause: pause,
-                    onResume: resume,
-                    onFinish: finish
-                )
+                // Instrument picker (header removed)
+                Picker("Instrument", selection: $selectedInstrument) {
+                    Text("—").tag("")
+                    ForEach(instrumentNames, id: \.self) { ins in
+                        Text(ins).tag(ins)
+                    }
+                }
+                .pickerStyle(.menu)
+                .padding(.horizontal)
 
-                NotesSection(notes: $notes)
+                // Timer readout
+                Text(formatElapsed(recovery.elapsedSeconds(now: now)))
+                    .font(.system(size: 48, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+
+                // Controls
+                HStack(spacing: 20) {
+                    if isRunning {
+                        Button {
+                            pause()
+                        } label: {
+                            Label("Pause", systemImage: "pause.circle.fill")
+                                .labelStyle(.titleAndIcon)
+                                .font(.title2)
+                        }
+                    } else {
+                        Button {
+                            startOrResume()
+                        } label: {
+                            Label(startedAt == nil ? "Start" : "Resume", systemImage: "play.circle.fill")
+                                .labelStyle(.titleAndIcon)
+                                .font(.title2)
+                        }
+                    }
+
+                    Button {
+                        finish()
+                    } label: {
+                        Label("Finish", systemImage: "checkmark.circle.fill")
+                            .labelStyle(.titleAndIcon)
+                            .font(.title2)
+                    }
+                    .disabled(recovery.elapsedSeconds(now: now) == 0)
+                }
+
+                // Quick notes
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Notes (optional)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    TextEditor(text: $quickNotes)
+                        .frame(minHeight: 120)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                }
+                .padding(.horizontal)
+
+                Spacer(minLength: 0)
             }
-            .navigationTitle("Record Practice")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Practice")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { handleClose() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    if isRunning { PulsingDot().accessibilityLabel("Recording in progress") }
+                    Button("Close") { dismiss() }
                 }
             }
-            .sheet(isPresented: $showingInstruments) {
-                InstrumentListView().environment(\.managedObjectContext, moc)
-            }
-            .sheet(isPresented: $showingDetails) {
-                // Pass a callback so Save closes BOTH sheets
-                PostRecordDetailsView(
-                    proposedTitle: titleIfEmptyDefault(),
-                    startedAt: startedAt,
-                    durationSeconds: finishedDuration,
-                    existingNotes: notes,
-                    onSaved: {
-                        // Close details sheet and the timer itself
-                        showingDetails = false
-                        resetTiming()
-                        dismiss()
-                    }
-                )
-                .environment(\.managedObjectContext, moc)
-            }
-            .onAppear {
-                seedDefaultsFromProfile()
-                resetTiming()
-            }
-            .onReceive(ticker) { _ in
-                if isRunning { elapsedDisplay = clockElapsedNow() }
-            }
-            .onChange(of: scenePhase) { _ in
-                if hasStarted && isRunning { elapsedDisplay = clockElapsedNow() }
-            }
-            .alert("Discard this recording?", isPresented: $showingDiscardAlert) {
-                Button("Discard", role: .destructive) {
-                    resetTiming()
+        }
+        .onAppear {
+            adoptPrimaryInstrumentIfNeeded()
+            adoptRecoveredState()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            recovery.scenePhaseDidChange(newPhase)
+        }
+        .onReceive(uiTimer) { _ in
+            if isRunning { now = Date() }
+        }
+        .sheet(isPresented: $showDetailsSheet) {
+            PostRecordDetailsView(
+                proposedTitle: proposedTitle,
+                startedAt: startedAt ?? Date(),
+                durationSeconds: recovery.elapsedSeconds(now: now),
+                notes: quickNotes,
+                instrumentName: selectedInstrument,
+                onSaved: {
+                    recovery.clear()
+                    startedAt = nil
+                    isRunning = false
+                    quickNotes = ""
                     dismiss()
                 }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("Your elapsed time will be lost.")
-            }
+            )
         }
     }
 
-    // MARK: - Derived data
+    // MARK: - Derived
 
-    private func instrumentList() -> [String] {
-        var names: [String] = instruments.compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-        names = names.filter { !$0.isEmpty }
-        if names.isEmpty {
-            let primary = profiles.first?.primaryInstrument?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return primary.isEmpty ? ["Practice"] : [primary]
-        }
-        return names
+    private var instrumentNames: [String] {
+        instruments
+            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    // MARK: - Flow actions
-
-    private func seedDefaultsFromProfile() {
-        let list = instrumentList()
-        selectedInstrument = list.first ?? "Practice"
-        title = defaultTitle(for: selectedInstrument)
-        didAutoSetTitle = true
+    private var proposedTitle: String {
+        let ins = selectedInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
+        return ins.isEmpty ? "Practice Session" : "\(ins) Practice"
     }
 
-    private func handleClose() {
-        let hasData = elapsedDisplay > 0 || !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !notes.isEmpty
-        if hasStarted && hasData {
-            showingDiscardAlert = true
-        } else {
-            dismiss()
-        }
-    }
+    // MARK: - Actions
 
-    private func start() {
-        hasStarted = true
+    private func startOrResume() {
+        if startedAt == nil { startedAt = Date() }
+        recovery.start(resumeFrom: recovery.elapsedSeconds(now: now))
         isRunning = true
-        startedAt = Date()
-        elapsedDisplay = 0
-        totalPausedSeconds = 0
-        pauseBeganAt = nil
-        if didAutoSetTitle { title = defaultTitle(for: selectedInstrument) }
+        now = Date()
     }
 
     private func pause() {
-        guard hasStarted, isRunning else { return }
+        recovery.pause()
         isRunning = false
-        pauseBeganAt = Date()
-        elapsedDisplay = clockElapsedNow()
-    }
-
-    private func resume() {
-        guard hasStarted, !isRunning else { return }
-        if let pauseStart = pauseBeganAt {
-            let delta = Int(Date().timeIntervalSince(pauseStart))
-            if delta > 0 { totalPausedSeconds += delta }
-        }
-        pauseBeganAt = nil
-        isRunning = true
-        elapsedDisplay = clockElapsedNow()
     }
 
     private func finish() {
-        guard hasStarted else { return }
+        if isRunning { pause() }
+        showDetailsSheet = true
+    }
 
-        // Normalize pause state so elapsed is stable
-        if let pauseStart = pauseBeganAt {
-            let delta = Int(Date().timeIntervalSince(pauseStart))
-            if delta > 0 { totalPausedSeconds += delta }
-            pauseBeganAt = nil
+    private func adoptPrimaryInstrumentIfNeeded() {
+        guard selectedInstrument.isEmpty else { return }
+        let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
+        fr.fetchLimit = 1
+        let primary = (try? ctx.fetch(fr).first?.primaryInstrument) ?? ""
+        if !primary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            selectedInstrument = primary
+        } else if let first = instrumentNames.first {
+            selectedInstrument = first
+        } else {
+            selectedInstrument = ""
         }
-        isRunning = false
-        elapsedDisplay = clockElapsedNow()
-        finishedDuration = max(elapsedDisplay, clockElapsedNow())
-
-        // Open details; it will handle saving & dismissing
-        showingDetails = true
     }
 
-    // MARK: - Timing (clock-true)
-
-    private func clockElapsedNow() -> Int {
-        let now = Date()
-        var paused = totalPausedSeconds
-        if let pauseStart = pauseBeganAt {
-            let add = Int(now.timeIntervalSince(pauseStart))
-            if add > 0 { paused += add }
-        }
-        let span = Int(now.timeIntervalSince(startedAt))
-        return max(0, span - paused)
-    }
-
-    private func resetTiming() {
-        hasStarted = false
-        isRunning = false
-        startedAt = Date()
-        elapsedDisplay = 0
-        totalPausedSeconds = 0
-        pauseBeganAt = nil
-        notes = ""
-        // keep title/instrument for next run
-    }
-
-    // MARK: - Titles / formatting
-
-    private func defaultTitle(for instrument: String) -> String {
-        let inst = instrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        return (inst.isEmpty || inst.lowercased() == "practice") ? "Practice Session" : "\(inst) Practice"
-    }
-
-    private func titleIfEmptyDefault() -> String {
-        let t = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return t.isEmpty ? defaultTitle(for: selectedInstrument) : t
-    }
-
-    private func formatted(_ seconds: Int) -> String {
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        let s = seconds % 60
-        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
-    }
-}
-
-// MARK: - Tiny subviews
-
-private struct SetupSection: View {
-    let instrumentList: [String]
-    @Binding var selectedInstrument: String
-    @Binding var title: String
-    let isRunning: Bool
-    let manageInstruments: () -> Void
-    let onSelectedInstrumentChange: (String) -> Void
-    let onTitleChange: (String) -> Void
-    @Binding var startedAt: Date
-
-    var body: some View {
-        Section("Setup") {
-            HStack {
-                Picker("Instrument", selection: $selectedInstrument) {
-                    ForEach(instrumentList, id: \.self) { inst in
-                        Text(inst).tag(inst)
-                    }
-                }
-                Button(action: manageInstruments) {
-                    Image(systemName: "plus.circle")
-                }
-                .accessibilityLabel("Manage Instruments")
-            }
-            .onChange(of: selectedInstrument) { _, newValue in
-                onSelectedInstrumentChange(newValue)
-            }
-
-            TextField("Title", text: $title)
-                .textInputAutocapitalization(.words)
-                .onChange(of: title) { _, newValue in
-                    onTitleChange(newValue)
-                }
-
-            DatePicker("Started", selection: $startedAt, displayedComponents: [.date, .hourAndMinute])
-                .disabled(isRunning)
+    private func adoptRecoveredState() {
+        let snap = recovery.snapshot
+        switch snap.mode {
+        case .idle:
+            isRunning = false
+        case .paused:
+            isRunning = false
+            if startedAt == nil { startedAt = Date() }
+        case .running:
+            isRunning = true
+            if startedAt == nil { startedAt = Date() }
+            now = Date()
         }
     }
 }
 
-private struct RecordingSection: View {
-    let hasStarted: Bool
-    let isRunning: Bool
-    let elapsedText: String
-    let onStart: () -> Void
-    let onPause: () -> Void
-    let onResume: () -> Void
-    let onFinish: () -> Void
-
-    var body: some View {
-        Section {
-            HStack {
-                Spacer()
-                VStack(spacing: 8) {
-                    Text(elapsedText)
-                        .font(.system(size: 44, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-
-                    if hasStarted {
-                        if isRunning {
-                            HStack(spacing: 16) {
-                                Button(action: onPause) { Label("Pause", systemImage: "pause.fill") }
-                                    .buttonStyle(.bordered)
-                                Button(action: onFinish) { Label("Finish", systemImage: "stop.fill") }
-                                    .buttonStyle(.borderedProminent).tint(.red)
-                            }
-                        } else {
-                            HStack(spacing: 16) {
-                                Button(action: onResume) { Label("Resume", systemImage: "play.fill") }
-                                    .buttonStyle(.bordered)
-                                Button(action: onFinish) { Label("Finish", systemImage: "stop.fill") }
-                                    .buttonStyle(.borderedProminent).tint(.red)
-                            }
-                        }
-                    } else {
-                        Button(action: onStart) {
-                            Label("Start Recording", systemImage: "record.circle.fill")
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
-                }
-                Spacer()
-            }
-            .padding(.vertical, 8)
-        } header: {
-            Text("Recording")
-        } footer: {
-            Text("Finish to review and save. Accurate even if you switch apps or lock your device.")
-        }
-    }
-}
-
-private struct NotesSection: View {
-    @Binding var notes: String
-    var body: some View {
-        Section("Notes") {
-            TextField("What did you practice?", text: $notes, axis: .vertical)
-                .lineLimit(4...8)
-        }
-    }
-}
-
-private struct PulsingDot: View {
-    @State private var animate: Bool = false
-    var body: some View {
-        Circle()
-            .fill(Color.red)
-            .frame(width: 12, height: 12)
-            .scaleEffect(animate ? 1.2 : 0.9)
-            .opacity(animate ? 1.0 : 0.6)
-            .onAppear {
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    animate = true
-                }
-            }
+// MARK: - Formatter
+private func formatElapsed(_ seconds: Int) -> String {
+    let h = seconds / 3600
+    let m = (seconds % 3600) / 60
+    let s = seconds % 60
+    if h > 0 {
+        return String(format: "%d:%02d:%02d", h, m, s)
+    } else {
+        return String(format: "%02d:%02d", m, s)
     }
 }
