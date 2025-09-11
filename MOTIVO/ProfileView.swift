@@ -10,23 +10,20 @@ import CoreData
 
 struct ProfileView: View {
     @Environment(\.managedObjectContext) private var ctx
-    @Environment(\.dismiss) private var dismiss
 
-    // Instruments for the current profile (string-key sort descriptor per convention)
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
-    ) private var instruments: FetchedResults<Instrument>
+    // Close-first strategy
+    var onClose: (() -> Void)? = nil
 
-    // Local form state
+    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
+    private var instruments: FetchedResults<Instrument>
+
     @State private var name: String = ""
     @State private var primaryInstrumentName: String = ""
     @State private var defaultPrivacy: Bool = false
 
-    // Routing
     @State private var showInstrumentManager: Bool = false
-
-    // Cached profile reference
     @State private var profile: Profile?
+    @State private var isSaving = false
 
     var body: some View {
         NavigationView {
@@ -36,14 +33,12 @@ struct ProfileView: View {
                         .textInputAutocapitalization(.words)
 
                     Toggle("Default public posts", isOn: $defaultPrivacy)
-                        .accessibilityHint("When enabled, new sessions default to Public")
                 }
 
                 Section(header: Text("Primary Instrument")) {
                     if instruments.isEmpty {
                         HStack {
-                            Text("No instruments added yet")
-                                .foregroundStyle(.secondary)
+                            Text("No instruments added yet").foregroundStyle(.secondary)
                             Spacer()
                             Button("Manage…") { showInstrumentManager = true }
                         }
@@ -63,20 +58,24 @@ struct ProfileView: View {
             .navigationTitle("Profile")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { onClose?() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button("Save") {
+                        guard !isSaving else { return }
+                        isSaving = true
+                        // 1) Close immediately
+                        onClose?()
+                        // 2) Save next tick
+                        DispatchQueue.main.async { save() }
+                    }
                 }
             }
             .onAppear { loadOrCreateProfile() }
-            .sheet(isPresented: $showInstrumentManager) {
-                InstrumentListView()
-            }
+            .sheet(isPresented: $showInstrumentManager) { InstrumentListView() }
         }
     }
 
-    // MARK: - Derived
     private var instrumentsArray: [String] {
         instruments
             .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -84,9 +83,7 @@ struct ProfileView: View {
             .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
-    // MARK: - Data flow
     private func loadOrCreateProfile() {
-        // Fetch (or create) singleton Profile
         let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
         fr.fetchLimit = 1
         if let existing = (try? ctx.fetch(fr))?.first {
@@ -96,12 +93,11 @@ struct ProfileView: View {
             p.id = UUID()
             p.name = ""
             p.primaryInstrument = ""
-            p.defaultPrivacy = false  // private by default
+            p.defaultPrivacy = false
             try? ctx.save()
             profile = p
         }
 
-        // Bind to form
         name = profile?.name ?? ""
         primaryInstrumentName = (profile?.primaryInstrument ?? "").isEmpty
             ? (instrumentsArray.first ?? "")
@@ -114,11 +110,6 @@ struct ProfileView: View {
         p.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
         p.defaultPrivacy = defaultPrivacy
-        do {
-            try ctx.save()
-            dismiss()
-        } catch {
-            // Minimal error handling per your guardrails
-        }
+        do { try ctx.save() } catch { /* minimal handling */ }
     }
 }

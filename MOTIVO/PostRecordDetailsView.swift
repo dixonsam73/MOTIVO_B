@@ -5,171 +5,249 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+//
+//  PostRecordDetailsView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
 import SwiftUI
 import CoreData
 
 struct PostRecordDetailsView: View {
-    @Environment(\.managedObjectContext) private var ctx
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.managedObjectContext) private var viewContext
 
-    // Inputs from timer
-    let proposedTitle: String
-    let startedAt: Date
-    let durationSeconds: Int
-    let notes: String
-    let instrumentName: String
-    let onSaved: () -> Void
+    // Close review first, then save
+    @Binding var isPresented: Bool
+    var onSaved: (() -> Void)? = nil
 
-    // Local form
-    @State private var title: String = ""
-    @State private var when: Date = Date()
-    @State private var isPublic: Bool = false
-    @State private var mood: Double = 5
-    @State private var effort: Double = 5
-    @State private var selectedInstrument: String = ""
-    @State private var tagsCSV: String = ""
-    @State private var extraNotes: String = ""
-    @State private var userEditedTitle: Bool = false
+    // Prefill
+    private let prefillTimestamp: Date
+    private let prefillDurationSeconds: Int
+    private let prefillInstrument: Instrument?
 
-    // Instruments for picker
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
-    ) private var instruments: FetchedResults<Instrument>
+    // Form
+    @State private var instrument: Instrument?
+    @State private var title = ""
+    @State private var timestamp = Date()
+    @State private var durationSeconds = 0
+    @State private var isPublic = true
+    @State private var mood = 5
+    @State private var effort = 5
+    @State private var tagsText = ""
+    @State private var notes = ""
+
+    // Pickers
+    @State private var showStartPicker = false
+    @State private var showDurationPicker = false
+    @State private var tempDate = Date()
+    @State private var tempHours = 0
+    @State private var tempMinutes = 0
+
+    // Guard
+    @State private var isSaving = false
+    @State private var isTitleEdited = false
+    @State private var initialAutoTitle = ""
+
+    init(
+        isPresented: Binding<Bool>,
+        timestamp: Date? = nil,
+        durationSeconds: Int? = nil,
+        instrument: Instrument? = nil,
+        onSaved: (() -> Void)? = nil
+    ) {
+        self._isPresented = isPresented
+        self.prefillTimestamp = timestamp ?? Date()
+        self.prefillDurationSeconds = max(0, durationSeconds ?? 0)
+        self.prefillInstrument = instrument
+        self.onSaved = onSaved
+    }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             Form {
-                // Title (no header)
-                TextField("Title", text: $title)
-                    .textInputAutocapitalization(.words)
-                    .onChange(of: title) { _, _ in userEditedTitle = true }
-
-                // When & duration (compact, no header)
-                DatePicker("Start", selection: $when, displayedComponents: [.date, .hourAndMinute])
-                HStack {
-                    Text("Duration")
-                    Spacer()
-                    Text(formatDuration(durationSeconds))
-                        .foregroundStyle(.secondary)
-                }
-
-                // Instrument (no header)
-                Picker("Instrument", selection: $selectedInstrument) {
-                    Text("—").tag("")
-                    ForEach(instrumentNames, id: \.self) { ins in
-                        Text(ins).tag(ins)
+                Section {
+                    Picker("Instrument", selection: $instrument) {
+                        ForEach(fetchInstruments(), id: \.self) { inst in
+                            Text(inst.name ?? "").tag(inst as Instrument?)
+                        }
                     }
                 }
-                .onChange(of: selectedInstrument) { old, new in
-                    let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let newAuto = trimmed.isEmpty ? "Practice Session" : "\(trimmed) Practice"
-                    if !userEditedTitle || title == autoTitleForInstrument(old) || title == proposedTitle {
-                        title = newAuto
-                        userEditedTitle = false
+                Section {
+                    TextField("Title", text: $title)
+                        .onChange(of: title) { _, newValue in
+                            if newValue.trimmingCharacters(in: .whitespacesAndNewlines) != initialAutoTitle {
+                                isTitleEdited = true
+                            }
+                        }
+                }
+                Section {
+                    Button {
+                        tempDate = timestamp
+                        showStartPicker = true
+                    } label: {
+                        HStack { Text("Start Time"); Spacer(); Text(formattedDate(timestamp)).foregroundStyle(.secondary) }
+                    }
+                }
+                Section {
+                    Button {
+                        (tempHours, tempMinutes) = secondsToHM(durationSeconds)
+                        showDurationPicker = true
+                    } label: {
+                        HStack { Text("Duration"); Spacer(); Text(formattedDuration(durationSeconds)).foregroundStyle(.secondary) }
+                    }
+                    if durationSeconds == 0 {
+                        Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
+                    }
+                }
+                Section { Toggle("Public", isOn: $isPublic) }
+
+                Section("Mood & Effort") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
+                        Slider(value: Binding(get: { Double(mood) }, set: { mood = Int($0.rounded()) }), in: 0...10, step: 1)
+                    }
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack { Text("Effort"); Spacer(); Text("\(effort)").foregroundStyle(.secondary) }
+                        Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
                     }
                 }
 
-                // Privacy & Feel (kept grouped)
-                Section(header: Text("Privacy & Feel")) {
-                    Toggle("Public", isOn: $isPublic)
-                    VStack(alignment: .leading) {
-                        HStack { Text("Mood"); Spacer(); Text("\(Int(mood))").foregroundStyle(.secondary) }
-                        Slider(value: $mood, in: 0...10, step: 1)
-                    }
-                    VStack(alignment: .leading) {
-                        HStack { Text("Effort"); Spacer(); Text("\(Int(effort))").foregroundStyle(.secondary) }
-                        Slider(value: $effort, in: 0...10, step: 1)
+                // Notes with placeholder
+                Section {
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $notes)
+                            .frame(minHeight: 100)
+                        if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            Text("Notes")
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 8)
+                        }
                     }
                 }
 
-                // Tags (no header)
-                TextField("Tags (comma-separated: e.g. scales, repertoire)", text: $tagsCSV)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-
-                // Notes (no header)
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Notes")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    TextEditor(text: $extraNotes)
-                        .frame(minHeight: 120)
-                }
+                Section { TextField("Tags (comma-separated)", text: $tagsText) }
             }
             .navigationTitle("Review & Save")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+                    Button("Cancel") { isPresented = false }.disabled(isSaving)
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
+                    Button {
+                        guard !isSaving else { return }
+                        isSaving = true
+                        // 1) Close this sheet immediately
+                        isPresented = false
+                        // 2) Save on next tick
+                        DispatchQueue.main.async {
+                            saveToCoreData()
+                            // 3) Ask parent timer to close
+                            onSaved?()
+                        }
+                    } label: { Text("Save") }
+                    .disabled(isSaving || durationSeconds == 0 || instrument == nil)
                 }
             }
-            .onAppear { primeForm() }
+            .sheet(isPresented: $showStartPicker) {
+                NavigationStack {
+                    VStack {
+                        DatePicker("", selection: $tempDate, displayedComponents: [.date, .hourAndMinute])
+                            .datePickerStyle(.wheel)
+                            .labelsHidden()
+                        Spacer()
+                    }
+                    .navigationTitle("Start Time")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
+                        ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showDurationPicker) {
+                NavigationStack {
+                    VStack {
+                        HStack {
+                            Picker("Hours", selection: $tempHours) { ForEach(0..<24, id: \.self) { Text("\($0) h").tag($0) } }.pickerStyle(.wheel)
+                            Picker("Minutes", selection: $tempMinutes) { ForEach(0..<60, id: \.self) { Text("\($0) m").tag($0) } }.pickerStyle(.wheel)
+                        }
+                        Spacer()
+                    }
+                    .navigationTitle("Duration")
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
+                        }
+                    }
+                }
+                .presentationDetents([.medium])
+            }
+            .onAppear(perform: loadPrefill)
+            .onChange(of: instrument) { _, _ in
+                guard !isTitleEdited else { return }
+                let auto = defaultTitle(); title = auto; initialAutoTitle = auto
+            }
         }
     }
 
-    // MARK: - Derived
-    private var instrumentNames: [String] {
-        instruments
-            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    private func loadPrefill() {
+        timestamp = prefillTimestamp
+        durationSeconds = prefillDurationSeconds
+        instrument = prefillInstrument
+        let auto = defaultTitle()
+        title = auto; initialAutoTitle = auto; isTitleEdited = false
     }
 
-    private func autoTitleForInstrument(_ instrument: String?) -> String {
-        let ins = (instrument ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return ins.isEmpty ? "Practice Session" : "\(ins) Practice"
-    }
-
-    // MARK: - Actions
-    private func primeForm() {
-        title = proposedTitle
-        when = startedAt
-        selectedInstrument = instrumentName
-        extraNotes = notes
-
-        let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
-        fr.fetchLimit = 1
-        if let p = try? ctx.fetch(fr).first {
-            isPublic = p.defaultPrivacy
-        } else {
-            isPublic = false
-        }
-        userEditedTitle = false
-    }
-
-    private func save() {
-        let s = Session(context: ctx)
-        s.id = UUID()
-        s.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        s.notes = extraNotes
-        s.timestamp = when
+    private func saveToCoreData() {
+        let s = Session(context: viewContext)
+        s.instrument = instrument
+        s.title = title.isEmpty ? defaultTitle() : title
+        s.timestamp = timestamp
+        s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
-        s.mood = Int16(min(max(Int(mood), 0), 10))
-        s.effort = Int16(min(max(Int(effort), 0), 10))
-        s.instrument = selectedInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        s.durationSeconds = Int64(max(0, durationSeconds))
+        s.mood = Int16(mood)
+        s.effort = Int16(effort)
+        s.notes = notes
 
-        do {
-            let tags = try TagCanonicalizer.upsertCSV(in: ctx, csv: tagsCSV)
-            for t in tags { s.addToTags(t) }
-        } catch { }
+        let tagNames = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        s.tags = NSSet(array: upsertTags(tagNames))
 
-        do {
-            try ctx.save()
-            onSaved()
-            dismiss()
-        } catch {
-            // Minimal handling
-        }
+        do { try viewContext.save() } catch { print("Error saving session: \(error)") }
     }
-}
 
-// MARK: - Helpers
-private func formatDuration(_ seconds: Int) -> String {
-    let m = seconds / 60
-    let s = seconds % 60
-    if s == 0 { return "\(m)m" }
-    return String(format: "%dm %02ds", m, s)
+    // Helpers
+    private func defaultTitle(for inst: Instrument? = nil) -> String {
+        if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) Practice" }
+        return "Practice"
+    }
+    private func fetchInstruments() -> [Instrument] {
+        let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+        req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        return (try? viewContext.fetch(req)) ?? []
+    }
+    private func upsertTags(_ names: [String]) -> [Tag] {
+        var results: [Tag] = []
+        for name in names {
+            let req: NSFetchRequest<Tag> = Tag.fetchRequest()
+            req.predicate = NSPredicate(format: "name ==[c] %@", name)
+            if let existing = (try? viewContext.fetch(req))?.first { results.append(existing) }
+            else { let t = Tag(context: viewContext); t.name = name; results.append(t) }
+        }
+        return results
+    }
+    private func formattedDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.doesRelativeDateFormatting = true; f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: date)
+    }
+    private func formattedDuration(_ seconds: Int) -> String {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60; return (h, m)
+    }
 }

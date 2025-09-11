@@ -5,205 +5,135 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+//
+//  PracticeTimerView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
 import SwiftUI
+import Combine
 import CoreData
 
 struct PracticeTimerView: View {
-    @Environment(\.managedObjectContext) private var ctx
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.managedObjectContext) private var viewContext
 
-    // Instruments
+    @Binding var isPresented: Bool
+
     @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
+        animation: .default
     ) private var instruments: FetchedResults<Instrument>
 
-    // Timer state
-    @StateObject private var recovery = TimerStateRecovery.shared
-    @State private var startedAt: Date?
-    @State private var isRunning: Bool = false
+    @State private var isRunning = false
+    @State private var startDate: Date? = nil
+    @State private var elapsedSeconds = 0
+    @State private var ticker: AnyCancellable? = nil
 
-    // Live ticking
-    @State private var now = Date()
-    private let uiTimer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+    @State private var selectedInstrument: Instrument? = nil
+    @State private var quickNotes = ""
 
-    // Selection
-    @State private var selectedInstrument: String = ""
-
-    // Notes
-    @State private var quickNotes: String = ""
-
-    // Routing
-    @State private var showDetailsSheet: Bool = false
+    @State private var showReviewSheet = false
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 24) {
-
-                // Instrument picker (header removed)
-                Picker("Instrument", selection: $selectedInstrument) {
-                    Text("—").tag("")
-                    ForEach(instrumentNames, id: \.self) { ins in
-                        Text(ins).tag(ins)
-                    }
+                HStack {
+                    Text("Instrument"); Spacer()
+                    Menu {
+                        Button("Select…") { selectedInstrument = nil }
+                        Divider()
+                        ForEach(instruments, id: \.objectID) { inst in
+                            Button { selectedInstrument = inst } label: {
+                                HStack { Text(inst.name ?? "(Unnamed)"); if selectedInstrument?.objectID == inst.objectID { Image(systemName: "checkmark") } }
+                            }
+                        }
+                    } label: { Text(selectedInstrument?.name ?? "Select").foregroundStyle(.secondary) }
                 }
-                .pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal)
 
-                // Timer readout
-                Text(formatElapsed(recovery.elapsedSeconds(now: now)))
-                    .font(.system(size: 48, weight: .semibold, design: .rounded))
+                Text(formattedElapsed(elapsedSeconds))
+                    .font(.system(size: 56, weight: .semibold, design: .rounded))
                     .monospacedDigit()
+                    .padding(.top, 8)
 
-                // Controls
-                HStack(spacing: 20) {
+                HStack(spacing: 16) {
                     if isRunning {
-                        Button {
-                            pause()
-                        } label: {
-                            Label("Pause", systemImage: "pause.circle.fill")
-                                .labelStyle(.titleAndIcon)
-                                .font(.title2)
-                        }
+                        Button { pause() } label: { Label("Pause", systemImage: "pause.circle.fill").font(.title2) }
                     } else {
-                        Button {
-                            startOrResume()
-                        } label: {
-                            Label(startedAt == nil ? "Start" : "Resume", systemImage: "play.circle.fill")
-                                .labelStyle(.titleAndIcon)
-                                .font(.title2)
+                        if elapsedSeconds == 0 {
+                            Button { start() } label: { Label("Start", systemImage: "play.circle.fill").font(.title2) }
+                        } else {
+                            Button { resume() } label: { Label("Resume", systemImage: "play.circle.fill").font(.title2) }
                         }
                     }
-
-                    Button {
-                        finish()
-                    } label: {
-                        Label("Finish", systemImage: "checkmark.circle.fill")
-                            .labelStyle(.titleAndIcon)
-                            .font(.title2)
+                    Button(role: .destructive) { reset() } label: {
+                        Label("Reset", systemImage: "arrow.counterclockwise.circle.fill").font(.title3)
                     }
-                    .disabled(recovery.elapsedSeconds(now: now) == 0)
+                    .disabled(elapsedSeconds == 0 && !isRunning)
                 }
 
-                // Quick notes
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("Notes (optional)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    Text("Quick Notes").font(.subheadline).foregroundStyle(.secondary)
                     TextEditor(text: $quickNotes)
-                        .frame(minHeight: 120)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2)))
+                        .frame(minHeight: 100)
+                        .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary, lineWidth: 1) }
                 }
                 .padding(.horizontal)
 
-                Spacer(minLength: 0)
+                Spacer()
+
+                Button { finish() } label: {
+                    Text("Finish & Review")
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .font(.headline)
+                }
+                .buttonStyle(.borderedProminent)
+                .padding(.horizontal)
+                .disabled(elapsedSeconds == 0 || selectedInstrument == nil)
             }
+            .padding(.vertical, 16)
             .navigationTitle("Practice")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                    Button("Close") { isPresented = false }
                 }
             }
-        }
-        .onAppear {
-            adoptPrimaryInstrumentIfNeeded()
-            adoptRecoveredState()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            recovery.scenePhaseDidChange(newPhase)
-        }
-        .onReceive(uiTimer) { _ in
-            if isRunning { now = Date() }
-        }
-        .sheet(isPresented: $showDetailsSheet) {
-            PostRecordDetailsView(
-                proposedTitle: proposedTitle,
-                startedAt: startedAt ?? Date(),
-                durationSeconds: recovery.elapsedSeconds(now: now),
-                notes: quickNotes,
-                instrumentName: selectedInstrument,
-                onSaved: {
-                    recovery.clear()
-                    startedAt = nil
-                    isRunning = false
-                    quickNotes = ""
-                    dismiss()
-                }
-            )
+            .sheet(isPresented: $showReviewSheet) {
+                PostRecordDetailsView(
+                    isPresented: $showReviewSheet,
+                    timestamp: startDate ?? Date(),
+                    durationSeconds: elapsedSeconds,
+                    instrument: selectedInstrument,
+                    onSaved: { isPresented = false } // close parent AFTER the review saves
+                )
+            }
+            .onAppear {
+                if selectedInstrument == nil, let first = instruments.first { selectedInstrument = first }
+            }
+            .onDisappear {
+                ticker?.cancel(); ticker = nil
+            }
         }
     }
 
-    // MARK: - Derived
-
-    private var instrumentNames: [String] {
-        instruments
-            .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    private var proposedTitle: String {
-        let ins = selectedInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
-        return ins.isEmpty ? "Practice Session" : "\(ins) Practice"
-    }
-
-    // MARK: - Actions
-
-    private func startOrResume() {
-        if startedAt == nil { startedAt = Date() }
-        recovery.start(resumeFrom: recovery.elapsedSeconds(now: now))
-        isRunning = true
-        now = Date()
-    }
-
-    private func pause() {
-        recovery.pause()
-        isRunning = false
-    }
-
-    private func finish() {
-        if isRunning { pause() }
-        showDetailsSheet = true
-    }
-
-    private func adoptPrimaryInstrumentIfNeeded() {
-        guard selectedInstrument.isEmpty else { return }
-        let fr: NSFetchRequest<Profile> = Profile.fetchRequest()
-        fr.fetchLimit = 1
-        let primary = (try? ctx.fetch(fr).first?.primaryInstrument) ?? ""
-        if !primary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            selectedInstrument = primary
-        } else if let first = instrumentNames.first {
-            selectedInstrument = first
-        } else {
-            selectedInstrument = ""
+    private func start() { guard !isRunning else { return }; startDate = Date(); isRunning = true; startTicker() }
+    private func resume() { guard !isRunning else { return }; isRunning = true; startTicker() }
+    private func pause() { guard isRunning else { return }; isRunning = false; ticker?.cancel(); ticker = nil }
+    private func reset() { pause(); startDate = nil; elapsedSeconds = 0; quickNotes = "" }
+    private func finish() { pause(); showReviewSheet = true }
+    private func startTicker() {
+        ticker?.cancel()
+        ticker = Timer.publish(every: 1.0, on: .main, in: .common).autoconnect().sink { _ in
+            if isRunning { elapsedSeconds += 1 }
         }
     }
-
-    private func adoptRecoveredState() {
-        let snap = recovery.snapshot
-        switch snap.mode {
-        case .idle:
-            isRunning = false
-        case .paused:
-            isRunning = false
-            if startedAt == nil { startedAt = Date() }
-        case .running:
-            isRunning = true
-            if startedAt == nil { startedAt = Date() }
-            now = Date()
-        }
-    }
-}
-
-// MARK: - Formatter
-private func formatElapsed(_ seconds: Int) -> String {
-    let h = seconds / 3600
-    let m = (seconds % 3600) / 60
-    let s = seconds % 60
-    if h > 0 {
-        return String(format: "%d:%02d:%02d", h, m, s)
-    } else {
-        return String(format: "%02d:%02d", m, s)
+    private func formattedElapsed(_ secs: Int) -> String {
+        let h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60
+        return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 }
