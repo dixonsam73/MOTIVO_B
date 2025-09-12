@@ -19,9 +19,39 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+//
+//  AddEditSessionView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
+//
+//  AddEditSessionView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
+//
+//  AddEditSessionView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
+//
+//  AddEditSessionView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
 import SwiftUI
 import CoreData
 import PhotosUI
+import AVFoundation
+import UIKit
 
 struct AddEditSessionView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -30,7 +60,7 @@ struct AddEditSessionView: View {
     @Binding var isPresented: Bool
     var session: Session? = nil
 
-    // Existing state
+    // State (session fields)
     @State private var instrument: Instrument?
     @State private var title = ""
     @State private var timestamp = Date()
@@ -41,38 +71,74 @@ struct AddEditSessionView: View {
     @State private var tagsText = ""
     @State private var notes = ""
 
+    // Pickers (wheels)
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
 
+    // Save/title behavior
     @State private var isSaving = false
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
 
-    // Attachments (added previously)
+    // Attachments
     @State private var stagedAttachments: [StagedAttachment] = []
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
 
-    // Camera usage key guard
-    @State private var showCameraKeyAlert = false
+    // Camera permission alert
+    @State private var showCameraDeniedAlert = false
+
+    // Profile instruments cache
+    @State private var instruments: [Instrument] = []
+
+    // Convenience flags
+    private var hasNoInstruments: Bool { instruments.isEmpty }
+    private var hasOneInstrument: Bool { instruments.count == 1 }
+    private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Picker("Instrument", selection: $instrument) {
-                        // ✅ allow nil selection to silence Picker warnings
-                        Text("Select instrument…").tag(nil as Instrument?)
-                        ForEach(fetchInstruments(), id: \.self) { inst in
-                            Text(inst.name ?? "").tag(inst as Instrument?)
+                // Instrument selection logic:
+                // - 0 instruments: show guidance
+                // - 1 instrument: hide picker, show non-editable row (auto-assigned)
+                // - 2+ instruments: show picker (existing behavior)
+                if hasNoInstruments {
+                    Section {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("No instruments found")
+                                .font(.headline)
+                            Text("Add an instrument in your Profile to create a session.")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        }
+                    }
+                } else if hasOneInstrument {
+                    Section {
+                        HStack {
+                            Text("Instrument")
+                            Spacer()
+                            Text(instruments.first?.name ?? "—")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
+                    Section {
+                        Picker("Instrument", selection: $instrument) {
+                            Text("Select instrument…").tag(nil as Instrument?)
+                            ForEach(instruments, id: \.self) { inst in
+                                Text(inst.name ?? "").tag(inst as Instrument?)
+                            }
                         }
                     }
                 }
+
+                // Title
                 Section {
                     TextField("Title", text: $title)
                         .onChange(of: title) { _, newValue in
@@ -81,6 +147,8 @@ struct AddEditSessionView: View {
                             }
                         }
                 }
+
+                // Start time
                 Section {
                     Button {
                         tempDate = timestamp
@@ -89,6 +157,8 @@ struct AddEditSessionView: View {
                         HStack { Text("Start Time"); Spacer(); Text(formattedDate(timestamp)).foregroundStyle(.secondary) }
                     }
                 }
+
+                // Duration
                 Section {
                     Button {
                         (tempHours, tempMinutes) = secondsToHM(durationSeconds)
@@ -100,7 +170,10 @@ struct AddEditSessionView: View {
                         Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
                     }
                 }
+
                 Section { Toggle("Public", isOn: $isPublic) }
+
+                // Mood & Effort
                 Section("Mood & Effort") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
@@ -111,6 +184,8 @@ struct AddEditSessionView: View {
                         Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
                     }
                 }
+
+                // Notes
                 Section {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
@@ -119,6 +194,8 @@ struct AddEditSessionView: View {
                         }
                     }
                 }
+
+                // Tags
                 Section { TextField("Tags (comma-separated)", text: $tagsText) }
 
                 // Attachments UI
@@ -128,30 +205,28 @@ struct AddEditSessionView: View {
                     Button("Add File") { showFileImporter = true }
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
                         Button("Take Photo") {
-                            // ✅ Runtime guard for NSCameraUsageDescription
-                            if cameraUsageDescriptionPresent() {
-                                showCamera = true
-                            } else {
-                                showCameraKeyAlert = true
-                                print("NSCameraUsageDescription:", Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") ?? "nil")
-                            }
+                            ensureCameraAuthorized { showCamera = true }
                         }
                     }
                 }
             }
             .navigationTitle(session == nil ? "New Session" : "Edit Session")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { isPresented = false }.disabled(isSaving) }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { isPresented = false }.disabled(isSaving)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
                         guard !isSaving else { return }
                         isSaving = true
-                        isPresented = false
-                        DispatchQueue.main.async { saveToCoreData() }
+                        isPresented = false      // close first
+                        DispatchQueue.main.async { saveToCoreData() } // then commit
                     } label: { Text("Save") }
                     .disabled(isSaving || durationSeconds == 0 || instrument == nil)
                 }
             }
+
+            // Start picker
             .sheet(isPresented: $showStartPicker) {
                 NavigationStack {
                     VStack {
@@ -164,8 +239,11 @@ struct AddEditSessionView: View {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
                         ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
                     }
-                }.presentationDetents([.medium])
+                }
+                .presentationDetents([.medium])
             }
+
+            // Duration picker
             .sheet(isPresented: $showDurationPicker) {
                 NavigationStack {
                     VStack {
@@ -182,14 +260,11 @@ struct AddEditSessionView: View {
                             Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
                         }
                     }
-                }.presentationDetents([.medium])
+                }
+                .presentationDetents([.medium])
             }
-            .onAppear { loadSession() }
-            .onChange(of: instrument) { _, _ in
-                guard !isTitleEdited else { return }
-                let auto = defaultTitle(); title = auto; initialAutoTitle = auto
-            }
-            // Attachments modifiers
+
+            // Photo/file modifiers
             .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
             .task(id: photoPickerItem) {
                 guard let item = photoPickerItem else { return }
@@ -201,64 +276,106 @@ struct AddEditSessionView: View {
                     if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
                 }
             }
-            .alert("Camera permission key missing",
-                   isPresented: $showCameraKeyAlert,
-                   actions: { Button("OK", role: .cancel) {} },
-                   message: { Text("App build is missing NSCameraUsageDescription. Please reinstall after adding it.") })
+            .alert("Camera access denied",
+                   isPresented: $showCameraDeniedAlert,
+                   actions: {
+                       Button("OK", role: .cancel) {}
+                       Button("Open Settings") {
+                           if let url = URL(string: UIApplication.openSettingsURLString) {
+                               UIApplication.shared.open(url)
+                           }
+                       }
+                   },
+                   message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+            .onAppear {
+                // Load instruments and apply single-instrument policy
+                instruments = fetchInstruments()
+
+                // For a new session, if there is exactly one instrument, auto-assign it.
+                if session == nil, hasOneInstrument {
+                    if instrument == nil {
+                        instrument = instruments.first
+                    }
+                    // Auto title if the user hasn't edited
+                    if !isTitleEdited {
+                        let auto = defaultTitle(for: instrument)
+                        title = auto
+                        initialAutoTitle = auto
+                    }
+                } else if session == nil, hasMultipleInstruments, !isTitleEdited {
+                    // With multiple instruments but none chosen yet, keep default “Practice”
+                    let auto = defaultTitle(for: nil)
+                    title = auto
+                    initialAutoTitle = auto
+                } else if let s = session {
+                    // Editing existing session (keep existing values, ensure title baseline)
+                    if !isTitleEdited {
+                        let auto = defaultTitle(for: s.instrument)
+                        initialAutoTitle = auto
+                        if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            title = auto
+                        }
+                    }
+                }
+            }
+            .onChange(of: instrument) { _, _ in
+                // If user selects a different instrument (multi-instrument case),
+                // refresh the auto title unless the user already edited it.
+                guard !isTitleEdited else { return }
+                let auto = defaultTitle(for: instrument)
+                title = auto
+                initialAutoTitle = auto
+            }
         }
     }
 
-    // MARK: - Existing helpers
-    private func loadSession() {
-        if let s = session {
-            instrument = s.instrument
-            title = s.title ?? ""
-            timestamp = s.timestamp ?? Date()
-            durationSeconds = Int(s.durationSeconds)
-            isPublic = s.isPublic
-            mood = Int(s.mood); effort = Int(s.effort)
-            tagsText = ((s.tags as? Set<Tag>) ?? []).compactMap { $0.name }
-                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-                .joined(separator: ", ")
-            notes = s.notes ?? ""
-            let auto = defaultTitle(for: s.instrument)
-            initialAutoTitle = auto
-            isTitleEdited = !(title.isEmpty || title == auto)
-            if title.isEmpty { title = auto }
-        } else {
-            let auto = defaultTitle()
-            title = auto; initialAutoTitle = auto; isTitleEdited = false
-        }
-    }
+    // MARK: - Save
 
     private func saveToCoreData() {
         let s = session ?? Session(context: viewContext)
+
+        // Ensure required Core Data fields
+        if (s.value(forKey: "id") as? UUID) == nil { s.setValue(UUID(), forKey: "id") }
+        if s.timestamp == nil { s.timestamp = Date() }
+
         s.instrument = instrument
-        s.title = title.isEmpty ? defaultTitle() : title
+        s.title = title.isEmpty ? defaultTitle(for: instrument) : title
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
         s.mood = Int16(mood)
         s.effort = Int16(effort)
         s.notes = notes
-        let tagNames = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+
+        let tagNames = tagsText
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
 
         // Commit staged attachments
         commitStagedAttachments(to: s, ctx: viewContext)
 
-        do { try viewContext.save() } catch { print("Error saving session: \(error)") }
+        do {
+            try viewContext.save()
+        } catch {
+            print("Error saving session: \(error)")
+        }
     }
+
+    // MARK: - Helpers
 
     private func defaultTitle(for inst: Instrument? = nil) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) Practice" }
         return "Practice"
     }
+
     private func fetchInstruments() -> [Instrument] {
         let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
         req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
         return (try? viewContext.fetch(req)) ?? []
     }
+
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
         for name in names {
@@ -269,25 +386,37 @@ struct AddEditSessionView: View {
         }
         return results
     }
+
     private func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.doesRelativeDateFormatting = true; f.dateStyle = .medium; f.timeStyle = .short
+        let f = DateFormatter()
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        f.timeStyle = .short
         return f.string(from: date)
     }
+
     private func formattedDuration(_ seconds: Int) -> String {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
+
     private func secondsToHM(_ seconds: Int) -> (Int, Int) {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60; return (h, m)
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        return (h, m)
     }
 
     // MARK: - Attachment helpers
+
     private func stageData(_ data: Data, kind: AttachmentKind) {
         stagedAttachments.append(StagedAttachment(id: UUID(), data: data, kind: kind))
     }
+
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
     }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         if case .success(let urls) = result {
             for url in urls {
@@ -303,6 +432,7 @@ struct AddEditSessionView: View {
             }
         }
     }
+
     private func kindForURL(_ url: URL) -> AttachmentKind {
         let ext = url.pathExtension.lowercased()
         if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
@@ -310,6 +440,7 @@ struct AddEditSessionView: View {
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
         return .file
     }
+
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
         for att in stagedAttachments {
             do {
@@ -323,11 +454,21 @@ struct AddEditSessionView: View {
         stagedAttachments.removeAll()
     }
 
-    // MARK: - Camera plist guard
-    private func cameraUsageDescriptionPresent() -> Bool {
-        if let v = Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String, !v.isEmpty {
-            return true
+    // MARK: - Camera authorization
+
+    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            onAuthorized()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async {
+                    granted ? onAuthorized() : { self.showCameraDeniedAlert = true }()
+                }
+            }
+        default:
+            self.showCameraDeniedAlert = true
         }
-        return false
     }
 }
