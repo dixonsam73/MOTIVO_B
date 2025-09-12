@@ -14,6 +14,7 @@
 
 import SwiftUI
 import CoreData
+import PhotosUI
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -50,6 +51,14 @@ struct PostRecordDetailsView: View {
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
 
+    // Attachments
+    @State private var stagedAttachments: [StagedAttachment] = []
+    @State private var showPhotoPicker = false
+    @State private var showFileImporter = false
+    @State private var showCamera = false
+    @State private var photoPickerItem: PhotosPickerItem?
+    @State private var showCameraKeyAlert = false
+
     init(
         isPresented: Binding<Bool>,
         timestamp: Date? = nil,
@@ -69,6 +78,8 @@ struct PostRecordDetailsView: View {
             Form {
                 Section {
                     Picker("Instrument", selection: $instrument) {
+                        // ✅ allow nil selection
+                        Text("Select instrument…").tag(nil as Instrument?)
                         ForEach(fetchInstruments(), id: \.self) { inst in
                             Text(inst.name ?? "").tag(inst as Instrument?)
                         }
@@ -102,7 +113,6 @@ struct PostRecordDetailsView: View {
                     }
                 }
                 Section { Toggle("Public", isOn: $isPublic) }
-
                 Section("Mood & Effort") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
@@ -113,22 +123,32 @@ struct PostRecordDetailsView: View {
                         Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
                     }
                 }
-
-                // Notes with placeholder
                 Section {
                     ZStack(alignment: .topLeading) {
-                        TextEditor(text: $notes)
-                            .frame(minHeight: 100)
+                        TextEditor(text: $notes).frame(minHeight: 100)
                         if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("Notes")
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal, 5)
-                                .padding(.vertical, 8)
+                            Text("Notes").foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 8)
                         }
                     }
                 }
-
                 Section { TextField("Tags (comma-separated)", text: $tagsText) }
+
+                // Attachments UI
+                StagedAttachmentsSectionView(attachments: stagedAttachments, onRemove: removeStagedAttachment)
+                Section {
+                    Button("Add Photo") { showPhotoPicker = true }
+                    Button("Add File") { showFileImporter = true }
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Take Photo") {
+                            if cameraUsageDescriptionPresent() {
+                                showCamera = true
+                            } else {
+                                showCameraKeyAlert = true
+                                print("NSCameraUsageDescription:", Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") ?? "nil")
+                            }
+                        }
+                    }
+                }
             }
             .navigationTitle("Review & Save")
             .toolbar {
@@ -139,12 +159,9 @@ struct PostRecordDetailsView: View {
                     Button {
                         guard !isSaving else { return }
                         isSaving = true
-                        // 1) Close this sheet immediately
                         isPresented = false
-                        // 2) Save on next tick
                         DispatchQueue.main.async {
                             saveToCoreData()
-                            // 3) Ask parent timer to close
                             onSaved?()
                         }
                     } label: { Text("Save") }
@@ -155,8 +172,7 @@ struct PostRecordDetailsView: View {
                 NavigationStack {
                     VStack {
                         DatePicker("", selection: $tempDate, displayedComponents: [.date, .hourAndMinute])
-                            .datePickerStyle(.wheel)
-                            .labelsHidden()
+                            .datePickerStyle(.wheel).labelsHidden()
                         Spacer()
                     }
                     .navigationTitle("Start Time")
@@ -164,8 +180,7 @@ struct PostRecordDetailsView: View {
                         ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
                         ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
                     }
-                }
-                .presentationDetents([.medium])
+                }.presentationDetents([.medium])
             }
             .sheet(isPresented: $showDurationPicker) {
                 NavigationStack {
@@ -183,17 +198,33 @@ struct PostRecordDetailsView: View {
                             Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
                         }
                     }
-                }
-                .presentationDetents([.medium])
+                }.presentationDetents([.medium])
             }
             .onAppear(perform: loadPrefill)
             .onChange(of: instrument) { _, _ in
                 guard !isTitleEdited else { return }
                 let auto = defaultTitle(); title = auto; initialAutoTitle = auto
             }
+            // Attachments modifiers
+            .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
+            .task(id: photoPickerItem) {
+                guard let item = photoPickerItem else { return }
+                if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
+            }
+            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+            .sheet(isPresented: $showCamera) {
+                CameraCaptureView { image in
+                    if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
+                }
+            }
+            .alert("Camera permission key missing",
+                   isPresented: $showCameraKeyAlert,
+                   actions: { Button("OK", role: .cancel) {} },
+                   message: { Text("App build is missing NSCameraUsageDescription. Please reinstall after adding it.") })
         }
     }
 
+    // MARK: - Existing helpers
     private func loadPrefill() {
         timestamp = prefillTimestamp
         durationSeconds = prefillDurationSeconds
@@ -212,14 +243,15 @@ struct PostRecordDetailsView: View {
         s.mood = Int16(mood)
         s.effort = Int16(effort)
         s.notes = notes
-
         let tagNames = tagsText.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
+
+        // Commit staged attachments
+        commitStagedAttachments(to: s, ctx: viewContext)
 
         do { try viewContext.save() } catch { print("Error saving session: \(error)") }
     }
 
-    // Helpers
     private func defaultTitle(for inst: Instrument? = nil) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) Practice" }
         return "Practice"
@@ -249,5 +281,55 @@ struct PostRecordDetailsView: View {
     }
     private func secondsToHM(_ seconds: Int) -> (Int, Int) {
         let h = seconds / 3600; let m = (seconds % 3600) / 60; return (h, m)
+    }
+
+    // MARK: - Attachment helpers
+    private func stageData(_ data: Data, kind: AttachmentKind) {
+        stagedAttachments.append(StagedAttachment(id: UUID(), data: data, kind: kind))
+    }
+    private func removeStagedAttachment(_ a: StagedAttachment) {
+        stagedAttachments.removeAll { $0.id == a.id }
+    }
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        if case .success(let urls) = result {
+            for url in urls {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let kind = kindForURL(url)
+                    stageData(data, kind: kind)
+                } catch {
+                    print("File import failed for \(url): \(error)")
+                }
+            }
+        }
+    }
+    private func kindForURL(_ url: URL) -> AttachmentKind {
+        let ext = url.pathExtension.lowercased()
+        if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
+        if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
+        if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
+        return .file
+    }
+    private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        for att in stagedAttachments {
+            do {
+                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
+                try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, ctx: ctx)
+            } catch {
+                print("Attachment commit failed: \(error)")
+            }
+        }
+        stagedAttachments.removeAll()
+    }
+
+    // MARK: - Camera plist guard
+    private func cameraUsageDescriptionPresent() -> Bool {
+        if let v = Bundle.main.object(forInfoDictionaryKey: "NSCameraUsageDescription") as? String, !v.isEmpty {
+            return true
+        }
+        return false
     }
 }

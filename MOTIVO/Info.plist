@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Privacy - Camera Usage Description
+</key>
+	<string>Motivo uses the camera to attach practice photos.</string>
+	<key>Privacy – Microphone Usage Description</key>
+	<string>Motivo may access the microphone when capturing video clips.
+</string>
+	<key>Privacy – Photo Library Additions Usage Description</key>
+	<string>Motivo can save captured photos with your permission.</string>
+	<key>Privacy – Photo Library Usage Description</key>
+	<string>Motivo needs access to your photo library to show and attach photos.</string>
+</dict>
+</plist>
