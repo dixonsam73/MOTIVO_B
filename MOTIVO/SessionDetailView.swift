@@ -2,14 +2,8 @@
 //  SessionDetailView.swift
 //  MOTIVO
 //
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  SessionDetailView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
+//  NOTE: This version preserves your previous UI (Edit button, Delete, Quick Look, sections)
+//        and ONLY adds a favourite indicator (★) next to attachments where isThumbnail == true.
 //
 
 import SwiftUI
@@ -59,7 +53,7 @@ struct SessionDetailView: View {
                 }
             }
 
-            // Attachments
+            // Attachments (now shows ★ for favourite)
             Section("Attachments") {
                 let atts = attachmentsSorted()
                 if atts.isEmpty {
@@ -74,7 +68,17 @@ struct SessionDetailView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: "paperclip.circle")
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(attachmentTitle(att))
+                                    HStack(spacing: 6) {
+                                        Text(attachmentTitle(att))
+                                        if (att.value(forKey: "isThumbnail") as? Bool) == true {
+                                            Text("★")
+                                                .font(.caption)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 2)
+                                                .background(.ultraThinMaterial, in: Capsule())
+                                                .accessibilityLabel("Thumbnail")
+                                        }
+                                    }
                                     if let date = att.createdAt {
                                         Text(shortDate(date))
                                             .font(.caption)
@@ -102,8 +106,15 @@ struct SessionDetailView: View {
             }
         }
         .sheet(isPresented: $showEdit) {
-            AddEditSessionView(isPresented: $showEdit, session: session)
-                .environment(\.managedObjectContext, viewContext)
+            AddEditSessionView(
+                isPresented: $showEdit,
+                session: session,
+                onSaved: {
+                    // After saving from the sheet, close Detail → return to Feed.
+                    dismiss()
+                }
+            )
+            .environment(\.managedObjectContext, viewContext)
         }
         .sheet(isPresented: Binding(
             get: { previewURL != nil },

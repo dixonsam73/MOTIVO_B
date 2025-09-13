@@ -2,50 +2,6 @@
 //  PostRecordDetailsView.swift
 //  MOTIVO
 //
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PostRecordDetailsView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
 
 import SwiftUI
 import CoreData
@@ -53,50 +9,61 @@ import PhotosUI
 import AVFoundation
 import UIKit
 
+fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    var id: Int16 { rawValue }
+    var label: String {
+        switch self {
+        case .practice: return "Practice"
+        case .rehearsal: return "Rehearsal"
+        case .recording: return "Recording"
+        case .lesson: return "Lesson"
+        }
+    }
+    static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
+}
+
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
-    // Presented sheet binding from timer
     @Binding var isPresented: Bool
-
-    // Prefill from timer (passed in)
     private let prefillTimestamp: Date
     private let prefillDurationSeconds: Int
 
-    // Review state
     @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
     @State private var title: String = ""
     @State private var timestamp: Date
     @State private var durationSeconds: Int
+    @State private var activity: ActivityType = .practice
     @State private var isPublic: Bool = true
     @State private var mood: Int = 5
     @State private var effort: Int = 5
     @State private var tagsText: String = ""
     @State private var notes: String = ""
 
-    // Track if user has edited title (so we don’t overwrite on instrument change)
+    // Title control
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
 
     // Wheels
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
+    @State private var showActivityPicker = false
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
+    @State private var tempActivity: ActivityType = .practice
 
-    // Attachments staging
+    // Staged attachments + thumbnail choice
     @State private var stagedAttachments: [StagedAttachment] = []
+    @State private var selectedThumbnailID: UUID? = nil
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
-
-    // Camera permission alert
     @State private var showCameraDeniedAlert = false
 
-    // Callback to notify timer view when saved (optional)
     var onSaved: (() -> Void)?
 
     init(
@@ -115,7 +82,6 @@ struct PostRecordDetailsView: View {
         self.onSaved = onSaved
     }
 
-    // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
@@ -123,18 +89,12 @@ struct PostRecordDetailsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                // Instrument logic:
-                // - 0 instruments: guidance (edge case)
-                // - 1 instrument: hide the instrument section entirely (per request)
-                // - 2+ instruments: show picker; changing selection updates title if user hasn’t edited
                 if hasNoInstruments {
                     Section {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("No instruments found")
-                                .font(.headline)
+                            Text("No instruments found").font(.headline)
                             Text("Add an instrument in your Profile to save this session.")
-                                .foregroundStyle(.secondary)
-                                .font(.subheadline)
+                                .foregroundStyle(.secondary).font(.subheadline)
                         }
                     }
                 } else if hasMultipleInstruments {
@@ -147,9 +107,16 @@ struct PostRecordDetailsView: View {
                         }
                     }
                 }
-                // (When hasOneInstrument, we show nothing here by design)
 
-                // Title
+                Section {
+                    Button {
+                        tempActivity = activity
+                        showActivityPicker = true
+                    } label: {
+                        HStack { Text("Activity"); Spacer(); Text(activity.label).foregroundStyle(.secondary) }
+                    }
+                }
+
                 Section {
                     TextField("Title", text: $title)
                         .onChange(of: title) { _, newValue in
@@ -159,7 +126,6 @@ struct PostRecordDetailsView: View {
                         }
                 }
 
-                // Start Time
                 Section {
                     Button {
                         tempDate = timestamp
@@ -169,7 +135,6 @@ struct PostRecordDetailsView: View {
                     }
                 }
 
-                // Duration
                 Section {
                     Button {
                         (tempHours, tempMinutes) = secondsToHM(durationSeconds)
@@ -184,7 +149,6 @@ struct PostRecordDetailsView: View {
 
                 Section { Toggle("Public", isOn: $isPublic) }
 
-                // Mood & Effort
                 Section("Mood & Effort") {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
@@ -196,7 +160,6 @@ struct PostRecordDetailsView: View {
                     }
                 }
 
-                // Notes
                 Section {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
@@ -206,122 +169,146 @@ struct PostRecordDetailsView: View {
                     }
                 }
 
-                // Tags
                 Section { TextField("Tags (comma-separated)", text: $tagsText) }
 
-                // Attachments staging
-                StagedAttachmentsSectionView(attachments: stagedAttachments, onRemove: removeStagedAttachment)
+                // Staged attachments with thumbnail selection
+                StagedAttachmentsSectionView(
+                    attachments: stagedAttachments,
+                    onRemove: removeStagedAttachment,
+                    selectedThumbnailID: $selectedThumbnailID
+                )
+
                 Section {
                     Button("Add Photo") { showPhotoPicker = true }
                     Button("Add File") { showFileImporter = true }
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") {
-                            ensureCameraAuthorized { showCamera = true }
-                        }
+                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
                     }
                 }
             }
-            .navigationTitle("Review")
+            .navigationTitle("Session Review")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        // Close first, then commit
                         isPresented = false
                         DispatchQueue.main.async { saveToCoreData() }
                     }
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
             }
-
-            // Start picker
-            .sheet(isPresented: $showStartPicker) {
-                NavigationStack {
-                    VStack {
-                        DatePicker("", selection: $tempDate, displayedComponents: [.date, .hourAndMinute])
-                            .datePickerStyle(.wheel).labelsHidden()
-                        Spacer()
-                    }
-                    .navigationTitle("Start Time")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
-                        ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
-                    }
-                }
-                .presentationDetents([.medium])
-            }
-
-            // Duration picker
-            .sheet(isPresented: $showDurationPicker) {
-                NavigationStack {
-                    VStack {
-                        HStack {
-                            Picker("Hours", selection: $tempHours) { ForEach(0..<24, id: \.self) { Text("\($0) h").tag($0) } }.pickerStyle(.wheel)
-                            Picker("Minutes", selection: $tempMinutes) { ForEach(0..<60, id: \.self) { Text("\($0) m").tag($0) } }.pickerStyle(.wheel)
-                        }
-                        Spacer()
-                    }
-                    .navigationTitle("Duration")
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
-                        }
-                    }
-                }
-                .presentationDetents([.medium])
-            }
-
-            // Attachments modifiers
+            .sheet(isPresented: $showActivityPicker) { activityPicker }
+            .sheet(isPresented: $showStartPicker) { startPicker }
+            .sheet(isPresented: $showDurationPicker) { durationPicker }
             .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
             .task(id: photoPickerItem) {
                 guard let item = photoPickerItem else { return }
                 if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
             }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
-            .sheet(isPresented: $showCamera) {
-                CameraCaptureView { image in
-                    if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
-                }
-            }
+            .sheet(isPresented: $showCamera) { CameraCaptureView { image in
+                if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
+            } }
             .alert("Camera access denied",
                    isPresented: $showCameraDeniedAlert,
                    actions: {
                        Button("OK", role: .cancel) {}
-                       Button("Open Settings") {
-                           if let url = URL(string: UIApplication.openSettingsURLString) {
-                               UIApplication.shared.open(url)
-                           }
-                       }
+                       Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .onAppear {
-                // Load instruments and apply single-instrument policy
                 instruments = fetchInstruments()
 
-                // If only one instrument exists, auto-assign and hide selector.
-                if instrument == nil, hasOneInstrument {
-                    instrument = instruments.first
+                if instrument == nil {
+                    if let primaryName = fetchPrimaryInstrumentName(),
+                       let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
+                        instrument = match
+                    } else if hasOneInstrument {
+                        instrument = instruments.first
+                    }
                 }
 
-                // Auto title using instrument if available and title is empty
+                activity = .practice
+                tempActivity = activity
+
                 if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    let auto = defaultTitle(for: instrument)
+                    let auto = defaultTitle(for: instrument, activity: activity)
                     title = auto
                     initialAutoTitle = auto
                     isTitleEdited = false
                 }
             }
             .onChange(of: instrument) { _, _ in
-                // Update title when instrument changes, but only if user hasn’t edited manually
-                guard !isTitleEdited else { return }
-                let auto = defaultTitle(for: instrument)
-                title = auto
-                initialAutoTitle = auto
+                refreshAutoTitleIfNeeded()
             }
         }
+    }
+
+    // MARK: - Subviews
+
+    private var activityPicker: some View {
+        NavigationStack {
+            VStack {
+                Picker("", selection: $tempActivity) {
+                    ForEach(ActivityType.allCases) { type in
+                        Text(type.label).tag(type)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+                Spacer()
+            }
+            .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        activity = tempActivity
+                        showActivityPicker = false
+                        refreshAutoTitleIfNeeded()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var startPicker: some View {
+        NavigationStack {
+            VStack {
+                DatePicker("", selection: $tempDate, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.wheel).labelsHidden()
+                Spacer()
+            }
+            .navigationTitle("Start Time")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private var durationPicker: some View {
+        NavigationStack {
+            VStack {
+                HStack {
+                    Picker("Hours", selection: $tempHours) { ForEach(0..<24, id: \.self) { Text("\($0) h").tag($0) } }.pickerStyle(.wheel)
+                    Picker("Minutes", selection: $tempMinutes) { ForEach(0..<60, id: \.self) { Text("\($0) m").tag($0) } }.pickerStyle(.wheel)
+                }
+                Spacer()
+            }
+            .navigationTitle("Duration")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 
     // MARK: - Save
@@ -329,16 +316,11 @@ struct PostRecordDetailsView: View {
     private func saveToCoreData() {
         let s = Session(context: viewContext)
 
-        // Ensure required Core Data fields
-        if (s.value(forKey: "id") as? UUID) == nil {
-            s.setValue(UUID(), forKey: "id")
-        }
-        if s.timestamp == nil {
-            s.timestamp = Date()
-        }
+        if (s.value(forKey: "id") as? UUID) == nil { s.setValue(UUID(), forKey: "id") }
+        if s.timestamp == nil { s.timestamp = Date() }
 
         s.instrument = instrument
-        s.title = title.isEmpty ? defaultTitle(for: instrument) : title
+        s.title = title.isEmpty ? defaultTitle(for: instrument, activity: activity) : title
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
@@ -346,13 +328,17 @@ struct PostRecordDetailsView: View {
         s.effort = Int16(effort)
         s.notes = notes
 
+        // Persist activity type
+        s.setValue(activity.rawValue, forKey: "activityType")
+
+        // Tags
         let tagNames = tagsText
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
 
-        // Commit staged attachments
+        // Commit staged attachments with thumbnail choice
         commitStagedAttachments(to: s, ctx: viewContext)
 
         do {
@@ -363,17 +349,96 @@ struct PostRecordDetailsView: View {
         }
     }
 
+    // MARK: - Attachments (stage & commit)
+
+    private func stageData(_ data: Data, kind: AttachmentKind) {
+        let id = UUID()
+        stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
+        if kind == .image {
+            let imageCount = stagedAttachments.filter { $0.kind == .image }.count
+            if imageCount == 1 { selectedThumbnailID = id }
+        }
+    }
+
+    private func removeStagedAttachment(_ a: StagedAttachment) {
+        stagedAttachments.removeAll { $0.id == a.id }
+        if selectedThumbnailID == a.id {
+            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+        }
+    }
+
+    private func handleFileImport(_ result: Result<[URL], Error>) {
+        if case .success(let urls) = result {
+            for url in urls {
+                let accessed = url.startAccessingSecurityScopedResource()
+                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+                do {
+                    let data = try Data(contentsOf: url)
+                    let kind = kindForURL(url)
+                    stageData(data, kind: kind)
+                } catch { print("File import failed for \(url): \(error)") }
+            }
+        }
+    }
+
+    private func kindForURL(_ url: URL) -> AttachmentKind {
+        let ext = url.pathExtension.lowercased()
+        if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
+        if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
+        if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
+        return .file
+    }
+
+    private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
+        var chosenThumbID = selectedThumbnailID
+        if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
+
+        for att in stagedAttachments {
+            do {
+                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
+                let isThumb = (att.id == chosenThumbID) && (att.kind == .image)
+                _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
+            } catch { print("Attachment commit failed: \(error)") }
+        }
+        stagedAttachments.removeAll()
+        selectedThumbnailID = nil
+    }
+
     // MARK: - Helpers
 
-    private func defaultTitle(for inst: Instrument? = nil) -> String {
-        if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) Practice" }
-        return "Practice"
+    private func defaultTitle(for inst: Instrument? = nil, activity: ActivityType) -> String {
+        if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
+        return activity.label
+    }
+
+    private func refreshAutoTitleIfNeeded() {
+        guard !isTitleEdited else { return }
+        let auto = defaultTitle(for: instrument, activity: activity)
+        title = auto
+        initialAutoTitle = auto
     }
 
     private func fetchInstruments() -> [Instrument] {
         let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
         req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
         return (try? viewContext.fetch(req)) ?? []
+    }
+
+    private func fetchPrimaryInstrumentName() -> String? {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+        req.fetchLimit = 1
+        do {
+            if let profile = try viewContext.fetch(req).first {
+                let name = profile.value(forKey: "primaryInstrument") as? String
+                let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (trimmed?.isEmpty == false) ? trimmed : nil
+            }
+        } catch {
+            print("Profile fetch failed: \(error)")
+        }
+        return nil
     }
 
     private func upsertTags(_ names: [String]) -> [Tag] {
@@ -403,68 +468,15 @@ struct PostRecordDetailsView: View {
         return (h, m)
     }
 
-    // MARK: - Attachment helpers
-
-    private func stageData(_ data: Data, kind: AttachmentKind) {
-        stagedAttachments.append(StagedAttachment(id: UUID(), data: data, kind: kind))
-    }
-
-    private func removeStagedAttachment(_ a: StagedAttachment) {
-        stagedAttachments.removeAll { $0.id == a.id }
-    }
-
-    private func handleFileImport(_ result: Result<[URL], Error>) {
-        if case .success(let urls) = result {
-            for url in urls {
-                let accessed = url.startAccessingSecurityScopedResource()
-                defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-                do {
-                    let data = try Data(contentsOf: url)
-                    let kind = kindForURL(url)
-                    stageData(data, kind: kind)
-                } catch {
-                    print("File import failed for \(url): \(error)")
-                }
-            }
-        }
-    }
-
-    private func kindForURL(_ url: URL) -> AttachmentKind {
-        let ext = url.pathExtension.lowercased()
-        if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
-        if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
-        if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
-        return .file
-    }
-
-    private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
-        for att in stagedAttachments {
-            do {
-                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
-                try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, ctx: ctx)
-            } catch {
-                print("Attachment commit failed: \(error)")
-            }
-        }
-        stagedAttachments.removeAll()
-    }
-
-    // MARK: - Camera authorization
-
     private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
-        case .authorized:
-            onAuthorized()
+        case .authorized: onAuthorized()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async {
-                    granted ? onAuthorized() : { self.showCameraDeniedAlert = true }()
-                }
+                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
             }
-        default:
-            self.showCameraDeniedAlert = true
+        default: self.showCameraDeniedAlert = true
         }
     }
 }

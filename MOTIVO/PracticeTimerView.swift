@@ -26,6 +26,27 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+//
+//  PracticeTimerView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
+//
+//  PracticeTimerView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
+//
+//  PracticeTimerView.swift
+//  MOTIVO
+//
+//  Created by Samuel Dixon on 09/09/2025.
+//
+
 import SwiftUI
 import Combine
 import CoreData
@@ -49,7 +70,11 @@ struct PracticeTimerView: View {
     // Review sheet
     @State private var showReviewSheet = false
 
-    // Optional quick notes (kept for future; currently not passed forward)
+    // Info sheets for prebuilt-in recording guidance
+    @State private var showAudioHelp = false
+    @State private var showVideoHelp = false
+
+    // Quick notes
     @State private var quickNotes: String = ""
 
     // Convenience flags
@@ -66,30 +91,37 @@ struct PracticeTimerView: View {
                         VStack(spacing: 6) {
                             Text("No instruments found")
                                 .font(.headline)
-                            Text("Add an instrument in your Profile to start timing practice.")
+                            Text("Add an instrument in your Profile to start timing sessions.")
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal)
                         }
-                    } else if hasOneInstrument {
-                        HStack {
-                            Text("Instrument")
-                            Spacer()
-                            Text(instruments.first?.name ?? "—")
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     } else {
-                        HStack {
-                            Text("Instrument")
-                            Spacer()
-                            Picker("", selection: $instrument) {
-                                ForEach(instruments, id: \.self) { inst in
-                                    Text(inst.name ?? "").tag(inst as Instrument?)
-                                }
+                        VStack(spacing: 8) {
+                            HStack {
+                                Text("Instrument")
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                Spacer()
                             }
-                            .pickerStyle(.menu)
+
+                            if hasMultipleInstruments {
+                                Picker("Instrument", selection: $instrument) {
+                                    ForEach(instruments, id: \.self) { inst in
+                                        Text(inst.name ?? "Instrument").tag(inst as Instrument?)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                            } else if let only = instruments.first {
+                                HStack {
+                                    Text(only.name ?? "Instrument")
+                                        .font(.headline)
+                                    Spacer()
+                                }
+                                .onAppear { instrument = only }
+                            }
                         }
                         .padding(.horizontal)
                     }
@@ -117,34 +149,73 @@ struct PracticeTimerView: View {
                         .disabled(elapsedSeconds == 0 || instrument == nil)
                 }
 
-                // Optional quick notes
-                VStack(alignment: .leading) {
-                    Text("Quick Notes")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    TextEditor(text: $quickNotes)
-                        .frame(minHeight: 100)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                        )
+                // Recording icons (info-only, prebuilt-ins)
+                VStack(spacing: 12) {
+                    Divider().padding(.horizontal)
+                    HStack(spacing: 24) {
+                        Button { showAudioHelp = true } label: {
+                            Image(systemName: "mic.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Record audio help")
+                        .accessibilityHint("Opens instructions for using your device’s app to capture audio.")
+
+                        Button { showVideoHelp = true } label: {
+                            Image(systemName: "video.fill")
+                                .font(.system(size: 22, weight: .semibold))
+                                .frame(width: 44, height: 44)
+                                .contentShape(Circle())
+                        }
+                        .buttonStyle(.bordered)
+                        .accessibilityLabel("Record video help")
+                        .accessibilityHint("Opens instructions for using your device’s app to capture video.")
+                    }
+                }
+
+                // Quick notes with inline placeholder
+                VStack(alignment: .leading, spacing: 8) {
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $quickNotes)
+                            .frame(minHeight: 80, maxHeight: 120)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                            )
+
+                        if quickNotes.isEmpty {
+                            Text("Quick Notes")
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 8)
+                                .padding(.leading, 5)
+                                .allowsHitTesting(false)
+                        }
+                    }
                 }
                 .padding(.horizontal)
 
-                Spacer()
+                Spacer(minLength: 0)
             }
-            .navigationTitle("Practice Timer")
+            .padding(.top, 16)
+            .navigationTitle("Session Timer")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        isPresented = false
-                    }
+                    Button("Close") { isPresented = false }
                 }
             }
             .onAppear {
                 instruments = fetchInstruments()
-                if hasOneInstrument {
-                    instrument = instruments.first
+
+                // NEW: auto-select primary instrument if available (even when multiple exist)
+                if instrument == nil {
+                    if let primaryName = fetchPrimaryInstrumentName(),
+                       let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
+                        instrument = match
+                    } else if hasOneInstrument {
+                        instrument = instruments.first
+                    }
                 }
             }
             .sheet(isPresented: $showReviewSheet) {
@@ -159,12 +230,37 @@ struct PracticeTimerView: View {
                         isPresented = false
                     }
                 )
-                .environment(\.managedObjectContext, viewContext)
+            }
+            .sheet(isPresented: $showAudioHelp) {
+                InfoSheetView(
+                    title: "Quick audio takes (for now)",
+                    bullets: [
+                        "Open Voice Memos to record.",
+                        "Share to Files when done.",
+                        "Back here, use Add Attachment to include it."
+                    ],
+                    primaryCTA: nil
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showVideoHelp) {
+                InfoSheetView(
+                    title: "Quick video clips (for now)",
+                    bullets: [
+                        "Open Camera → Video to record.",
+                        "Save to Photos or Files.",
+                        "Back here, use Add Attachment to include it."
+                    ],
+                    primaryCTA: nil
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
             }
         }
     }
 
-    // MARK: - Instruments
+    // MARK: - Actions & fetches
 
     private func fetchInstruments() -> [Instrument] {
         let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
@@ -172,7 +268,15 @@ struct PracticeTimerView: View {
         return (try? viewContext.fetch(req)) ?? []
     }
 
-    // MARK: - Timer controls
+    private func fetchPrimaryInstrumentName() -> String? {
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+        if let profile = try? viewContext.fetch(req).first {
+            let name = profile.primaryInstrument?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (name?.isEmpty == false) ? name : nil
+        }
+        return nil
+    }
 
     private func start() {
         guard instrument != nil else { return }
@@ -212,5 +316,26 @@ struct PracticeTimerView: View {
         let h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s)
                       : String(format: "%02d:%02d", m, s)
+    }
+}
+
+private struct InfoSheetView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let title: String
+    let bullets: [String]
+    let primaryCTA: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(title).font(.headline)
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(bullets.enumerated()), id: \.0) { _, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•"); Text(line) }
+                }
+            }
+            HStack { Spacer(); Button("Got it") { dismiss() }.buttonStyle(.borderedProminent) }
+        }
+        .padding()
     }
 }

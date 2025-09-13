@@ -2,42 +2,100 @@
 //  StagedAttachmentsSectionView.swift
 //  MOTIVO
 //
-//  Created by Samuel Dixon on 12/09/2025.
-//
 
 import SwiftUI
 
+/// Section that previews staged (unsaved) attachments and allows removal / thumbnail marking.
 struct StagedAttachmentsSectionView: View {
     let attachments: [StagedAttachment]
     let onRemove: (StagedAttachment) -> Void
 
+    /// Selected staged attachment id to be saved as thumbnail (images only).
+    @Binding var selectedThumbnailID: UUID?
+
+    private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
+
     var body: some View {
-        Section(header: Text("Attachments")) {
+        Section("Attachments") {
             if attachments.isEmpty {
-                Text("No attachments")
-                    .foregroundColor(.secondary)
+                Text("No attachments yet")
+                    .foregroundStyle(.secondary)
             } else {
-                ForEach(attachments) { att in
-                    HStack {
-                        Text(label(for: att))
-                        Spacer()
-                        Button(role: .destructive) {
-                            onRemove(att)
-                        } label: {
-                            Image(systemName: "trash")
-                        }
+                LazyVGrid(columns: grid, spacing: 12) {
+                    ForEach(attachments) { att in
+                        AttachmentThumb(
+                            att: att,
+                            isThumbnail: selectedThumbnailID == att.id,
+                            onMakeThumbnail: { selectedThumbnailID = att.id },
+                            onRemove: { onRemove(att) }
+                        )
                     }
                 }
+                .padding(.vertical, 4)
             }
         }
     }
+}
 
-    private func label(for att: StagedAttachment) -> String {
-        switch att.kind {
-        case .image: return "Image"
-        case .audio: return "Audio"
-        case .video: return "Video"
-        case .file:  return "File"
+// MARK: - Thumb cell
+
+fileprivate struct AttachmentThumb: View {
+    let att: StagedAttachment
+    let isThumbnail: Bool
+    let onMakeThumbnail: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            thumbContent
+                .frame(width: 84, height: 84)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                )
+
+            // Star overlay: tap to set thumbnail (always visible on images)
+            if att.kind == .image {
+                Text(isThumbnail ? "★" : "☆")
+                    .font(.system(size: 16))
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .padding(4)
+                    .onTapGesture { onMakeThumbnail() }
+                    .accessibilityLabel(isThumbnail ? "Thumbnail (selected)" : "Set as Thumbnail")
+            }
         }
+        .contextMenu {
+            if att.kind == .image {
+                Button("Set as Thumbnail") { onMakeThumbnail() }
+            }
+            Button(role: .destructive) { onRemove() } label: { Text("Remove") }
+        }
+    }
+
+    @ViewBuilder
+    private var thumbContent: some View {
+        switch att.kind {
+        case .image:
+            if let ui = UIImage(data: att.data) {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else {
+                placeholder(system: "photo")
+            }
+        case .audio:
+            placeholder(system: "waveform")
+        case .video:
+            placeholder(system: "video")
+        case .file:
+            placeholder(system: "doc")
+        }
+    }
+
+    private func placeholder(system: String) -> some View {
+        Image(systemName: system)
+            .imageScale(.large)
+            .foregroundStyle(.secondary)
     }
 }

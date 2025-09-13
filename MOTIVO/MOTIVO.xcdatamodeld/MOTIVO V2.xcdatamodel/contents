@@ -4,6 +4,7 @@
         <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="fileURL" attributeType="String"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
+        <attribute name="isThumbnail" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>
         <attribute name="kind" attributeType="String"/>
         <relationship name="session" optional="YES" maxCount="1" deletionRule="Nullify" destinationEntity="Session" inverseName="attachments" inverseEntity="Session"/>
     </entity>
@@ -24,6 +25,7 @@
         <relationship name="relationship" optional="YES" toMany="YES" deletionRule="Cascade" destinationEntity="Instrument" inverseName="profile" inverseEntity="Instrument"/>
     </entity>
     <entity name="Session" representedClassName="Session" syncable="YES" codeGenerationType="class">
+        <attribute name="activityType" attributeType="Integer 16" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="durationSeconds" attributeType="Integer 64" defaultValueString="0" usesScalarValueType="YES"/>
         <attribute name="effort" attributeType="Integer 16" defaultValueString="5" usesScalarValueType="YES"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
