@@ -370,10 +370,10 @@ struct AddEditSessionView: View {
         // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
 
-        // Persist tags
+        // Persist tags — normalize & ensure each Tag has required UUID 'id'
         let tagNames = tagsText
             .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } // <<< CHANGED
             .filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
 
@@ -486,8 +486,15 @@ struct AddEditSessionView: View {
         for name in names {
             let req: NSFetchRequest<Tag> = Tag.fetchRequest()
             req.predicate = NSPredicate(format: "name ==[c] %@", name)
-            if let existing = (try? viewContext.fetch(req))?.first { results.append(existing) }
-            else { let t = Tag(context: viewContext); t.name = name; results.append(t) }
+            if let existing = (try? viewContext.fetch(req))?.first {
+                results.append(existing)
+            } else {
+                let t = Tag(context: viewContext)
+                t.name = name
+                // Ensure required UUID id is set so validation passes
+                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }   // <<< CHANGED
+                results.append(t)
+            }
         }
         return results
     }

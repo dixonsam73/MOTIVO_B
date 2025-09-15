@@ -5,27 +5,6 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
-//
-//  Persistence.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  Persistence.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  Persistence.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
 import CoreData
 
 final class PersistenceController {
@@ -80,5 +59,6 @@ final class PersistenceController {
         }
 
         container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy   // <<< ADDED
     }
 }

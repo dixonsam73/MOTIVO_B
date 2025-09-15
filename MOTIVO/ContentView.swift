@@ -5,32 +5,6 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
-//
-//  ContentView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  ContentView.swift
-//  MOTIVO
-//
-
-//
-//  ContentView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  ContentView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
 import SwiftUI
 import CoreData
 
@@ -47,6 +21,8 @@ struct ContentView: View {
 
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedTagIDs: Set<NSManagedObjectID> = []
+    // Keep selection stable across filter panel show/hide
+    @State private var selectionSnapshot: Set<NSManagedObjectID> = []   // <<< CHANGED: snapshot only on open
 
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var instruments: FetchedResults<Instrument>
@@ -84,7 +60,6 @@ struct ContentView: View {
                                 SessionRow(session: session)
                             }
                         }
-                        // ✅ Swipe-to-delete restored
                         .onDelete(perform: deleteSessions)
                     }
                 }
@@ -111,6 +86,15 @@ struct ContentView: View {
             }
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
+            }
+            // <<< CHANGED: snapshot on open only so user selections persist after closing
+            .onChange(of: filtersExpanded) { newValue in
+                if newValue {
+                    // opening: remember current selection
+                    selectionSnapshot = selectedTagIDs
+                }
+                // NOTE: previously we restored the snapshot on close which discarded user changes;
+                // we intentionally DO NOT restore here so selections made in the panel persist.
             }
         }
     }
@@ -205,36 +189,65 @@ fileprivate struct FilterPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation { filtersExpanded.toggle() } } label: {
-                HStack { Text("Filters").font(.subheadline).bold(); Spacer(); Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down").foregroundStyle(.secondary) }
+                HStack {
+                    Text("Filters").font(.subheadline).bold()
+                    Spacer()
+                    Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundStyle(.secondary)
+                }
             }
             if filtersExpanded {
                 VStack(alignment: .leading, spacing: 12) {
                     Toggle("Public only", isOn: $publicOnly)
+
                     Menu {
                         Button("Any Instrument") { selectedInstrument = nil }
                         Divider()
                         ForEach(instruments, id: \.objectID) { inst in
                             Button { selectedInstrument = inst } label: {
-                                HStack { Text(inst.name ?? "(Unnamed)"); if selectedInstrument?.objectID == inst.objectID { Image(systemName: "checkmark") } }
+                                HStack {
+                                    Text(inst.name ?? "(Unnamed)")
+                                    if selectedInstrument?.objectID == inst.objectID {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
                             }
                         }
-                    } label: { HStack { Text("Instrument"); Spacer(); Text(selectedInstrument?.name ?? "Any").foregroundStyle(.secondary) } }
+                    } label: {
+                        HStack {
+                            Text("Instrument")
+                            Spacer()
+                            Text(selectedInstrument?.name ?? "Any").foregroundStyle(.secondary)
+                        }
+                    }
+
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Tags").font(.subheadline)
-                        if tags.isEmpty { Text("No tags yet").foregroundStyle(.secondary) }
-                        else {
+                        if tags.isEmpty {
+                            Text("No tags yet").foregroundStyle(.secondary)
+                        } else {
                             ForEach(tags, id: \.objectID) { tag in
                                 Button {
                                     let id = tag.objectID
                                     if selectedTagIDs.contains(id) { selectedTagIDs.remove(id) }
                                     else { selectedTagIDs.insert(id) }
                                 } label: {
-                                    HStack { Text(tag.name ?? "(Untitled)"); Spacer(); if selectedTagIDs.contains(tag.objectID) { Image(systemName: "checkmark") } }
+                                    HStack {
+                                        Text(tag.name ?? "(Untitled)")
+                                        Spacer()
+                                        if selectedTagIDs.contains(tag.objectID) {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
                                 }
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
                             }
                         }
                     }
-                }.padding(.top, 8)
+                }
+                .padding(.top, 8)
             }
         }
     }
