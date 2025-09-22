@@ -25,7 +25,6 @@ struct MOTIVOApp: App {
                 }
                 do { try ctx.save() } catch {
                     // Non-fatal: we’ll also set IDs when creating a new Profile in ProfileView
-                    // You can add logging here if you want
                 }
             }
         }
@@ -36,6 +35,12 @@ struct MOTIVOApp: App {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
+                .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
+                    persistenceController.currentUserID = uid
+                    if let id = uid {
+                        Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
+                    }
+                }
         }
     }
 }

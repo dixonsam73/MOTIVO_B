@@ -9,12 +9,25 @@ import SwiftUI
 import CoreData
 
 struct ContentView: View {
+    @EnvironmentObject private var auth: AuthManager
+
+    var body: some View {
+        // Pass the currentUserID down so the child can build its @FetchRequest in init
+        SessionsRootView(userID: auth.currentUserID)
+            // Ensure a fresh init when the user changes
+            .id(auth.currentUserID ?? "nil-user")
+    }
+}
+
+// MARK: - Root of the screen (owns the fetch + all the original UI)
+
+fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
-        animation: .default
-    ) private var sessions: FetchedResults<Session>
+    let userID: String?
+
+    // Sessions are fetched with a predicate based on userID.
+    @FetchRequest private var sessions: FetchedResults<Session>
 
     @AppStorage("filtersExpanded") private var filtersExpanded = false
     @AppStorage("publicOnly") private var publicOnly = false
@@ -22,7 +35,7 @@ struct ContentView: View {
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedTagIDs: Set<NSManagedObjectID> = []
     // Keep selection stable across filter panel show/hide
-    @State private var selectionSnapshot: Set<NSManagedObjectID> = []   // <<< CHANGED: snapshot only on open
+    @State private var selectionSnapshot: Set<NSManagedObjectID> = []   // snapshot only on open
 
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var instruments: FetchedResults<Instrument>
@@ -33,6 +46,20 @@ struct ContentView: View {
     @State private var showAdd = false
     @State private var showProfile = false
     @State private var showTimer = false
+
+    // Build the fetch with the correct predicate up-front
+    init(userID: String?) {
+        self.userID = userID
+        let predicate: NSPredicate = {
+            if let uid = userID { return NSPredicate(format: "ownerUserID == %@", uid) }
+            else { return NSPredicate(value: false) } // no user → empty list
+        }()
+        _sessions = FetchRequest<Session>(
+            sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
+            predicate: predicate,
+            animation: .default
+        )
+    }
 
     var body: some View {
         NavigationStack {
@@ -87,14 +114,13 @@ struct ContentView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
-            // <<< CHANGED: snapshot on open only so user selections persist after closing
+            // snapshot on open only so user selections persist after closing
             .onChange(of: filtersExpanded) { newValue in
                 if newValue {
                     // opening: remember current selection
                     selectionSnapshot = selectedTagIDs
                 }
-                // NOTE: previously we restored the snapshot on close which discarded user changes;
-                // we intentionally DO NOT restore here so selections made in the panel persist.
+                // we intentionally DO NOT restore snapshot on close
             }
         }
     }
@@ -127,7 +153,7 @@ struct ContentView: View {
     }
 }
 
-// ——— helpers (unchanged) ———
+// ——— helpers (unchanged, kept inline) ———
 fileprivate struct StatsBannerView: View {
     let sessions: [Session]
     @Environment(\.calendar) private var calendar
