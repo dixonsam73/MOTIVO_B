@@ -1,4 +1,4 @@
-//
+///////
 //  AddEditSessionView.swift
 //  MOTIVO
 //
@@ -57,7 +57,10 @@ struct AddEditSessionView: View {
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
 
-    // Attachments (staged)
+    // Existing attachments (for EDIT mode)
+    @State private var existingAttachments: [Attachment] = []
+
+    // Attachments (staged for new additions during this edit)
     @State private var stagedAttachments: [StagedAttachment] = []
     @State private var selectedThumbnailID: UUID? = nil
     @State private var showPhotoPicker = false
@@ -168,6 +171,14 @@ struct AddEditSessionView: View {
 
                 // Tags
                 Section { TextField("Tags (comma-separated)", text: $tagsText) }
+
+                // Existing attachments (READ-ONLY) when editing an existing session
+                if session != nil, !existingAttachments.isEmpty {
+                    AttachmentsSectionView(
+                        attachments: existingAttachments,
+                        onOpen: { _ in /* no-op in this editor */ }
+                    )
+                }
 
                 // Staged attachments (with thumbnail selection)
                 StagedAttachmentsSectionView(
@@ -321,6 +332,18 @@ struct AddEditSessionView: View {
             let raw = s.value(forKey: "activityType") as? Int16
             activity = ActivityType.from(raw)
             tempActivity = activity
+
+            // Existing attachments (read-only display)
+            if let set = s.attachments as? Set<Attachment> {
+                existingAttachments = set.sorted { (a, b) in
+                    let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
+                    let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
+                    return da < db
+                }
+            } else {
+                existingAttachments = []
+            }
+
             // Auto-title only if empty
             if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 let auto = defaultTitle(for: instrument, activity: activity)
@@ -380,7 +403,13 @@ struct AddEditSessionView: View {
         // Commit staged attachments (with thumbnail choice)
         commitStagedAttachments(to: s, ctx: viewContext)
 
-        do { try viewContext.save() } catch { print("Error saving session: \(error)") }
+        do {
+            try viewContext.save()
+            // Ensure SwiftUI fetches refresh immediately after a same-context save.
+            viewContext.processPendingChanges()
+        } catch {
+            print("Error saving session: \(error)")
+        }
     }
 
     // MARK: - Attachment staging & commit
@@ -481,6 +510,34 @@ struct AddEditSessionView: View {
         return nil
     }
 
+    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return (h, m)
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized: onAuthorized()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
+            }
+        default: self.showCameraDeniedAlert = true
+        }
+    }
+
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
         guard let uid = PersistenceController.shared.currentUserID else { return results }
@@ -498,33 +555,5 @@ struct AddEditSessionView: View {
             }
         }
         return results
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.doesRelativeDateFormatting = true
-        f.dateStyle = .medium; f.timeStyle = .short
-        return f.string(from: date)
-    }
-
-    private func formattedDuration(_ seconds: Int) -> String {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-
-    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
-        return (h, m)
-    }
-
-    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .authorized: onAuthorized()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
-            }
-        default: self.showCameraDeniedAlert = true
-        }
     }
 }

@@ -1,4 +1,4 @@
-//
+////
 //  PostRecordDetailsView.swift
 //  MOTIVO
 //
@@ -343,6 +343,8 @@ struct PostRecordDetailsView: View {
 
         do {
             try viewContext.save()
+            // 👇 Nudge SwiftUI immediately after saving in the same context.
+            viewContext.processPendingChanges()
             onSaved?()
         } catch {
             print("Error saving session (timer review): \(error)")
@@ -441,25 +443,6 @@ struct PostRecordDetailsView: View {
         return nil
     }
 
-    private func upsertTags(_ names: [String]) -> [Tag] {
-        var results: [Tag] = []
-        guard let uid = PersistenceController.shared.currentUserID else { return results }
-        for name in names {
-            let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
-            if let existing = (try? viewContext.fetch(req))?.first {
-                results.append(existing)
-            } else {
-                let t = Tag(context: viewContext)
-                t.name = name
-                t.ownerUserID = uid
-                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
-                results.append(t)
-            }
-        }
-        return results
-    }
-
     private func formattedDate(_ date: Date) -> String {
         let f = DateFormatter(); f.doesRelativeDateFormatting = true
         f.dateStyle = .medium; f.timeStyle = .short
@@ -486,5 +469,24 @@ struct PostRecordDetailsView: View {
             }
         default: self.showCameraDeniedAlert = true
         }
+    }
+
+    private func upsertTags(_ names: [String]) -> [Tag] {
+        var results: [Tag] = []
+        guard let uid = PersistenceController.shared.currentUserID else { return results }
+        for name in names {
+            let req: NSFetchRequest<Tag> = Tag.fetchRequest()
+            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
+            if let existing = (try? viewContext.fetch(req))?.first {
+                results.append(existing)
+            } else {
+                let t = Tag(context: viewContext)
+                t.name = name
+                t.ownerUserID = uid
+                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
+                results.append(t)
+            }
+        }
+        return results
     }
 }

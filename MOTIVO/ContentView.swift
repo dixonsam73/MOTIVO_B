@@ -1,4 +1,4 @@
-//
+////
 //  ContentView.swift
 //  MOTIVO
 //
@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Combine
 
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
@@ -45,6 +46,9 @@ fileprivate struct SessionsRootView: View {
 
     // NEW: UI refresh tick when attachments are inserted (so paperclip count updates immediately)
     @State private var attachmentChangeTick: Int = 0
+
+    // NEW: UI refresh tick when THIS viewContext saves (edits to existing sessions)
+    @State private var feedRefreshToken: Int = 0
 
     @State private var showAdd = false
     @State private var showProfile = false
@@ -99,7 +103,8 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
             }
-            .id(attachmentChangeTick) // force list to re-render when attachments change
+            // Force list to re-render when attachments OR same-context saves occur
+            .id(attachmentChangeTick ^ feedRefreshToken)
             .navigationTitle("Motivo")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -138,6 +143,10 @@ fileprivate struct SessionsRootView: View {
                     // lightweight tick to refresh list rows so paperclip count updates
                     attachmentChangeTick &+= 1
                 }
+            }
+            // 🔔 Also listen for SAME-CONTEXT saves and nudge the list to refresh
+            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: viewContext)) { _ in
+                feedRefreshToken &+= 1
             }
         }
     }
