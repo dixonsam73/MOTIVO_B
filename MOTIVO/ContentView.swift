@@ -40,8 +40,11 @@ fileprivate struct SessionsRootView: View {
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var instruments: FetchedResults<Instrument>
 
-    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
-    private var tags: FetchedResults<Tag>
+    // CHANGED earlier today: tags fetch now constructed in init with user predicate
+    @FetchRequest private var tags: FetchedResults<Tag>
+
+    // NEW: UI refresh tick when attachments are inserted (so paperclip count updates immediately)
+    @State private var attachmentChangeTick: Int = 0
 
     @State private var showAdd = false
     @State private var showProfile = false
@@ -56,6 +59,11 @@ fileprivate struct SessionsRootView: View {
         }()
         _sessions = FetchRequest<Session>(
             sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
+            predicate: predicate,
+            animation: .default
+        )
+        _tags = FetchRequest<Tag>(
+            sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
             predicate: predicate,
             animation: .default
         )
@@ -91,6 +99,7 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
             }
+            .id(attachmentChangeTick) // force list to re-render when attachments change
             .navigationTitle("Motivo")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -121,6 +130,14 @@ fileprivate struct SessionsRootView: View {
                     selectionSnapshot = selectedTagIDs
                 }
                 // we intentionally DO NOT restore snapshot on close
+            }
+            // 🔔 Listen for Attachment inserts in this context and bump the tick
+            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { note in
+                if let inserts = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>,
+                   inserts.contains(where: { $0.entity.name == "Attachment" }) {
+                    // lightweight tick to refresh list rows so paperclip count updates
+                    attachmentChangeTick &+= 1
+                }
             }
         }
     }

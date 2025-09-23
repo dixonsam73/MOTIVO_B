@@ -443,11 +443,19 @@ struct PostRecordDetailsView: View {
 
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
+        guard let uid = PersistenceController.shared.currentUserID else { return results }
         for name in names {
             let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-            req.predicate = NSPredicate(format: "name ==[c] %@", name)
-            if let existing = (try? viewContext.fetch(req))?.first { results.append(existing) }
-            else { let t = Tag(context: viewContext); t.name = name; results.append(t) }
+            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
+            if let existing = (try? viewContext.fetch(req))?.first {
+                results.append(existing)
+            } else {
+                let t = Tag(context: viewContext)
+                t.name = name
+                t.ownerUserID = uid
+                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
+                results.append(t)
+            }
         }
         return results
     }

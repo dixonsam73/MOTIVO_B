@@ -373,7 +373,7 @@ struct AddEditSessionView: View {
         // Persist tags — normalize & ensure each Tag has required UUID 'id'
         let tagNames = tagsText
             .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() } // <<< CHANGED
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             .filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
 
@@ -483,16 +483,17 @@ struct AddEditSessionView: View {
 
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
+        guard let uid = PersistenceController.shared.currentUserID else { return results }
         for name in names {
             let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-            req.predicate = NSPredicate(format: "name ==[c] %@", name)
+            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
             if let existing = (try? viewContext.fetch(req))?.first {
                 results.append(existing)
             } else {
                 let t = Tag(context: viewContext)
                 t.name = name
-                // Ensure required UUID id is set so validation passes
-                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }   // <<< CHANGED
+                t.ownerUserID = uid
+                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
                 results.append(t)
             }
         }
