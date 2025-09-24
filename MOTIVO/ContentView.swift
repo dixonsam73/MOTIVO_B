@@ -13,21 +13,16 @@ struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
 
     var body: some View {
-        // Pass the currentUserID down so the child can build its @FetchRequest in init
         SessionsRootView(userID: auth.currentUserID)
-            // Ensure a fresh init when the user changes
             .id(auth.currentUserID ?? "nil-user")
     }
 }
-
-// MARK: - Root of the screen (owns the fetch + all the original UI)
 
 fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     let userID: String?
 
-    // Sessions are fetched with a predicate based on userID.
     @FetchRequest private var sessions: FetchedResults<Session>
 
     @AppStorage("filtersExpanded") private var filtersExpanded = false
@@ -35,31 +30,25 @@ fileprivate struct SessionsRootView: View {
 
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedTagIDs: Set<NSManagedObjectID> = []
-    // Keep selection stable across filter panel show/hide
-    @State private var selectionSnapshot: Set<NSManagedObjectID> = []   // snapshot only on open
+    @State private var selectionSnapshot: Set<NSManagedObjectID> = []
 
     @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
     private var instruments: FetchedResults<Instrument>
 
-    // CHANGED earlier today: tags fetch now constructed in init with user predicate
     @FetchRequest private var tags: FetchedResults<Tag>
 
-    // NEW: UI refresh tick when attachments are inserted (so paperclip count updates immediately)
-    @State private var attachmentChangeTick: Int = 0
-
-    // NEW: UI refresh tick when THIS viewContext saves (edits to existing sessions)
-    @State private var feedRefreshToken: Int = 0
+    // Single refresh key to drive list re-render
+    @State private var refreshKey: Int = 0
 
     @State private var showAdd = false
     @State private var showProfile = false
     @State private var showTimer = false
 
-    // Build the fetch with the correct predicate up-front
     init(userID: String?) {
         self.userID = userID
         let predicate: NSPredicate = {
             if let uid = userID { return NSPredicate(format: "ownerUserID == %@", uid) }
-            else { return NSPredicate(value: false) } // no user → empty list
+            else { return NSPredicate(value: false) }
         }()
         _sessions = FetchRequest<Session>(
             sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
@@ -76,7 +65,11 @@ fileprivate struct SessionsRootView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section { StatsBannerView(sessions: Array(filteredSessions)) }
+                Section {
+                    // Compute once to keep generics simpler
+                    let statsInput: [Session] = filteredSessions
+                    StatsBannerView(sessions: statsInput)
+                }
 
                 Section {
                     FilterPanel(
@@ -90,11 +83,12 @@ fileprivate struct SessionsRootView: View {
                 }
 
                 Section {
-                    if filteredSessions.isEmpty {
+                    let rows: [Session] = filteredSessions
+                    if rows.isEmpty {
                         Text("No sessions match your filters yet.")
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(filteredSessions, id: \.objectID) { session in
+                        ForEach(rows, id: \.objectID) { session in
                             NavigationLink(destination: SessionDetailView(session: session)) {
                                 SessionRow(session: session)
                             }
@@ -103,8 +97,7 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
             }
-            // Force list to re-render when attachments OR same-context saves occur
-            .id(attachmentChangeTick ^ feedRefreshToken)
+            .id(refreshKey)
             .navigationTitle("Motivo")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -128,40 +121,55 @@ fileprivate struct SessionsRootView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
-            // snapshot on open only so user selections persist after closing
             .onChange(of: filtersExpanded) { newValue in
-                if newValue {
-                    // opening: remember current selection
-                    selectionSnapshot = selectedTagIDs
-                }
-                // we intentionally DO NOT restore snapshot on close
+                if newValue { selectionSnapshot = selectedTagIDs }
             }
-            // 🔔 Listen for Attachment inserts in this context and bump the tick
-            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)) { note in
+            // Listen for Attachment inserts/deletes in ANY context and bump the key
+            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: nil)) { note in
                 if let inserts = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>,
                    inserts.contains(where: { $0.entity.name == "Attachment" }) {
-                    // lightweight tick to refresh list rows so paperclip count updates
-                    attachmentChangeTick &+= 1
+                    refreshKey &+= 1
+                }
+                if let deletes = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>,
+                   deletes.contains(where: { $0.entity.name == "Attachment" }) {
+                    refreshKey &+= 1
                 }
             }
-            // 🔔 Also listen for SAME-CONTEXT saves and nudge the list to refresh
-            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: viewContext)) { _ in
-                feedRefreshToken &+= 1
+            // Also listen for saves (self or merges) and nudge the list + refresh relationships
+            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: nil)) { _ in
+                viewContext.perform {
+                    viewContext.refreshAllObjects()
+                }
+                refreshKey &+= 1
             }
         }
     }
 
+    // MARK: - Filtering (split into simple steps to aid type-checker)
+
     private var filteredSessions: [Session] {
-        sessions.filter { s in
-            if publicOnly && s.isPublic == false { return false }
-            if let sel = selectedInstrument, s.instrument != sel { return false }
-            if !selectedTagIDs.isEmpty {
-                let sTagIDs: Set<NSManagedObjectID> = ((s.tags as? Set<Tag>) ?? [])
-                    .reduce(into: []) { $0.insert($1.objectID) }
-                if sTagIDs.intersection(selectedTagIDs).isEmpty { return false }
-            }
-            return true
+        var out: [Session] = Array(sessions)
+
+        if publicOnly {
+            out = out.filter { $0.isPublic }
         }
+
+        if let sel = selectedInstrument {
+            let selID = sel.objectID
+            out = out.filter { $0.instrument?.objectID == selID }
+        }
+
+        if !selectedTagIDs.isEmpty {
+            out = out.filter { sessionHasSelectedTags($0) }
+        }
+
+        return out
+    }
+
+    private func sessionHasSelectedTags(_ s: Session) -> Bool {
+        guard let set = s.tags as? Set<Tag>, !set.isEmpty else { return false }
+        let ids: Set<NSManagedObjectID> = Set(set.map { $0.objectID })
+        return !ids.intersection(selectedTagIDs).isEmpty
     }
 
     // MARK: - Delete
@@ -179,10 +187,11 @@ fileprivate struct SessionsRootView: View {
     }
 }
 
-// ——— helpers (unchanged, kept inline) ———
+// ——— helpers (simplified to keep expressions small) ———
 fileprivate struct StatsBannerView: View {
     let sessions: [Session]
     @Environment(\.calendar) private var calendar
+
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 24) {
             StatCell(title: "This Week", value: minutesThisWeekString)
@@ -192,32 +201,51 @@ fileprivate struct StatsBannerView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
     }
+
     private var minutesThisWeekString: String {
-        let startOfWeek = calendar.date(from: calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: Date())) ?? Date()
-        let secs = sessions.filter { ($0.timestamp ?? Date()) >= startOfWeek }
-            .map { Int($0.durationSeconds) }
-            .reduce(0, +)
-        return "\(secs / 60) min"
+        let now = Date()
+        let comps = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
+        let startOfWeek = calendar.date(from: comps) ?? now
+
+        let durations: [Int] = sessions.compactMap { s in
+            guard let ts = s.timestamp else { return nil }
+            return ts >= startOfWeek ? Int(s.durationSeconds) : nil
+        }
+
+        let total = durations.reduce(0, +)
+        return "\(total / 60) min"
     }
+
     private var currentStreak: Int {
-        guard !sessions.isEmpty else { return 0 }
-        let uniqueDays = Set(sessions.compactMap { $0.timestamp?.stripToDay(using: calendar) })
+        let timestamps: [Date] = sessions.compactMap { $0.timestamp }
+        guard !timestamps.isEmpty else { return 0 }
+
+        let days: [Date] = timestamps.map { calendar.startOfDay(for: $0) }
+        let unique: Set<Date> = Set(days)
+
         var streak = 0
-        var day = Date().stripToDay(using: calendar)
-        while uniqueDays.contains(day) {
+        var probe = calendar.startOfDay(for: Date())
+        while unique.contains(probe) {
             streak += 1
-            day = calendar.date(byAdding: .day, value: -1, to: day) ?? day
+            probe = calendar.date(byAdding: .day, value: -1, to: probe) ?? probe
         }
         return streak
     }
+
     private var bestStreak: Int {
-        guard !sessions.isEmpty else { return 0 }
-        let uniqueDays = Set(sessions.compactMap { $0.timestamp?.stripToDay(using: calendar) }).sorted()
-        var best = 0, run = 0, prev: Date?
-        for d in uniqueDays {
+        let timestamps: [Date] = sessions.compactMap { $0.timestamp }
+        guard !timestamps.isEmpty else { return 0 }
+
+        let uniqueDaysSorted: [Date] = Array(Set(timestamps.map { calendar.startOfDay(for: $0) })).sorted()
+
+        var best = 0
+        var run = 0
+        var prev: Date? = nil
+
+        for d in uniqueDaysSorted {
             if let p = prev,
-               let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: p),
-               Calendar.current.isDate(d, inSameDayAs: nextDay) {
+               let next = calendar.date(byAdding: .day, value: 1, to: p),
+               calendar.isDate(d, inSameDayAs: next) {
                 run += 1
             } else {
                 run = 1
@@ -228,9 +256,18 @@ fileprivate struct StatsBannerView: View {
         return best
     }
 }
-fileprivate struct StatCell: View { let title: String; let value: String
-    var body: some View { VStack(alignment: .leading, spacing: 2) { Text(value).font(.headline); Text(title).font(.caption).foregroundStyle(.secondary) } }
+
+fileprivate struct StatCell: View {
+    let title: String
+    let value: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.headline)
+            Text(title).font(.caption).foregroundStyle(.secondary)
+        }
+    }
 }
+
 fileprivate struct FilterPanel: View {
     @Binding var filtersExpanded: Bool
     @Binding var publicOnly: Bool
@@ -304,47 +341,78 @@ fileprivate struct FilterPanel: View {
         }
     }
 }
+
 fileprivate struct SessionRow: View {
     let session: Session
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(displayTitle).font(.headline).lineLimit(1)
-                Spacer(minLength: 8)
-                Text("\(formattedDuration) • \(relativeTime)").font(.subheadline).foregroundStyle(.secondary)
-                if !session.isPublic {
-                    Image(systemName: "eye.slash").foregroundStyle(.secondary).imageScale(.small).padding(.leading, 6)
-                }
-            }
-            if let notes = session.notes, !notes.isEmpty {
-                Text(notes).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-            }
-            HStack(spacing: 12) {
-                let tags = ((session.tags as? Set<Tag>) ?? []).compactMap { $0.name }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-                if !tags.isEmpty { Text(tags.joined(separator: ", ")).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
-                let attachmentCount = ((session.attachments as? Set<Attachment>) ?? []).count
-                if attachmentCount > 0 { HStack(spacing: 4) { Image(systemName: "paperclip"); Text("\(attachmentCount)") }.font(.caption).foregroundStyle(.secondary) }
-            }
-        }
-    }
+
     private var displayTitle: String {
         if let t = session.title, !t.isEmpty { return t }
         if let name = session.instrument?.name, !name.isEmpty { return "\(name) Practice" }
         return "Practice"
     }
+
     private var formattedDuration: String {
-        let total = Int(session.durationSeconds); let h = total/3600; let m = (total%3600)/60
+        let seconds = Int(session.durationSeconds)
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
+
     private var relativeTime: String {
-        guard let ts = session.timestamp else { return "" }
-        let f = RelativeDateTimeFormatter(); f.unitsStyle = .abbreviated
-        return f.localizedString(for: ts, relativeTo: Date())
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: session.timestamp ?? Date(), relativeTo: Date())
     }
-}
-fileprivate extension Date {
-    func stripToDay(using cal: Calendar) -> Date {
-        let c = cal.dateComponents([.year,.month,.day], from: self)
-        return cal.date(from: c) ?? self
+
+    private var attachmentCount: Int {
+        let set: Set<Attachment> = (session.attachments as? Set<Attachment>) ?? []
+        return set.count
+    }
+
+    private var tagNames: [String] {
+        let set: Set<Tag> = (session.tags as? Set<Tag>) ?? []
+        return set.compactMap { $0.name }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(displayTitle).font(.headline).lineLimit(1)
+                Spacer(minLength: 8)
+                Text("\(formattedDuration) • \(relativeTime)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                if !session.isPublic {
+                    Image(systemName: "eye.slash")
+                        .foregroundStyle(.secondary)
+                        .imageScale(.small)
+                        .padding(.leading, 6)
+                }
+            }
+            if let notes = session.notes, !notes.isEmpty {
+                Text(notes)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+            HStack(spacing: 12) {
+                if !tagNames.isEmpty {
+                    Text(tagNames.joined(separator: " • "))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                if attachmentCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "paperclip")
+                        Text("\(attachmentCount)")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
     }
 }

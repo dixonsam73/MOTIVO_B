@@ -1,4 +1,4 @@
-///////
+/////////
 //  AddEditSessionView.swift
 //  MOTIVO
 //
@@ -8,6 +8,7 @@ import CoreData
 import PhotosUI
 import AVFoundation
 import UIKit
+import UniformTypeIdentifiers
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
     case practice = 0, rehearsal = 1, recording = 2, lesson = 3
@@ -21,6 +22,12 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
+}
+
+// Represents user's thumbnail pick (existing vs staged)
+fileprivate enum ThumbnailChoice {
+    case existing(NSManagedObjectID)
+    case staged(UUID)
 }
 
 struct AddEditSessionView: View {
@@ -62,18 +69,24 @@ struct AddEditSessionView: View {
 
     // Attachments (staged for new additions during this edit)
     @State private var stagedAttachments: [StagedAttachment] = []
-    @State private var selectedThumbnailID: UUID? = nil
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
+    // Thumbnail selection (either existing or staged). We only write it if user actually changed it.
+    @State private var thumbnailChoice: ThumbnailChoice? = nil
+    @State private var thumbnailChoiceDirty = false
+
     // Instruments
     @State private var instruments: [Instrument] = []
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
+
+    // Layout
+    private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
     var body: some View {
         NavigationStack {
@@ -172,20 +185,8 @@ struct AddEditSessionView: View {
                 // Tags
                 Section { TextField("Tags (comma-separated)", text: $tagsText) }
 
-                // Existing attachments (READ-ONLY) when editing an existing session
-                if session != nil, !existingAttachments.isEmpty {
-                    AttachmentsSectionView(
-                        attachments: existingAttachments,
-                        onOpen: { _ in /* no-op in this editor */ }
-                    )
-                }
-
-                // Staged attachments (with thumbnail selection)
-                StagedAttachmentsSectionView(
-                    attachments: stagedAttachments,
-                    onRemove: removeStagedAttachment,
-                    selectedThumbnailID: $selectedThumbnailID
-                )
+                // Unified Attachments (existing + staged) with thumbnail selection
+                attachmentsSection
 
                 // Add attachments
                 Section {
@@ -252,7 +253,7 @@ struct AddEditSessionView: View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .onAppear { onAppearSetup() }
-            .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
+            .onChange(of: instrument) { _ in refreshAutoTitleIfNeeded() }
         }
     }
 
@@ -333,12 +334,17 @@ struct AddEditSessionView: View {
             activity = ActivityType.from(raw)
             tempActivity = activity
 
-            // Existing attachments (read-only display)
+            // Existing attachments
             if let set = s.attachments as? Set<Attachment> {
                 existingAttachments = set.sorted { (a, b) in
                     let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
                     let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
                     return da < db
+                }
+                // Seed the visual star from current thumbnail (but don't mark dirty)
+                if let currentThumb = existingAttachments.first(where: { ($0.value(forKey: "isThumbnail") as? Bool) == true }) {
+                    thumbnailChoice = .existing(currentThumb.objectID)
+                    thumbnailChoiceDirty = false
                 }
             } else {
                 existingAttachments = []
@@ -400,8 +406,22 @@ struct AddEditSessionView: View {
             .filter { !$0.isEmpty }
         s.tags = NSSet(array: upsertTags(tagNames))
 
-        // Commit staged attachments (with thumbnail choice)
-        commitStagedAttachments(to: s, ctx: viewContext)
+        // Commit staged attachments; only mark a staged one as thumbnail if the user explicitly picked it.
+        let chosenStagedID: UUID? = (thumbnailChoiceDirty
+                                     ? { if case .staged(let id) = thumbnailChoice { return id } else { return nil } }()
+                                     : nil)
+        commitStagedAttachments(to: s, chosenStagedID: chosenStagedID, ctx: viewContext)
+
+        // If user starred an EXISTING image, update flags now.
+        if thumbnailChoiceDirty, case .existing(let oid) = thumbnailChoice {
+            if let set = s.attachments as? Set<Attachment> {
+                for a in set {
+                    let isImage = (a.kind ?? "") == "image"
+                    let makeThumb = isImage && (a.objectID == oid)
+                    a.setValue(makeThumb, forKey: "isThumbnail")
+                }
+            }
+        }
 
         do {
             try viewContext.save()
@@ -417,19 +437,19 @@ struct AddEditSessionView: View {
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
-        if kind == .image {
-            // If it's the first and only image, auto-select it as thumbnail
-            let imageCount = stagedAttachments.filter { $0.kind == .image }.count
-            if imageCount == 1 {
-                selectedThumbnailID = id
-            }
+
+        // Only auto-pick thumbnail for brand-new sessions (convenience).
+        if session == nil, kind == .image, thumbnailChoice == nil {
+            thumbnailChoice = .staged(id)
+            thumbnailChoiceDirty = true
         }
     }
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
-        if selectedThumbnailID == a.id {
-            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+        if case .staged(let id) = thumbnailChoice, id == a.id {
+            thumbnailChoice = nil
+            thumbnailChoiceDirty = true
         }
     }
 
@@ -455,24 +475,27 @@ struct AddEditSessionView: View {
         return .file
     }
 
-    private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
-        // Resolve thumbnail choice
-        let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
-        var chosenThumbID = selectedThumbnailID
-        if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
+    private func commitStagedAttachments(to session: Session, chosenStagedID: UUID?, ctx: NSManagedObjectContext) {
+        // If a staged image is chosen, clear existing image thumbnails.
+        if let _ = chosenStagedID, let set = session.attachments as? Set<Attachment> {
+            for a in set where (a.kind ?? "") == "image" {
+                a.setValue(false, forKey: "isThumbnail")
+            }
+        }
 
+        // Persist each staged item
         for att in stagedAttachments {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
                 let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
-                let isThumb = (att.id == chosenThumbID) && (att.kind == .image)
+                let isThumb = (att.kind == .image) && (chosenStagedID == att.id)
                 _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
             } catch {
                 print("Attachment commit failed: \(error)")
             }
         }
+
         stagedAttachments.removeAll()
-        selectedThumbnailID = nil
     }
 
     // MARK: - Helpers
@@ -538,6 +561,7 @@ struct AddEditSessionView: View {
         }
     }
 
+    // ✅ Tag upsert helper
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
         guard let uid = PersistenceController.shared.currentUserID else { return results }
@@ -555,5 +579,237 @@ struct AddEditSessionView: View {
             }
         }
         return results
+    }
+
+    // MARK: - Unified Attachments section
+
+    @ViewBuilder
+    private var attachmentsSection: some View {
+        Section("Attachments") {
+            let existingImages = existingAttachments.filter { ($0.kind ?? "") == "image" }
+            let existingFiles  = existingAttachments.filter { ($0.kind ?? "") != "image" }
+            let stagedImages   = stagedAttachments.filter { $0.kind == .image }
+            let stagedFiles    = stagedAttachments.filter { $0.kind != .image }
+
+            // Nothing yet?
+            if existingImages.isEmpty && existingFiles.isEmpty && stagedImages.isEmpty && stagedFiles.isEmpty {
+                Text("No attachments yet").foregroundStyle(.secondary)
+            } else {
+                // Thumbnails grid (existing + staged images together)
+                if !existingImages.isEmpty || !stagedImages.isEmpty {
+                    LazyVGrid(columns: grid, spacing: 12) {
+                        // Existing image thumbs (tap star to choose)
+                        ForEach(existingImages, id: \.objectID) { a in
+                            ExistingThumbCell(
+                                image: loadExistingImage(a),
+                                isStarred: isExistingChosen(a),
+                                onStar: {
+                                    thumbnailChoice = .existing(a.objectID)
+                                    thumbnailChoiceDirty = true
+                                }
+                            )
+                        }
+                        // Staged image thumbs (tap star to choose; X to remove)
+                        ForEach(stagedImages) { att in
+                            StagedThumbCell(
+                                att: att,
+                                isStarred: isStagedChosen(att.id),
+                                onStar: {
+                                    thumbnailChoice = .staged(att.id)
+                                    thumbnailChoiceDirty = true
+                                },
+                                onRemove: { removeStagedAttachment(att) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                // Existing non-image files
+                ForEach(existingFiles, id: \.objectID) { a in
+                    HStack {
+                        Image(systemName: icon(for: a.kind ?? "file"))
+                            .foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(fileName(of: a)).lineLimit(1)
+                            Text(a.kind ?? "file").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                }
+
+                // Staged non-image files (with remove button)
+                ForEach(stagedFiles) { att in
+                    HStack {
+                        Image(systemName: icon(for: att.kind.rawValue)).foregroundStyle(.secondary)
+                        Text("New \(att.kind.rawValue)")
+                        Spacer()
+                        Button(role: .destructive) {
+                            removeStagedAttachment(att)
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func isExistingChosen(_ a: Attachment) -> Bool {
+        if thumbnailChoiceDirty {
+            if case .existing(let oid) = thumbnailChoice { return oid == a.objectID }
+            return false
+        } else {
+            return (a.value(forKey: "isThumbnail") as? Bool) == true
+        }
+    }
+
+    private func isStagedChosen(_ id: UUID) -> Bool {
+        if thumbnailChoiceDirty {
+            if case .staged(let sid) = thumbnailChoice { return sid == id }
+            return false
+        } else {
+            return false
+        }
+    }
+
+    // ✅ Path-resilient loader: try stored path/URL, else fall back to Documents/<filename>
+    private func loadExistingImage(_ a: Attachment) -> UIImage? {
+        guard let url = resolveAttachmentURL(a) else { return nil }
+        if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
+        return UIImage(contentsOfFile: url.path)
+    }
+
+    private func resolveAttachmentURL(_ a: Attachment) -> URL? {
+        guard let s = a.fileURL, !s.isEmpty else { return nil }
+        let fm = FileManager.default
+
+        // 1) If it's a valid file URL and exists, use it
+        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
+            return u
+        }
+
+        // 2) If it's a plain path and exists, use it
+        if fm.fileExists(atPath: s) {
+            return URL(fileURLWithPath: s)
+        }
+
+        // 3) Fall back to Documents/<filename> in case the saved absolute path is stale
+        let filename = URL(fileURLWithPath: s).lastPathComponent
+        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let candidate = docs.appendingPathComponent(filename, isDirectory: false)
+            if fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    private func icon(for kind: String) -> String {
+        switch kind {
+        case "audio": return "waveform"
+        case "video": return "video"
+        case "image": return "photo"
+        default: return "doc"
+        }
+    }
+
+    private func fileName(of a: Attachment) -> String {
+        guard let path = a.fileURL, !path.isEmpty else { return "file" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+}
+
+// MARK: - Thumb cells
+
+fileprivate struct ExistingThumbCell: View {
+    let image: UIImage?
+    let isStarred: Bool
+    let onStar: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let ui = image {
+                    Image(uiImage: ui).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 84, height: 84)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
+            )
+
+            Text(isStarred ? "★" : "☆")
+                .font(.system(size: 16))
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
+                .padding(4)
+                .onTapGesture { onStar() }
+                .accessibilityLabel(isStarred ? "Thumbnail (selected)" : "Set as Thumbnail")
+        }
+    }
+}
+
+fileprivate struct StagedThumbCell: View {
+    let att: StagedAttachment
+    let isStarred: Bool
+    let onStar: () -> Void
+    let onRemove: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            thumb
+                .frame(width: 84, height: 84)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                )
+
+            HStack(spacing: 6) {
+                if att.kind == .image {
+                    Text(isStarred ? "★" : "☆")
+                        .font(.system(size: 16))
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .onTapGesture { onStar() }
+                        .accessibilityLabel(isStarred ? "Thumbnail (selected)" : "Set as Thumbnail")
+                }
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .accessibilityLabel("Remove")
+                }
+            }
+            .padding(4)
+        }
+    }
+
+    @ViewBuilder
+    private var thumb: some View {
+        switch att.kind {
+        case .image:
+            if let ui = UIImage(data: att.data) {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else {
+                Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
+            }
+        case .audio:
+            Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
+        case .video:
+            Image(systemName: "video").imageScale(.large).foregroundStyle(.secondary)
+        case .file:
+            Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
+        }
     }
 }

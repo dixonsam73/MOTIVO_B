@@ -1,13 +1,14 @@
-//
+///
 //  SessionDetailView.swift
 //  MOTIVO
 //
-//  NOTE: This version preserves your previous UI (Edit button, Delete, Quick Look, sections)
-//        and ONLY adds a favourite indicator (★) next to attachments where isThumbnail == true.
+//  Shows image thumbnails (with ★ for the chosen thumbnail) and keeps non-image files as rows.
+//  Tap any item to Quick Look.
 //
 
 import SwiftUI
 import CoreData
+import UIKit
 
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -16,137 +17,142 @@ struct SessionDetailView: View {
     let session: Session
 
     @State private var showEdit = false
+    @State private var showDeleteConfirm = false
+
+    // Quick Look
     @State private var previewURL: URL? = nil
+    @State private var isShowingPreview = false
+
+    // Layout
+    private let grid = [GridItem(.adaptive(minimum: 96), spacing: 12)]
 
     var body: some View {
         List {
-            // When & Duration
-            Section {
-                DetailRow(label: "Date", value: formattedDate(session.timestamp))
-                DetailRow(label: "Duration", value: formattedDuration(Int(session.durationSeconds)))
-            }
-
-            // Instrument & Privacy
+            // Header / meta
             Section {
                 DetailRow(label: "Instrument", value: session.instrument?.name ?? "—")
+                DetailRow(label: "Duration", value: formattedDuration(Int(session.durationSeconds)))
+                DetailRow(label: "When", value: formattedDate(session.timestamp ?? Date()))
                 DetailRow(label: "Privacy", value: session.isPublic ? "Public" : "Private")
-                DetailRow(label: "Mood", value: String(Int(session.mood)))
-                DetailRow(label: "Effort", value: String(Int(session.effort)))
-            }
-
-            // Tags
-            Section("Tags") {
-                let names = tagNames()
-                if names.isEmpty {
-                    Text("No tags").foregroundStyle(.secondary)
-                } else {
-                    Text(names.joined(separator: ", "))
-                        .foregroundStyle(.secondary)
-                }
             }
 
             // Notes
             if let notes = session.notes, !notes.isEmpty {
                 Section("Notes") {
-                    Text(notes)
-                        .font(.body)
+                    Text(notes).font(.body)
                 }
             }
 
-            // Attachments (now shows ★ for favourite)
+            // Attachments
             Section("Attachments") {
-                let atts = attachmentsSorted()
-                if atts.isEmpty {
+                let (images, others) = splitAttachments()
+                if images.isEmpty && others.isEmpty {
                     Text("No attachments").foregroundStyle(.secondary)
                 } else {
-                    ForEach(atts, id: \.objectID) { att in
-                        Button {
-                            if let url = safeFileURL(att.fileURL) {
-                                previewURL = url
-                            }
-                        } label: {
-                            HStack(spacing: 12) {
-                                Image(systemName: "paperclip.circle")
-                                VStack(alignment: .leading, spacing: 2) {
-                                    HStack(spacing: 6) {
-                                        Text(attachmentTitle(att))
-                                        if (att.value(forKey: "isThumbnail") as? Bool) == true {
-                                            Text("★")
-                                                .font(.caption)
-                                                .padding(.horizontal, 4)
-                                                .padding(.vertical, 2)
-                                                .background(.ultraThinMaterial, in: Capsule())
-                                                .accessibilityLabel("Thumbnail")
-                                        }
-                                    }
-                                    if let date = att.createdAt {
-                                        Text(shortDate(date))
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
+                    if !images.isEmpty {
+                        LazyVGrid(columns: grid, spacing: 12) {
+                            ForEach(images, id: \.objectID) { a in
+                                ThumbCell(
+                                    image: loadImage(a),
+                                    isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true
+                                )
+                                .onTapGesture { openQuickLook(a) }
+                                .contextMenu {
+                                    Button("Open") { openQuickLook(a) }
                                 }
-                                Spacer()
                             }
                         }
+                        .padding(.vertical, 4)
+                    }
+                    ForEach(others, id: \.objectID) { a in
+                        AttachmentRow(attachment: a) { openQuickLook(a) }
                     }
                 }
             }
         }
-        .navigationTitle(displayTitle())
+        .navigationTitle("Session")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("Edit") { showEdit = true }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button(role: .destructive) {
-                    deleteSession()
-                } label: {
-                    Image(systemName: "trash")
-                }
+                Menu {
+                    Button("Edit") { showEdit = true }
+                    Button(role: .destructive) { showDeleteConfirm = true } label: { Text("Delete") }
+                } label: { Text("Edit") }
             }
         }
         .sheet(isPresented: $showEdit) {
-            AddEditSessionView(
-                isPresented: $showEdit,
-                session: session,
-                onSaved: {
-                    // After saving from the sheet, close Detail → return to Feed.
-                    dismiss()
-                }
-            )
-            .environment(\.managedObjectContext, viewContext)
+            AddEditSessionView(isPresented: $showEdit, session: session)
         }
-        .sheet(isPresented: Binding(
-            get: { previewURL != nil },
-            set: { if !$0 { previewURL = nil } }
-        )) {
+        .sheet(isPresented: $isShowingPreview) {
             if let url = previewURL {
                 QuickLookPreview(url: url)
-            } else {
-                EmptyView()
             }
+        }
+        .alert("Delete Session?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) { deleteSession() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This cannot be undone.")
         }
     }
 
-    // MARK: - Title & Formatting
+    // MARK: - Helpers
 
-    private func displayTitle() -> String {
-        if let t = session.title, !t.isEmpty { return t }
-        if let name = session.instrument?.name, !name.isEmpty { return "\(name) Practice" }
-        return "Practice"
+    private func splitAttachments() -> ([Attachment], [Attachment]) {
+        let set = (session.attachments as? Set<Attachment>) ?? []
+        let sorted = set.sorted { (a, b) in
+            let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
+            let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
+            return da < db
+        }
+        let images = sorted.filter { ($0.kind ?? "") == "image" }
+        let others = sorted.filter { ($0.kind ?? "") != "image" }
+        return (images, others)
     }
 
-    private func formattedDate(_ date: Date?) -> String {
-        guard let date = date else { return "—" }
+    private func openQuickLook(_ a: Attachment) {
+        guard let url = urlFromAttachment(a) else { return }
+        previewURL = url
+        isShowingPreview = true
+    }
+
+    private func loadImage(_ a: Attachment) -> UIImage? {
+        guard let url = urlFromAttachment(a) else { return nil }
+        if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
+        return UIImage(contentsOfFile: url.path)
+    }
+
+    // ✅ Path-resilient URL resolution used by both thumbnails and Quick Look
+    private func urlFromAttachment(_ a: Attachment) -> URL? {
+        guard let s = a.fileURL, !s.isEmpty else { return nil }
+        let fm = FileManager.default
+
+        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
+            return u
+        }
+        if fm.fileExists(atPath: s) {
+            return URL(fileURLWithPath: s)
+        }
+        let filename = URL(fileURLWithPath: s).lastPathComponent
+        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let candidate = docs.appendingPathComponent(filename, isDirectory: false)
+            if fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
+
+    private func deleteSession() {
+        viewContext.delete(session)
+        do {
+            try viewContext.save()
+        } catch {
+            print("Delete error: \(error)")
+        }
+        dismiss()
+    }
+
+    private func formattedDate(_ date: Date) -> String {
         let f = DateFormatter()
         f.doesRelativeDateFormatting = true
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f.string(from: date)
-    }
-
-    private func shortDate(_ date: Date) -> String {
-        let f = DateFormatter()
         f.dateStyle = .medium
         f.timeStyle = .short
         return f.string(from: date)
@@ -157,62 +163,9 @@ struct SessionDetailView: View {
         let m = (seconds % 3600) / 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
-
-    // MARK: - Tags & Attachments
-
-    private func tagNames() -> [String] {
-        let set = (session.tags as? Set<Tag>) ?? []
-        let names = set.compactMap { $0.name }
-        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    private func attachmentsSorted() -> [Attachment] {
-        let set = (session.attachments as? Set<Attachment>) ?? []
-        return set.sorted { (a, b) in
-            let da = a.createdAt ?? .distantPast
-            let db = b.createdAt ?? .distantPast
-            return da > db
-        }
-    }
-
-    private func safeFileURL(_ path: String?) -> URL? {
-        guard let path = path, !path.isEmpty else { return nil }
-        let url = URL(fileURLWithPath: path, isDirectory: false)
-        if FileManager.default.fileExists(atPath: url.path) {
-            return url
-        }
-        if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let alt = docs.appendingPathComponent(path)
-            if FileManager.default.fileExists(atPath: alt.path) {
-                return alt
-            }
-        }
-        return nil
-    }
-
-    private func attachmentTitle(_ att: Attachment) -> String {
-        let name = URL(fileURLWithPath: att.fileURL ?? "").lastPathComponent
-        if let kind = att.kind, !kind.isEmpty {
-            return "\(kind.capitalized): \(name)"
-        } else {
-            return name.isEmpty ? "Attachment" : name
-        }
-    }
-
-    // MARK: - Delete
-
-    private func deleteSession() {
-        viewContext.delete(session)
-        do {
-            try viewContext.save()
-            dismiss()
-        } catch {
-            print("Delete failed: \(error)")
-        }
-    }
 }
 
-// MARK: - Row component
+// MARK: - Subviews
 
 fileprivate struct DetailRow: View {
     let label: String
@@ -222,6 +175,73 @@ fileprivate struct DetailRow: View {
             Text(label)
             Spacer()
             Text(value).foregroundStyle(.secondary)
+        }
+    }
+}
+
+fileprivate struct AttachmentRow: View {
+    let attachment: Attachment
+    let open: () -> Void
+    var body: some View {
+        Button(action: open) {
+            HStack {
+                Image(systemName: icon(for: attachment.kind ?? "file"))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(fileName(of: attachment)).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text((attachment.kind ?? "file")).font(.footnote)
+                        if (attachment.value(forKey: "isThumbnail") as? Bool) == true {
+                            Text("★").font(.footnote)
+                        }
+                    }.foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
+    }
+    private func icon(for kind: String) -> String {
+        switch kind {
+        case "audio": return "waveform"
+        case "video": return "video"
+        case "image": return "photo"
+        default: return "doc"
+        }
+    }
+    private func fileName(of a: Attachment) -> String {
+        guard let path = a.fileURL, !path.isEmpty else { return "file" }
+        return URL(fileURLWithPath: path).lastPathComponent
+    }
+}
+
+fileprivate struct ThumbCell: View {
+    let image: UIImage?
+    let isStarred: Bool
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let ui = image {
+                    Image(uiImage: ui).resizable().scaledToFill()
+                } else {
+                    Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 96, height: 96)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
+            )
+
+            if isStarred {
+                Text("★")
+                    .font(.system(size: 16))
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .padding(4)
+                    .accessibilityLabel("Thumbnail")
+            }
         }
     }
 }
