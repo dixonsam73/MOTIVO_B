@@ -1,4 +1,4 @@
-//
+///
 //  AttachmentStore.swift
 //  MOTIVO
 //
@@ -25,6 +25,7 @@ struct AttachmentStore {
 
     /// Creates and attaches a Core Data `Attachment` to a session.
     /// NOTE: We ONLY set the inverse (`att.session = session`). Core Data keeps the other side in sync.
+    @MainActor
     @discardableResult
     static func addAttachment(kind: AttachmentKind,
                               filePath: String,
@@ -41,6 +42,15 @@ struct AttachmentStore {
 
         // Inverse relationship is enough; avoid assigning to session.attachments directly.
         att.setValue(session,       forKey: "session")
+
+        // 🔐 V4 hardening: ensure ownerUserID is stamped
+        if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
+            att.setValue(uid, forKey: "ownerUserID")
+        } else if let sid = (session.value(forKey: "ownerUserID") as? String), !sid.isEmpty {
+            // Inherit from session if available
+            att.setValue(sid, forKey: "ownerUserID")
+        }
+        // (If neither branch applies, PersistenceController's WillSave observer/backfill will still cover it.)
 
         return att
     }

@@ -1,4 +1,4 @@
-/////////
+////////////
 //  AddEditSessionView.swift
 //  MOTIVO
 //
@@ -398,6 +398,11 @@ struct AddEditSessionView: View {
 
         // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
+
+        // 🔐 V4 hardening: ensure Session has ownerUserID before save
+        if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
+            s.setValue(uid, forKey: "ownerUserID")
+        }
 
         // Persist tags — normalize & ensure each Tag has required UUID 'id'
         let tagNames = tagsText
