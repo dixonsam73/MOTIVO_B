@@ -121,7 +121,8 @@ fileprivate struct SessionsRootView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
-            .onChange(of: filtersExpanded) { newValue in
+            // ✅ iOS 17 onChange style (old,new)
+            .onChange(of: filtersExpanded) { _, newValue in
                 if newValue { selectionSnapshot = selectedTagIDs }
             }
             // Listen for Attachment inserts/deletes in ANY context and bump the key

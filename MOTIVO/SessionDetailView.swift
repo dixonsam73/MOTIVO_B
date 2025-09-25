@@ -1,14 +1,25 @@
-///
+//////
 //  SessionDetailView.swift
 //  MOTIVO
-//
-//  Shows image thumbnails (with ★ for the chosen thumbnail) and keeps non-image files as rows.
-//  Tap any item to Quick Look.
 //
 
 import SwiftUI
 import CoreData
 import UIKit
+
+fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    var id: Int16 { rawValue }
+    var label: String {
+        switch self {
+        case .practice:  return "Practice"
+        case .rehearsal: return "Rehearsal"
+        case .recording: return "Recording"
+        case .lesson:    return "Lesson"
+        }
+    }
+    static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
+}
 
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -18,32 +29,35 @@ struct SessionDetailView: View {
 
     @State private var showEdit = false
     @State private var showDeleteConfirm = false
-
-    // Quick Look
-    @State private var previewURL: URL? = nil
+    @State private var previewURL: URL?
     @State private var isShowingPreview = false
 
-    // Layout
-    private let grid = [GridItem(.adaptive(minimum: 96), spacing: 12)]
+    private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
     var body: some View {
-        List {
-            // Header / meta
+        Form {
             Section {
-                DetailRow(label: "Instrument", value: session.instrument?.name ?? "—")
-                DetailRow(label: "Duration", value: formattedDuration(Int(session.durationSeconds)))
-                DetailRow(label: "When", value: formattedDate(session.timestamp ?? Date()))
-                DetailRow(label: "Privacy", value: session.isPublic ? "Public" : "Private")
-            }
-
-            // Notes
-            if let notes = session.notes, !notes.isEmpty {
-                Section("Notes") {
-                    Text(notes).font(.body)
+                HStack {
+                    Text(session.title ?? "Session")
+                    Spacer()
+                    Text(formattedDate(session.timestamp ?? Date()))
+                        .foregroundStyle(.secondary)
                 }
+                HStack(spacing: 12) {
+                    Label("\(Int(session.durationSeconds/60)) min", systemImage: "clock")
+                    if let name = session.instrument?.name, !name.isEmpty {
+                        Label(name, systemImage: "pianokeys.inverse")
+                    }
+                    Label(ActivityType.from(session.value(forKey: "activityType") as? Int16).label, systemImage: "figure.walk")
+                }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
             }
 
-            // Attachments
+            if let notes = session.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Section("Notes") { Text(notes) }
+            }
+
             Section("Attachments") {
                 let (images, others) = splitAttachments()
                 if images.isEmpty && others.isEmpty {
@@ -57,9 +71,6 @@ struct SessionDetailView: View {
                                     isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true
                                 )
                                 .onTapGesture { openQuickLook(a) }
-                                .contextMenu {
-                                    Button("Open") { openQuickLook(a) }
-                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -73,65 +84,59 @@ struct SessionDetailView: View {
         .navigationTitle("Session")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Menu {
+                HStack(spacing: 12) {
                     Button("Edit") { showEdit = true }
-                    Button(role: .destructive) { showDeleteConfirm = true } label: { Text("Delete") }
-                } label: { Text("Edit") }
+                    Button(role: .destructive) { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                    }
+                }
             }
         }
-        .sheet(isPresented: $showEdit) {
-            AddEditSessionView(isPresented: $showEdit, session: session)
+        // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
+        .fullScreenCover(isPresented: $showEdit) {
+            AddEditSessionView(
+                isPresented: $showEdit,
+                session: session,
+                onSaved: { dismiss() } // pop detail → Feed
+            )
         }
         .sheet(isPresented: $isShowingPreview) {
-            if let url = previewURL {
-                QuickLookPreview(url: url)
-            }
+            if let url = previewURL { QuickLookPreview(url: url) }
         }
         .alert("Delete Session?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) { deleteSession() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This cannot be undone.")
+            Button("Cancel", role: .cancel) { }
         }
     }
 
-    // MARK: - Helpers
+    // MARK: - Attachments split
 
-    private func splitAttachments() -> ([Attachment], [Attachment]) {
+    private func splitAttachments() -> (images: [Attachment], others: [Attachment]) {
         let set = (session.attachments as? Set<Attachment>) ?? []
-        let sorted = set.sorted { (a, b) in
+        let images = set.filter { ($0.kind ?? "") == "image" }.sorted { (a, b) in
             let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
             let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
             return da < db
         }
-        let images = sorted.filter { ($0.kind ?? "") == "image" }
-        let others = sorted.filter { ($0.kind ?? "") != "image" }
+        let others = set.filter { ($0.kind ?? "") != "image" }.sorted { (a, b) in
+            let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
+            let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
+            return da < db
+        }
         return (images, others)
     }
 
     private func openQuickLook(_ a: Attachment) {
-        guard let url = urlFromAttachment(a) else { return }
+        guard let url = resolveURL(a) else { return }
         previewURL = url
         isShowingPreview = true
     }
 
-    private func loadImage(_ a: Attachment) -> UIImage? {
-        guard let url = urlFromAttachment(a) else { return nil }
-        if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
-        return UIImage(contentsOfFile: url.path)
-    }
-
-    // ✅ Path-resilient URL resolution used by both thumbnails and Quick Look
-    private func urlFromAttachment(_ a: Attachment) -> URL? {
+    private func resolveURL(_ a: Attachment) -> URL? {
         guard let s = a.fileURL, !s.isEmpty else { return nil }
         let fm = FileManager.default
-
-        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
-            return u
-        }
-        if fm.fileExists(atPath: s) {
-            return URL(fileURLWithPath: s)
-        }
+        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) { return u }
+        if fm.fileExists(atPath: s) { return URL(fileURLWithPath: s) }
         let filename = URL(fileURLWithPath: s).lastPathComponent
         if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
             let candidate = docs.appendingPathComponent(filename, isDirectory: false)
@@ -140,13 +145,15 @@ struct SessionDetailView: View {
         return nil
     }
 
+    private func loadImage(_ a: Attachment) -> UIImage? {
+        guard let url = resolveURL(a) else { return nil }
+        if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
+        return UIImage(contentsOfFile: url.path)
+    }
+
     private func deleteSession() {
         viewContext.delete(session)
-        do {
-            try viewContext.save()
-        } catch {
-            print("Delete error: \(error)")
-        }
+        do { try viewContext.save() } catch { print("Delete error: \(error)") }
         dismiss()
     }
 
@@ -157,47 +164,29 @@ struct SessionDetailView: View {
         f.timeStyle = .short
         return f.string(from: date)
     }
-
-    private func formattedDuration(_ seconds: Int) -> String {
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
 }
 
-// MARK: - Subviews
-
-fileprivate struct DetailRow: View {
-    let label: String
-    let value: String
-    var body: some View {
-        HStack {
-            Text(label)
-            Spacer()
-            Text(value).foregroundStyle(.secondary)
-        }
-    }
-}
+// MARK: - Rows
 
 fileprivate struct AttachmentRow: View {
     let attachment: Attachment
-    let open: () -> Void
+    let onTap: () -> Void
     var body: some View {
-        Button(action: open) {
-            HStack {
-                Image(systemName: icon(for: attachment.kind ?? "file"))
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(fileName(of: attachment)).lineLimit(1)
-                    HStack(spacing: 6) {
-                        Text((attachment.kind ?? "file")).font(.footnote)
-                        if (attachment.value(forKey: "isThumbnail") as? Bool) == true {
-                            Text("★").font(.footnote)
-                        }
-                    }.foregroundStyle(.secondary)
-                }
-                Spacer()
+        HStack {
+            Image(systemName: icon(for: attachment.kind ?? "file"))
+                .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(fileName(of: attachment)).lineLimit(1)
+                HStack(spacing: 6) {
+                    Text((attachment.kind ?? "file")).font(.footnote)
+                    if (attachment.value(forKey: "isThumbnail") as? Bool) == true {
+                        Text("★").font(.footnote)
+                    }
+                }.foregroundStyle(.secondary)
             }
+            Spacer()
         }
+        .onTapGesture { onTap() }
         .buttonStyle(.plain)
     }
     private func icon(for kind: String) -> String {
@@ -220,13 +209,10 @@ fileprivate struct ThumbCell: View {
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Group {
-                if let ui = image {
-                    Image(uiImage: ui).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
-                }
+                if let ui = image { Image(uiImage: ui).resizable().scaledToFill() }
+                else { Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary) }
             }
-            .frame(width: 96, height: 96)
+            .frame(width: 84, height: 84)
             .background(Color.secondary.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(

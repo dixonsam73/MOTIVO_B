@@ -193,8 +193,8 @@ struct PostRecordDetailsView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        isPresented = false
-                        DispatchQueue.main.async { saveToCoreData() }
+                        saveToCoreData()
+                        DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
                     }
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
@@ -313,6 +313,7 @@ struct PostRecordDetailsView: View {
 
     // MARK: - Save
 
+    @MainActor
     private func saveToCoreData() {
         let s = Session(context: viewContext)
 
@@ -471,6 +472,7 @@ struct PostRecordDetailsView: View {
         }
     }
 
+    @MainActor
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
         guard let uid = PersistenceController.shared.currentUserID else { return results }

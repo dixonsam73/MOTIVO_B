@@ -209,15 +209,19 @@ struct AddEditSessionView: View {
                     Button {
                         guard !isSaving else { return }
                         isSaving = true
-                        // Close first
-                        isPresented = false
-                        dismiss()
-                        // Then commit & notify
-                        DispatchQueue.main.async {
-                            saveToCoreData()
-                            onSaved?()
-                        }
-                    } label: { Text("Save") }
+// Commit first
+saveToCoreData()
+viewContext.processPendingChanges()
+// Dismiss parent (Session detail) to land on Feed
+onSaved?()
+// Close this editor on the next runloop with no animation
+DispatchQueue.main.async {
+    withAnimation(.none) {
+        isPresented = false
+        dismiss()
+    }
+}
+} label: { Text("Save") }
                     .disabled(isSaving || durationSeconds == 0 || instrument == nil)
                 }
             }
@@ -381,6 +385,7 @@ struct AddEditSessionView: View {
 
     // MARK: - Save
 
+    @MainActor
     private func saveToCoreData() {
         let s = session ?? Session(context: viewContext)
 
@@ -567,6 +572,7 @@ struct AddEditSessionView: View {
     }
 
     // ✅ Tag upsert helper
+    @MainActor
     private func upsertTags(_ names: [String]) -> [Tag] {
         var results: [Tag] = []
         guard let uid = PersistenceController.shared.currentUserID else { return results }
