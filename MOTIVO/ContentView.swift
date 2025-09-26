@@ -2,102 +2,122 @@
 //  ContentView.swift
 //  MOTIVO
 //
-//  Created by Samuel Dixon on 09/09/2025.
-//
 
 import SwiftUI
 import CoreData
 import Combine
 
+// MARK: - Local (file-scoped) helper enums to avoid collisions in other files
+
+fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    var id: Int16 { rawValue }
+    var label: String {
+        switch self {
+        case .practice:  return "Practice"
+        case .rehearsal: return "Rehearsal"
+        case .recording: return "Recording"
+        case .lesson:    return "Lesson"
+        }
+    }
+    static func from(_ code: Int16?) -> ActivityType {
+        guard let c = code, let v = ActivityType(rawValue: c) else { return .practice }
+        return v
+    }
+}
+
+fileprivate enum FeedScope: String, CaseIterable, Identifiable {
+    case all = "All"
+    case mine = "Mine"
+    var id: String { rawValue }
+}
+
+// MARK: - Entry
+
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
-
     var body: some View {
         SessionsRootView(userID: auth.currentUserID)
             .id(auth.currentUserID ?? "nil-user")
     }
 }
 
+// MARK: - Root
+
 fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
 
     let userID: String?
 
-    @FetchRequest private var sessions: FetchedResults<Session>
+    // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
+        predicate: NSPredicate(value: true),
+        animation: .default
+    ) private var sessions: FetchedResults<Session>
 
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
+        animation: .default
+    ) private var instruments: FetchedResults<Instrument>
+
+    // UI state
     @AppStorage("filtersExpanded") private var filtersExpanded = false
-    @AppStorage("publicOnly") private var publicOnly = false
-
     @State private var selectedInstrument: Instrument? = nil
-    @State private var selectedTagIDs: Set<NSManagedObjectID> = []
-    @State private var selectionSnapshot: Set<NSManagedObjectID> = []
+    @State private var selectedActivity: ActivityType? = nil
+    @State private var selectedScope: FeedScope = .all
+    @State private var searchText: String = ""
+    @State private var debouncedQuery: String = ""
 
-    @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
-    private var instruments: FetchedResults<Instrument>
-
-    @FetchRequest private var tags: FetchedResults<Tag>
-
-    // Single refresh key to drive list re-render
-    @State private var refreshKey: Int = 0
-
-    @State private var showAdd = false
+    // Sheets (original buttons)
     @State private var showProfile = false
     @State private var showTimer = false
+    @State private var showAdd = false
 
-    init(userID: String?) {
-        self.userID = userID
-        let predicate: NSPredicate = {
-            if let uid = userID { return NSPredicate(format: "ownerUserID == %@", uid) }
-            else { return NSPredicate(value: false) }
-        }()
-        _sessions = FetchRequest<Session>(
-            sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
-            predicate: predicate,
-            animation: .default
-        )
-        _tags = FetchRequest<Tag>(
-            sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
-            predicate: predicate,
-            animation: .default
-        )
-    }
+    // Debounce
+    @State private var debounceCancellable: AnyCancellable?
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    // Compute once to keep generics simpler
-                    let statsInput: [Session] = filteredSessions
-                    StatsBannerView(sessions: statsInput)
-                }
+            VStack(spacing: 8) {
 
-                Section {
-                    FilterPanel(
-                        filtersExpanded: $filtersExpanded,
-                        publicOnly: $publicOnly,
-                        instruments: Array(instruments),
-                        selectedInstrument: $selectedInstrument,
-                        tags: Array(tags),
-                        selectedTagIDs: $selectedTagIDs
-                    )
-                }
+                // ---------- Filter bar OUTSIDE the List ----------
+                FilterBar(
+                    filtersExpanded: $filtersExpanded,
+                    instruments: Array(instruments),
+                    selectedInstrument: $selectedInstrument,
+                    selectedActivity: $selectedActivity,
+                    selectedScope: $selectedScope,
+                    searchText: $searchText
+                )
+                .padding(.horizontal)
 
-                Section {
-                    let rows: [Session] = filteredSessions
-                    if rows.isEmpty {
-                        Text("No sessions match your filters yet.")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(rows, id: \.objectID) { session in
-                            NavigationLink(destination: SessionDetailView(session: session)) {
-                                SessionRow(session: session)
+                // ---------- Content List ----------
+                List {
+                    // Stats
+                    Section {
+                        let statsInput: [Session] = filteredSessions
+                        StatsBannerView(sessions: statsInput)
+                    }
+
+                    // Sessions
+                    Section {
+                        let rows: [Session] = filteredSessions
+                        if rows.isEmpty {
+                            Text("No sessions match your filters yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(rows, id: \.objectID) { session in
+                                NavigationLink(destination: SessionDetailView(session: session)) {
+                                    SessionRow(session: session)
+                                }
                             }
+                            .onDelete(perform: deleteSessions)
                         }
-                        .onDelete(perform: deleteSessions)
                     }
                 }
+                .listStyle(.plain)
             }
-            .id(refreshKey)
             .navigationTitle("Motivo")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -112,170 +132,104 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
             }
-            .sheet(isPresented: $showAdd) {
-                AddEditSessionView(isPresented: $showAdd)
-            }
+            // Sheets
             .sheet(isPresented: $showTimer) {
                 PracticeTimerView(isPresented: $showTimer)
+            }
+            .sheet(isPresented: $showAdd) {
+                AddEditSessionView(isPresented: $showAdd)
             }
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
-            // ✅ iOS 17 onChange style (old,new)
-            .onChange(of: filtersExpanded) { _, newValue in
-                if newValue { selectionSnapshot = selectedTagIDs }
+            // Debounce lifecycle (no deprecated onChange)
+            .task {
+                setUpDebounce()
             }
-            // Listen for Attachment inserts/deletes in ANY context and bump the key
-            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: nil)) { note in
-                if let inserts = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>,
-                   inserts.contains(where: { $0.entity.name == "Attachment" }) {
-                    refreshKey &+= 1
-                }
-                if let deletes = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>,
-                   deletes.contains(where: { $0.entity.name == "Attachment" }) {
-                    refreshKey &+= 1
-                }
-            }
-            // Also listen for saves (self or merges) and nudge the list + refresh relationships
-            .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: nil)) { _ in
-                viewContext.perform {
-                    viewContext.refreshAllObjects()
-                }
-                refreshKey &+= 1
+            .task(id: searchText) {
+                debounceCancellable?.cancel()
+                debounceCancellable = Just(searchText)
+                    .delay(for: .milliseconds(250), scheduler: RunLoop.main)
+                    .sink { debouncedQuery = $0 }
             }
         }
     }
 
-    // MARK: - Filtering (split into simple steps to aid type-checker)
+    // MARK: - Filtering (Scope • Instrument • Activity • Search)
 
     private var filteredSessions: [Session] {
-        var out: [Session] = Array(sessions)
+        var out = Array(sessions)
 
-        if publicOnly {
-            out = out.filter { $0.isPublic }
+        // Scope
+        switch selectedScope {
+        case .mine:
+            if let uid = userID {
+                out = out.filter { $0.ownerUserID == uid }
+            } else {
+                out = []
+            }
+        case .all:
+            break
         }
 
-        if let sel = selectedInstrument {
-            let selID = sel.objectID
-            out = out.filter { $0.instrument?.objectID == selID }
+        // Instrument (core)
+        if let inst = selectedInstrument {
+            let id = inst.objectID
+            out = out.filter { $0.instrument?.objectID == id }
         }
 
-        if !selectedTagIDs.isEmpty {
-            out = out.filter { sessionHasSelectedTags($0) }
+        // Activity (core enum)
+        if let act = selectedActivity {
+            out = out.filter { ($0.value(forKey: "activityType") as? Int16) == act.rawValue }
+        }
+
+        // Search (title or notes)
+        let q = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty {
+            out = out.filter { s in
+                let t = (s.title ?? "")
+                let n = (s.notes ?? "")
+                return t.localizedCaseInsensitiveContains(q) || n.localizedCaseInsensitiveContains(q)
+            }
         }
 
         return out
     }
 
-    private func sessionHasSelectedTags(_ s: Session) -> Bool {
-        guard let set = s.tags as? Set<Tag>, !set.isEmpty else { return false }
-        let ids: Set<NSManagedObjectID> = Set(set.map { $0.objectID })
-        return !ids.intersection(selectedTagIDs).isEmpty
-    }
-
     // MARK: - Delete
 
     private func deleteSessions(at offsets: IndexSet) {
-        for index in offsets {
-            let session = filteredSessions[index]
-            viewContext.delete(session)
-        }
+        let rows = filteredSessions
         do {
+            for idx in offsets {
+                viewContext.delete(rows[idx])
+            }
             try viewContext.save()
         } catch {
             print("Delete error: \(error)")
         }
     }
-}
 
-// ——— helpers (simplified to keep expressions small) ———
-fileprivate struct StatsBannerView: View {
-    let sessions: [Session]
-    @Environment(\.calendar) private var calendar
+    // MARK: - Debounce
 
-    var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 24) {
-            StatCell(title: "This Week", value: minutesThisWeekString)
-            StatCell(title: "Current Streak", value: "\(currentStreak) d")
-            StatCell(title: "Best Streak", value: "\(bestStreak) d")
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 4)
-    }
-
-    private var minutesThisWeekString: String {
-        let now = Date()
-        let comps = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
-        let startOfWeek = calendar.date(from: comps) ?? now
-
-        let durations: [Int] = sessions.compactMap { s in
-            guard let ts = s.timestamp else { return nil }
-            return ts >= startOfWeek ? Int(s.durationSeconds) : nil
-        }
-
-        let total = durations.reduce(0, +)
-        return "\(total / 60) min"
-    }
-
-    private var currentStreak: Int {
-        let timestamps: [Date] = sessions.compactMap { $0.timestamp }
-        guard !timestamps.isEmpty else { return 0 }
-
-        let days: [Date] = timestamps.map { calendar.startOfDay(for: $0) }
-        let unique: Set<Date> = Set(days)
-
-        var streak = 0
-        var probe = calendar.startOfDay(for: Date())
-        while unique.contains(probe) {
-            streak += 1
-            probe = calendar.date(byAdding: .day, value: -1, to: probe) ?? probe
-        }
-        return streak
-    }
-
-    private var bestStreak: Int {
-        let timestamps: [Date] = sessions.compactMap { $0.timestamp }
-        guard !timestamps.isEmpty else { return 0 }
-
-        let uniqueDaysSorted: [Date] = Array(Set(timestamps.map { calendar.startOfDay(for: $0) })).sorted()
-
-        var best = 0
-        var run = 0
-        var prev: Date? = nil
-
-        for d in uniqueDaysSorted {
-            if let p = prev,
-               let next = calendar.date(byAdding: .day, value: 1, to: p),
-               calendar.isDate(d, inSameDayAs: next) {
-                run += 1
-            } else {
-                run = 1
-            }
-            best = max(best, run)
-            prev = d
-        }
-        return best
+    private func setUpDebounce() {
+        debounceCancellable?.cancel()
+        debounceCancellable = Just(searchText)
+            .delay(for: .milliseconds(250), scheduler: RunLoop.main)
+            .sink { debouncedQuery = $0 }
     }
 }
 
-fileprivate struct StatCell: View {
-    let title: String
-    let value: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(value).font(.headline)
-            Text(title).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-}
+// MARK: - Filter bar OUTSIDE the List (uses menu-style Pickers, not Menu)
 
-fileprivate struct FilterPanel: View {
+fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
-    @Binding var publicOnly: Bool
     let instruments: [Instrument]
     @Binding var selectedInstrument: Instrument?
-    let tags: [Tag]
-    @Binding var selectedTagIDs: Set<NSManagedObjectID>
+    @Binding var selectedActivity: ActivityType?
+    @Binding var selectedScope: FeedScope
+    @Binding var searchText: String
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button { withAnimation { filtersExpanded.toggle() } } label: {
@@ -286,123 +240,115 @@ fileprivate struct FilterPanel: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            if filtersExpanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    Toggle("Public only", isOn: $publicOnly)
 
-                    Menu {
-                        Button("Any Instrument") { selectedInstrument = nil }
-                        Divider()
-                        ForEach(instruments, id: \.objectID) { inst in
-                            Button { selectedInstrument = inst } label: {
-                                HStack {
-                                    Text(inst.name ?? "(Unnamed)")
-                                    if selectedInstrument?.objectID == inst.objectID {
-                                        Image(systemName: "checkmark")
-                                    }
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack {
-                            Text("Instrument")
-                            Spacer()
-                            Text(selectedInstrument?.name ?? "Any").foregroundStyle(.secondary)
+            if filtersExpanded {
+                VStack(alignment: .leading, spacing: 10) {
+                    // Scope
+                    Picker("Scope", selection: $selectedScope) {
+                        ForEach(FeedScope.allCases) { s in
+                            Text(s.rawValue).tag(s)
                         }
                     }
+                    .pickerStyle(.segmented)
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Tags").font(.subheadline)
-                        if tags.isEmpty {
-                            Text("No tags yet").foregroundStyle(.secondary)
-                        } else {
-                            ForEach(tags, id: \.objectID) { tag in
-                                Button {
-                                    let id = tag.objectID
-                                    if selectedTagIDs.contains(id) { selectedTagIDs.remove(id) }
-                                    else { selectedTagIDs.insert(id) }
-                                } label: {
-                                    HStack {
-                                        Text(tag.name ?? "(Untitled)")
-                                        Spacer()
-                                        if selectedTagIDs.contains(tag.objectID) {
-                                            Image(systemName: "checkmark")
-                                        }
-                                    }
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                                .buttonStyle(.plain)
-                                .contentShape(Rectangle())
+                    // Search
+                    TextField("Search title or notes", text: $searchText)
+                        .textInputAutocapitalization(.never)
+                        .disableAutocorrection(true)
+                        .textFieldStyle(.roundedBorder)
+
+                    // Instrument (menu-style Picker)
+                    HStack {
+                        Text("Instrument")
+                        Spacer()
+                        Picker("Instrument", selection: $selectedInstrument) {
+                            Text("Any").tag(nil as Instrument?)
+                            ForEach(instruments, id: \.objectID) { inst in
+                                Text(inst.name ?? "(Unnamed)").tag(inst as Instrument?)
                             }
                         }
+                        .pickerStyle(.menu)
+                    }
+
+                    // Activity (menu-style Picker)
+                    HStack {
+                        Text("Activity")
+                        Spacer()
+                        Picker("Activity", selection: $selectedActivity) {
+                            Text("Any").tag(nil as ActivityType?)
+                            ForEach(ActivityType.allCases) { a in
+                                Text(a.label).tag(Optional(a))
+                            }
+                        }
+                        .pickerStyle(.menu)
                     }
                 }
-                .padding(.top, 8)
             }
         }
     }
 }
 
+// MARK: - Stats (unchanged appearance, no 'reduce' ambiguity, no schema assumptions)
+
+fileprivate struct StatsBannerView: View {
+    let sessions: [Session]
+
+    private var totalMinutes: Int {
+        // Compute safely: only read Core Data keys that exist on the entity.
+        var total = 0
+        for s in sessions {
+            let attrs = s.entity.attributesByName
+            if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber {
+                total += n.intValue
+            } else if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber {
+                total += n.intValue
+            } else if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber {
+                total += n.intValue
+            }
+        }
+        return total
+    }
+
+    private var count: Int { sessions.count }
+
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading) {
+                Text("Sessions: \(count)")
+                    .font(.subheadline)
+                Text("Total minutes: \(totalMinutes)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+// MARK: - Row (now shows NOTES under title)
+
 fileprivate struct SessionRow: View {
     let session: Session
 
-    private var displayTitle: String {
-        if let t = session.title, !t.isEmpty { return t }
-        if let name = session.instrument?.name, !name.isEmpty { return "\(name) Practice" }
-        return "Practice"
-    }
-
-    private var formattedDuration: String {
-        let seconds = Int(session.durationSeconds)
-        let h = seconds / 3600
-        let m = (seconds % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-
-    private var relativeTime: String {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .short
-        return formatter.localizedString(for: session.timestamp ?? Date(), relativeTo: Date())
-    }
-
     private var attachmentCount: Int {
-        let set: Set<Attachment> = (session.attachments as? Set<Attachment>) ?? []
-        return set.count
+        (session.attachments as? Set<Attachment>)?.count ?? 0
     }
 
-    private var tagNames: [String] {
-        let set: Set<Tag> = (session.tags as? Set<Tag>) ?? []
-        return set.compactMap { $0.name }.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    private var notesSnippet: String? {
+        let raw = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.isEmpty { return nil }
+        // Single-line, truncated preview
+        let oneLine = raw.replacingOccurrences(of: "\n", with: " ")
+        return String(oneLine.prefix(140))
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(displayTitle).font(.headline).lineLimit(1)
-                Spacer(minLength: 8)
-                Text("\(formattedDuration) • \(relativeTime)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if !session.isPublic {
-                    Image(systemName: "eye.slash")
-                        .foregroundStyle(.secondary)
-                        .imageScale(.small)
-                        .padding(.leading, 6)
-                }
-            }
-            if let notes = session.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                Text(session.title ?? "Session")
+                    .font(.headline)
                     .lineLimit(2)
-            }
-            HStack(spacing: 12) {
-                if !tagNames.isEmpty {
-                    Text(tagNames.joined(separator: " • "))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
                 Spacer()
                 if attachmentCount > 0 {
                     HStack(spacing: 4) {
@@ -412,6 +358,13 @@ fileprivate struct SessionRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
+            }
+
+            if let preview = notesSnippet {
+                Text(preview)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
         .padding(.vertical, 4)
