@@ -1,47 +1,5 @@
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 09/09/2025.
-//
-
-//
-//  PracticeTimerView.swift
+//////
+// //  PracticeTimerView.swift
 //  MOTIVO
 //
 //  Created by Samuel Dixon on 09/09/2025.
@@ -50,6 +8,23 @@
 import SwiftUI
 import Combine
 import CoreData
+
+
+fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
+    var id: Int16 { rawValue }
+    var label: String {
+        switch self {
+        case .practice: return "Practice"
+        case .rehearsal: return "Rehearsal"
+        case .recording: return "Recording"
+        case .lesson: return "Lesson"
+        case .performance: return "Performance"
+        }
+    }
+}
+
+
 
 struct PracticeTimerView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -60,6 +35,7 @@ struct PracticeTimerView: View {
     // Instruments (profile)
     @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
+    @State private var activity: ActivityType = .practice
 
     // Timer state
     @State private var isRunning = false
@@ -75,7 +51,7 @@ struct PracticeTimerView: View {
     @State private var showVideoHelp = false
 
     // Quick notes
-    @State private var quickNotes: String = ""
+    
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -100,12 +76,7 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         VStack(spacing: 8) {
-                            HStack {
-                                Text("Instrument")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                            }
+                           
 
                             if hasMultipleInstruments {
                                 Picker("Instrument", selection: $instrument) {
@@ -122,6 +93,19 @@ struct PracticeTimerView: View {
                                 }
                                 .onAppear { instrument = only }
                             }
+
+                        // Activity
+                        Section {
+                           
+                            Picker("Activity", selection: $activity) {
+                                ForEach(ActivityType.allCases) { a in
+                                    Text(a.label).tag(a)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                        }
+                        .padding(.horizontal)
+
                         }
                         .padding(.horizontal)
                     }
@@ -175,26 +159,7 @@ struct PracticeTimerView: View {
                     }
                 }
 
-                // Quick notes with inline placeholder
-                VStack(alignment: .leading, spacing: 8) {
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: $quickNotes)
-                            .frame(minHeight: 80, maxHeight: 120)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                            )
-
-                        if quickNotes.isEmpty {
-                            Text("Quick Notes")
-                                .foregroundStyle(.secondary)
-                                .padding(.top, 8)
-                                .padding(.leading, 5)
-                                .allowsHitTesting(false)
-                        }
-                    }
-                }
-                .padding(.horizontal)
+                                .padding(.horizontal)
 
                 Spacer(minLength: 0)
             }
@@ -224,6 +189,7 @@ struct PracticeTimerView: View {
                     timestamp: startDate ?? Date(),
                     durationSeconds: elapsedSeconds,
                     instrument: instrument,
+                    activityTypeRaw: activity.rawValue,
                     onSaved: {
                         // Reset timer and close timer sheet after saving
                         reset()
@@ -295,7 +261,6 @@ struct PracticeTimerView: View {
         pause()
         startDate = nil
         elapsedSeconds = 0
-        quickNotes = ""
     }
 
     private func finish() {

@@ -1,4 +1,4 @@
-////
+///
 //  ContentView.swift
 //  MOTIVO
 //
@@ -10,21 +10,24 @@ import Combine
 // MARK: - Local (file-scoped) helper enums to avoid collisions in other files
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
     var id: Int16 { rawValue }
     var label: String {
         switch self {
-        case .practice:  return "Practice"
+        case .practice: return "Practice"
         case .rehearsal: return "Rehearsal"
         case .recording: return "Recording"
-        case .lesson:    return "Lesson"
+        case .lesson: return "Lesson"
+        case .performance: return "Performance"
         }
     }
-    static func from(_ code: Int16?) -> ActivityType {
-        guard let c = code, let v = ActivityType(rawValue: c) else { return .practice }
-        return v
     }
+fileprivate func from(_ code: Int16?) -> ActivityType {
+    guard let c = code, let v = ActivityType(rawValue: c) else { return .practice }
+    return v
 }
+
+
 
 fileprivate enum FeedScope: String, CaseIterable, Identifiable {
     case all = "All"
@@ -331,12 +334,24 @@ fileprivate struct StatsBannerView: View {
 fileprivate struct SessionRow: View {
     let session: Session
 
+    
+    private var instrumentName: String {
+        let label = (session.value(forKey: "userInstrumentLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let custom = label, !custom.isEmpty { return custom }
+        return session.instrument?.name ?? "Session"
+    }
+    private var activityName: String {
+        let label = (session.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let custom = label, !custom.isEmpty { return custom }
+        let raw = (session.value(forKey: "activityType") as? Int16) ?? 0
+        return (ActivityType(rawValue: raw) ?? .practice).label
+    }
     private var attachmentCount: Int {
         (session.attachments as? Set<Attachment>)?.count ?? 0
     }
 
-    private var notesSnippet: String? {
-        let raw = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    private var activityDetailPreview: String? {
+        let raw = ((session.value(forKey: "activityDetail") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.isEmpty { return nil }
         // Single-line, truncated preview
         let oneLine = raw.replacingOccurrences(of: "\n", with: " ")
@@ -346,7 +361,7 @@ fileprivate struct SessionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text(session.title ?? "Session")
+                Text("\(instrumentName.uppercased()) : \(activityName.uppercased())")
                     .font(.headline)
                     .lineLimit(2)
                 Spacer()
@@ -360,7 +375,7 @@ fileprivate struct SessionRow: View {
                 }
             }
 
-            if let preview = notesSnippet {
+            if let preview = activityDetailPreview {
                 Text(preview)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)

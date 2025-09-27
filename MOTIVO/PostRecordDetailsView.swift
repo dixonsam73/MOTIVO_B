@@ -1,4 +1,3 @@
-////
 //  PostRecordDetailsView.swift
 //  MOTIVO
 //
@@ -10,7 +9,7 @@ import AVFoundation
 import UIKit
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
     var id: Int16 { rawValue }
     var label: String {
         switch self {
@@ -18,6 +17,7 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .rehearsal: return "Rehearsal"
         case .recording: return "Recording"
         case .lesson: return "Lesson"
+        case .performance: return "Performance"
         }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
@@ -41,6 +41,7 @@ struct PostRecordDetailsView: View {
     @State private var effort: Int = 5
     @State private var tagsText: String = ""
     @State private var notes: String = ""
+    @State private var activityDetail: String = ""
 
     // Title control
     @State private var isTitleEdited = false
@@ -71,6 +72,7 @@ struct PostRecordDetailsView: View {
         timestamp: Date? = nil,
         durationSeconds: Int? = nil,
         instrument: Instrument? = nil,
+        activityTypeRaw: Int16? = nil,
         onSaved: (() -> Void)? = nil
     ) {
         self._isPresented = isPresented
@@ -79,6 +81,7 @@ struct PostRecordDetailsView: View {
         self._timestamp = State(initialValue: self.prefillTimestamp)
         self._durationSeconds = State(initialValue: self.prefillDurationSeconds)
         self._instrument = State(initialValue: instrument)
+        if let raw = activityTypeRaw { self._activity = State(initialValue: ActivityType(rawValue: raw) ?? .practice) }
         self.onSaved = onSaved
     }
 
@@ -117,13 +120,10 @@ struct PostRecordDetailsView: View {
                     }
                 }
 
+                // Activity description (short detail)
                 Section {
-                    TextField("Title", text: $title)
-                        .onChange(of: title) { _, newValue in
-                            if newValue.trimmingCharacters(in: .whitespacesAndNewlines) != initialAutoTitle {
-                                isTitleEdited = true
-                            }
-                        }
+                    TextField("Activity description", text: $activityDetail, axis: .vertical)
+                        .lineLimit(1...3)
                 }
 
                 Section {
@@ -230,7 +230,7 @@ struct PostRecordDetailsView: View {
                     }
                 }
 
-                activity = .practice
+                // IMPORTANT: do NOT reset `activity` here; it was preselected from the Timer.
                 tempActivity = activity
 
                 if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -328,9 +328,15 @@ struct PostRecordDetailsView: View {
         s.mood = Int16(mood)
         s.effort = Int16(effort)
         s.notes = notes
+        s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
 
         // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
+
+        // Stamp owner (required)
+        if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
+            s.setValue(uid, forKey: "ownerUserID")
+        }
 
         // Tags
         let tagNames = tagsText
