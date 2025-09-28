@@ -36,6 +36,9 @@ struct PracticeTimerView: View {
     @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
     @State private var activity: ActivityType = .practice
+    @State private var userActivities: [UserActivity] = []
+    @State private var activityChoice: String = "core:0"
+    @State private var activityDetail: String = ""
 
     // Timer state
     @State private var isRunning = false
@@ -97,12 +100,32 @@ struct PracticeTimerView: View {
                         // Activity
                         Section {
                            
-                            Picker("Activity", selection: $activity) {
+                            Picker("Activity", selection: $activityChoice) {
                                 ForEach(ActivityType.allCases) { a in
-                                    Text(a.label).tag(a)
+                                    Text(a.label).tag("core:\(a.rawValue)")
+                                }
+                                if !userActivities.isEmpty {
+                                    Text("— Your Activities —").disabled(true)
+                                    ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                                        Text(name).tag("custom:\(name)")
+                                    }
                                 }
                             }
                             .pickerStyle(.menu)
+                            .onChange(of: activityChoice) { choice in
+                                if choice.hasPrefix("core:") {
+                                    if let raw = Int(choice.split(separator: ":").last ?? "0") {
+                                        activity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                    } else {
+                                        activity = .practice
+                                    }
+                                    activityDetail = ""
+                                } else if choice.hasPrefix("custom:") {
+                                    let name = String(choice.dropFirst("custom:".count))
+                                    activity = .practice
+                                    activityDetail = name
+                                }
+                            }
                         }
                         .padding(.horizontal)
 
@@ -165,6 +188,8 @@ struct PracticeTimerView: View {
             }
             .padding(.top, 16)
             .navigationTitle("Session Timer")
+            .task { loadUserActivities() }
+            .onAppear { syncActivityChoiceFromState() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { isPresented = false }
@@ -190,6 +215,7 @@ struct PracticeTimerView: View {
                     durationSeconds: elapsedSeconds,
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
+                    activityDetailPrefill: activityDetail.isEmpty ? nil : activityDetail,
                     onSaved: {
                         // Reset timer and close timer sheet after saving
                         reset()
@@ -281,6 +307,23 @@ struct PracticeTimerView: View {
         let h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s)
                       : String(format: "%02d:%02d", m, s)
+    }
+
+    // MARK: - Custom activities (load & sync)
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+
+    private func syncActivityChoiceFromState() {
+        if !activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            activityChoice = "custom:\(activityDetail)"
+        } else {
+            activityChoice = "core:\(activity.rawValue)"
+        }
     }
 }
 

@@ -18,7 +18,8 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .recording: return "Recording"
         case .lesson: return "Lesson"
         case .performance: return "Performance"
-        }
+        
+    }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
 }
@@ -36,6 +37,9 @@ struct PostRecordDetailsView: View {
     @State private var timestamp: Date
     @State private var durationSeconds: Int
     @State private var activity: ActivityType = .practice
+    @State private var userActivities: [UserActivity] = []
+    @State private var activityChoice: String = "core:0"
+    @State private var selectedCustomName: String = ""
     @State private var isPublic: Bool = true
     @State private var mood: Int = 5
     @State private var effort: Int = 5
@@ -73,6 +77,7 @@ struct PostRecordDetailsView: View {
         durationSeconds: Int? = nil,
         instrument: Instrument? = nil,
         activityTypeRaw: Int16? = nil,
+        activityDetailPrefill: String? = nil,
         onSaved: (() -> Void)? = nil
     ) {
         self._isPresented = isPresented
@@ -81,6 +86,12 @@ struct PostRecordDetailsView: View {
         self._timestamp = State(initialValue: self.prefillTimestamp)
         self._durationSeconds = State(initialValue: self.prefillDurationSeconds)
         self._instrument = State(initialValue: instrument)
+        if let prefill = activityDetailPrefill, !prefill.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            self._selectedCustomName = State(initialValue: prefill)
+            self._activityDetail = State(initialValue: "")
+            self._activity = State(initialValue: .practice)
+            self._activityChoice = State(initialValue: "custom:\(prefill)")
+        }
         if let raw = activityTypeRaw { self._activity = State(initialValue: ActivityType(rawValue: raw) ?? .practice) }
         self.onSaved = onSaved
     }
@@ -116,7 +127,7 @@ struct PostRecordDetailsView: View {
                         tempActivity = activity
                         showActivityPicker = true
                     } label: {
-                        HStack { Text("Activity"); Spacer(); Text(activity.label).foregroundStyle(.secondary) }
+                        HStack { Text("Activity"); Spacer(); Text(selectedCustomName.isEmpty ? activity.label : selectedCustomName).foregroundStyle(.secondary) }
                     }
                 }
 
@@ -187,6 +198,7 @@ struct PostRecordDetailsView: View {
                 }
             }
             .navigationTitle("Session Review")
+            .onAppear { syncActivityChoiceFromState() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }
@@ -251,9 +263,16 @@ struct PostRecordDetailsView: View {
     private var activityPicker: some View {
         NavigationStack {
             VStack {
-                Picker("", selection: $tempActivity) {
+                Picker("", selection: $activityChoice) {
+                    // Core activities first
                     ForEach(ActivityType.allCases) { type in
-                        Text(type.label).tag(type)
+                        Text(type.label).tag("core:\(type.rawValue)")
+                    }
+                    // Then user-local customs
+                    if !userActivities.isEmpty {
+                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                            Text(name).tag("custom:\(name)")
+                        }
                     }
                 }
                 .pickerStyle(.wheel)
@@ -262,19 +281,44 @@ struct PostRecordDetailsView: View {
             }
             .navigationTitle("Activity")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showActivityPicker = false }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
-                        activity = tempActivity
+                        if activityChoice.hasPrefix("core:") {
+                            if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
+                                tempActivity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                activity = tempActivity
+                            } else {
+                                tempActivity = .practice
+                                activity = .practice
+                            }
+                            selectedCustomName = ""
+                            // leave description alone
+                        } else if activityChoice.hasPrefix("custom:") {
+                            let name = String(activityChoice.dropFirst("custom:".count))
+                            tempActivity = .practice
+                            activity = .practice
+                            selectedCustomName = name
+                            // keep description blank
+                        }
                         showActivityPicker = false
                         refreshAutoTitleIfNeeded()
                     }
                 }
             }
+            .onAppear {
+                if !selectedCustomName.isEmpty {
+                    activityChoice = "custom:\(selectedCustomName)"
+                } else {
+                    activityChoice = "core:\(activity.rawValue)"
+                }
+                do { userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext) } catch { userActivities = [] }
+            }
         }
-        .presentationDetents([.medium])
     }
-
+    
     private var startPicker: some View {
         NavigationStack {
             VStack {
@@ -317,7 +361,8 @@ struct PostRecordDetailsView: View {
     private func saveToCoreData() {
         let s = Session(context: viewContext)
 
-        if (s.value(forKey: "id") as? UUID) == nil { s.setValue(UUID(), forKey: "id") }
+        if (s.value(forKey: "id") as? UUID) == nil {         s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
+s.setValue(UUID(), forKey: "id") }
         if s.timestamp == nil { s.timestamp = Date() }
 
         s.instrument = instrument
@@ -419,7 +464,7 @@ struct PostRecordDetailsView: View {
 
     private func defaultTitle(for inst: Instrument? = nil, activity: ActivityType) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
-        return activity.label
+        return selectedCustomName.isEmpty ? activity.label : selectedCustomName
     }
 
     private func refreshAutoTitleIfNeeded() {
@@ -496,5 +541,20 @@ struct PostRecordDetailsView: View {
             }
         }
         return results
+    }
+    // MARK: - Activity helpers (customs)
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+    private func syncActivityChoiceFromState() {
+        if !selectedCustomName.isEmpty {
+            activityChoice = "custom:\(selectedCustomName)"
+        } else {
+            activityChoice = "core:\(activity.rawValue)"
+        }
     }
 }

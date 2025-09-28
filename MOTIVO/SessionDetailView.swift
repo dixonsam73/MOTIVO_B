@@ -8,7 +8,7 @@ import CoreData
 import UIKit
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
     var id: Int16 { rawValue }
     var label: String {
         switch self {
@@ -16,7 +16,8 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .rehearsal: return "Rehearsal"
         case .recording: return "Recording"
         case .lesson:    return "Lesson"
-        }
+        case .performance: return "Performance"
+    }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
 }
@@ -38,21 +39,24 @@ struct SessionDetailView: View {
         Form {
             Section {
                 HStack {
-                    Text(session.title ?? "Session")
+                    Text(headerTitle)
                     Spacer()
                     Text(formattedDate(session.timestamp ?? Date()))
                         .foregroundStyle(.secondary)
                 }
-                HStack(spacing: 12) {
-                    Label("\(Int(session.durationSeconds/60)) min", systemImage: "clock")
-                    if let name = session.instrument?.name, !name.isEmpty {
-                        Label(name, systemImage: "pianokeys.inverse")
-                    }
-                    Label(ActivityType.from(session.value(forKey: "activityType") as? Int16).label, systemImage: "figure.walk")
-                }
+                Text(detailLine)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             }
+            if let desc = (session.value(forKey: "activityDetail") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !desc.isEmpty {
+                Section("Activity Description") {
+                    Text(desc)
+                }
+            }
+
 
             if let notes = session.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Section("Notes") { Text(notes) }
@@ -164,6 +168,23 @@ struct SessionDetailView: View {
         f.timeStyle = .short
         return f.string(from: date)
     }
+
+    private var chosenActivityName: String {
+        let label = ((session.value(forKey: "userActivityLabel") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty { return label }
+        return ActivityType.from(session.value(forKey: "activityType") as? Int16).label
+    }
+    private var headerTitle: String {
+        let instrumentName = session.instrument?.name ?? "Instrument"
+        return "\(instrumentName) : \(chosenActivityName)"
+    }
+    private var detailLine: String {
+        var parts: [String] = []
+        parts.append("\(Int(session.durationSeconds/60)) min")
+        if let name = session.instrument?.name, !name.isEmpty { parts.append(name) }
+        parts.append(chosenActivityName)
+        return parts.joined(separator: " • ")
+    }
 }
 
 // MARK: - Rows
@@ -177,7 +198,7 @@ fileprivate struct AttachmentRow: View {
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(fileName(of: attachment)).lineLimit(1)
-                HStack(spacing: 6) {
+                HStack(spacing: 12) {
                     Text((attachment.kind ?? "file")).font(.footnote)
                     if (attachment.value(forKey: "isThumbnail") as? Bool) == true {
                         Text("★").font(.footnote)

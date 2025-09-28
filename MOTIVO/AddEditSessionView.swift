@@ -11,7 +11,7 @@ import UIKit
 import UniformTypeIdentifiers
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
     var id: Int16 { rawValue }
     var label: String {
         switch self {
@@ -19,7 +19,8 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .rehearsal: return "Rehearsal"
         case .recording: return "Recording"
         case .lesson: return "Lesson"
-        }
+        case .performance: return "Performance"
+    }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
 }
@@ -44,11 +45,15 @@ struct AddEditSessionView: View {
     @State private var timestamp = Date()
     @State private var durationSeconds = 0
     @State private var activity: ActivityType = .practice
+    @State private var userActivities: [UserActivity] = []
+    @State private var activityChoice: String = "core:0"
+    @State private var selectedCustomName: String = ""
+@State private var selectedCustomActivity: String = ""
     @State private var isPublic = true
     @State private var mood = 5
     @State private var effort = 5
-    @State private var tagsText = ""
     @State private var notes = ""
+    @State private var activityDetail = ""
 
     // Pickers
     @State private var showStartPicker = false
@@ -121,19 +126,18 @@ struct AddEditSessionView: View {
                         tempActivity = activity
                         showActivityPicker = true
                     } label: {
-                        HStack { Text("Activity"); Spacer(); Text(activity.label).foregroundStyle(.secondary) }
+                        HStack { Text("Activity"); Spacer(); Text(!selectedCustomName.isEmpty ? selectedCustomName : activity.label).foregroundStyle(.secondary) }
                     }
                 }
 
                 // Title
+                
+                // Activity description (short detail)
                 Section {
-                    TextField("Title", text: $title)
-                        .onChange(of: title) { _, newValue in
-                            if newValue.trimmingCharacters(in: .whitespacesAndNewlines) != initialAutoTitle {
-                                isTitleEdited = true
-                            }
-                        }
+                    TextField("Activity description", text: $activityDetail, axis: .vertical)
+                        .lineLimit(1...3)
                 }
+    
 
                 // Start time
                 Section {
@@ -182,10 +186,6 @@ struct AddEditSessionView: View {
                     }
                 }
 
-                // Tags
-                Section { TextField("Tags (comma-separated)", text: $tagsText) }
-
-                // Unified Attachments (existing + staged) with thumbnail selection
                 attachmentsSection
 
                 // Add attachments
@@ -197,6 +197,9 @@ struct AddEditSessionView: View {
                     }
                 }
             }
+            .onAppear { loadUserActivities(); syncActivityChoiceFromState() }
+            .task { loadUserActivities(); syncActivityChoiceFromState() }
+
             .navigationTitle(session == nil ? "New Session" : "Edit Session")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -227,7 +230,7 @@ DispatchQueue.main.async {
             }
 
             // Pickers
-            .sheet(isPresented: $showActivityPicker) { activityPicker }
+            .sheet(isPresented: $showActivityPicker) { activityPickerUnified }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
 
@@ -257,7 +260,7 @@ DispatchQueue.main.async {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .onAppear { onAppearSetup() }
-            .onChange(of: instrument) { _ in refreshAutoTitleIfNeeded() }
+            .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
         }
     }
 
@@ -337,6 +340,13 @@ DispatchQueue.main.async {
             let raw = s.value(forKey: "activityType") as? Int16
             activity = ActivityType.from(raw)
             tempActivity = activity
+        // Hydrate custom label + description for Edit mode
+        let hydratedLabel = (s.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        selectedCustomName = hydratedLabel
+        activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
+        // Align unified picker with hydrated state
+        syncActivityChoiceFromState()
+
 
             // Existing attachments
             if let set = s.attachments as? Set<Attachment> {
@@ -389,7 +399,8 @@ DispatchQueue.main.async {
     private func saveToCoreData() {
         let s = session ?? Session(context: viewContext)
 
-        if (s.value(forKey: "id") as? UUID) == nil { s.setValue(UUID(), forKey: "id") }
+        if (s.value(forKey: "id") as? UUID) == nil {         s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
+s.setValue(UUID(), forKey: "id") }
         if s.timestamp == nil { s.timestamp = Date() }
 
         s.instrument = instrument
@@ -400,6 +411,8 @@ DispatchQueue.main.async {
         s.mood = Int16(mood)
         s.effort = Int16(effort)
         s.notes = notes
+        s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
+        s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
 
         // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
@@ -409,14 +422,7 @@ DispatchQueue.main.async {
             s.setValue(uid, forKey: "ownerUserID")
         }
 
-        // Persist tags — normalize & ensure each Tag has required UUID 'id'
-        let tagNames = tagsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { !$0.isEmpty }
-        s.tags = NSSet(array: upsertTags(tagNames))
-
-        // Commit staged attachments; only mark a staged one as thumbnail if the user explicitly picked it.
+                // Commit staged attachments; only mark a staged one as thumbnail if the user explicitly picked it.
         let chosenStagedID: UUID? = (thumbnailChoiceDirty
                                      ? { if case .staged(let id) = thumbnailChoice { return id } else { return nil } }()
                                      : nil)
@@ -729,6 +735,71 @@ DispatchQueue.main.async {
     private func fileName(of a: Attachment) -> String {
         guard let path = a.fileURL, !path.isEmpty else { return "file" }
         return URL(fileURLWithPath: path).lastPathComponent
+    }
+
+    // MARK: - Custom activities loader
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+
+    // MARK: - Unified Activity Picker (core + user customs)
+    private var activityPickerUnified: some View {
+        NavigationStack {
+            VStack {
+                Picker("", selection: $activityChoice) {
+                    // Core activities
+                    ForEach(ActivityType.allCases) { type in
+                        Text(type.label).tag("core:\(type.rawValue)")
+                    }
+                    // User-local customs
+                    if !userActivities.isEmpty {
+                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                            Text(name).tag("custom:\(name)")
+                        }
+                    }
+                }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+                Spacer()
+            }
+            .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showActivityPicker = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        if activityChoice.hasPrefix("core:") {
+                            if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
+                                tempActivity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                activity = tempActivity
+                            } else {
+                                tempActivity = .practice
+                                activity = .practice
+                            }
+                            selectedCustomName = ""
+                        } else if activityChoice.hasPrefix("custom:") {
+                            let name = String(activityChoice.dropFirst("custom:".count))
+                            tempActivity = .practice
+                            activity = .practice
+                            selectedCustomName = name
+                        }
+                        showActivityPicker = false
+                    }
+                }
+            }
+        }
+    }
+
+    // MARK: - Activity helpers
+    
+    private func syncActivityChoiceFromState() {
+        if !selectedCustomName.isEmpty { activityChoice = "custom:\(selectedCustomName)" }
+        else { activityChoice = "core:\(activity.rawValue)" }
     }
 }
 

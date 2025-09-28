@@ -1,4 +1,4 @@
-///
+//
 //  ContentView.swift
 //  MOTIVO
 //
@@ -161,6 +161,8 @@ fileprivate struct SessionsRootView: View {
     // MARK: - Filtering (Scope • Instrument • Activity • Search)
 
     private var filteredSessions: [Session] {
+        // Ensure no data is shown when signed out
+        guard userID != nil else { return [] }
         var out = Array(sessions)
 
         // Scope

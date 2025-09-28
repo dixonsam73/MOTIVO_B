@@ -24,6 +24,7 @@ struct ProfileView: View {
     @State private var defaultPrivacy: Bool = false
 
     @State private var showInstrumentManager: Bool = false
+    @State private var showActivityManager: Bool = false
     @State private var profile: Profile?
     @State private var isSaving = false
 
@@ -81,6 +82,13 @@ struct ProfileView: View {
                         Label("Manage Instruments", systemImage: "guitars")
                     }
                 }
+                Section {
+                    Button {
+                        showActivityManager = true
+                    } label: {
+                        Label("Manage Activities", systemImage: "figure.walk")
+                    }
+                }
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -107,6 +115,10 @@ struct ProfileView: View {
             .onAppear(perform: load)
             .sheet(isPresented: $showInstrumentManager) {
                 InstrumentListView()
+                    .environment(\.managedObjectContext, ctx)
+            }
+            .sheet(isPresented: $showActivityManager) {
+                ActivityListView()
                     .environment(\.managedObjectContext, ctx)
             }
         }
