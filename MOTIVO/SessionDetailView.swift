@@ -1,8 +1,8 @@
 ////////
 //  SessionDetailView.swift
 //  MOTIVO
+//  P2: Layout tweak — Description first; meta card second
 //
-
 import SwiftUI
 import CoreData
 import UIKit
@@ -17,7 +17,7 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .recording: return "Recording"
         case .lesson:    return "Lesson"
         case .performance: return "Performance"
-    }
+        }
     }
     static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
 }
@@ -37,31 +37,34 @@ struct SessionDetailView: View {
 
     var body: some View {
         Form {
+            // 1) Top card — Activity Description (headline), shown only if non-empty
+            if let desc = activityDescription, !desc.isEmpty {
+                Section {
+                    Text(desc)
+                        .fixedSize(horizontal: false, vertical: true) // allow multiline
+                }
+            }
+
+            // 2) Second card — Instrument : Activity + Date • Time • Duration
             Section {
-                HStack {
-                    Text(headerTitle)
-                    Spacer()
-                    Text(formattedDate(session.timestamp ?? Date()))
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(headerTitle)
+                        Spacer()
+                    }
+                    Text(metaLine)
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
-                Text(detailLine)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            }
-            if let desc = (session.value(forKey: "activityDetail") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !desc.isEmpty {
-                Section("Activity Description") {
-                    Text(desc)
-                }
             }
 
-
-            if let notes = session.notes, !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Notes
+            if let notes = session.notes,
+               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Section("Notes") { Text(notes) }
             }
 
+            // Attachments
             Section("Attachments") {
                 let (images, others) = splitAttachments()
                 if images.isEmpty && others.isEmpty {
@@ -113,6 +116,48 @@ struct SessionDetailView: View {
         }
     }
 
+    // MARK: - Computed helpers (strings)
+
+    private var chosenActivityName: String {
+        let label = ((session.value(forKey: "userActivityLabel") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !label.isEmpty { return label }
+        return ActivityType.from(session.value(forKey: "activityType") as? Int16).label
+    }
+
+    private var headerTitle: String {
+        let instrumentName = (session.instrument?.name ?? "Instrument")
+        return "\(instrumentName) : \(chosenActivityName)"
+    }
+
+    private var activityDescription: String? {
+        let desc = (session.value(forKey: "activityDetail") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return desc.isEmpty ? nil : desc
+    }
+
+    private var metaLine: String {
+        let ts = session.timestamp ?? Date()
+        let dateFormatter = DateFormatter()
+        dateFormatter.doesRelativeDateFormatting = true
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .none
+        timeFormatter.timeStyle = .short
+
+        let dateStr = dateFormatter.string(from: ts)
+        let timeStr = timeFormatter.string(from: ts)
+        let durStr = formattedDurationDisplay(Int(session.durationSeconds))
+
+        return "\(dateStr) • \(timeStr) • \(durStr)"
+    }
+
+    private func formattedDurationDisplay(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+
     // MARK: - Attachments split
 
     private func splitAttachments() -> (images: [Attachment], others: [Attachment]) {
@@ -159,31 +204,6 @@ struct SessionDetailView: View {
         viewContext.delete(session)
         do { try viewContext.save() } catch { print("Delete error: \(error)") }
         dismiss()
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.doesRelativeDateFormatting = true
-        f.dateStyle = .medium
-        f.timeStyle = .short
-        return f.string(from: date)
-    }
-
-    private var chosenActivityName: String {
-        let label = ((session.value(forKey: "userActivityLabel") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !label.isEmpty { return label }
-        return ActivityType.from(session.value(forKey: "activityType") as? Int16).label
-    }
-    private var headerTitle: String {
-        let instrumentName = session.instrument?.name ?? "Instrument"
-        return "\(instrumentName) : \(chosenActivityName)"
-    }
-    private var detailLine: String {
-        var parts: [String] = []
-        parts.append("\(Int(session.durationSeconds/60)) min")
-        if let name = session.instrument?.name, !name.isEmpty { parts.append(name) }
-        parts.append(chosenActivityName)
-        return parts.joined(separator: " • ")
     }
 }
 

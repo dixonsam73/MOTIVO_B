@@ -43,9 +43,11 @@ struct PostRecordDetailsView: View {
     @State private var isPublic: Bool = true
     @State private var mood: Int = 5
     @State private var effort: Int = 5
-    @State private var tagsText: String = ""
     @State private var notes: String = ""
     @State private var activityDetail: String = ""
+    // P3: default description tracking
+    @State private var lastAutoActivityDetail: String = ""
+    @State private var userEditedActivityDetail: Bool = false
 
     // Title control
     @State private var isTitleEdited = false
@@ -179,9 +181,6 @@ struct PostRecordDetailsView: View {
                         }
                     }
                 }
-
-                Section { TextField("Tags (comma-separated)", text: $tagsText) }
-
                 // Staged attachments with thumbnail selection
                 StagedAttachmentsSectionView(
                     attachments: stagedAttachments,
@@ -251,9 +250,24 @@ struct PostRecordDetailsView: View {
                     initialAutoTitle = auto
                     isTitleEdited = false
                 }
+                // P3: Prefill default description on first open if blank
+                if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    let autoDesc = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
+                    activityDetail = autoDesc
+                    lastAutoActivityDetail = autoDesc
+                    userEditedActivityDetail = false
+                }
             }
             .onChange(of: instrument) { _, _ in
                 refreshAutoTitleIfNeeded()
+            }
+            .onChange(of: activity) { _, _ in
+                // P3: keep description synced if still default
+                maybeUpdateActivityDetailFromDefaults()
+            }
+            .onChange(of: activityDetail) { old, new in
+                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
             }
         }
     }
@@ -304,6 +318,8 @@ struct PostRecordDetailsView: View {
                             // keep description blank
                         }
                         showActivityPicker = false
+                        // P3: Update default description if appropriate
+                        maybeUpdateActivityDetailFromDefaults()
                         refreshAutoTitleIfNeeded()
                     }
                 }
@@ -329,7 +345,7 @@ struct PostRecordDetailsView: View {
             .navigationTitle("Start Time")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false; maybeUpdateActivityDetailFromDefaults() } }
             }
         }
         .presentationDetents([.medium])
@@ -353,6 +369,30 @@ struct PostRecordDetailsView: View {
             }
         }
         .presentationDetents([.medium])
+    }
+
+    // MARK: - P3 Helpers — Default description logic (editor)
+    private func editorDefaultDescription(timestamp: Date, activity: ActivityType, customName: String) -> String {
+        let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
+        let hour = Calendar.current.component(.hour, from: timestamp)
+        let part: String
+        switch hour {
+        case 0...4: part = "Late Night"
+        case 5...11: part = "Morning"
+        case 12...17: part = "Afternoon"
+        default: part = "Evening"
+        }
+        return "\(part) \(label)"
+    }
+
+    // Update activityDetail only if it's empty OR still equal to the last auto-generated default
+    private func maybeUpdateActivityDetailFromDefaults() {
+        let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
+        if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activityDetail == lastAutoActivityDetail {
+            activityDetail = newDefault
+            lastAutoActivityDetail = newDefault
+            userEditedActivityDetail = false
+        }
     }
 
     // MARK: - Save
@@ -382,14 +422,6 @@ s.setValue(UUID(), forKey: "id") }
         if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
-
-        // Tags
-        let tagNames = tagsText
-            .split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        s.tags = NSSet(array: upsertTags(tagNames))
-
         // Commit staged attachments with thumbnail choice
         commitStagedAttachments(to: s, ctx: viewContext)
 

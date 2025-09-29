@@ -3,12 +3,11 @@
 //  MOTIVO
 //
 //  Created by Samuel Dixon on 09/09/2025.
+//  P0: Background-safe timer implementation (compute-on-resume; persisted state)
 //
-
 import SwiftUI
 import Combine
 import CoreData
-
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
     case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
@@ -24,10 +23,9 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
     }
 }
 
-
-
 struct PracticeTimerView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.scenePhase) private var scenePhase
 
     // Presented as a sheet from ContentView
     @Binding var isPresented: Bool
@@ -40,11 +38,15 @@ struct PracticeTimerView: View {
     @State private var activityChoice: String = "core:0"
     @State private var activityDetail: String = ""
 
-    // Timer state
-    @State private var isRunning = false
-    @State private var startDate: Date?
-    @State private var elapsedSeconds: Int = 0
+    // MARK: - Background-safe timer state (persisted)
+    @State private var isRunning: Bool = false              // mirrored from persisted
+    @State private var startDate: Date? = nil               // start timestamp (persisted)
+    @State private var accumulatedSeconds: Int = 0          // persisted running total (excludes current run segment)
+    @State private var elapsedSeconds: Int = 0              // UI-only, recomputed each tick from persisted state
     @State private var ticker: AnyCancellable?
+
+    // Used when presenting the review sheet so we pass a stable, final duration
+    @State private var finalizedDuration: Int = 0
 
     // Review sheet
     @State private var showReviewSheet = false
@@ -52,9 +54,6 @@ struct PracticeTimerView: View {
     // Info sheets for prebuilt-in recording guidance
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
-
-    // Quick notes
-    
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -79,8 +78,6 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
                         VStack(spacing: 8) {
-                           
-
                             if hasMultipleInstruments {
                                 Picker("Instrument", selection: $instrument) {
                                     ForEach(instruments, id: \.self) { inst in
@@ -97,38 +94,36 @@ struct PracticeTimerView: View {
                                 .onAppear { instrument = only }
                             }
 
-                        // Activity
-                        Section {
-                           
-                            Picker("Activity", selection: $activityChoice) {
-                                ForEach(ActivityType.allCases) { a in
-                                    Text(a.label).tag("core:\(a.rawValue)")
-                                }
-                                if !userActivities.isEmpty {
-                                    Text("— Your Activities —").disabled(true)
-                                    ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                                        Text(name).tag("custom:\(name)")
+                            // Activity
+                            Section {
+                                Picker("Activity", selection: $activityChoice) {
+                                    ForEach(ActivityType.allCases) { a in
+                                        Text(a.label).tag("core:\(a.rawValue)")
+                                    }
+                                    if !userActivities.isEmpty {
+                                        Text("— Your Activities —").disabled(true)
+                                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                                            Text(name).tag("custom:\(name)")
+                                        }
                                     }
                                 }
-                            }
-                            .pickerStyle(.menu)
-                            .onChange(of: activityChoice) { choice in
-                                if choice.hasPrefix("core:") {
-                                    if let raw = Int(choice.split(separator: ":").last ?? "0") {
-                                        activity = ActivityType(rawValue: Int16(raw)) ?? .practice
-                                    } else {
+                                .pickerStyle(.menu)
+                                .onChange(of: activityChoice) { choice in
+                                    if choice.hasPrefix("core:") {
+                                        if let raw = Int(choice.split(separator: ":").last ?? "0") {
+                                            activity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                        } else {
+                                            activity = .practice
+                                        }
+                                        activityDetail = ""
+                                    } else if choice.hasPrefix("custom:") {
+                                        let name = String(choice.dropFirst("custom:".count))
                                         activity = .practice
+                                        activityDetail = name
                                     }
-                                    activityDetail = ""
-                                } else if choice.hasPrefix("custom:") {
-                                    let name = String(choice.dropFirst("custom:".count))
-                                    activity = .practice
-                                    activityDetail = name
                                 }
                             }
-                        }
-                        .padding(.horizontal)
-
+                            .padding(.horizontal)
                         }
                         .padding(.horizontal)
                     }
@@ -149,11 +144,11 @@ struct PracticeTimerView: View {
 
                     Button("Reset") { reset() }
                         .buttonStyle(.bordered)
-                        .disabled(elapsedSeconds == 0 && !isRunning)
+                        .disabled((elapsedSeconds == 0) && !isRunning)
 
                     Button("Finish") { finish() }
                         .buttonStyle(.bordered)
-                        .disabled(elapsedSeconds == 0 || instrument == nil)
+                        .disabled((elapsedSeconds == 0) || instrument == nil)
                 }
 
                 // Recording icons (info-only, prebuilt-ins)
@@ -181,24 +176,16 @@ struct PracticeTimerView: View {
                         .accessibilityHint("Opens instructions for using your device’s app to capture video.")
                     }
                 }
-
-                                .padding(.horizontal)
+                .padding(.horizontal)
 
                 Spacer(minLength: 0)
             }
             .padding(.top, 16)
             .navigationTitle("Session Timer")
             .task { loadUserActivities() }
-            .onAppear { syncActivityChoiceFromState() }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { isPresented = false }
-                }
-            }
             .onAppear {
                 instruments = fetchInstruments()
-
-                // NEW: auto-select primary instrument if available (even when multiple exist)
+                // Auto-select primary instrument if available (preserve existing behaviour)
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
                        let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
@@ -207,18 +194,44 @@ struct PracticeTimerView: View {
                         instrument = instruments.first
                     }
                 }
+                // Hydrate persisted timer state and start UI ticker
+                hydrateTimerFromStorage()
+                syncActivityChoiceFromState()
+                startTicker() // drives UI only; true elapsed is recomputed each tick
+            }
+            .onChange(of: scenePhase) { newPhase in
+                switch newPhase {
+                case .active:
+                    // Recompute elapsed on resume to catch up time spent in background
+                    hydrateTimerFromStorage()
+                    // ensure ticker is running for UI updates
+                    startTicker()
+                case .inactive, .background:
+                    // Cancel UI ticker to avoid wasted cycles (elapsed is recomputed on resume)
+                    stopTicker()
+                    // Persist a checkpoint so state is always current
+                    persistTimerSnapshot()
+                @unknown default:
+                    break
+                }
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { isPresented = false }
+                }
             }
             .sheet(isPresented: $showReviewSheet) {
                 PostRecordDetailsView(
                     isPresented: $showReviewSheet,
                     timestamp: startDate ?? Date(),
-                    durationSeconds: elapsedSeconds,
+                    durationSeconds: finalizedDuration,
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.isEmpty ? nil : activityDetail,
                     onSaved: {
-                        // Reset timer and close timer sheet after saving
-                        reset()
+                        // After saving, clear timer state and close timer sheet
+                        clearPersistedTimer()
+                        resetUIOnly()
                         isPresented = false
                     }
                 )
@@ -253,7 +266,6 @@ struct PracticeTimerView: View {
     }
 
     // MARK: - Actions & fetches
-
     private func fetchInstruments() -> [Instrument] {
         let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
         req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
@@ -270,43 +282,156 @@ struct PracticeTimerView: View {
         return nil
     }
 
+    // MARK: - Background-safe timer controls
     private func start() {
         guard instrument != nil else { return }
-        if startDate == nil { startDate = Date() }
-        isRunning = true
+        // If not already running, set a start timestamp
+        if !isRunning {
+            if startDate == nil { startDate = Date() }
+            isRunning = true
+            // persist
+            persistTimerState()
+        }
         startTicker()
+        recomputeElapsedForUI()
     }
 
     private func pause() {
         guard isRunning else { return }
+        // Fold current segment into accumulated, then stop running
+        let now = Date()
+        if let started = startDate {
+            let delta = max(0, Int(now.timeIntervalSince(started)))
+            accumulatedSeconds += delta
+        }
+        startDate = nil
         isRunning = false
-        ticker?.cancel(); ticker = nil
+        persistTimerState()
+        stopTicker()
+        recomputeElapsedForUI()
     }
 
     private func reset() {
         pause()
-        startDate = nil
-        elapsedSeconds = 0
+        clearPersistedTimer()
+        resetUIOnly()
     }
 
     private func finish() {
+        // Capture final duration first
+        let total = trueElapsedSeconds()
+        finalizedDuration = total
+        // Pause the timer and persist snapshot
         pause()
+        // Present review
         showReviewSheet = true
     }
 
+    // MARK: - UI ticker
     private func startTicker() {
-        ticker?.cancel()
+        stopTicker()
         ticker = Timer.publish(every: 1.0, on: .main, in: .common)
             .autoconnect()
             .sink { _ in
-                if isRunning { elapsedSeconds += 1 }
+                recomputeElapsedForUI()
             }
+    }
+
+    private func stopTicker() {
+        ticker?.cancel()
+        ticker = nil
+    }
+
+    private func recomputeElapsedForUI() {
+        elapsedSeconds = trueElapsedSeconds()
+    }
+
+    // MARK: - Elapsed calculation (truth)
+    private func trueElapsedSeconds() -> Int {
+        let base = accumulatedSeconds
+        if isRunning, let started = startDate {
+            let now = Date()
+            let delta = max(0, Int(now.timeIntervalSince(started)))
+            return base + delta
+        } else {
+            return base
+        }
     }
 
     private func formattedElapsed(_ secs: Int) -> String {
         let h = secs / 3600, m = (secs % 3600) / 60, s = secs % 60
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s)
                       : String(format: "%02d:%02d", m, s)
+    }
+
+    // MARK: - Persistence (UserDefaults)
+    private enum TimerDefaultsKey: String {
+        case startedAtEpoch = "PracticeTimer.startedAtEpoch"
+        case accumulated = "PracticeTimer.accumulatedSeconds"
+        case running = "PracticeTimer.isRunning"
+    }
+
+    private func hydrateTimerFromStorage() {
+        let ud = UserDefaults.standard
+        let isRun = ud.bool(forKey: TimerDefaultsKey.running.rawValue)
+        let acc = ud.integer(forKey: TimerDefaultsKey.accumulated.rawValue)
+
+        var start: Date? = nil
+        let epoch = ud.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        if epoch > 0 {
+            start = Date(timeIntervalSince1970: epoch)
+        }
+
+        // Assign to state
+        self.isRunning = isRun
+        self.accumulatedSeconds = max(0, acc)
+        self.startDate = start
+
+        // Recompute UI
+        recomputeElapsedForUI()
+    }
+
+    private func persistTimerState() {
+        let ud = UserDefaults.standard
+        ud.set(isRunning, forKey: TimerDefaultsKey.running.rawValue)
+        ud.set(accumulatedSeconds, forKey: TimerDefaultsKey.accumulated.rawValue)
+        if let start = startDate {
+            ud.set(start.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        } else {
+            ud.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        }
+    }
+
+    private func persistTimerSnapshot() {
+        // Ensure current delta is represented in persisted values (without changing run state)
+        if isRunning, let started = startDate {
+            let now = Date()
+            let delta = max(0, Int(now.timeIntervalSince(started)))
+            let newAccum = accumulatedSeconds + delta
+            let ud = UserDefaults.standard
+            ud.set(isRunning, forKey: TimerDefaultsKey.running.rawValue)
+            ud.set(newAccum, forKey: TimerDefaultsKey.accumulated.rawValue)
+            ud.set(now.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue) // keep running from 'now' to avoid double counting on long sleeps
+        } else {
+            persistTimerState()
+        }
+    }
+
+    private func clearPersistedTimer() {
+        let ud = UserDefaults.standard
+        ud.removeObject(forKey: TimerDefaultsKey.running.rawValue)
+        ud.removeObject(forKey: TimerDefaultsKey.accumulated.rawValue)
+        ud.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        // Also clear mirrors
+        isRunning = false
+        accumulatedSeconds = 0
+        startDate = nil
+        recomputeElapsedForUI()
+    }
+
+    private func resetUIOnly() {
+        elapsedSeconds = 0
+        finalizedDuration = 0
     }
 
     // MARK: - Custom activities (load & sync)

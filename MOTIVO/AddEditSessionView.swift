@@ -54,6 +54,9 @@ struct AddEditSessionView: View {
     @State private var effort = 5
     @State private var notes = ""
     @State private var activityDetail = ""
+    // P3 default-description tracking
+    @State private var lastAutoActivityDetail = ""
+    @State private var userEditedActivityDetail = false
 
     // Pickers
     @State private var showStartPicker = false
@@ -261,6 +264,12 @@ DispatchQueue.main.async {
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .onAppear { onAppearSetup() }
             .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
+            .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
+            .onChange(of: selectedCustomName) { _, _ in maybeUpdateActivityDetailFromDefaults() }
+            .onChange(of: activityDetail) { old, new in
+                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+                userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            }
         }
     }
 
@@ -297,7 +306,7 @@ DispatchQueue.main.async {
             .navigationTitle("Start Time")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false; maybeUpdateActivityDetailFromDefaults() } }
             }
         }
         .presentationDetents([.medium])
@@ -390,6 +399,34 @@ DispatchQueue.main.async {
             title = auto
             initialAutoTitle = auto
             isTitleEdited = false
+        }
+        // Prefill default description after hydration (first paint)
+        DispatchQueue.main.async {
+            maybeUpdateActivityDetailFromDefaults()
+        }
+    }
+
+    // MARK: - P3 Helpers — Default description logic (editor)
+    private func editorDefaultDescription(timestamp: Date, activity: ActivityType, customName: String) -> String {
+        let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
+        let hour = Calendar.current.component(.hour, from: timestamp)
+        let part: String
+        switch hour {
+        case 0...4: part = "Late Night"
+        case 5...11: part = "Morning"
+        case 12...17: part = "Afternoon"
+        default: part = "Evening"
+        }
+        return "\(part) \(label)"
+    }
+    /// Update activityDetail only if it's empty OR still equal to the last auto-generated default.
+    private func maybeUpdateActivityDetailFromDefaults() {
+        let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
+        let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty || trimmed == lastAutoActivityDetail {
+            activityDetail = newDefault
+            lastAutoActivityDetail = newDefault
+            userEditedActivityDetail = false
         }
     }
 

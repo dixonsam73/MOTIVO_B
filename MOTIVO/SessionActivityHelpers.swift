@@ -1,4 +1,3 @@
-
 import Foundation
 import CoreData
 
@@ -35,6 +34,54 @@ enum SessionActivity {
                 activity].compactMap { $0 }.joined(separator: " • ")
     }
 
+    // MARK: - NEW: Defaults & Feed title/subtitle helpers (P3)
+    // Friendly generated description like "Morning Practice" based on timestamp and activity.
+    static func defaultDescription(for session: NSManagedObject) -> String {
+        let ts = (session.value(forKey: "timestamp") as? Date) ?? Date()
+        let activityLabel = name(for: session) // this already resolves custom label if present
+        let part = dayPart(for: ts)
+        return "\(part) \(activityLabel)"
+    }
+
+    // True if the current description equals what defaultDescription(for:) would produce.
+    static func isUsingDefaultDescription(for session: NSManagedObject) -> Bool {
+        let desc = description(for: session).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !desc.isEmpty else { return false }
+        return desc.caseInsensitiveCompare(defaultDescription(for: session)) == .orderedSame
+    }
+
+    // Feed title according to rules.
+    // D empty → Instrument + Activity
+    // D == Default → Default description
+    // D custom → Custom description
+    static func feedTitle(for session: NSManagedObject) -> String {
+        let d = description(for: session).trimmingCharacters(in: .whitespacesAndNewlines)
+        if d.isEmpty { return headerTitle(for: session) }
+        if isUsingDefaultDescription(for: session) { return d }
+        return d // custom
+    }
+
+    // Feed subtitle according to rules.
+    // D empty → Time, Date
+    // D == Default → Instrument, Time, Date
+    // D custom → Instrument, Activity, Time, Date
+    static func feedSubtitle(for session: NSManagedObject) -> String {
+        let instrumentName = (session.value(forKeyPath: "instrument.name") as? String)?.trimmedNonEmpty() ?? "Instrument"
+        let activityLabel = name(for: session)
+        let ts = (session.value(forKey: "timestamp") as? Date) ?? Date()
+
+        let (timeStr, dateStr) = timeAndDateStrings(for: ts)
+
+        let d = description(for: session).trimmingCharacters(in: .whitespacesAndNewlines)
+        if d.isEmpty {
+            return [timeStr, dateStr].joined(separator: ", ")
+        } else if isUsingDefaultDescription(for: session) {
+            return [instrumentName, timeStr, dateStr].joined(separator: ", ")
+        } else {
+            return [instrumentName, activityLabel, timeStr, dateStr].joined(separator: ", ")
+        }
+    }
+
     // MARK: - Internal enum label mapper (no dependency on scattered enums)
     private static func enumLabel(for raw: Int16?) -> String {
         switch raw {
@@ -45,6 +92,32 @@ enum SessionActivity {
         case 4: return "Performance"
         default: return "Practice"
         }
+    }
+
+    private static func dayPart(for date: Date) -> String {
+        // Local time components
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour], from: date)
+        let hour = comps.hour ?? 0
+        switch hour {
+        case 0...4: return "Late Night"
+        case 5...11: return "Morning"
+        case 12...17: return "Afternoon"
+        default: return "Evening" // 18...23
+        }
+    }
+
+    private static func timeAndDateStrings(for date: Date) -> (String, String) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.doesRelativeDateFormatting = true
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .none
+        timeFormatter.timeStyle = .short
+
+        return (timeFormatter.string(from: date), dateFormatter.string(from: date))
     }
 }
 

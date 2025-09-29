@@ -298,20 +298,27 @@ fileprivate struct FilterBar: View {
 fileprivate struct StatsBannerView: View {
     let sessions: [Session]
 
-    private var totalMinutes: Int {
-        // Compute safely: only read Core Data keys that exist on the entity.
+    private var totalSeconds: Int {
         var total = 0
         for s in sessions {
             let attrs = s.entity.attributesByName
-            if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber {
+            if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber {
                 total += n.intValue
+            } else if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber {
+                total += n.intValue * 60
             } else if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber {
-                total += n.intValue
+                total += n.intValue * 60
             } else if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber {
-                total += n.intValue
+                total += n.intValue * 60
             }
         }
-        return total
+        return max(0, total)
+    }
+
+    private var totalTimeDisplay: String {
+        let h = totalSeconds / 3600
+        let m = (totalSeconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
     private var count: Int { sessions.count }
@@ -321,7 +328,7 @@ fileprivate struct StatsBannerView: View {
             VStack(alignment: .leading) {
                 Text("Sessions: \(count)")
                     .font(.subheadline)
-                Text("Total minutes: \(totalMinutes)")
+                Text("Total Time: \(totalTimeDisplay)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -331,39 +338,26 @@ fileprivate struct StatsBannerView: View {
     }
 }
 
+
 // MARK: - Row (now shows NOTES under title)
 
 fileprivate struct SessionRow: View {
     let session: Session
 
-    
-    private var instrumentName: String {
-        let label = (session.value(forKey: "userInstrumentLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let custom = label, !custom.isEmpty { return custom }
-        return session.instrument?.name ?? "Session"
+    private var feedTitle: String {
+        SessionActivity.feedTitle(for: session)
     }
-    private var activityName: String {
-        let label = (session.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let custom = label, !custom.isEmpty { return custom }
-        let raw = (session.value(forKey: "activityType") as? Int16) ?? 0
-        return (ActivityType(rawValue: raw) ?? .practice).label
+    private var feedSubtitle: String {
+        SessionActivity.feedSubtitle(for: session)
     }
     private var attachmentCount: Int {
         (session.attachments as? Set<Attachment>)?.count ?? 0
     }
 
-    private var activityDetailPreview: String? {
-        let raw = ((session.value(forKey: "activityDetail") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if raw.isEmpty { return nil }
-        // Single-line, truncated preview
-        let oneLine = raw.replacingOccurrences(of: "\n", with: " ")
-        return String(oneLine.prefix(140))
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .firstTextBaseline) {
-                Text("\(instrumentName.uppercased()) : \(activityName.uppercased())")
+                Text(feedTitle)
                     .font(.headline)
                     .lineLimit(2)
                 Spacer()
@@ -376,13 +370,10 @@ fileprivate struct SessionRow: View {
                     .foregroundStyle(.secondary)
                 }
             }
-
-            if let preview = activityDetailPreview {
-                Text(preview)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
+            Text(feedSubtitle)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
         }
         .padding(.vertical, 4)
     }
