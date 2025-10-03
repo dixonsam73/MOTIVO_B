@@ -6,6 +6,11 @@
 //  P0: Background-safe timer implementation (compute-on-resume; persisted state)
 //  [ROLLBACK ANCHOR] v7.8 pre-hotfix — PracticeTimer first-use lag
 //  [ROLLBACK ANCHOR] v7.8 Scope1 — primary-activity preselect applied (no migration)
+//  [ROLLBACK ANCHOR] v7.8 Scope2 — pre-wheel-pickers (used .menu pickers)
+//
+//  Scope 2: Replace inline .menu pickers with wheel pickers in sheets (Instrument + Activity).
+//  - Preserve prefetch; first open must remain instant.
+//  - No migration; timer behaviour unchanged.
 //
 import SwiftUI
 import Combine
@@ -23,13 +28,22 @@ struct PracticeTimerView: View {
     // Instruments (profile)
     @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
-    @State private var activity: SessionActivityType = .practice
     @State private var userActivities: [UserActivity] = []
-    @State private var activityChoice: String = "core:0"
+
+    // Instrument wheel state (index into instruments array)
+    @State private var instrumentIndex: Int = 0
+
+    // Activity state
+    @State private var activity: SessionActivityType = .practice
     @State private var activityDetail: String = ""
+    @State private var activityChoice: String = "core:0" // "core:<raw>" or "custom:<name>"
 
     // Primary Activity (Stage 1)
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
+    // Wheel picker sheet toggles
+    @State private var showInstrumentSheet: Bool = false
+    @State private var showActivitySheet: Bool = false
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -55,7 +69,7 @@ struct PracticeTimerView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 24) {
-                // Instrument selection
+                // Instrument & Activity selectors (wheel in sheets)
                 Group {
                     if hasNoInstruments {
                         VStack(spacing: 6) {
@@ -69,42 +83,102 @@ struct PracticeTimerView: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     } else {
-                        VStack(spacing: 8) {
+                        VStack(spacing: 12) {
+                            // Instrument
                             if hasMultipleInstruments {
-                                Picker("Instrument", selection: $instrument) {
-                                    ForEach(instruments, id: \.self) { inst in
-                                        Text(inst.name ?? "Instrument").tag(inst as Instrument?)
+                                Button {
+                                    // Set index to current selection before opening
+                                    if let current = instrument,
+                                       let idx = instruments.firstIndex(of: current) {
+                                        instrumentIndex = idx
+                                    }
+                                    showInstrumentSheet = true
+                                } label: {
+                                    HStack {
+                                        Text("Instrument")
+                                        Spacer()
+                                        Text(currentInstrumentName())
+                                            .foregroundStyle(.secondary)
                                     }
                                 }
-                                .pickerStyle(.menu)
+                                .buttonStyle(.plain)
+                                .sheet(isPresented: $showInstrumentSheet) {
+                                    NavigationView {
+                                        VStack {
+                                            Picker("Instrument", selection: $instrumentIndex) {
+                                                ForEach(instruments.indices, id: \.self) { i in
+                                                    Text(instruments[i].name ?? "Instrument").tag(i)
+                                                }
+                                            }
+                                            .pickerStyle(.wheel)
+                                            .labelsHidden()
+                                        }
+                                        .navigationTitle("Instrument")
+                                        .toolbar {
+                                            ToolbarItem(placement: .confirmationAction) {
+                                                Button("Done") {
+                                                    applyInstrumentIndex()
+                                                    showInstrumentSheet = false
+                                                }
+                                            }
+                                            ToolbarItem(placement: .cancellationAction) {
+                                                Button("Cancel") { showInstrumentSheet = false }
+                                            }
+                                        }
+                                    }
+                                }
                             } else if let only = instruments.first {
                                 HStack {
-                                    Text(only.name ?? "Instrument")
-                                        .font(.headline)
+                                    Text("Instrument")
                                     Spacer()
+                                    Text(only.name ?? "Instrument")
+                                        .foregroundStyle(.secondary)
                                 }
                                 .onAppear { instrument = only }
                             }
 
                             // Activity
-                            Section {
-                                Picker("Activity", selection: $activityChoice) {
-                                    ForEach(SessionActivityType.allCases) { a in
-                                        Text(a.label).tag("core:\(a.rawValue)")
+                            Button {
+                                showActivitySheet = true
+                            } label: {
+                                HStack {
+                                    Text("Activity")
+                                    Spacer()
+                                    Text(activityDisplayName(for: activityChoice))
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .sheet(isPresented: $showActivitySheet) {
+                                NavigationView {
+                                    VStack {
+                                        Picker("Activity", selection: $activityChoice) {
+                                            // Core activities
+                                            ForEach(SessionActivityType.allCases) { a in
+                                                Text(a.label).tag("core:\(a.rawValue)")
+                                            }
+                                            // User customs (no separator)
+                                            ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                                                Text(name).tag("custom:\(name)")
+                                            }
+                                        }
+                                        .pickerStyle(.wheel)
+                                        .labelsHidden()
+                                        .onChange(of: activityChoice) { choice in
+                                            applyChoice(choice)
+                                        }
                                     }
-                                    if !userActivities.isEmpty {
-                                        Text("— Your Activities —").disabled(true)
-                                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                                            Text(name).tag("custom:\(name)")
+                                    .navigationTitle("Activity")
+                                    .toolbar {
+                                        ToolbarItem(placement: .confirmationAction) {
+                                            Button("Done") { showActivitySheet = false }
+                                        }
+                                        ToolbarItem(placement: .cancellationAction) {
+                                            Button("Cancel") { showActivitySheet = false }
                                         }
                                     }
                                 }
-                                .pickerStyle(.menu)
-                                .onChange(of: activityChoice) { choice in
-                                    applyChoice(choice)
-                                }
                             }
-                            .padding(.horizontal)
                         }
                         .padding(.horizontal)
                     }
@@ -148,18 +222,26 @@ struct PracticeTimerView: View {
                     if let primaryName = fetchPrimaryInstrumentName(),
                        let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
                         instrument = match
+                        if let idx = instruments.firstIndex(of: match) { instrumentIndex = idx }
                     } else if hasOneInstrument {
                         instrument = instruments.first
+                        instrumentIndex = 0
+                    } else if hasMultipleInstruments {
+                        instrumentIndex = 0 // safe default
+                        instrument = instruments.first
                     }
+                } else if let current = instrument,
+                          let idx = instruments.firstIndex(of: current) {
+                    instrumentIndex = idx
                 }
 
-                // Prefetch custom activities so the Activity menu is instant on first open
+                // Prefetch custom activities so the Activity wheel is instant on first open
                 loadUserActivities()
 
                 // Apply Primary Activity if available
                 applyPrimaryActivityRef()
 
-                // Ensure the picker reflects current state
+                // Ensure the choice string reflects current state
                 syncActivityChoiceFromState()
             }
             .onAppear {
@@ -205,6 +287,32 @@ struct PracticeTimerView: View {
                 )
             }
         }
+    }
+
+    // MARK: - Helpers for wheel UI
+
+    private func currentInstrumentName() -> String {
+        if let inst = instrument { return inst.name ?? "Instrument" }
+        if instruments.indices.contains(instrumentIndex) { return instruments[instrumentIndex].name ?? "Instrument" }
+        return "Instrument"
+    }
+
+    private func applyInstrumentIndex() {
+        guard instruments.indices.contains(instrumentIndex) else { return }
+        instrument = instruments[instrumentIndex]
+    }
+
+    private func activityDisplayName(for choice: String) -> String {
+        if choice.hasPrefix("core:") {
+            if let raw = Int(choice.split(separator: ":").last ?? "0"),
+               let t = SessionActivityType(rawValue: Int16(raw)) {
+                return t.label
+            }
+            return SessionActivityType.practice.label
+        } else if choice.hasPrefix("custom:") {
+            return String(choice.dropFirst("custom:".count))
+        }
+        return SessionActivityType.practice.label
     }
 
     // MARK: - Apply choices / primary
@@ -435,3 +543,5 @@ struct PracticeTimerView: View {
         }
     }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 Scope2 — post-wheel-pickers (wheel pickers in sheets; behaviour unchanged)
