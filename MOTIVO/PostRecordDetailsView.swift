@@ -1,8 +1,14 @@
 //  PostRecordDetailsView.swift
 //  MOTIVO
 //  [ROLLBACK ANCHOR] v7.8 pre-hotfix commit: remove first-use lag in picker/notes
+//  [ROLLBACK ANCHOR] v7.8 Stage2 — pre (before Primary pinned-first)
 //
-
+//  v7.8 Stage 2 — Primary pinned-first in Activity wheel
+//  - Pins Primary Activity at top (deduped), then core, then customs.
+//  - Restores local helper functions used in the original file (formattedDate, secondsToHM, formattedDuration, ensureCameraAuthorized).
+//  - Breaks up complex expressions to keep the compiler happy.
+//  - No schema/migrations.
+//
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -10,7 +16,6 @@ import AVFoundation
 import UIKit
 
 // SessionActivityType moved to SessionActivityType.swift
-
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -59,6 +64,9 @@ struct PostRecordDetailsView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
+    // Primary Activity persisted ref
+    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
     var onSaved: (() -> Void)?
 
     init(
@@ -106,7 +114,8 @@ struct PostRecordDetailsView: View {
                         Picker("Instrument", selection: $instrument) {
                             Text("Select instrument…").tag(nil as Instrument?)
                             ForEach(instruments, id: \.self) { inst in
-                                Text(inst.name ?? "").tag(inst as Instrument?)
+                                let name = inst.name ?? ""
+                                Text(name).tag(inst as Instrument?)
                             }
                         }
                     }
@@ -117,7 +126,8 @@ struct PostRecordDetailsView: View {
                         tempActivity = activity
                         showActivityPicker = true
                     } label: {
-                        HStack { Text("Activity"); Spacer(); Text(selectedCustomName.isEmpty ? activity.label : selectedCustomName).foregroundStyle(.secondary) }
+                        let display = selectedCustomName.isEmpty ? activity.label : selectedCustomName
+                        HStack { Text("Activity"); Spacer(); Text(display).foregroundStyle(.secondary) }
                     }
                 }
 
@@ -132,16 +142,20 @@ struct PostRecordDetailsView: View {
                         tempDate = timestamp
                         showStartPicker = true
                     } label: {
-                        HStack { Text("Start Time"); Spacer(); Text(formattedDate(timestamp)).foregroundStyle(.secondary) }
+                        let dateStr = formattedDate(timestamp)
+                        HStack { Text("Start Time"); Spacer(); Text(dateStr).foregroundStyle(.secondary) }
                     }
                 }
 
                 Section {
                     Button {
-                        (tempHours, tempMinutes) = secondsToHM(durationSeconds)
+                        let hm = secondsToHM(durationSeconds)
+                        tempHours = hm.0
+                        tempMinutes = hm.1
                         showDurationPicker = true
                     } label: {
-                        HStack { Text("Duration"); Spacer(); Text(formattedDuration(durationSeconds)).foregroundStyle(.secondary) }
+                        let durStr = formattedDuration(durationSeconds)
+                        HStack { Text("Duration"); Spacer(); Text(durStr).foregroundStyle(.secondary) }
                     }
                     if durationSeconds == 0 {
                         Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
@@ -180,7 +194,9 @@ struct PostRecordDetailsView: View {
                     Button("Add Photo") { showPhotoPicker = true }
                     Button("Add File") { showFileImporter = true }
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
+                        Button("Take Photo") {
+                            ensureCameraAuthorized { showCamera = true }
+                        }
                     }
                 }
             }
@@ -198,7 +214,7 @@ struct PostRecordDetailsView: View {
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
             }
-            .sheet(isPresented: $showActivityPicker) { activityPicker }
+            .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
             .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
@@ -268,19 +284,15 @@ struct PostRecordDetailsView: View {
 
     // MARK: - Subviews
 
-    private var activityPicker: some View {
+    private var activityPickerPinned: some View {
         NavigationStack {
             VStack {
+                // Break out choices to ease type-checking
+                let choices = activityChoicesPinned()
                 Picker("", selection: $activityChoice) {
-                    // Core activities first
-                    ForEach(SessionActivityType.allCases) { type in
-                        Text(type.label).tag("core:\(type.rawValue)")
-                    }
-                    // Then user-local customs
-                    if !userActivities.isEmpty {
-                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                            Text(name).tag("custom:\(name)")
-                        }
+                    ForEach(choices, id: \.self) { choice in
+                        let label = activityDisplayName(for: choice)
+                        Text(label).tag(choice)
                     }
                 }
                 .pickerStyle(.wheel)
@@ -319,16 +331,16 @@ struct PostRecordDetailsView: View {
                 }
             }
             .onAppear {
+                // Keep wheel aligned with current state when presented
                 if !selectedCustomName.isEmpty {
                     activityChoice = "custom:\(selectedCustomName)"
                 } else {
                     activityChoice = "core:\(activity.rawValue)"
                 }
-                // [v7.8 hotfix] userActivities are prefetched in parent .task; no fetch here.
             }
         }
     }
-    
+
     private var startPicker: some View {
         NavigationStack {
             VStack {
@@ -365,6 +377,75 @@ struct PostRecordDetailsView: View {
         .presentationDetents([.medium])
     }
 
+    // MARK: - Helpers for pinned list
+
+    private func activityDisplayName(for choice: String) -> String {
+        if choice.hasPrefix("core:") {
+            if let raw = Int(choice.split(separator: ":").last ?? "0"),
+               let t = SessionActivityType(rawValue: Int16(raw)) {
+                return t.label
+            }
+            return SessionActivityType.practice.label
+        } else if choice.hasPrefix("custom:") {
+            return String(choice.dropFirst("custom:".count))
+        }
+        return SessionActivityType.practice.label
+    }
+
+    private func activityChoicesPinned() -> [String] {
+        // Core list
+        let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
+        // Custom list
+        let customs: [String] = userActivities.compactMap { ua in
+            let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? nil : "custom:\(n)"
+        }
+
+        // Normalize primary
+        let primary = normalizedPrimary()
+        var result: [String] = []
+
+        if let p = primary { result.append(p) }
+        for c in core where !result.contains(c) { result.append(c) }
+        for cu in customs where !result.contains(cu) { result.append(cu) }
+        return result
+    }
+
+    private func normalizedPrimary() -> String? {
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               SessionActivityType(rawValue: Int16(v)) != nil {
+                return "core:\(v)"
+            }
+            return "core:0"
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                return "custom:\(name)"
+            }
+            return "core:0"
+        } else {
+            return "core:0"
+        }
+    }
+
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+
+    private func syncActivityChoiceFromState() {
+        if selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            activityChoice = "core:\(activity.rawValue)"
+        } else {
+            activityChoice = "custom:\(selectedCustomName)"
+        }
+    }
+
     // MARK: - P3 Helpers — Default description logic (editor)
     private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
         let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
@@ -395,8 +476,11 @@ struct PostRecordDetailsView: View {
     private func saveToCoreData() {
         let s = Session(context: viewContext)
 
-        if (s.value(forKey: "id") as? UUID) == nil {         s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
-s.setValue(UUID(), forKey: "id") }
+        if (s.value(forKey: "id") as? UUID) == nil {
+            let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
+            s.setValue(trimmedCustom.isEmpty ? nil : trimmedCustom, forKey: "userActivityLabel")
+            s.setValue(UUID(), forKey: "id")
+        }
         if s.timestamp == nil { s.timestamp = Date() }
 
         s.instrument = instrument
@@ -478,19 +562,21 @@ s.setValue(UUID(), forKey: "id") }
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
                 let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
-                let isThumb = (att.id == chosenThumbID) && (att.kind == .image)
+                let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
-            } catch { print("Attachment commit failed: \(error)") }
+            } catch {
+                print("Attachment commit failed: ", error)
+            }
         }
+
         stagedAttachments.removeAll()
-        selectedThumbnailID = nil
     }
 
-    // MARK: - Helpers
+    // MARK: - Misc helpers
 
     private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
-        return selectedCustomName.isEmpty ? activity.label : selectedCustomName
+        return activity.label
     }
 
     private func refreshAutoTitleIfNeeded() {
@@ -521,6 +607,13 @@ s.setValue(UUID(), forKey: "id") }
         return nil
     }
 
+    // Restored local helpers (from original file patterns)
+
+    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return (h, m)
+    }
+
     private func formattedDate(_ date: Date) -> String {
         let f = DateFormatter(); f.doesRelativeDateFormatting = true
         f.dateStyle = .medium; f.timeStyle = .short
@@ -532,55 +625,17 @@ s.setValue(UUID(), forKey: "id") }
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
-    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
-        return (h, m)
-    }
-
     private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
-        case .authorized: onAuthorized()
+        case .authorized:
+            onAuthorized()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
             }
-        default: self.showCameraDeniedAlert = true
-        }
-    }
-
-    @MainActor
-    private func upsertTags(_ names: [String]) -> [Tag] {
-        var results: [Tag] = []
-        guard let uid = PersistenceController.shared.currentUserID else { return results }
-        for name in names {
-            let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
-            if let existing = (try? viewContext.fetch(req))?.first {
-                results.append(existing)
-            } else {
-                let t = Tag(context: viewContext)
-                t.name = name
-                t.ownerUserID = uid
-                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
-                results.append(t)
-            }
-        }
-        return results
-    }
-    // MARK: - Activity helpers (customs)
-    private func loadUserActivities() {
-        do {
-            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
-        } catch {
-            userActivities = []
-        }
-    }
-    private func syncActivityChoiceFromState() {
-        if !selectedCustomName.isEmpty {
-            activityChoice = "custom:\(selectedCustomName)"
-        } else {
-            activityChoice = "core:\(activity.rawValue)"
+        default:
+            self.showCameraDeniedAlert = true
         }
     }
 }

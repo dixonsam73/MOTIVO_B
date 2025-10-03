@@ -4,11 +4,10 @@
 //
 //  [ROLLBACK ANCHOR] v7.8 Scope1 — pre-primary-activity (no primary activity selector; icons on manage rows; account at top)
 //
-//  Scope 1 (update): Move Primary selectors next to their managers.
-//  - Primary Instrument picker now lives in the Instruments section (above "Manage Instruments").
-//  - Primary Activity picker now lives in the Activities section (above "Manage Activities").
-//  - Remove the "— Your Activities —" separator; customs follow core items directly.
-//  - Account section remains at the bottom. No migrations.
+//  v7.8 Stage 2 — Primary fallback notice + live sync
+//  - Shows a one-time in-app notice if Primary (custom) was deleted/hidden and auto-reset to Practice.
+//  - Live-syncs the Primary picker when returning from Activity Manager or when AppStorage changes.
+//  - No schema/migrations.
 //
 import SwiftUI
 import CoreData
@@ -33,10 +32,15 @@ struct ProfileView: View {
     @State private var profile: Profile?
     @State private var isSaving = false
 
-    // Primary Activity (Stage 1)
+    // Primary Activity (Stage 1 persisted in AppStorage; Stage 2 UX hardening)
+    // Format: "core:<raw>" or "custom:<name>"
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
     @State private var userActivities: [UserActivity] = []
     @State private var primaryActivityChoice: String = "core:0" // mirrors picker; same tag format
+
+    // Stage 2: one-time notice flag (set in ActivityListView on fallback)
+    @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
+    @State private var showPrimaryFallbackAlert: Bool = false
 
     var body: some View {
         NavigationView {
@@ -50,7 +54,7 @@ struct ProfileView: View {
                     Toggle("Default to Private Posts", isOn: $defaultPrivacy)
                 }
 
-                // MARK: - Instruments (now includes Primary Instrument picker)
+                // MARK: - Instruments (includes Primary Instrument picker)
                 Section {
                     Picker("Primary Instrument", selection: $primaryInstrumentName) {
                         ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
@@ -65,7 +69,7 @@ struct ProfileView: View {
                     }
                 }
 
-                // MARK: - Activities (now includes Primary Activity picker; no separator line)
+                // MARK: - Activities (includes Primary Activity picker; no separator line)
                 Section {
                     Picker("Primary Activity", selection: $primaryActivityChoice) {
                         // Core activities first
@@ -138,11 +142,37 @@ struct ProfileView: View {
                     .disabled(profile == nil)
                 }
             }
+            // Initial hydration
             .onAppear {
                 load()
                 refreshUserActivities()
-                // Sync local picker from stored ref
+                // Sync local picker from stored ref (normalize if needed)
                 primaryActivityChoice = normalizedPrimaryActivityRef()
+
+                // Stage 2: show one-time notice if flagged by ActivityListView
+                if primaryFallbackNoticeNeeded {
+                    showPrimaryFallbackAlert = true
+                    // Clear the flag immediately so it's truly one-time
+                    primaryFallbackNoticeNeeded = false
+                }
+            }
+            // When returning from Activity Manager, refresh customs and re-normalize picker
+            .onChange(of: showActivityManager) { wasPresented, isPresented in
+                if wasPresented == true && isPresented == false {
+                    refreshUserActivities()
+                    primaryActivityChoice = normalizedPrimaryActivityRef()
+                }
+            }
+            // If the underlying AppStorage value changes (e.g., due to deletion in manager),
+            // keep the picker selection in sync.
+            .onChange(of: primaryActivityRef) { _, _ in
+                primaryActivityChoice = normalizedPrimaryActivityRef()
+            }
+            // One-time alert
+            .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Your Primary Activity was removed, so it’s been reset to Practice.")
             }
             .sheet(isPresented: $showInstrumentManager) {
                 InstrumentListView()
@@ -241,10 +271,32 @@ struct ProfileView: View {
         }
     }
 
-    private func writePrimaryActivityRef(_ value: String) {
-        // Persist to AppStorage/UserDefaults; no other side effects here
-        primaryActivityRef = value
+    /// Persists the user's selection and keeps local state in sync.
+    private func writePrimaryActivityRef(_ newValue: String) {
+        // Normalize against current customs
+        let normalized = normalizeChoiceString(newValue)
+        primaryActivityRef = normalized
+        primaryActivityChoice = normalized
+    }
+
+    /// Normalizes picker choice strings to valid "core:<raw>" / "custom:<name>" respecting available customs.
+    private func normalizeChoiceString(_ choice: String) -> String {
+        if choice.hasPrefix("core:") {
+            if let v = Int(choice.split(separator: ":").last ?? "0"),
+               SessionActivityType(rawValue: Int16(v)) != nil {
+                return "core:\(v)"
+            } else {
+                return "core:0"
+            }
+        } else if choice.hasPrefix("custom:") {
+            let name = String(choice.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                return "custom:\(name)"
+            } else {
+                return "core:0"
+            }
+        } else {
+            return "core:0"
+        }
     }
 }
-
-//  [ROLLBACK ANCHOR] v7.8 Scope1 — post-primary-activity (primary pickers moved; no separators; account at bottom)

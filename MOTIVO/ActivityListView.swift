@@ -2,7 +2,12 @@
 //  ActivityListView.swift
 //  MOTIVO
 //
-//  Auto-generated for v7.8 prep
+//  v7.8 Stage 2 — Primary fallback + one-time notice flag
+//
+//  Changes:
+//  - When a custom activity is deleted and it matches the current Primary (custom),
+//    reset Primary to Practice ("core:0") and set a one-time notice flag for ProfileView.
+//  - No schema/migrations. User-local customs only.
 //
 
 import SwiftUI
@@ -12,6 +17,8 @@ struct ActivityListView: View {
     @Environment(\.managedObjectContext) private var moc
     @Environment(\.dismiss) private var dismiss
 
+    // [ROLLBACK ANCHOR] v7.8 Stage2 — pre
+
     // Custom activities are user-local (scoped by ownerUserID)
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(key: "displayName", ascending: true)],
@@ -19,6 +26,12 @@ struct ActivityListView: View {
     ) private var activities: FetchedResults<UserActivity>
 
     @State private var newActivity: String = ""
+
+    // Primary Activity (AppStorage)
+    // Format: "core:<raw>" or "custom:<name>"
+    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    // One-time notice flag to be consumed by ProfileView
+    @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
 
     var body: some View {
         let isSignedIn = (PersistenceController.shared.currentUserID != nil)
@@ -72,8 +85,19 @@ struct ActivityListView: View {
     private func delete(at offsets: IndexSet) {
         let items = Array(activities)
         for i in offsets {
-            moc.delete(items[i])
+            let activityObj = items[i]
+            let name = (activityObj.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+            // If the deleted item is the current Primary (custom), reset to Practice and set one-time notice
+            if !name.isEmpty && primaryActivityRef.caseInsensitiveCompare("custom:\(name)") == .orderedSame {
+                primaryActivityRef = "core:0" // Practice
+                primaryFallbackNoticeNeeded = true
+            }
+
+            moc.delete(activityObj)
         }
         do { try moc.save() } catch { print("Delete activity error: \(error)") }
+
+        // [ROLLBACK ANCHOR] v7.8 Stage2 — post
     }
 }

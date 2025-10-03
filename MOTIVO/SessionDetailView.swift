@@ -7,6 +7,9 @@
 //  Scope 0: Route all activity labels/titles/descriptions through SessionActivityHelpers.
 //  No behavior changes expected; removes duplicate derivation logic.
 //
+//  v7.8 Stage 2 — Fix AddEditSessionView initializer call
+//  - Replace outdated initializer that passed isPresented / onSaved with current form.
+//
 import SwiftUI
 import CoreData
 import UIKit
@@ -98,11 +101,8 @@ struct SessionDetailView: View {
         }
         // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
         .fullScreenCover(isPresented: $showEdit) {
-            AddEditSessionView(
-                isPresented: $showEdit,
-                session: session,
-                onSaved: { dismiss() } // pop detail → Feed
-            )
+            // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
+            AddEditSessionView(session: session)
         }
         .sheet(isPresented: $isShowingPreview) {
             if let url = previewURL { QuickLookPreview(url: url) }

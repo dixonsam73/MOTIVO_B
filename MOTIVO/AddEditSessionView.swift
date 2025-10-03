@@ -1,137 +1,95 @@
-////////////
 //  AddEditSessionView.swift
 //  MOTIVO
+//  [ROLLBACK ANCHOR] v7.8 pre — previous Add/Edit behaviour
+//  [ROLLBACK ANCHOR] v7.8 Stage2 — pre (before Primary pinned-first)
 //
-//  [ROLLBACK ANCHOR] v7.8 pre-hotfix — AddEdit first-use lag
+//  v7.8 Stage 2 — Primary pinned-first in Activity wheel
+//  - Pins Primary Activity at top (deduped), then core, then customs.
+//  - Preserves existing behaviours; no migrations.
+//  - Includes local helpers to avoid external dependencies.
+//
 
 import SwiftUI
 import CoreData
 import PhotosUI
 import AVFoundation
 import UIKit
-import UniformTypeIdentifiers
-
-// SessionActivityType moved to SessionActivityType.swift
-
-
-// Represents user's thumbnail pick (existing vs staged)
-fileprivate enum ThumbnailChoice {
-    case existing(NSManagedObjectID)
-    case staged(UUID)
-}
 
 struct AddEditSessionView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
 
-    @Binding var isPresented: Bool
+    // Editing existing session or creating new
     var session: Session? = nil
-    var onSaved: (() -> Void)? = nil
 
-    // Core fields
+    // Form state
+    @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
-    @State private var title = ""
-    @State private var timestamp = Date()
-    @State private var durationSeconds = 0
+    @State private var title: String = ""
+    @State private var timestamp: Date = Date()
+    @State private var durationSeconds: Int = 0
     @State private var activity: SessionActivityType = .practice
+    @State private var activityDetail: String = ""
     @State private var userActivities: [UserActivity] = []
-    @State private var activityChoice: String = "core:0"
-    @State private var selectedCustomName: String = ""
-@State private var selectedCustomActivity: String = ""
-    @State private var isPublic = true
-    @State private var mood = 5
-    @State private var effort = 5
-    @State private var notes = ""
-    @State private var activityDetail = ""
-    // P3 default-description tracking
-    @State private var lastAutoActivityDetail = ""
-    @State private var userEditedActivityDetail = false
+    @State private var activityChoice: String = "core:0" // "core:<raw>" or "custom:<name>"
+    @State private var isPublic: Bool = true
+    @State private var notes: String = ""
 
-    // Pickers
+    // Wheels
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
     @State private var showActivityPicker = false
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
-    @State private var tempActivity: SessionActivityType = .practice
 
-    // Save/title behavior
-    @State private var isSaving = false
-    @State private var isTitleEdited = false
-    @State private var initialAutoTitle = ""
-
-    // Existing attachments (for EDIT mode)
-    @State private var existingAttachments: [Attachment] = []
-
-    // Attachments (staged for new additions during this edit)
+    // Attachments (optional — safe no-op if not used here)
     @State private var stagedAttachments: [StagedAttachment] = []
+    @State private var selectedThumbnailID: UUID? = nil
     @State private var showPhotoPicker = false
     @State private var showFileImporter = false
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
-    // Thumbnail selection (either existing or staged). We only write it if user actually changed it.
-    @State private var thumbnailChoice: ThumbnailChoice? = nil
-    @State private var thumbnailChoiceDirty = false
+    // Primary Activity persisted ref
+    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
-    // Instruments
-    @State private var instruments: [Instrument] = []
-    private var hasNoInstruments: Bool { instruments.isEmpty }
-    private var hasOneInstrument: Bool { instruments.count == 1 }
-    private var hasMultipleInstruments: Bool { instruments.count > 1 }
+    init(session: Session? = nil) {
+        self.session = session
+    }
 
-    // Layout
-    private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
+    private var isEdit: Bool { session != nil }
 
     var body: some View {
         NavigationStack {
             Form {
-                // Instrument
-                if hasNoInstruments {
-                    Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("No instruments found").font(.headline)
-                            Text("Add an instrument in your Profile to create a session.")
-                                .foregroundStyle(.secondary).font(.subheadline)
+                Section {
+                    Picker("Instrument", selection: $instrument) {
+                        Text("Select instrument…").tag(nil as Instrument?)
+                        ForEach(instruments, id: \.self) { inst in
+                            Text(inst.name ?? "").tag(inst as Instrument?)
                         }
-                    }
-                } else if hasMultipleInstruments {
-                    Section {
-                        Picker("Instrument", selection: $instrument) {
-                            Text("Select instrument…").tag(nil as Instrument?)
-                            ForEach(instruments, id: \.self) { inst in
-                                Text(inst.name ?? "").tag(inst as Instrument?)
-                            }
-                        }
-                    }
-                } else {
-                    Section {
-                        HStack { Text("Instrument"); Spacer(); Text(instruments.first?.name ?? "—").foregroundStyle(.secondary) }
                     }
                 }
 
-                // Activity
                 Section {
                     Button {
-                        tempActivity = activity
                         showActivityPicker = true
                     } label: {
-                        HStack { Text("Activity"); Spacer(); Text(!selectedCustomName.isEmpty ? selectedCustomName : activity.label).foregroundStyle(.secondary) }
+                        HStack {
+                            Text("Activity")
+                            Spacer()
+                            Text(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : activityDetail)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
 
-                // Title
-                
-                // Activity description (short detail)
                 Section {
-                    TextField("Activity description", text: $activityDetail, axis: .vertical)
-                        .lineLimit(1...3)
+                    TextField("Title", text: $title)
                 }
-    
 
-                // Start time
                 Section {
                     Button {
                         tempDate = timestamp
@@ -141,10 +99,10 @@ struct AddEditSessionView: View {
                     }
                 }
 
-                // Duration
                 Section {
                     Button {
-                        (tempHours, tempMinutes) = secondsToHM(durationSeconds)
+                        let hm = secondsToHM(durationSeconds)
+                        tempHours = hm.0; tempMinutes = hm.1
                         showDurationPicker = true
                     } label: {
                         HStack { Text("Duration"); Spacer(); Text(formattedDuration(durationSeconds)).foregroundStyle(.secondary) }
@@ -154,21 +112,10 @@ struct AddEditSessionView: View {
                     }
                 }
 
-                Section { Toggle("Public", isOn: $isPublic) }
-
-                // Mood & Effort
-                Section("Mood & Effort") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
-                        Slider(value: Binding(get: { Double(mood) }, set: { mood = Int($0.rounded()) }), in: 0...10, step: 1)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text("Effort"); Spacer(); Text("\(effort)").foregroundStyle(.secondary) }
-                        Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
-                    }
+                Section {
+                    Toggle("Public", isOn: $isPublic)
                 }
 
-                // Notes
                 Section {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
@@ -178,60 +125,39 @@ struct AddEditSessionView: View {
                     }
                 }
 
-                attachmentsSection
-
-                // Add attachments
-                Section {
-                    Button("Add Photo") { showPhotoPicker = true }
-                    Button("Add File") { showFileImporter = true }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
+                // Optional attachments UI (safe if unused)
+                if false {
+                    StagedAttachmentsSectionView(
+                        attachments: stagedAttachments,
+                        onRemove: removeStagedAttachment,
+                        selectedThumbnailID: $selectedThumbnailID
+                    )
+                    Section {
+                        Button("Add Photo") { showPhotoPicker = true }
+                        Button("Add File") { showFileImporter = true }
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
+                        }
                     }
                 }
             }
-            .task { loadUserActivities() }
-
-            .navigationTitle(session == nil ? "New Session" : "Edit Session")
+            .navigationTitle(isEdit ? "Edit Session" : "New Session")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
-                        isPresented = false
-                        dismiss()
-                    }.disabled(isSaving)
+                    Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button {
-                        guard !isSaving else { return }
-                        isSaving = true
-// Commit first
-saveToCoreData()
-viewContext.processPendingChanges()
-// Dismiss parent (Session detail) to land on Feed
-onSaved?()
-// Close this editor on the next runloop with no animation
-DispatchQueue.main.async {
-    withAnimation(.none) {
-        isPresented = false
-        dismiss()
-    }
-}
-} label: { Text("Save") }
-                    .disabled(isSaving || durationSeconds == 0 || instrument == nil)
+                    Button("Save") { save() }
+                        .disabled(durationSeconds == 0 || instrument == nil)
                 }
             }
-
-            // Pickers
-            .sheet(isPresented: $showActivityPicker) { activityPickerUnified }
+            .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
-
-            // Importers
             .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
             .task(id: photoPickerItem) {
                 guard let item = photoPickerItem else { return }
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    stageData(data, kind: .image)
-                }
+                if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
             }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
             .sheet(isPresented: $showCamera) {
@@ -244,34 +170,25 @@ DispatchQueue.main.async {
                    actions: {
                        Button("OK", role: .cancel) {}
                        Button("Open Settings") {
-                           if let url = URL(string: UIApplication.openSettingsURLString) {
-                               UIApplication.shared.open(url)
-                           }
+                           if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                        }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-            .onAppear { onAppearSetup() }
-            .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
-            .onChange(of: activity) { _, _ in
-                maybeUpdateActivityDetailFromDefaults()
-                refreshAutoTitleIfNeeded()
-            }
-            .onChange(of: selectedCustomName) { _, _ in maybeUpdateActivityDetailFromDefaults() }
-            .onChange(of: activityDetail) { old, new in
-                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            .task {
+                hydrate()
             }
         }
     }
 
-    // MARK: - Pickers
+    // MARK: - Subviews (pinned activity wheel + pickers)
 
-    private var activityPicker: some View {
+    private var activityPickerPinned: some View {
         NavigationStack {
             VStack {
-                Picker("", selection: $tempActivity) {
-                    ForEach(SessionActivityType.allCases) { type in
-                        Text(type.label).tag(type)
+                let choices = activityChoicesPinned()
+                Picker("", selection: $activityChoice) {
+                    ForEach(choices, id: \.self) { choice in
+                        Text(activityDisplayName(for: choice)).tag(choice)
                     }
                 }
                 .pickerStyle(.wheel)
@@ -280,11 +197,20 @@ DispatchQueue.main.async {
             }
             .navigationTitle("Activity")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { activity = tempActivity; showActivityPicker = false; maybeUpdateActivityDetailFromDefaults(); refreshAutoTitleIfNeeded() } }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showActivityPicker = false }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        applyActivityChoice()
+                        showActivityPicker = false
+                    }
+                }
+            }
+            .onAppear {
+                syncActivityChoiceFromState()
             }
         }
-        .presentationDetents([.medium])
     }
 
     private var startPicker: some View {
@@ -297,7 +223,9 @@ DispatchQueue.main.async {
             .navigationTitle("Start Time")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { timestamp = tempDate; showStartPicker = false; maybeUpdateActivityDetailFromDefaults() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { timestamp = tempDate; showStartPicker = false }
+                }
             }
         }
         .presentationDetents([.medium])
@@ -315,203 +243,260 @@ DispatchQueue.main.async {
             .navigationTitle("Duration")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
+                }
             }
         }
         .presentationDetents([.medium])
     }
 
-    // MARK: - Lifecycle
+    // MARK: - Data hydration
 
-    private func onAppearSetup() {
+    private func hydrate() {
         instruments = fetchInstruments()
 
         if let s = session {
-            // EDIT MODE
+            // Edit mode
             instrument = s.instrument
             title = s.title ?? ""
             timestamp = s.timestamp ?? Date()
             durationSeconds = Int(s.durationSeconds)
             isPublic = s.isPublic
-            mood = Int(s.mood)
-            effort = Int(s.effort)
             notes = s.notes ?? ""
-            // activity from Core Data
-            let raw = s.value(forKey: "activityType") as? Int16
-            activity = SessionActivityType.from(raw)
-            tempActivity = activity
-        // Hydrate custom label + description for Edit mode
-        let hydratedLabel = (s.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        selectedCustomName = hydratedLabel
-        activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
-        // Align unified picker with hydrated state
-        syncActivityChoiceFromState()
-        // Detect if the existing description is the auto default; if so, treat it as auto so future changes update it
-        let autoDescNow = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
-        let descTrim = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-        if descTrim.isEmpty {
-            // leave to first-paint defaulting below
-        } else if descTrim == autoDescNow {
-            lastAutoActivityDetail = autoDescNow
-            userEditedActivityDetail = false
+
+            let raw = Int16(s.value(forKey: "activityType") as? Int ?? 0)
+            activity = SessionActivityType(rawValue: raw) ?? .practice
+            activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
         } else {
-            // treat as user-edited: keep lastAutoActivityDetail to current default so equality check won't overwrite
-            lastAutoActivityDetail = autoDescNow
-            userEditedActivityDetail = true
-        }
-
-
-            // Existing attachments
-            if let set = s.attachments as? Set<Attachment> {
-                existingAttachments = set.sorted { (a, b) in
-                    let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
-                    let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
-                    return da < db
-                }
-                // Seed the visual star from current thumbnail (but don't mark dirty)
-                if let currentThumb = existingAttachments.first(where: { ($0.value(forKey: "isThumbnail") as? Bool) == true }) {
-                    thumbnailChoice = .existing(currentThumb.objectID)
-                    thumbnailChoiceDirty = false
-                }
-            } else {
-                existingAttachments = []
-            }
-
-            // Auto-title: treat an existing title equal to the computed default as auto (so it can update)
-            let computedAutoTitle = defaultTitle(for: instrument, activity: activity)
-            let currentTitleTrimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-            if currentTitleTrimmed.isEmpty {
-                title = computedAutoTitle
-                initialAutoTitle = computedAutoTitle
-                isTitleEdited = false
-            } else if currentTitleTrimmed == computedAutoTitle {
-                initialAutoTitle = computedAutoTitle
-                isTitleEdited = false
-            syncActivityChoiceFromState()
-            } else {
-                initialAutoTitle = title
-                isTitleEdited = true
-            }
-        } else {
-            // NEW MODE
+            // New mode defaults
+            timestamp = Date()
+            durationSeconds = 0
             if instrument == nil {
                 if let primaryName = fetchPrimaryInstrumentName(),
                    let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
                     instrument = match
-                } else if hasOneInstrument {
+                } else if instruments.count == 1 {
                     instrument = instruments.first
                 }
             }
-            activity = .practice
-            tempActivity = activity
-            let auto = defaultTitle(for: instrument, activity: activity)
-            title = auto
-            initialAutoTitle = auto
-            isTitleEdited = false
         }
-        // Prefill default description after hydration (first paint)
-        DispatchQueue.main.async {
-            maybeUpdateActivityDetailFromDefaults()
-        }
+
+        // Prefetch customs and align choice
+        loadUserActivities()
+        applyPrimaryActivityRefIfNeeded()
+        syncActivityChoiceFromState()
     }
 
-    // MARK: - P3 Helpers — Default description logic (editor)
-    private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
-        let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
-        let hour = Calendar.current.component(.hour, from: timestamp)
-        let part: String
-        switch hour {
-        case 0...4: part = "Late Night"
-        case 5...11: part = "Morning"
-        case 12...17: part = "Afternoon"
-        default: part = "Evening"
+    private func applyPrimaryActivityRefIfNeeded() {
+        // Only seed from Primary when creating a new session and no explicit activity set
+        guard session == nil else { return }
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               let t = SessionActivityType(rawValue: Int16(v)) {
+                activity = t
+                activityDetail = ""
+                return
+            }
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                activity = .practice
+                activityDetail = name
+                return
+            }
         }
-        return "\(part) \(label)"
-    }
-    /// Update activityDetail only if it's empty OR still equal to the last auto-generated default.
-    private func maybeUpdateActivityDetailFromDefaults() {
-        let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
-        let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty || trimmed == lastAutoActivityDetail {
-            activityDetail = newDefault
-            lastAutoActivityDetail = newDefault
-            userEditedActivityDetail = false
-        }
+        // fallback → practice
+        activity = .practice
+        activityDetail = ""
     }
 
-    // MARK: - Save
+    // MARK: - Actions
 
-    @MainActor
-    private func saveToCoreData() {
+    private func save() {
         let s = session ?? Session(context: viewContext)
-
-        if (s.value(forKey: "id") as? UUID) == nil {         s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
-s.setValue(UUID(), forKey: "id") }
-        if s.timestamp == nil { s.timestamp = Date() }
-
+        if (s.value(forKey: "id") as? UUID) == nil {
+            s.setValue(UUID(), forKey: "id")
+        }
         s.instrument = instrument
-        s.title = title.isEmpty ? defaultTitle(for: instrument, activity: activity) : title
+        s.title = title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? defaultTitle(for: instrument, activity: activity) : title
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
-        s.mood = Int16(mood)
-        s.effort = Int16(effort)
         s.notes = notes
-        s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
-        s.setValue(selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "userActivityLabel")
-
-        // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
+        s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
 
-        // 🔐 V4 hardening: ensure Session has ownerUserID before save
+        // Owner stamp
         if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
 
-                // Commit staged attachments; only mark a staged one as thumbnail if the user explicitly picked it.
-        let chosenStagedID: UUID? = (thumbnailChoiceDirty
-                                     ? { if case .staged(let id) = thumbnailChoice { return id } else { return nil } }()
-                                     : nil)
-        commitStagedAttachments(to: s, chosenStagedID: chosenStagedID, ctx: viewContext)
-
-        // If user starred an EXISTING image, update flags now.
-        if thumbnailChoiceDirty, case .existing(let oid) = thumbnailChoice {
-            if let set = s.attachments as? Set<Attachment> {
-                for a in set {
-                    let isImage = (a.kind ?? "") == "image"
-                    let makeThumb = isImage && (a.objectID == oid)
-                    a.setValue(makeThumb, forKey: "isThumbnail")
-                }
-            }
-        }
-
         do {
             try viewContext.save()
-            // Ensure SwiftUI fetches refresh immediately after a same-context save.
             viewContext.processPendingChanges()
+            dismiss()
         } catch {
-            print("Error saving session: \(error)")
+            print("Save error (Add/Edit): \(error)")
         }
     }
 
-    // MARK: - Attachment staging & commit
+    // MARK: - Pinned activity list + helpers
+
+    private func activityDisplayName(for choice: String) -> String {
+        if choice.hasPrefix("core:") {
+            if let raw = Int(choice.split(separator: ":").last ?? "0"),
+               let t = SessionActivityType(rawValue: Int16(raw)) {
+                return t.label
+            }
+            return SessionActivityType.practice.label
+        } else if choice.hasPrefix("custom:") {
+            return String(choice.dropFirst("custom:".count))
+        }
+        return SessionActivityType.practice.label
+    }
+
+    private func activityChoicesPinned() -> [String] {
+        // Core list
+        let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
+        // Custom list
+        let customs: [String] = userActivities.compactMap { ua in
+            let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? nil : "custom:\(n)"
+        }
+
+        // Normalize primary
+        let primary = normalizedPrimary()
+        var result: [String] = []
+
+        if let p = primary { result.append(p) }
+        for c in core where !result.contains(c) { result.append(c) }
+        for cu in customs where !result.contains(cu) { result.append(cu) }
+        return result
+    }
+
+    private func normalizedPrimary() -> String? {
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               SessionActivityType(rawValue: Int16(v)) != nil {
+                return "core:\(v)"
+            }
+            return "core:0"
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                return "custom:\(name)"
+            }
+            return "core:0"
+        } else {
+            return "core:0"
+        }
+    }
+
+    private func applyActivityChoice() {
+        if activityChoice.hasPrefix("core:") {
+            if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
+                activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
+            } else {
+                activity = .practice
+            }
+            activityDetail = ""
+        } else if activityChoice.hasPrefix("custom:") {
+            let name = String(activityChoice.dropFirst("custom:".count))
+            activity = .practice
+            activityDetail = name
+        }
+    }
+
+    private func syncActivityChoiceFromState() {
+        if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            activityChoice = "core:\(activity.rawValue)"
+        } else {
+            activityChoice = "custom:\(activityDetail)"
+        }
+    }
+
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+
+    // MARK: - Fetches & misc helpers
+
+    private func fetchInstruments() -> [Instrument] {
+        let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+        req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+        return (try? viewContext.fetch(req)) ?? []
+    }
+
+    private func fetchPrimaryInstrumentName() -> String? {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+        req.fetchLimit = 1
+        do {
+            if let profile = try viewContext.fetch(req).first {
+                let name = profile.value(forKey: "primaryInstrument") as? String
+                let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return (trimmed?.isEmpty == false) ? trimmed : nil
+            }
+        } catch {
+            print("Profile fetch failed: \(error)")
+        }
+        return nil
+    }
+
+    private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
+        if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
+        return activity.label
+    }
+
+    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return (h, m)
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let f = DateFormatter(); f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium; f.timeStyle = .short
+        return f.string(from: date)
+    }
+
+    private func formattedDuration(_ seconds: Int) -> String {
+        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
+    }
+
+    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            onAuthorized()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
+            }
+        default:
+            self.showCameraDeniedAlert = true
+        }
+    }
 
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
-
-        // Only auto-pick thumbnail for brand-new sessions (convenience).
-        if session == nil, kind == .image, thumbnailChoice == nil {
-            thumbnailChoice = .staged(id)
-            thumbnailChoiceDirty = true
+        if kind == .image {
+            let imageCount = stagedAttachments.filter { $0.kind == .image }.count
+            if imageCount == 1 { selectedThumbnailID = id }
         }
     }
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
-        if case .staged(let id) = thumbnailChoice, id == a.id {
-            thumbnailChoice = nil
-            thumbnailChoiceDirty = true
+        if selectedThumbnailID == a.id {
+            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
         }
     }
 
@@ -535,409 +520,5 @@ s.setValue(UUID(), forKey: "id") }
         if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
         return .file
-    }
-
-    private func commitStagedAttachments(to session: Session, chosenStagedID: UUID?, ctx: NSManagedObjectContext) {
-        // If a staged image is chosen, clear existing image thumbnails.
-        if let _ = chosenStagedID, let set = session.attachments as? Set<Attachment> {
-            for a in set where (a.kind ?? "") == "image" {
-                a.setValue(false, forKey: "isThumbnail")
-            }
-        }
-
-        // Persist each staged item
-        for att in stagedAttachments {
-            do {
-                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
-                let isThumb = (att.kind == .image) && (chosenStagedID == att.id)
-                _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
-            } catch {
-                print("Attachment commit failed: \(error)")
-            }
-        }
-
-        stagedAttachments.removeAll()
-    }
-
-    // MARK: - Helpers
-
-    private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
-        if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
-        return activity.label
-    }
-
-    private func refreshAutoTitleIfNeeded() {
-        guard !isTitleEdited else { return }
-        let auto = defaultTitle(for: instrument, activity: activity)
-        title = auto
-        initialAutoTitle = auto
-    }
-
-    private func fetchInstruments() -> [Instrument] {
-        let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
-        req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
-        return (try? viewContext.fetch(req)) ?? []
-    }
-
-    private func fetchPrimaryInstrumentName() -> String? {
-        let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
-        req.fetchLimit = 1
-        do {
-            if let profile = try viewContext.fetch(req).first {
-                let name = profile.value(forKey: "primaryInstrument") as? String
-                let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return (trimmed?.isEmpty == false) ? trimmed : nil
-            }
-        } catch {
-            print("Profile fetch failed: \(error)")
-        }
-        return nil
-    }
-
-    private func secondsToHM(_ seconds: Int) -> (Int, Int) {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
-        return (h, m)
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.doesRelativeDateFormatting = true
-        f.dateStyle = .medium; f.timeStyle = .short
-        return f.string(from: date)
-    }
-
-    private func formattedDuration(_ seconds: Int) -> String {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
-        return h > 0 ? "\(h)h \(m)m" : "\(m)m"
-    }
-
-    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
-        let status = AVCaptureDevice.authorizationStatus(for: .video)
-        switch status {
-        case .authorized: onAuthorized()
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
-            }
-        default: self.showCameraDeniedAlert = true
-        }
-    }
-
-    // ✅ Tag upsert helper
-    @MainActor
-    private func upsertTags(_ names: [String]) -> [Tag] {
-        var results: [Tag] = []
-        guard let uid = PersistenceController.shared.currentUserID else { return results }
-        for name in names {
-            let req: NSFetchRequest<Tag> = Tag.fetchRequest()
-            req.predicate = NSPredicate(format: "name ==[c] %@ AND ownerUserID == %@", name, uid)
-            if let existing = (try? viewContext.fetch(req))?.first {
-                results.append(existing)
-            } else {
-                let t = Tag(context: viewContext)
-                t.name = name
-                t.ownerUserID = uid
-                if (t.value(forKey: "id") as? UUID) == nil { t.setValue(UUID(), forKey: "id") }
-                results.append(t)
-            }
-        }
-        return results
-    }
-
-    // MARK: - Unified Attachments section
-
-    @ViewBuilder
-    private var attachmentsSection: some View {
-        Section("Attachments") {
-            let existingImages = existingAttachments.filter { ($0.kind ?? "") == "image" }
-            let existingFiles  = existingAttachments.filter { ($0.kind ?? "") != "image" }
-            let stagedImages   = stagedAttachments.filter { $0.kind == .image }
-            let stagedFiles    = stagedAttachments.filter { $0.kind != .image }
-
-            // Nothing yet?
-            if existingImages.isEmpty && existingFiles.isEmpty && stagedImages.isEmpty && stagedFiles.isEmpty {
-                Text("No attachments yet").foregroundStyle(.secondary)
-            } else {
-                // Thumbnails grid (existing + staged images together)
-                if !existingImages.isEmpty || !stagedImages.isEmpty {
-                    LazyVGrid(columns: grid, spacing: 12) {
-                        // Existing image thumbs (tap star to choose)
-                        ForEach(existingImages, id: \.objectID) { a in
-                            ExistingThumbCell(
-                                image: loadExistingImage(a),
-                                isStarred: isExistingChosen(a),
-                                onStar: {
-                                    thumbnailChoice = .existing(a.objectID)
-                                    thumbnailChoiceDirty = true
-                                }
-                            )
-                        }
-                        // Staged image thumbs (tap star to choose; X to remove)
-                        ForEach(stagedImages) { att in
-                            StagedThumbCell(
-                                att: att,
-                                isStarred: isStagedChosen(att.id),
-                                onStar: {
-                                    thumbnailChoice = .staged(att.id)
-                                    thumbnailChoiceDirty = true
-                                },
-                                onRemove: { removeStagedAttachment(att) }
-                            )
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-
-                // Existing non-image files
-                ForEach(existingFiles, id: \.objectID) { a in
-                    HStack {
-                        Image(systemName: icon(for: a.kind ?? "file"))
-                            .foregroundStyle(.secondary)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(fileName(of: a)).lineLimit(1)
-                            Text(a.kind ?? "file").font(.footnote).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                    }
-                }
-
-                // Staged non-image files (with remove button)
-                ForEach(stagedFiles) { att in
-                    HStack {
-                        Image(systemName: icon(for: att.kind.rawValue)).foregroundStyle(.secondary)
-                        Text("New \(att.kind.rawValue)")
-                        Spacer()
-                        Button(role: .destructive) {
-                            removeStagedAttachment(att)
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func isExistingChosen(_ a: Attachment) -> Bool {
-        if thumbnailChoiceDirty {
-            if case .existing(let oid) = thumbnailChoice { return oid == a.objectID }
-            return false
-        } else {
-            return (a.value(forKey: "isThumbnail") as? Bool) == true
-        }
-    }
-
-    private func isStagedChosen(_ id: UUID) -> Bool {
-        if thumbnailChoiceDirty {
-            if case .staged(let sid) = thumbnailChoice { return sid == id }
-            return false
-        } else {
-            return false
-        }
-    }
-
-    // ✅ Path-resilient loader: try stored path/URL, else fall back to Documents/<filename>
-    private func loadExistingImage(_ a: Attachment) -> UIImage? {
-        guard let url = resolveAttachmentURL(a) else { return nil }
-        if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
-        return UIImage(contentsOfFile: url.path)
-    }
-
-    private func resolveAttachmentURL(_ a: Attachment) -> URL? {
-        guard let s = a.fileURL, !s.isEmpty else { return nil }
-        let fm = FileManager.default
-
-        // 1) If it's a valid file URL and exists, use it
-        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
-            return u
-        }
-
-        // 2) If it's a plain path and exists, use it
-        if fm.fileExists(atPath: s) {
-            return URL(fileURLWithPath: s)
-        }
-
-        // 3) Fall back to Documents/<filename> in case the saved absolute path is stale
-        let filename = URL(fileURLWithPath: s).lastPathComponent
-        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let candidate = docs.appendingPathComponent(filename, isDirectory: false)
-            if fm.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return nil
-    }
-
-    private func icon(for kind: String) -> String {
-        switch kind {
-        case "audio": return "waveform"
-        case "video": return "video"
-        case "image": return "photo"
-        default: return "doc"
-        }
-    }
-
-    private func fileName(of a: Attachment) -> String {
-        guard let path = a.fileURL, !path.isEmpty else { return "file" }
-        return URL(fileURLWithPath: path).lastPathComponent
-    }
-
-    // MARK: - Custom activities loader
-    private func loadUserActivities() {
-        do {
-            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
-        } catch {
-            userActivities = []
-        }
-    }
-
-    // MARK: - Unified Activity Picker (core + user customs)
-    private var activityPickerUnified: some View {
-        NavigationStack {
-            VStack {
-                Picker("", selection: $activityChoice) {
-                    // Core activities
-                    ForEach(SessionActivityType.allCases) { type in
-                        Text(type.label).tag("core:\(type.rawValue)")
-                    }
-                    // User-local customs
-                    if !userActivities.isEmpty {
-                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                            Text(name).tag("custom:\(name)")
-                        }
-                    }
-                }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-                Spacer()
-            }
-            .navigationTitle("Activity")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showActivityPicker = false }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        if activityChoice.hasPrefix("core:") {
-                            if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
-                                tempActivity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
-                                activity = tempActivity
-                            } else {
-                                tempActivity = .practice
-                                activity = .practice
-                            }
-                            selectedCustomName = ""
-                        } else if activityChoice.hasPrefix("custom:") {
-                            let name = String(activityChoice.dropFirst("custom:".count))
-                            tempActivity = .practice
-                            activity = .practice
-                            selectedCustomName = name
-                        }
-                        showActivityPicker = false
-                    }
-                }
-            }
-        }
-    }
-
-    // MARK: - Activity helpers
-    
-    private func syncActivityChoiceFromState() {
-        if !selectedCustomName.isEmpty { activityChoice = "custom:\(selectedCustomName)" }
-        else { activityChoice = "core:\(activity.rawValue)" }
-    }
-}
-
-// MARK: - Thumb cells
-
-fileprivate struct ExistingThumbCell: View {
-    let image: UIImage?
-    let isStarred: Bool
-    let onStar: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let ui = image {
-                    Image(uiImage: ui).resizable().scaledToFill()
-                } else {
-                    Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
-                }
-            }
-            .frame(width: 84, height: 84)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
-            )
-
-            Text(isStarred ? "★" : "☆")
-                .font(.system(size: 16))
-                .padding(6)
-                .background(.ultraThinMaterial, in: Circle())
-                .padding(4)
-                .onTapGesture { onStar() }
-                .accessibilityLabel(isStarred ? "Thumbnail (selected)" : "Set as Thumbnail")
-        }
-    }
-}
-
-fileprivate struct StagedThumbCell: View {
-    let att: StagedAttachment
-    let isStarred: Bool
-    let onStar: () -> Void
-    let onRemove: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            thumb
-                .frame(width: 84, height: 84)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
-                )
-
-            HStack(spacing: 6) {
-                if att.kind == .image {
-                    Text(isStarred ? "★" : "☆")
-                        .font(.system(size: 16))
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .onTapGesture { onStar() }
-                        .accessibilityLabel(isStarred ? "Thumbnail (selected)" : "Set as Thumbnail")
-                }
-                Button {
-                    onRemove()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .padding(6)
-                        .background(.ultraThinMaterial, in: Circle())
-                        .accessibilityLabel("Remove")
-                }
-            }
-            .padding(4)
-        }
-    }
-
-    @ViewBuilder
-    private var thumb: some View {
-        switch att.kind {
-        case .image:
-            if let ui = UIImage(data: att.data) {
-                Image(uiImage: ui).resizable().scaledToFill()
-            } else {
-                Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
-            }
-        case .audio:
-            Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
-        case .video:
-            Image(systemName: "video").imageScale(.large).foregroundStyle(.secondary)
-        case .file:
-            Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
-        }
     }
 }

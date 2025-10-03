@@ -2,12 +2,19 @@
 //  ContentView.swift
 //  MOTIVO
 //
-
+//  v7.8 Stage 2 — Filter: include custom activities in Activity picker
+//  - Adds UserActivity fetch and includes custom names in the Activity filter.
+//  - Introduces ActivityFilter enum: .any, .core(ActivityType), .custom(String).
+//  - Filtering supports core (activityType) and customs via userActivityLabel/activityDetail.
+//  - Whole-file replacement; no migrations.
+//
+//  [ROLLBACK ANCHOR] v7.8 Stage2 Filter — pre (before custom activities in filter)
+//
 import SwiftUI
 import CoreData
 import Combine
 
-// MARK: - Local (file-scoped) helper enums to avoid collisions in other files
+// MARK: - Local helper enums
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
     case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
@@ -21,18 +28,39 @@ fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
         case .performance: return "Performance"
         }
     }
-    }
+}
 fileprivate func from(_ code: Int16?) -> ActivityType {
     guard let c = code, let v = ActivityType(rawValue: c) else { return .practice }
     return v
 }
 
-
-
 fileprivate enum FeedScope: String, CaseIterable, Identifiable {
     case all = "All"
     case mine = "Mine"
     var id: String { rawValue }
+}
+
+// New: unified filter type for Activity (core or custom)
+fileprivate enum ActivityFilter: Hashable, Identifiable {
+    case any
+    case core(ActivityType)
+    case custom(String)
+
+    var id: String {
+        switch self {
+        case .any: return "any"
+        case .core(let a): return "core:\(a.rawValue)"
+        case .custom(let name): return "custom:\(name)"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .any: return "Any"
+        case .core(let a): return a.label
+        case .custom(let name): return name
+        }
+    }
 }
 
 // MARK: - Entry
@@ -64,10 +92,16 @@ fileprivate struct SessionsRootView: View {
         animation: .default
     ) private var instruments: FetchedResults<Instrument>
 
+    // New: fetch user-local custom activities for filter menu
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "displayName", ascending: true)],
+        animation: .default
+    ) private var userActivities: FetchedResults<UserActivity>
+
     // UI state
     @AppStorage("filtersExpanded") private var filtersExpanded = false
     @State private var selectedInstrument: Instrument? = nil
-    @State private var selectedActivity: ActivityType? = nil
+    @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedScope: FeedScope = .all
     @State private var searchText: String = ""
     @State private var debouncedQuery: String = ""
@@ -88,6 +122,7 @@ fileprivate struct SessionsRootView: View {
                 FilterBar(
                     filtersExpanded: $filtersExpanded,
                     instruments: Array(instruments),
+                    customNames: userActivities.map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
                     selectedInstrument: $selectedInstrument,
                     selectedActivity: $selectedActivity,
                     selectedScope: $selectedScope,
@@ -140,7 +175,7 @@ fileprivate struct SessionsRootView: View {
                 PracticeTimerView(isPresented: $showTimer)
             }
             .sheet(isPresented: $showAdd) {
-                AddEditSessionView(isPresented: $showAdd)
+                AddEditSessionView()
             }
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
@@ -183,9 +218,20 @@ fileprivate struct SessionsRootView: View {
             out = out.filter { $0.instrument?.objectID == id }
         }
 
-        // Activity (core enum)
-        if let act = selectedActivity {
+        // Activity (core enum or custom name)
+        switch selectedActivity {
+        case .any:
+            break
+        case .core(let act):
             out = out.filter { ($0.value(forKey: "activityType") as? Int16) == act.rawValue }
+        case .custom(let name):
+            out = out.filter { s in
+                let label = (s.value(forKey: "userActivityLabel") as? String) ?? ""
+                let detail = (s.value(forKey: "activityDetail") as? String) ?? ""
+                // Match either explicit label or exact detail match (case-insensitive)
+                return label.caseInsensitiveCompare(name) == .orderedSame ||
+                       detail.caseInsensitiveCompare(name) == .orderedSame
+            }
         }
 
         // Search (title or notes)
@@ -225,13 +271,14 @@ fileprivate struct SessionsRootView: View {
     }
 }
 
-// MARK: - Filter bar OUTSIDE the List (uses menu-style Pickers, not Menu)
+// MARK: - Filter bar OUTSIDE the List (menu-style Pickers)
 
 fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
     let instruments: [Instrument]
+    let customNames: [String]
     @Binding var selectedInstrument: Instrument?
-    @Binding var selectedActivity: ActivityType?
+    @Binding var selectedActivity: ActivityFilter
     @Binding var selectedScope: FeedScope
     @Binding var searchText: String
 
@@ -262,7 +309,7 @@ fileprivate struct FilterBar: View {
                         .disableAutocorrection(true)
                         .textFieldStyle(.roundedBorder)
 
-                    // Instrument (menu-style Picker)
+                    // Instrument
                     HStack {
                         Text("Instrument")
                         Spacer()
@@ -275,14 +322,21 @@ fileprivate struct FilterBar: View {
                         .pickerStyle(.menu)
                     }
 
-                    // Activity (menu-style Picker)
+                    // Activity — include customs
                     HStack {
                         Text("Activity")
                         Spacer()
                         Picker("Activity", selection: $selectedActivity) {
-                            Text("Any").tag(nil as ActivityType?)
+                            Text("Any").tag(ActivityFilter.any)
+                            // Core activities
                             ForEach(ActivityType.allCases) { a in
-                                Text(a.label).tag(Optional(a))
+                                Text(a.label).tag(ActivityFilter.core(a))
+                            }
+                            // Custom activities
+                            if !customNames.isEmpty {
+                                ForEach(customNames, id: \.self) { name in
+                                    Text(name).tag(ActivityFilter.custom(name))
+                                }
                             }
                         }
                         .pickerStyle(.menu)
@@ -293,7 +347,7 @@ fileprivate struct FilterBar: View {
     }
 }
 
-// MARK: - Stats (unchanged appearance, no 'reduce' ambiguity, no schema assumptions)
+// MARK: - Stats (unchanged appearance)
 
 fileprivate struct StatsBannerView: View {
     let sessions: [Session]
@@ -338,8 +392,7 @@ fileprivate struct StatsBannerView: View {
     }
 }
 
-
-// MARK: - Row (now shows NOTES under title)
+// MARK: - Row (shows derived title and subtitle)
 
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
@@ -378,3 +431,5 @@ fileprivate struct SessionRow: View {
         .padding(.vertical, 4)
     }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 Stage2 Filter — post

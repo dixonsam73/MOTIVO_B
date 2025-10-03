@@ -7,8 +7,9 @@
 //  [ROLLBACK ANCHOR] v7.8 pre-hotfix — PracticeTimer first-use lag
 //  [ROLLBACK ANCHOR] v7.8 Scope1 — primary-activity preselect applied (no migration)
 //  [ROLLBACK ANCHOR] v7.8 Scope2 — pre-wheel-pickers (used .menu pickers)
+//  [ROLLBACK ANCHOR] v7.8 Stage2 — pre (before Primary pinned-first)
 //
-//  Scope 2: Replace inline .menu pickers with wheel pickers in sheets (Instrument + Activity).
+//  Scope 2 + Stage 2: Wheel pickers + Primary pinned-first in Activity sheet.
 //  - Preserve prefetch; first open must remain instant.
 //  - No migration; timer behaviour unchanged.
 //
@@ -38,7 +39,7 @@ struct PracticeTimerView: View {
     @State private var activityDetail: String = ""
     @State private var activityChoice: String = "core:0" // "core:<raw>" or "custom:<name>"
 
-    // Primary Activity (Stage 1)
+    // Primary Activity (Stage 1 persisted)
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
     // Wheel picker sheet toggles
@@ -153,13 +154,9 @@ struct PracticeTimerView: View {
                                 NavigationView {
                                     VStack {
                                         Picker("Activity", selection: $activityChoice) {
-                                            // Core activities
-                                            ForEach(SessionActivityType.allCases) { a in
-                                                Text(a.label).tag("core:\(a.rawValue)")
-                                            }
-                                            // User customs (no separator)
-                                            ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                                                Text(name).tag("custom:\(name)")
+                                            // [Stage 2] Primary pinned first, then core, then customs (deduped)
+                                            ForEach(activityChoicesPinned(), id: \.self) { choice in
+                                                Text(activityDisplayName(for: choice)).tag(choice)
                                             }
                                         }
                                         .pickerStyle(.wheel)
@@ -330,6 +327,8 @@ struct PracticeTimerView: View {
             activity = .practice
             activityDetail = name
         }
+        // Persist timer snapshot when user changes activity
+        persistTimerState()
     }
 
     private func applyPrimaryActivityRef() {
@@ -357,7 +356,63 @@ struct PracticeTimerView: View {
         activityChoice = "core:0"
     }
 
-    // MARK: - Actions & fetches
+    // [Stage 2] Build a deduped list with Primary first
+    private func activityChoicesPinned() -> [String] {
+        // Build core list
+        let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
+        // Build custom list
+        let customs: [String] = userActivities.compactMap { ua in
+            let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? nil : "custom:\(n)"
+        }
+
+        // Normalize primary against available sets
+        let primary = normalizedPrimary()
+        var result: [String] = []
+
+        // Start with primary if valid
+        if let p = primary { result.append(p) }
+
+        // Append cores (skipping duplicate of primary if present)
+        for c in core where !result.contains(c) {
+            result.append(c)
+        }
+        // Append customs (skipping duplicate of primary if present)
+        for cu in customs where !result.contains(cu) {
+            result.append(cu)
+        }
+        return result
+    }
+
+    private func normalizedPrimary() -> String? {
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               SessionActivityType(rawValue: Int16(v)) != nil {
+                return "core:\(v)"
+            }
+            return "core:0"
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                return "custom:\(name)"
+            }
+            return "core:0"
+        } else {
+            return "core:0"
+        }
+    }
+
+    // MARK: - Data fetches
+
+    private func loadUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
+        } catch {
+            userActivities = []
+        }
+    }
+
     private func fetchInstruments() -> [Instrument] {
         let req: NSFetchRequest<Instrument> = Instrument.fetchRequest()
         req.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
@@ -459,89 +514,61 @@ struct PracticeTimerView: View {
     // MARK: - Persistence (UserDefaults)
     private enum TimerDefaultsKey: String {
         case startedAtEpoch = "PracticeTimer.startedAtEpoch"
-        case accumulated = "PracticeTimer.accumulatedSeconds"
-        case running = "PracticeTimer.isRunning"
+        case accumulated = "PracticeTimer.accumulated"
+        case isRunning = "PracticeTimer.isRunning"
+        case activityRaw = "PracticeTimer.activityRaw"
+        case activityDetail = "PracticeTimer.activityDetail"
     }
 
     private func hydrateTimerFromStorage() {
-        let ud = UserDefaults.standard
-        let isRun = ud.bool(forKey: TimerDefaultsKey.running.rawValue)
-        let acc = ud.integer(forKey: TimerDefaultsKey.accumulated.rawValue)
-
-        var start: Date? = nil
-        let epoch = ud.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
-        if epoch > 0 {
-            start = Date(timeIntervalSince1970: epoch)
-        }
-
-        // Assign to state
-        self.isRunning = isRun
-        self.accumulatedSeconds = max(0, acc)
-        self.startDate = start
-
-        // Recompute UI
-        recomputeElapsedForUI()
+        let d = UserDefaults.standard
+        let started = d.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        startDate = started > 0 ? Date(timeIntervalSince1970: started) : nil
+        accumulatedSeconds = d.integer(forKey: TimerDefaultsKey.accumulated.rawValue)
+        isRunning = d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
+        let raw = Int16(d.integer(forKey: TimerDefaultsKey.activityRaw.rawValue))
+        activity = SessionActivityType(rawValue: raw) ?? .practice
+        activityDetail = d.string(forKey: TimerDefaultsKey.activityDetail.rawValue) ?? ""
+        syncActivityChoiceFromState()
     }
 
     private func persistTimerState() {
-        let ud = UserDefaults.standard
-        ud.set(isRunning, forKey: TimerDefaultsKey.running.rawValue)
-        ud.set(accumulatedSeconds, forKey: TimerDefaultsKey.accumulated.rawValue)
-        if let start = startDate {
-            ud.set(start.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
-        } else {
-            ud.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
-        }
+        let d = UserDefaults.standard
+        d.set(startDate?.timeIntervalSince1970 ?? 0, forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        d.set(accumulatedSeconds, forKey: TimerDefaultsKey.accumulated.rawValue)
+        d.set(isRunning, forKey: TimerDefaultsKey.isRunning.rawValue)
+        d.set(Int(activity.rawValue), forKey: TimerDefaultsKey.activityRaw.rawValue)
+        d.set(activityDetail, forKey: TimerDefaultsKey.activityDetail.rawValue)
     }
 
     private func persistTimerSnapshot() {
-        // Ensure current delta is represented in persisted values (without changing run state)
-        if isRunning, let started = startDate {
-            let now = Date()
-            let delta = max(0, Int(now.timeIntervalSince(started)))
-            let newAccum = accumulatedSeconds + delta
-            let ud = UserDefaults.standard
-            ud.set(isRunning, forKey: TimerDefaultsKey.running.rawValue)
-            ud.set(newAccum, forKey: TimerDefaultsKey.accumulated.rawValue)
-            ud.set(now.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue) // keep running from 'now'
-        } else {
-            persistTimerState()
-        }
+        persistTimerState()
     }
 
     private func clearPersistedTimer() {
-        let ud = UserDefaults.standard
-        ud.removeObject(forKey: TimerDefaultsKey.running.rawValue)
-        ud.removeObject(forKey: TimerDefaultsKey.accumulated.rawValue)
-        ud.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
-        // Also clear mirrors
-        isRunning = false
-        accumulatedSeconds = 0
-        startDate = nil
-        recomputeElapsedForUI()
+        let d = UserDefaults.standard
+        d.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.accumulated.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.isRunning.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.activityRaw.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.activityDetail.rawValue)
     }
 
     private func resetUIOnly() {
+        isRunning = false
+        startDate = nil
+        accumulatedSeconds = 0
         elapsedSeconds = 0
-        finalizedDuration = 0
-    }
-
-    // MARK: - Custom activities (load & sync)
-    private func loadUserActivities() {
-        do {
-            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
-        } catch {
-            userActivities = []
-        }
+        activity = .practice
+        activityDetail = ""
+        activityChoice = "core:0"
     }
 
     private func syncActivityChoiceFromState() {
-        if !activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            activityChoice = "custom:\(activityDetail)"
-        } else {
+        if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             activityChoice = "core:\(activity.rawValue)"
+        } else {
+            activityChoice = "custom:\(activityDetail)"
         }
     }
 }
-
-//  [ROLLBACK ANCHOR] v7.8 Scope2 — post-wheel-pickers (wheel pickers in sheets; behaviour unchanged)
