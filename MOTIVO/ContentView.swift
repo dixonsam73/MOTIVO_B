@@ -2,13 +2,12 @@
 //  ContentView.swift
 //  MOTIVO
 //
-//  v7.8 Stage 2 — Filter: include custom activities in Activity picker
-//  - Adds UserActivity fetch and includes custom names in the Activity filter.
-//  - Introduces ActivityFilter enum: .any, .core(ActivityType), .custom(String).
-//  - Filtering supports core (activityType) and customs via userActivityLabel/activityDetail.
-//  - Whole-file replacement; no migrations.
+//  v7.8 Stage 2 — Filter includes custom activities (kept)
+//  v7.8 DesignLite — Feed polish: app background, carded filters + stats, plain list rows.
+//  - Removed big navigation title ("Motivo").
+//  - Visual-only changes; no behavior changes.
 //
-//  [ROLLBACK ANCHOR] v7.8 Stage2 Filter — pre (before custom activities in filter)
+//  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
 import SwiftUI
 import CoreData
@@ -40,7 +39,7 @@ fileprivate enum FeedScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
-// New: unified filter type for Activity (core or custom)
+// Unified filter type for Activity (core or custom)
 fileprivate enum ActivityFilter: Hashable, Identifiable {
     case any
     case core(ActivityType)
@@ -92,7 +91,7 @@ fileprivate struct SessionsRootView: View {
         animation: .default
     ) private var instruments: FetchedResults<Instrument>
 
-    // New: fetch user-local custom activities for filter menu
+    // Fetch user-local custom activities for filter menu
     @FetchRequest(
         sortDescriptors: [NSSortDescriptor(key: "displayName", ascending: true)],
         animation: .default
@@ -106,7 +105,7 @@ fileprivate struct SessionsRootView: View {
     @State private var searchText: String = ""
     @State private var debouncedQuery: String = ""
 
-    // Sheets (original buttons)
+    // Sheets
     @State private var showProfile = false
     @State private var showTimer = false
     @State private var showAdd = false
@@ -116,34 +115,36 @@ fileprivate struct SessionsRootView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 8) {
+            VStack(spacing: Theme.Spacing.l) {
+                // ---------- Filters (card) ----------
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Filters").sectionHeader()
+                    FilterBar(
+                        filtersExpanded: $filtersExpanded,
+                        instruments: Array(instruments),
+                        customNames: userActivities.map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+                        selectedInstrument: $selectedInstrument,
+                        selectedActivity: $selectedActivity,
+                        selectedScope: $selectedScope,
+                        searchText: $searchText
+                    )
+                }
+                .cardSurface()
 
-                // ---------- Filter bar OUTSIDE the List ----------
-                FilterBar(
-                    filtersExpanded: $filtersExpanded,
-                    instruments: Array(instruments),
-                    customNames: userActivities.map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
-                    selectedInstrument: $selectedInstrument,
-                    selectedActivity: $selectedActivity,
-                    selectedScope: $selectedScope,
-                    searchText: $searchText
-                )
-                .padding(.horizontal)
+                // ---------- Stats (card) ----------
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    let statsInput: [Session] = filteredSessions
+                    StatsBannerView(sessions: statsInput)
+                }
+                .cardSurface()
 
-                // ---------- Content List ----------
+                // ---------- Sessions List ----------
                 List {
-                    // Stats
-                    Section {
-                        let statsInput: [Session] = filteredSessions
-                        StatsBannerView(sessions: statsInput)
-                    }
-
-                    // Sessions
                     Section {
                         let rows: [Session] = filteredSessions
                         if rows.isEmpty {
                             Text("No sessions match your filters yet.")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         } else {
                             ForEach(rows, id: \.objectID) { session in
                                 NavigationLink(destination: SessionDetailView(session: session)) {
@@ -156,7 +157,10 @@ fileprivate struct SessionsRootView: View {
                 }
                 .listStyle(.plain)
             }
-            .navigationTitle("Motivo")
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.xl)
+            // No big nav title
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button { showProfile = true } label: { Text("Profile") }
@@ -180,7 +184,7 @@ fileprivate struct SessionsRootView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
-            // Debounce lifecycle (no deprecated onChange)
+            // Debounce lifecycle
             .task {
                 setUpDebounce()
             }
@@ -190,6 +194,7 @@ fileprivate struct SessionsRootView: View {
                     .delay(for: .milliseconds(250), scheduler: RunLoop.main)
                     .sink { debouncedQuery = $0 }
             }
+            .appBackground()
         }
     }
 
@@ -228,7 +233,6 @@ fileprivate struct SessionsRootView: View {
             out = out.filter { s in
                 let label = (s.value(forKey: "userActivityLabel") as? String) ?? ""
                 let detail = (s.value(forKey: "activityDetail") as? String) ?? ""
-                // Match either explicit label or exact detail match (case-insensitive)
                 return label.caseInsensitiveCompare(name) == .orderedSame ||
                        detail.caseInsensitiveCompare(name) == .orderedSame
             }
@@ -271,7 +275,7 @@ fileprivate struct SessionsRootView: View {
     }
 }
 
-// MARK: - Filter bar OUTSIDE the List (menu-style Pickers)
+// MARK: - Filter bar (unchanged logic, wrapped by a card above)
 
 fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
@@ -283,18 +287,20 @@ fileprivate struct FilterBar: View {
     @Binding var searchText: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            // Toggle
             Button { withAnimation { filtersExpanded.toggle() } } label: {
                 HStack {
-                    Text("Filters").font(.subheadline).bold()
+                    Text("Show/Hide").font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
                     Spacer()
                     Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
+            .buttonStyle(.plain)
 
             if filtersExpanded {
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     // Scope
                     Picker("Scope", selection: $selectedScope) {
                         ForEach(FeedScope.allCases) { s in
@@ -347,7 +353,7 @@ fileprivate struct FilterBar: View {
     }
 }
 
-// MARK: - Stats (unchanged appearance)
+// MARK: - Stats (card content)
 
 fileprivate struct StatsBannerView: View {
     let sessions: [Session]
@@ -379,12 +385,12 @@ fileprivate struct StatsBannerView: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading) {
-                Text("Sessions: \(count)")
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Sessions")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Text("\(count) • \(totalTimeDisplay) total")
                     .font(.subheadline)
-                Text("Total Time: \(totalTimeDisplay)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             Spacer()
         }
@@ -394,42 +400,325 @@ fileprivate struct StatsBannerView: View {
 
 // MARK: - Row (shows derived title and subtitle)
 
+
+
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
 
-    private var feedTitle: String {
-        SessionActivity.feedTitle(for: session)
+    private var feedTitle: String { SessionActivity.feedTitle(for: session) }
+    private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
+
+    private var attachments: [Attachment] {
+        (session.attachments as? Set<Attachment>).map { Array($0) } ?? []
     }
-    private var feedSubtitle: String {
-        SessionActivity.feedSubtitle(for: session)
+    private var imageAttachments: [Attachment] {
+        attachments.filter { attachmentKind($0) == "image" }
     }
-    private var attachmentCount: Int {
-        (session.attachments as? Set<Attachment>)?.count ?? 0
+    private var nonImageAttachments: [Attachment] {
+        attachments.filter { attachmentKind($0) != "image" }
+    }
+    private var favoriteImage: Attachment? {
+        pickFavoriteImage(from: imageAttachments)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(feedTitle)
-                    .font(.headline)
-                    .lineLimit(2)
-                Spacer()
-                if attachmentCount > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "paperclip")
-                        Text("\(attachmentCount)")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                }
-            }
+        VStack(alignment: .leading, spacing: 8) {
+            // Title only (paperclip removed)
+            Text(feedTitle)
+                .font(.headline)
+                .lineLimit(2)
+
+            // Subtitle
             Text(feedSubtitle)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(Theme.Colors.secondaryText)
                 .lineLimit(2)
+
+            // Thumbnails/icons strip
+            if !attachments.isEmpty {
+                AttachmentStrip(favoriteImage: favoriteImage, nonImageAttachments: nonImageAttachments)
+                    .padding(.top, 2)
+            }
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, !attachments.isEmpty ? 10 : 6)
     }
 }
 
-//  [ROLLBACK ANCHOR] v7.8 Stage2 Filter — post
+// Shows at most one image (favorite if present) plus up to 2 non-image icons.
+fileprivate struct AttachmentStrip: View {
+    let favoriteImage: Attachment?
+    let nonImageAttachments: [Attachment]
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let imgAtt = favoriteImage {
+                AttachmentThumb(attachment: imgAtt)
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+            }
+            ForEach(Array(nonImageAttachments.prefix( favoriteImage == nil ? 3 : 2 )), id: \.objectID) { att in
+                NonImageTile(kind: attachmentKind(att))
+                    .frame(width: 64, height: 64)
+            }
+        }
+    }
+}
+
+// PDF / audio / video icons
+fileprivate struct NonImageTile: View {
+    let kind: String
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+            Image(systemName: symbolName)
+                .imageScale(.large)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+    }
+    private var symbolName: String {
+        switch kind {
+        case "audio": return "waveform"
+        case "video": return "video"
+        case "pdf":   return "doc.richtext" // use a document-style icon for PDFs
+        default:      return "doc"
+        }
+    }
+}
+
+// MARK: - Image thumbnail (actual image if available)
+
+fileprivate struct AttachmentThumb: View {
+    @ObservedObject var attachment: Attachment
+    #if canImport(UIKit)
+    @StateObject private var loader: AttachmentThumbLoader
+    init(attachment: Attachment) {
+        self._attachment = ObservedObject(initialValue: attachment)
+        _loader = StateObject(wrappedValue: AttachmentThumbLoader(attachment: attachment))
+    }
+    #endif
+
+    var body: some View {
+        #if canImport(UIKit)
+        Group {
+            if let ui = loader.image {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else if loader.isFinished {
+                // Finished but no image -> neutral photo placeholder
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                    Image(systemName: "photo")
+                        .imageScale(.large)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            } else {
+                // Loading
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.secondary.opacity(0.08))
+                    ProgressView().progressViewStyle(.circular)
+                }
+            }
+        }
+        #else
+        Image(systemName: "photo")
+            .resizable()
+            .scaledToFit()
+            .padding(12)
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .background(Color.secondary.opacity(0.08))
+        #endif
+    }
+}
+#if canImport(UIKit)
+import UIKit
+
+final class AttachmentThumbLoader: ObservableObject {
+    @Published var image: UIImage?
+    @Published var isFinished: Bool = false
+
+    private static let cache = NSCache<NSString, UIImage>()
+    private let att: Attachment
+    private let maxSide: CGFloat = 100 // small thumb
+
+    init(attachment: Attachment) {
+        self.att = attachment
+        load()
+    }
+
+    private func load() {
+        isFinished = false
+        let key = att.objectID.uriRepresentation().absoluteString as NSString
+        if let cached = Self.cache.object(forKey: key) {
+            self.image = cached
+            self.isFinished = true
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async {
+            var ui: UIImage? = nil
+            // Try inline first
+            ui = attachmentImage(self.att)
+            // Try file URL next
+            if ui == nil, let url = attachmentFileURL(self.att) {
+                if url.isFileURL {
+                    ui = UIImage(contentsOfFile: url.path)
+                }
+            }
+            // Try Photos asset (localIdentifier) synchronously for a tiny target
+            if ui == nil {
+                ui = attachmentPhotoLibraryImage(self.att, targetMax: self.maxSide)
+            }
+            var final: UIImage? = nil
+            if let ui {
+                final = self.downscale(ui, to: self.maxSide)
+            }
+            DispatchQueue.main.async {
+                if let final {
+                    Self.cache.setObject(final, forKey: key)
+                    self.image = final
+                }
+                self.isFinished = true
+            }
+        }
+    }
+
+    private func downscale(_ img: UIImage, to max: CGFloat) -> UIImage? {
+        let size = img.size
+        guard size.width > 0 && size.height > 0 else { return img }
+        let scale = min(max / size.width, max / size.height, 1.0)
+        let newSize = CGSize(width: size.width * scale, height: size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: newSize)
+        return renderer.image { _ in
+            img.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+    }
+}
+#endif
+
+
+
+// MARK: - Favorite image selection
+
+fileprivate func pickFavoriteImage(from images: [Attachment]) -> Attachment? {
+    // Prefer explicit favorite/primary/thumbnail flags if present
+    for a in images {
+        if isTrueFlag(a, keys: ["isThumbnail","thumbnail","isFavorite","favorite","isStarred","starred","isPrimary","isCover"]) {
+            return a
+        }
+    }
+    // Otherwise, first image
+    return images.first
+}
+
+fileprivate func isTrueFlag(_ a: Attachment, keys: [String]) -> Bool {
+    let props = a.entity.propertiesByName
+    for k in keys where props[k] != nil {
+        if let n = a.value(forKey: k) as? NSNumber { if n.boolValue { return true } }
+        if let b = a.value(forKey: k) as? Bool, b { return true }
+    }
+    return false
+}
+
+// MARK: - Attachment helpers (KVC-safe + file URL + Photos fallback)
+
+fileprivate func attachmentKind(_ a: Attachment) -> String {
+    let props = a.entity.propertiesByName
+    func str(_ k: String) -> String? { props[k] != nil ? (a.value(forKey: k) as? String) : nil }
+
+    // MIME-ish fields
+    let typeStr = (str("type") ?? str("kind") ?? str("mimeType") ?? "").lowercased()
+    if typeStr.contains("image") { return "image" }
+    if typeStr.contains("video") { return "video" }
+    if typeStr.contains("audio") { return "audio" }
+    if typeStr.contains("pdf")   { return "pdf" }
+
+    // URL/path
+    let urlStr = (str("url") ?? str("fileURL") ?? str("path") ?? "").lowercased()
+    if urlStr.hasSuffix(".png") || urlStr.hasSuffix(".jpg") || urlStr.hasSuffix(".jpeg") || urlStr.hasSuffix(".heic") { return "image" }
+    if urlStr.hasSuffix(".mp4") || urlStr.hasSuffix(".mov") || urlStr.hasSuffix(".m4v") { return "video" }
+    if urlStr.hasSuffix(".m4a") || urlStr.hasSuffix(".mp3") || urlStr.hasSuffix(".wav") { return "audio" }
+    if urlStr.hasSuffix(".pdf") { return "pdf" }
+
+    return "unknown"
+}
+
+fileprivate func attachmentFileURL(_ a: Attachment) -> URL? {
+    let props = a.entity.propertiesByName
+
+    // URL-typed properties
+    let urlKeysURL = ["url", "fileURL", "pathURL", "localURL"]
+    for k in urlKeysURL where props[k] != nil {
+        if let u = a.value(forKey: k) as? URL { return u }
+    }
+
+    // String-typed properties
+    let urlKeysString = ["url", "fileURL", "path", "localPath", "filename"]
+    for k in urlKeysString where props[k] != nil {
+        if let s = a.value(forKey: k) as? String, !s.isEmpty {
+            if let u = URL(string: s), u.scheme?.hasPrefix("file") == true { return u }
+            // Relative path or plain filename
+            let fm = FileManager.default
+            let candidates: [URL] = [
+                fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+                fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+                URL(fileURLWithPath: NSTemporaryDirectory())
+            ].compactMap { $0 }.map { $0.appendingPathComponent(s) }
+            if let hit = candidates.first(where: { fm.fileExists(atPath: $0.path) }) { return hit }
+        }
+    }
+
+    // Bookmark data
+    let bookmarkKeys = ["bookmark", "bookmarkData"]
+    for k in bookmarkKeys where props[k] != nil {
+        if let d = a.value(forKey: k) as? Data {
+            var stale = false
+            if let u = try? URL(resolvingBookmarkData: d, options: [], relativeTo: nil, bookmarkDataIsStale: &stale) {
+                return u
+            }
+        }
+    }
+
+    return nil
+}
+
+#if canImport(UIKit)
+import UIKit
+fileprivate func attachmentImage(_ a: Attachment) -> UIImage? {
+    let props = a.entity.propertiesByName
+    // inline data or transformables (expanded keys)
+    let keys = ["thumbnail", "thumbnailData", "thumbData", "thumbnailSmall", "imageData", "image", "data", "preview", "previewData", "photoData"]
+    for k in keys where props[k] != nil {
+        if let d = a.value(forKey: k) as? Data, let img = UIImage(data: d) { return img }
+        if let img = a.value(forKey: k) as? UIImage { return img }
+    }
+    return nil
+}
+#endif
+
+#if canImport(Photos)
+import Photos
+fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? {
+    let props = a.entity.propertiesByName
+    func str(_ k: String) -> String? { props[k] != nil ? (a.value(forKey: k) as? String) : nil }
+    guard let id = (str("phLocalIdentifier") ?? str("localIdentifier") ?? str("assetIdentifier")) else {
+        return nil
+    }
+    let assets = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil)
+    guard let asset = assets.firstObject else { return nil }
+    let manager = PHImageManager.default()
+    let size = CGSize(width: targetMax, height: targetMax)
+    let opts = PHImageRequestOptions()
+    opts.isSynchronous = true
+    opts.deliveryMode = .fastFormat
+    opts.resizeMode = .fast
+    var result: UIImage?
+    manager.requestImage(for: asset, targetSize: size, contentMode: .aspectFill, options: opts) { img, _ in
+        result = img
+    }
+    return result
+}
+#else
+fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
+#endif
