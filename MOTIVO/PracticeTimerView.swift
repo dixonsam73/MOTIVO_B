@@ -9,19 +9,8 @@ import SwiftUI
 import Combine
 import CoreData
 
-fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
-    var id: Int16 { rawValue }
-    var label: String {
-        switch self {
-        case .practice: return "Practice"
-        case .rehearsal: return "Rehearsal"
-        case .recording: return "Recording"
-        case .lesson: return "Lesson"
-        case .performance: return "Performance"
-        }
-    }
-}
+// SessionActivityType moved to SessionActivityType.swift
+
 
 struct PracticeTimerView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -33,7 +22,7 @@ struct PracticeTimerView: View {
     // Instruments (profile)
     @State private var instruments: [Instrument] = []
     @State private var instrument: Instrument?
-    @State private var activity: ActivityType = .practice
+    @State private var activity: SessionActivityType = .practice
     @State private var userActivities: [UserActivity] = []
     @State private var activityChoice: String = "core:0"
     @State private var activityDetail: String = ""
@@ -97,7 +86,7 @@ struct PracticeTimerView: View {
                             // Activity
                             Section {
                                 Picker("Activity", selection: $activityChoice) {
-                                    ForEach(ActivityType.allCases) { a in
+                                    ForEach(SessionActivityType.allCases) { a in
                                         Text(a.label).tag("core:\(a.rawValue)")
                                     }
                                     if !userActivities.isEmpty {
@@ -111,7 +100,7 @@ struct PracticeTimerView: View {
                                 .onChange(of: activityChoice) { choice in
                                     if choice.hasPrefix("core:") {
                                         if let raw = Int(choice.split(separator: ":").last ?? "0") {
-                                            activity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                            activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
                                         } else {
                                             activity = .practice
                                         }

@@ -342,7 +342,7 @@ fileprivate struct StatsBannerView: View {
 // MARK: - Row (now shows NOTES under title)
 
 fileprivate struct SessionRow: View {
-    let session: Session
+    @ObservedObject var session: Session
 
     private var feedTitle: String {
         SessionActivity.feedTitle(for: session)

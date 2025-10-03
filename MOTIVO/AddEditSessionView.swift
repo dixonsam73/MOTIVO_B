@@ -10,20 +10,8 @@ import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
 
-fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
-    var id: Int16 { rawValue }
-    var label: String {
-        switch self {
-        case .practice: return "Practice"
-        case .rehearsal: return "Rehearsal"
-        case .recording: return "Recording"
-        case .lesson: return "Lesson"
-        case .performance: return "Performance"
-    }
-    }
-    static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
-}
+// SessionActivityType moved to SessionActivityType.swift
+
 
 // Represents user's thumbnail pick (existing vs staged)
 fileprivate enum ThumbnailChoice {
@@ -44,7 +32,7 @@ struct AddEditSessionView: View {
     @State private var title = ""
     @State private var timestamp = Date()
     @State private var durationSeconds = 0
-    @State private var activity: ActivityType = .practice
+    @State private var activity: SessionActivityType = .practice
     @State private var userActivities: [UserActivity] = []
     @State private var activityChoice: String = "core:0"
     @State private var selectedCustomName: String = ""
@@ -65,7 +53,7 @@ struct AddEditSessionView: View {
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
-    @State private var tempActivity: ActivityType = .practice
+    @State private var tempActivity: SessionActivityType = .practice
 
     // Save/title behavior
     @State private var isSaving = false
@@ -201,7 +189,6 @@ struct AddEditSessionView: View {
                 }
             }
             .onAppear { loadUserActivities(); syncActivityChoiceFromState() }
-            .task { loadUserActivities(); syncActivityChoiceFromState() }
 
             .navigationTitle(session == nil ? "New Session" : "Edit Session")
             .toolbar {
@@ -264,7 +251,10 @@ DispatchQueue.main.async {
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .onAppear { onAppearSetup() }
             .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
-            .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
+            .onChange(of: activity) { _, _ in
+                maybeUpdateActivityDetailFromDefaults()
+                refreshAutoTitleIfNeeded()
+            }
             .onChange(of: selectedCustomName) { _, _ in maybeUpdateActivityDetailFromDefaults() }
             .onChange(of: activityDetail) { old, new in
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -279,7 +269,7 @@ DispatchQueue.main.async {
         NavigationStack {
             VStack {
                 Picker("", selection: $tempActivity) {
-                    ForEach(ActivityType.allCases) { type in
+                    ForEach(SessionActivityType.allCases) { type in
                         Text(type.label).tag(type)
                     }
                 }
@@ -290,7 +280,7 @@ DispatchQueue.main.async {
             .navigationTitle("Activity")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { activity = tempActivity; showActivityPicker = false; refreshAutoTitleIfNeeded() } }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { activity = tempActivity; showActivityPicker = false; maybeUpdateActivityDetailFromDefaults(); refreshAutoTitleIfNeeded() } }
             }
         }
         .presentationDetents([.medium])
@@ -347,7 +337,7 @@ DispatchQueue.main.async {
             notes = s.notes ?? ""
             // activity from Core Data
             let raw = s.value(forKey: "activityType") as? Int16
-            activity = ActivityType.from(raw)
+            activity = SessionActivityType.from(raw)
             tempActivity = activity
         // Hydrate custom label + description for Edit mode
         let hydratedLabel = (s.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
@@ -355,6 +345,19 @@ DispatchQueue.main.async {
         activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
         // Align unified picker with hydrated state
         syncActivityChoiceFromState()
+        // Detect if the existing description is the auto default; if so, treat it as auto so future changes update it
+        let autoDescNow = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
+        let descTrim = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+        if descTrim.isEmpty {
+            // leave to first-paint defaulting below
+        } else if descTrim == autoDescNow {
+            lastAutoActivityDetail = autoDescNow
+            userEditedActivityDetail = false
+        } else {
+            // treat as user-edited: keep lastAutoActivityDetail to current default so equality check won't overwrite
+            lastAutoActivityDetail = autoDescNow
+            userEditedActivityDetail = true
+        }
 
 
             // Existing attachments
@@ -373,11 +376,15 @@ DispatchQueue.main.async {
                 existingAttachments = []
             }
 
-            // Auto-title only if empty
-            if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                let auto = defaultTitle(for: instrument, activity: activity)
-                title = auto
-                initialAutoTitle = auto
+            // Auto-title: treat an existing title equal to the computed default as auto (so it can update)
+            let computedAutoTitle = defaultTitle(for: instrument, activity: activity)
+            let currentTitleTrimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            if currentTitleTrimmed.isEmpty {
+                title = computedAutoTitle
+                initialAutoTitle = computedAutoTitle
+                isTitleEdited = false
+            } else if currentTitleTrimmed == computedAutoTitle {
+                initialAutoTitle = computedAutoTitle
                 isTitleEdited = false
             } else {
                 initialAutoTitle = title
@@ -407,7 +414,7 @@ DispatchQueue.main.async {
     }
 
     // MARK: - P3 Helpers — Default description logic (editor)
-    private func editorDefaultDescription(timestamp: Date, activity: ActivityType, customName: String) -> String {
+    private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
         let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
         let hour = Calendar.current.component(.hour, from: timestamp)
         let part: String
@@ -553,7 +560,7 @@ s.setValue(UUID(), forKey: "id") }
 
     // MARK: - Helpers
 
-    private func defaultTitle(for inst: Instrument? = nil, activity: ActivityType) -> String {
+    private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
         return activity.label
     }
@@ -789,7 +796,7 @@ s.setValue(UUID(), forKey: "id") }
             VStack {
                 Picker("", selection: $activityChoice) {
                     // Core activities
-                    ForEach(ActivityType.allCases) { type in
+                    ForEach(SessionActivityType.allCases) { type in
                         Text(type.label).tag("core:\(type.rawValue)")
                     }
                     // User-local customs
@@ -812,7 +819,7 @@ s.setValue(UUID(), forKey: "id") }
                     Button("Done") {
                         if activityChoice.hasPrefix("core:") {
                             if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
-                                tempActivity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                tempActivity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
                                 activity = tempActivity
                             } else {
                                 tempActivity = .practice

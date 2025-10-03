@@ -8,21 +8,8 @@ import PhotosUI
 import AVFoundation
 import UIKit
 
-fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
-    var id: Int16 { rawValue }
-    var label: String {
-        switch self {
-        case .practice: return "Practice"
-        case .rehearsal: return "Rehearsal"
-        case .recording: return "Recording"
-        case .lesson: return "Lesson"
-        case .performance: return "Performance"
-        
-    }
-    }
-    static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
-}
+// SessionActivityType moved to SessionActivityType.swift
+
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -36,7 +23,7 @@ struct PostRecordDetailsView: View {
     @State private var title: String = ""
     @State private var timestamp: Date
     @State private var durationSeconds: Int
-    @State private var activity: ActivityType = .practice
+    @State private var activity: SessionActivityType = .practice
     @State private var userActivities: [UserActivity] = []
     @State private var activityChoice: String = "core:0"
     @State private var selectedCustomName: String = ""
@@ -60,7 +47,7 @@ struct PostRecordDetailsView: View {
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
-    @State private var tempActivity: ActivityType = .practice
+    @State private var tempActivity: SessionActivityType = .practice
 
     // Staged attachments + thumbnail choice
     @State private var stagedAttachments: [StagedAttachment] = []
@@ -94,7 +81,7 @@ struct PostRecordDetailsView: View {
             self._activity = State(initialValue: .practice)
             self._activityChoice = State(initialValue: "custom:\(prefill)")
         }
-        if let raw = activityTypeRaw { self._activity = State(initialValue: ActivityType(rawValue: raw) ?? .practice) }
+        if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
         self.onSaved = onSaved
     }
 
@@ -279,7 +266,7 @@ struct PostRecordDetailsView: View {
             VStack {
                 Picker("", selection: $activityChoice) {
                     // Core activities first
-                    ForEach(ActivityType.allCases) { type in
+                    ForEach(SessionActivityType.allCases) { type in
                         Text(type.label).tag("core:\(type.rawValue)")
                     }
                     // Then user-local customs
@@ -302,7 +289,7 @@ struct PostRecordDetailsView: View {
                     Button("Done") {
                         if activityChoice.hasPrefix("core:") {
                             if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
-                                tempActivity = ActivityType(rawValue: Int16(raw)) ?? .practice
+                                tempActivity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
                                 activity = tempActivity
                             } else {
                                 tempActivity = .practice
@@ -372,7 +359,7 @@ struct PostRecordDetailsView: View {
     }
 
     // MARK: - P3 Helpers — Default description logic (editor)
-    private func editorDefaultDescription(timestamp: Date, activity: ActivityType, customName: String) -> String {
+    private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
         let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
         let hour = Calendar.current.component(.hour, from: timestamp)
         let part: String
@@ -494,7 +481,7 @@ s.setValue(UUID(), forKey: "id") }
 
     // MARK: - Helpers
 
-    private func defaultTitle(for inst: Instrument? = nil, activity: ActivityType) -> String {
+    private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
         return selectedCustomName.isEmpty ? activity.label : selectedCustomName
     }

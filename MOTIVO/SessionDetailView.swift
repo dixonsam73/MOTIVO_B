@@ -7,20 +7,8 @@ import SwiftUI
 import CoreData
 import UIKit
 
-fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
-    var id: Int16 { rawValue }
-    var label: String {
-        switch self {
-        case .practice:  return "Practice"
-        case .rehearsal: return "Rehearsal"
-        case .recording: return "Recording"
-        case .lesson:    return "Lesson"
-        case .performance: return "Performance"
-        }
-    }
-    static func from(_ raw: Int16?) -> ActivityType { ActivityType(rawValue: raw ?? 0) ?? .practice }
-}
+// SessionActivityType moved to SessionActivityType.swift
+
 
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -121,7 +109,7 @@ struct SessionDetailView: View {
     private var chosenActivityName: String {
         let label = ((session.value(forKey: "userActivityLabel") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !label.isEmpty { return label }
-        return ActivityType.from(session.value(forKey: "activityType") as? Int16).label
+        return SessionActivityType.from(session.value(forKey: "activityType") as? Int16).label
     }
 
     private var headerTitle: String {
