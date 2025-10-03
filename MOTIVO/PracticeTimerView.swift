@@ -1,5 +1,5 @@
 //////
-// //  PracticeTimerView.swift
+//  PracticeTimerView.swift
 //  MOTIVO
 //
 //  Created by Samuel Dixon on 09/09/2025.
@@ -8,10 +8,10 @@
 //  [ROLLBACK ANCHOR] v7.8 Scope1 — primary-activity preselect applied (no migration)
 //  [ROLLBACK ANCHOR] v7.8 Scope2 — pre-wheel-pickers (used .menu pickers)
 //  [ROLLBACK ANCHOR] v7.8 Stage2 — pre (before Primary pinned-first)
+//  [ROLLBACK ANCHOR] v7.8 DesignLite — pre (before visual polish)
 //
 //  Scope 2 + Stage 2: Wheel pickers + Primary pinned-first in Activity sheet.
-//  - Preserve prefetch; first open must remain instant.
-//  - No migration; timer behaviour unchanged.
+//  v7.8 DesignLite: visual polish only (cards/background/spacing).
 //
 import SwiftUI
 import Combine
@@ -22,6 +22,7 @@ import CoreData
 struct PracticeTimerView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.colorScheme) private var colorScheme
 
     // Presented as a sheet from ContentView
     @Binding var isPresented: Bool
@@ -62,6 +63,10 @@ struct PracticeTimerView: View {
     // Review sheet
     @State private var showReviewSheet = false
 
+    // Info-only recording helpers
+    @State private var showAudioHelp = false
+    @State private var showVideoHelp = false
+
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
@@ -69,152 +74,24 @@ struct PracticeTimerView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 24) {
-                // Instrument & Activity selectors (wheel in sheets)
-                Group {
-                    if hasNoInstruments {
-                        VStack(spacing: 6) {
-                            Text("No instruments found")
-                                .font(.headline)
-                            Text("Add an instrument in your Profile to start timing sessions.")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .center)
-                    } else {
-                        VStack(spacing: 12) {
-                            // Instrument
-                            if hasMultipleInstruments {
-                                Button {
-                                    // Set index to current selection before opening
-                                    if let current = instrument,
-                                       let idx = instruments.firstIndex(of: current) {
-                                        instrumentIndex = idx
-                                    }
-                                    showInstrumentSheet = true
-                                } label: {
-                                    HStack {
-                                        Text("Instrument")
-                                        Spacer()
-                                        Text(currentInstrumentName())
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                                .sheet(isPresented: $showInstrumentSheet) {
-                                    NavigationView {
-                                        VStack {
-                                            Picker("Instrument", selection: $instrumentIndex) {
-                                                ForEach(instruments.indices, id: \.self) { i in
-                                                    Text(instruments[i].name ?? "Instrument").tag(i)
-                                                }
-                                            }
-                                            .pickerStyle(.wheel)
-                                            .labelsHidden()
-                                        }
-                                        .navigationTitle("Instrument")
-                                        .toolbar {
-                                            ToolbarItem(placement: .confirmationAction) {
-                                                Button("Done") {
-                                                    applyInstrumentIndex()
-                                                    showInstrumentSheet = false
-                                                }
-                                            }
-                                            ToolbarItem(placement: .cancellationAction) {
-                                                Button("Cancel") { showInstrumentSheet = false }
-                                            }
-                                        }
-                                    }
-                                }
-                            } else if let only = instruments.first {
-                                HStack {
-                                    Text("Instrument")
-                                    Spacer()
-                                    Text(only.name ?? "Instrument")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .onAppear { instrument = only }
-                            }
-
-                            // Activity
-                            Button {
-                                showActivitySheet = true
-                            } label: {
-                                HStack {
-                                    Text("Activity")
-                                    Spacer()
-                                    Text(activityDisplayName(for: activityChoice))
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                            .buttonStyle(.plain)
-                            .sheet(isPresented: $showActivitySheet) {
-                                NavigationView {
-                                    VStack {
-                                        Picker("Activity", selection: $activityChoice) {
-                                            // [Stage 2] Primary pinned first, then core, then customs (deduped)
-                                            ForEach(activityChoicesPinned(), id: \.self) { choice in
-                                                Text(activityDisplayName(for: choice)).tag(choice)
-                                            }
-                                        }
-                                        .pickerStyle(.wheel)
-                                        .labelsHidden()
-                                        .onChange(of: activityChoice) { choice in
-                                            applyChoice(choice)
-                                        }
-                                    }
-                                    .navigationTitle("Activity")
-                                    .toolbar {
-                                        ToolbarItem(placement: .confirmationAction) {
-                                            Button("Done") { showActivitySheet = false }
-                                        }
-                                        ToolbarItem(placement: .cancellationAction) {
-                                            Button("Cancel") { showActivitySheet = false }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.horizontal)
-                    }
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                    selectorsCard()
+                    timerCard()
                 }
-
-                // Timer display
-                Text(formattedElapsed(elapsedSeconds))
-                    .font(.system(size: 56, weight: .bold, design: .rounded))
-                    .monospacedDigit()
-
-                // Controls
-                HStack(spacing: 16) {
-                    Button(isRunning ? "Pause" : "Start") {
-                        isRunning ? pause() : start()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(hasNoInstruments || instrument == nil)
-
-                    Button("Reset") { reset() }
-                        .buttonStyle(.bordered)
-                        .disabled((elapsedSeconds == 0) && !isRunning)
-
-                    Button("Finish") { finish() }
-                        .buttonStyle(.bordered)
-                        .disabled((elapsedSeconds == 0) || instrument == nil)
-                }
-                Spacer(minLength: 0)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
             }
-            .padding(.top, 16)
-            .navigationTitle("Session Timer")
+            .navigationTitle("Timer")
+            .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
+            .appBackground()
             // Single, unified prefetch path to avoid duplicate first-paint work
             .task {
                 guard !didPrefetch else { return }
                 didPrefetch = true
 
-                // Perform lightweight data hydration after first frame via .task
-                // Keep on the main actor because viewContext is main-queue bound.
                 instruments = fetchInstruments()
-                // Auto-select primary instrument if available (preserve existing behaviour)
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
                        let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
@@ -232,31 +109,21 @@ struct PracticeTimerView: View {
                     instrumentIndex = idx
                 }
 
-                // Prefetch custom activities so the Activity wheel is instant on first open
                 loadUserActivities()
-
-                // Apply Primary Activity if available
                 applyPrimaryActivityRef()
-
-                // Ensure the choice string reflects current state
                 syncActivityChoiceFromState()
             }
             .onAppear {
-                // Hydrate persisted timer state and start UI ticker
                 hydrateTimerFromStorage()
-                startTicker() // drives UI only; true elapsed is recomputed each tick
+                startTicker()
             }
             .onChange(of: scenePhase) { newPhase in
                 switch newPhase {
                 case .active:
-                    // Recompute elapsed on resume to catch up time spent in background
                     hydrateTimerFromStorage()
-                    // ensure ticker is running for UI updates
                     startTicker()
                 case .inactive, .background:
-                    // Cancel UI ticker to avoid wasted cycles (elapsed is recomputed on resume)
                     stopTicker()
-                    // Persist a checkpoint so state is always current
                     persistTimerSnapshot()
                 @unknown default:
                     break
@@ -265,6 +132,56 @@ struct PracticeTimerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") { isPresented = false }
+                }
+            }
+            .sheet(isPresented: $showInstrumentSheet) {
+                NavigationView {
+                    VStack {
+                        Picker("Instrument", selection: $instrumentIndex) {
+                            ForEach(instruments.indices, id: \.self) { i in
+                                Text(instruments[i].name ?? "Instrument").tag(i)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .labelsHidden()
+                    }
+                    .navigationTitle("Instrument")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") {
+                                applyInstrumentIndex()
+                                showInstrumentSheet = false
+                            }
+                        }
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showInstrumentSheet = false }
+                        }
+                    }
+                }
+            }
+            .sheet(isPresented: $showActivitySheet) {
+                NavigationView {
+                    VStack {
+                        Picker("Activity", selection: $activityChoice) {
+                            ForEach(activityChoicesPinned(), id: \.self) { choice in
+                                Text(activityDisplayName(for: choice)).tag(choice)
+                            }
+                        }
+                        .pickerStyle(.wheel)
+                        .labelsHidden()
+                        .onChange(of: activityChoice) { choice in
+                            applyChoice(choice)
+                        }
+                    }
+                    .navigationTitle("Activity")
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("Done") { showActivitySheet = false }
+                        }
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancel") { showActivitySheet = false }
+                        }
+                    }
                 }
             }
             .sheet(isPresented: $showReviewSheet) {
@@ -276,14 +193,162 @@ struct PracticeTimerView: View {
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     onSaved: {
-                        // After saving, clear timer state and close timer sheet
                         clearPersistedTimer()
                         resetUIOnly()
                         isPresented = false
                     }
                 )
             }
+            // Info sheets for recording help
+            .sheet(isPresented: $showAudioHelp) {
+                InfoSheetView(
+                    title: "Quick audio takes (for now)",
+                    bullets: [
+                        "Open Voice Memos to record.",
+                        "Share to Files when done.",
+                        "Back here, use Add Attachment to include it."
+                    ],
+                    primaryCTA: nil
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showVideoHelp) {
+                InfoSheetView(
+                    title: "Quick video clips (for now)",
+                    bullets: [
+                        "Open Camera → Video to record.",
+                        "Save to Photos or Files.",
+                        "Back here, use Add Attachment to include it."
+                    ],
+                    primaryCTA: nil
+                )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
         }
+    }
+
+    // MARK: - Cards (split to help the type-checker)
+
+    @ViewBuilder
+    private func selectorsCard() -> some View {
+        if hasNoInstruments {
+            VStack(alignment: .center, spacing: Theme.Spacing.s) {
+                Text("No instruments found")
+                    .font(.headline)
+                Text("Add an instrument in your Profile to start timing sessions.")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal)
+            }
+            .frame(maxWidth: .infinity)
+            .cardSurface()
+        } else {
+            VStack(spacing: Theme.Spacing.m) {
+                Text("Session").sectionHeader()
+                VStack(spacing: Theme.Spacing.s) {
+                    if hasMultipleInstruments {
+                        Button {
+                            if let current = instrument,
+                               let idx = instruments.firstIndex(of: current) {
+                                instrumentIndex = idx
+                            }
+                            showInstrumentSheet = true
+                        } label: {
+                            HStack {
+                                Text("Instrument")
+                                Spacer()
+                                Text(currentInstrumentName())
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    } else if let only = instruments.first {
+                        HStack {
+                            Text("Instrument")
+                            Spacer()
+                            Text(only.name ?? "Instrument")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .onAppear { instrument = only }
+                    }
+
+                    Button { showActivitySheet = true } label: {
+                        HStack {
+                            Text("Activity")
+                            Spacer()
+                            Text(activityDisplayName(for: activityChoice))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .cardSurface()
+        }
+    }
+
+    @ViewBuilder
+    private func timerCard() -> some View {
+        VStack(alignment: .center, spacing: Theme.Spacing.m) {
+            Text(formattedElapsed(elapsedSeconds))
+                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .monospacedDigit()
+
+            HStack(spacing: Theme.Spacing.m) {
+                Button(isRunning ? "Pause" : "Start") {
+                    isRunning ? pause() : start()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.Colors.accent)
+                .disabled(hasNoInstruments || instrument == nil)
+
+                Button("Reset") { reset() }
+                    .buttonStyle(.bordered)
+                    .disabled((elapsedSeconds == 0) && !isRunning)
+
+                if isRunning {
+                    Button("Finish") { finish() }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                        .disabled((elapsedSeconds == 0) || instrument == nil)
+                } else {
+                    Button("Finish") { finish() }
+                        .buttonStyle(.bordered)
+                        .disabled((elapsedSeconds == 0) || instrument == nil)
+                }
+            }
+
+            // Recording icons (info-only, prebuilt-ins)
+            VStack(spacing: 12) {
+                Divider().padding(.horizontal)
+                HStack(spacing: 24) {
+                    Button { showAudioHelp = true } label: {
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(Text("Record audio help"))
+                    .accessibilityHint(Text("Opens instructions for using your device’s app to capture audio."))
+
+                    Button { showVideoHelp = true } label: {
+                        Image(systemName: "video.fill")
+                            .font(.system(size: 22, weight: .semibold))
+                            .frame(width: 44, height: 44)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .accessibilityLabel(Text("Record video help"))
+                    .accessibilityHint(Text("Opens instructions for using your device’s app to capture video."))
+                }
+            }
+            .padding(.horizontal)
+        }
+        .cardSurface()
     }
 
     // MARK: - Helpers for wheel UI
@@ -327,7 +392,6 @@ struct PracticeTimerView: View {
             activity = .practice
             activityDetail = name
         }
-        // Persist timer snapshot when user changes activity
         persistTimerState()
     }
 
@@ -350,37 +414,24 @@ struct PracticeTimerView: View {
                 return
             }
         }
-        // Fallback to Practice
         activity = .practice
         activityDetail = ""
         activityChoice = "core:0"
     }
 
-    // [Stage 2] Build a deduped list with Primary first
     private func activityChoicesPinned() -> [String] {
-        // Build core list
         let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
-        // Build custom list
         let customs: [String] = userActivities.compactMap { ua in
             let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return n.isEmpty ? nil : "custom:\(n)"
         }
 
-        // Normalize primary against available sets
         let primary = normalizedPrimary()
         var result: [String] = []
 
-        // Start with primary if valid
         if let p = primary { result.append(p) }
-
-        // Append cores (skipping duplicate of primary if present)
-        for c in core where !result.contains(c) {
-            result.append(c)
-        }
-        // Append customs (skipping duplicate of primary if present)
-        for cu in customs where !result.contains(cu) {
-            result.append(cu)
-        }
+        for c in core where !result.contains(c) { result.append(c) }
+        for cu in customs where !result.contains(cu) { result.append(cu) }
         return result
     }
 
@@ -432,11 +483,9 @@ struct PracticeTimerView: View {
     // MARK: - Background-safe timer controls
     private func start() {
         guard instrument != nil else { return }
-        // If not already running, set a start timestamp
         if !isRunning {
             if startDate == nil { startDate = Date() }
             isRunning = true
-            // persist
             persistTimerState()
         }
         startTicker()
@@ -445,7 +494,6 @@ struct PracticeTimerView: View {
 
     private func pause() {
         guard isRunning else { return }
-        // Fold current segment into accumulated, then stop running
         let now = Date()
         if let started = startDate {
             let delta = max(0, Int(now.timeIntervalSince(started)))
@@ -465,12 +513,9 @@ struct PracticeTimerView: View {
     }
 
     private func finish() {
-        // Capture final duration first
         let total = trueElapsedSeconds()
         finalizedDuration = total
-        // Pause the timer and persist snapshot
         pause()
-        // Present review
         showReviewSheet = true
     }
 
@@ -572,3 +617,36 @@ struct PracticeTimerView: View {
         }
     }
 }
+
+// MARK: - Local InfoSheetView (minimal)
+// If a global InfoSheetView exists later, rename this to avoid collisions.
+fileprivate struct InfoSheetView: View {
+    let title: String
+    let bullets: [String]
+    let primaryCTA: (() -> Void)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            Text(title)
+                .font(.headline)
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                ForEach(bullets, id: \.self) { item in
+                    HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                        Text("•").font(.headline)
+                        Text(item)
+                    }
+                }
+            }
+            if let cta = primaryCTA {
+                Button("Continue") { cta() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.Colors.accent)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(Theme.Spacing.l)
+        .appBackground()
+    }
+}
+
+//  [ROLLBACK ANCHOR] v7.8 DesignLite — post

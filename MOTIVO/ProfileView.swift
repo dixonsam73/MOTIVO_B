@@ -4,10 +4,9 @@
 //
 //  [ROLLBACK ANCHOR] v7.8 Scope1 — pre-primary-activity (no primary activity selector; icons on manage rows; account at top)
 //
-//  v7.8 Stage 2 — Primary fallback notice + live sync
-//  - Shows a one-time in-app notice if Primary (custom) was deleted/hidden and auto-reset to Practice.
-//  - Live-syncs the Primary picker when returning from Activity Manager or when AppStorage changes.
-//  - No schema/migrations.
+//  v7.8 Stage 2 — Primary fallback notice + live sync (kept)
+//  v7.8 DesignLite — visual polish only (headers/background/spacing).
+//  v7.8 DesignLite — tweak: Manage buttons placed above primary pickers and aligned to section edge.
 //
 import SwiftUI
 import CoreData
@@ -46,61 +45,81 @@ struct ProfileView: View {
         NavigationView {
             Form {
                 // MARK: - Profile
-                Section(header: Text("Profile")) {
-                    TextField("Name", text: $name)
-                        .textInputAutocapitalization(.words)
-                        .disableAutocorrection(true)
-
-                    Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                }
-
-                // MARK: - Instruments (includes Primary Instrument picker)
                 Section {
-                    Picker("Primary Instrument", selection: $primaryInstrumentName) {
-                        ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
-                            Text(n).tag(n)
-                        }
-                    }
+                    Text("Profile").sectionHeader()
+                    VStack(spacing: Theme.Spacing.s) {
+                        TextField("Name", text: $name)
+                            .textInputAutocapitalization(.words)
+                            .disableAutocorrection(true)
 
+                        Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                    }
+                }
+                .listRowSeparator(.hidden)
+
+                // MARK: - Instruments (Manage above Primary)
+                Section {
+                    Text("Instruments").sectionHeader()
+
+                    // Manage button aligned with section edge
                     Button {
                         showInstrumentManager = true
                     } label: {
                         Text("Manage Instruments")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(spacing: Theme.Spacing.s) {
+                        Picker("Primary Instrument", selection: $primaryInstrumentName) {
+                            ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
+                                Text(n).tag(n)
+                            }
+                        }
                     }
                 }
+                .listRowSeparator(.hidden)
 
-                // MARK: - Activities (includes Primary Activity picker; no separator line)
+                // MARK: - Activities (Manage above Primary; no separator line)
                 Section {
-                    Picker("Primary Activity", selection: $primaryActivityChoice) {
-                        // Core activities first
-                        ForEach(SessionActivityType.allCases) { type in
-                            Text(type.label).tag("core:\(type.rawValue)")
-                        }
-                        // Then user customs directly (no "— Your Activities —" separator)
-                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                            Text(name).tag("custom:\(name)")
-                        }
-                    }
-                    .onChange(of: primaryActivityChoice) { newValue in
-                        writePrimaryActivityRef(newValue)
-                    }
+                    Text("Activities").sectionHeader()
 
                     Button {
                         showActivityManager = true
                     } label: {
                         Text("Manage Activities")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+
+                    VStack(spacing: Theme.Spacing.s) {
+                        Picker("Primary Activity", selection: $primaryActivityChoice) {
+                            // Core activities first
+                            ForEach(SessionActivityType.allCases) { type in
+                                Text(type.label).tag("core:\(type.rawValue)")
+                            }
+                            // Then user customs directly
+                            ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                                Text(name).tag("custom:\(name)")
+                            }
+                        }
+                        .onChange(of: primaryActivityChoice) { newValue in
+                            writePrimaryActivityRef(newValue)
+                        }
                     }
                 }
+                .listRowSeparator(.hidden)
 
                 // MARK: - Account (bottom)
-                Section(header: Text("Account")) {
+                Section {
+                    Text("Account").sectionHeader()
                     if auth.isSignedIn {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(auth.displayName ?? "Signed in")
                                 .font(.headline)
                             Text("User ID: \(auth.currentUserID ?? "--")")
                                 .font(.footnote)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Theme.Colors.secondaryText)
                             Button(role: .destructive) {
                                 auth.signOut()
                             } label: {
@@ -116,59 +135,46 @@ struct ProfileView: View {
                         }
                         .signInWithAppleButtonStyle(.black)
                         .frame(height: 44)
-                        .accessibilityLabel("Sign in with Apple")
+                        .accessibilityLabel(Text("Sign in with Apple"))
                     }
                 }
+                .listRowSeparator(.hidden)
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        onClose?()
-                    }
+                    Button("Close") { onClose?() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        // Close-first strategy
                         onClose?()
-                        // Then persist
                         isSaving = true
                         save()
                         isSaving = false
-                    } label: {
-                        Text("Save")
-                    }
+                    } label: { Text("Save") }
                     .disabled(profile == nil)
                 }
             }
-            // Initial hydration
+            .appBackground()
             .onAppear {
                 load()
                 refreshUserActivities()
-                // Sync local picker from stored ref (normalize if needed)
                 primaryActivityChoice = normalizedPrimaryActivityRef()
-
-                // Stage 2: show one-time notice if flagged by ActivityListView
                 if primaryFallbackNoticeNeeded {
                     showPrimaryFallbackAlert = true
-                    // Clear the flag immediately so it's truly one-time
                     primaryFallbackNoticeNeeded = false
                 }
             }
-            // When returning from Activity Manager, refresh customs and re-normalize picker
             .onChange(of: showActivityManager) { wasPresented, isPresented in
                 if wasPresented == true && isPresented == false {
                     refreshUserActivities()
                     primaryActivityChoice = normalizedPrimaryActivityRef()
                 }
             }
-            // If the underlying AppStorage value changes (e.g., due to deletion in manager),
-            // keep the picker selection in sync.
             .onChange(of: primaryActivityRef) { _, _ in
                 primaryActivityChoice = normalizedPrimaryActivityRef()
             }
-            // One-time alert
             .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
                 Button("OK", role: .cancel) {}
             } message: {
@@ -192,21 +198,18 @@ struct ProfileView: View {
     }
 
     private func load() {
-        // Ensure a single Profile record exists; fetch/create.
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
         req.fetchLimit = 1
         do {
             if let existing = try ctx.fetch(req).first {
                 profile = existing
-                // Backfill missing id if needed
                 if profile?.value(forKey: "id") == nil {
                     profile?.setValue(UUID(), forKey: "id")
                     try? ctx.save()
                 }
             } else {
                 let p = Profile(context: ctx)
-                // Ensure required fields are present
-                p.setValue(UUID(), forKey: "id") // ensure id
+                p.setValue(UUID(), forKey: "id")
                 p.name = ""
                 p.primaryInstrument = instrumentsArray.first ?? ""
                 p.defaultPrivacy = false
@@ -226,16 +229,13 @@ struct ProfileView: View {
 
     private func save() {
         guard let p = profile else { return }
-        // Ensure id is set before any save
         if p.value(forKey: "id") == nil {
             p.setValue(UUID(), forKey: "id")
         }
         p.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
         p.defaultPrivacy = defaultPrivacy
-        do { try ctx.save() } catch {
-            // Consider surfacing a user-facing alert if needed
-        }
+        do { try ctx.save() } catch { }
     }
 
     // MARK: - Primary Activity helpers
@@ -248,7 +248,6 @@ struct ProfileView: View {
         }
     }
 
-    /// Returns a normalized, valid ref. Falls back to "core:0" if invalid or custom missing.
     private func normalizedPrimaryActivityRef() -> String {
         let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.hasPrefix("core:") {
@@ -263,7 +262,6 @@ struct ProfileView: View {
             if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
                 return "custom:\(name)"
             } else {
-                // custom no longer exists → fallback to Practice
                 return "core:0"
             }
         } else {
@@ -271,15 +269,12 @@ struct ProfileView: View {
         }
     }
 
-    /// Persists the user's selection and keeps local state in sync.
     private func writePrimaryActivityRef(_ newValue: String) {
-        // Normalize against current customs
         let normalized = normalizeChoiceString(newValue)
         primaryActivityRef = normalized
         primaryActivityChoice = normalized
     }
 
-    /// Normalizes picker choice strings to valid "core:<raw>" / "custom:<name>" respecting available customs.
     private func normalizeChoiceString(_ choice: String) -> String {
         if choice.hasPrefix("core:") {
             if let v = Int(choice.split(separator: ":").last ?? "0"),
@@ -300,3 +295,5 @@ struct ProfileView: View {
         }
     }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 DesignLite — post
