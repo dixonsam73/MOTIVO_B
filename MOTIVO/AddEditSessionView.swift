@@ -2,6 +2,7 @@
 //  AddEditSessionView.swift
 //  MOTIVO
 //
+//  [ROLLBACK ANCHOR] v7.8 pre-hotfix — AddEdit first-use lag
 
 import SwiftUI
 import CoreData
@@ -188,7 +189,7 @@ struct AddEditSessionView: View {
                     }
                 }
             }
-            .onAppear { loadUserActivities(); syncActivityChoiceFromState() }
+            .task { loadUserActivities() }
 
             .navigationTitle(session == nil ? "New Session" : "Edit Session")
             .toolbar {
@@ -386,6 +387,7 @@ DispatchQueue.main.async {
             } else if currentTitleTrimmed == computedAutoTitle {
                 initialAutoTitle = computedAutoTitle
                 isTitleEdited = false
+            syncActivityChoiceFromState()
             } else {
                 initialAutoTitle = title
                 isTitleEdited = true

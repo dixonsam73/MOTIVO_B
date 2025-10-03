@@ -1,5 +1,6 @@
 //  PostRecordDetailsView.swift
 //  MOTIVO
+//  [ROLLBACK ANCHOR] v7.8 pre-hotfix commit: remove first-use lag in picker/notes
 //
 
 import SwiftUI
@@ -184,7 +185,7 @@ struct PostRecordDetailsView: View {
                 }
             }
             .navigationTitle("Session Review")
-            .onAppear { syncActivityChoiceFromState() }
+            // [v7.8 hotfix] merged into unified .task to avoid duplicate first-paint work
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }
@@ -216,7 +217,8 @@ struct PostRecordDetailsView: View {
                        Button("Open Settings") { if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) } }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-            .onAppear {
+            .task {
+                // [v7.8 hotfix] Unified first-appearance init to avoid duplicate work and main-thread stalls.
                 instruments = fetchInstruments()
 
                 if instrument == nil {
@@ -237,13 +239,18 @@ struct PostRecordDetailsView: View {
                     initialAutoTitle = auto
                     isTitleEdited = false
                 }
-                // P3: Prefill default description on first open if blank
+                // Prefill default description on first open if blank
                 if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let autoDesc = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
                     activityDetail = autoDesc
                     lastAutoActivityDetail = autoDesc
                     userEditedActivityDetail = false
                 }
+
+                // Preload user-local activities once so the activity picker opens instantly.
+                loadUserActivities()
+                // Keep the string selector in sync with current state.
+                syncActivityChoiceFromState()
             }
             .onChange(of: instrument) { _, _ in
                 refreshAutoTitleIfNeeded()
@@ -317,7 +324,7 @@ struct PostRecordDetailsView: View {
                 } else {
                     activityChoice = "core:\(activity.rawValue)"
                 }
-                do { userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext) } catch { userActivities = [] }
+                // [v7.8 hotfix] userActivities are prefetched in parent .task; no fetch here.
             }
         }
     }

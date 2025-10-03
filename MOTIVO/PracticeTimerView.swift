@@ -4,13 +4,13 @@
 //
 //  Created by Samuel Dixon on 09/09/2025.
 //  P0: Background-safe timer implementation (compute-on-resume; persisted state)
+//  [ROLLBACK ANCHOR] v7.8 pre-hotfix — PracticeTimer first-use lag
 //
 import SwiftUI
 import Combine
 import CoreData
 
 // SessionActivityType moved to SessionActivityType.swift
-
 
 struct PracticeTimerView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -27,6 +27,9 @@ struct PracticeTimerView: View {
     @State private var activityChoice: String = "core:0"
     @State private var activityDetail: String = ""
 
+    // Prefetch guard to avoid duplicate first-paint work
+    @State private var didPrefetch: Bool = false
+
     // MARK: - Background-safe timer state (persisted)
     @State private var isRunning: Bool = false              // mirrored from persisted
     @State private var startDate: Date? = nil               // start timestamp (persisted)
@@ -41,8 +44,6 @@ struct PracticeTimerView: View {
     @State private var showReviewSheet = false
 
     // Info sheets for prebuilt-in recording guidance
-    @State private var showAudioHelp = false
-    @State private var showVideoHelp = false
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -139,40 +140,17 @@ struct PracticeTimerView: View {
                         .buttonStyle(.bordered)
                         .disabled((elapsedSeconds == 0) || instrument == nil)
                 }
-
-                // Recording icons (info-only, prebuilt-ins)
-                VStack(spacing: 12) {
-                    Divider().padding(.horizontal)
-                    HStack(spacing: 24) {
-                        Button { showAudioHelp = true } label: {
-                            Image(systemName: "mic.fill")
-                                .font(.system(size: 22, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("Record audio help")
-                        .accessibilityHint("Opens instructions for using your device’s app to capture audio.")
-
-                        Button { showVideoHelp = true } label: {
-                            Image(systemName: "video.fill")
-                                .font(.system(size: 22, weight: .semibold))
-                                .frame(width: 44, height: 44)
-                                .contentShape(Circle())
-                        }
-                        .buttonStyle(.bordered)
-                        .accessibilityLabel("Record video help")
-                        .accessibilityHint("Opens instructions for using your device’s app to capture video.")
-                    }
-                }
-                .padding(.horizontal)
-
                 Spacer(minLength: 0)
             }
             .padding(.top, 16)
             .navigationTitle("Session Timer")
-            .task { loadUserActivities() }
-            .onAppear {
+            // Single, unified prefetch path to avoid duplicate first-paint work
+            .task {
+                guard !didPrefetch else { return }
+                didPrefetch = true
+
+                // Perform lightweight data hydration after first frame via .task
+                // Keep on the main actor because viewContext is main-queue bound.
                 instruments = fetchInstruments()
                 // Auto-select primary instrument if available (preserve existing behaviour)
                 if instrument == nil {
@@ -183,9 +161,16 @@ struct PracticeTimerView: View {
                         instrument = instruments.first
                     }
                 }
+
+                // Prefetch custom activities so the Activity menu is instant on first open
+                loadUserActivities()
+
+                // Ensure the picker reflects current state
+                syncActivityChoiceFromState()
+            }
+            .onAppear {
                 // Hydrate persisted timer state and start UI ticker
                 hydrateTimerFromStorage()
-                syncActivityChoiceFromState()
                 startTicker() // drives UI only; true elapsed is recomputed each tick
             }
             .onChange(of: scenePhase) { newPhase in
@@ -225,33 +210,7 @@ struct PracticeTimerView: View {
                     }
                 )
             }
-            .sheet(isPresented: $showAudioHelp) {
-                InfoSheetView(
-                    title: "Quick audio takes (for now)",
-                    bullets: [
-                        "Open Voice Memos to record.",
-                        "Share to Files when done.",
-                        "Back here, use Add Attachment to include it."
-                    ],
-                    primaryCTA: nil
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showVideoHelp) {
-                InfoSheetView(
-                    title: "Quick video clips (for now)",
-                    bullets: [
-                        "Open Camera → Video to record.",
-                        "Save to Photos or Files.",
-                        "Back here, use Add Attachment to include it."
-                    ],
-                    primaryCTA: nil
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-        }
+                                }
     }
 
     // MARK: - Actions & fetches
@@ -441,23 +400,3 @@ struct PracticeTimerView: View {
     }
 }
 
-private struct InfoSheetView: View {
-    @Environment(\.dismiss) private var dismiss
-
-    let title: String
-    let bullets: [String]
-    let primaryCTA: (() -> Void)?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text(title).font(.headline)
-            VStack(alignment: .leading, spacing: 8) {
-                ForEach(Array(bullets.enumerated()), id: \.0) { _, line in
-                    HStack(alignment: .firstTextBaseline, spacing: 8) { Text("•"); Text(line) }
-                }
-            }
-            HStack { Spacer(); Button("Got it") { dismiss() }.buttonStyle(.borderedProminent) }
-        }
-        .padding()
-    }
-}

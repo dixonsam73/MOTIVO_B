@@ -14,9 +14,11 @@ struct MOTIVOApp: App {
     @StateObject private var auth = AuthManager()
 
     init() {
+        // [ROLLBACK ANCHOR] v7.8 pre-hotfix — launch stall (profile-id backfill)
+
         // Backfill: ensure all Profile rows have a non-nil UUID `id`
         let ctx = persistenceController.container.viewContext
-        ctx.performAndWait {
+        ctx.perform {
             let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
             req.predicate = NSPredicate(format: "id == nil")
             if let rows = try? ctx.fetch(req), !rows.isEmpty {
