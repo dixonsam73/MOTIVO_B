@@ -2,9 +2,14 @@
 //  ProfileView.swift
 //  MOTIVO
 //
-//  Created by Samuel Dixon on 09/09/2025.
+//  [ROLLBACK ANCHOR] v7.8 Scope1 — pre-primary-activity (no primary activity selector; icons on manage rows; account at top)
 //
-
+//  Scope 1 (update): Move Primary selectors next to their managers.
+//  - Primary Instrument picker now lives in the Instruments section (above "Manage Instruments").
+//  - Primary Activity picker now lives in the Activities section (above "Manage Activities").
+//  - Remove the "— Your Activities —" separator; customs follow core items directly.
+//  - Account section remains at the bottom. No migrations.
+//
 import SwiftUI
 import CoreData
 import AuthenticationServices
@@ -28,10 +33,62 @@ struct ProfileView: View {
     @State private var profile: Profile?
     @State private var isSaving = false
 
+    // Primary Activity (Stage 1)
+    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    @State private var userActivities: [UserActivity] = []
+    @State private var primaryActivityChoice: String = "core:0" // mirrors picker; same tag format
+
     var body: some View {
         NavigationView {
             Form {
-                // MARK: - Auth / Account section
+                // MARK: - Profile
+                Section(header: Text("Profile")) {
+                    TextField("Name", text: $name)
+                        .textInputAutocapitalization(.words)
+                        .disableAutocorrection(true)
+
+                    Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                }
+
+                // MARK: - Instruments (now includes Primary Instrument picker)
+                Section {
+                    Picker("Primary Instrument", selection: $primaryInstrumentName) {
+                        ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
+                            Text(n).tag(n)
+                        }
+                    }
+
+                    Button {
+                        showInstrumentManager = true
+                    } label: {
+                        Text("Manage Instruments")
+                    }
+                }
+
+                // MARK: - Activities (now includes Primary Activity picker; no separator line)
+                Section {
+                    Picker("Primary Activity", selection: $primaryActivityChoice) {
+                        // Core activities first
+                        ForEach(SessionActivityType.allCases) { type in
+                            Text(type.label).tag("core:\(type.rawValue)")
+                        }
+                        // Then user customs directly (no "— Your Activities —" separator)
+                        ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                            Text(name).tag("custom:\(name)")
+                        }
+                    }
+                    .onChange(of: primaryActivityChoice) { newValue in
+                        writePrimaryActivityRef(newValue)
+                    }
+
+                    Button {
+                        showActivityManager = true
+                    } label: {
+                        Text("Manage Activities")
+                    }
+                }
+
+                // MARK: - Account (bottom)
                 Section(header: Text("Account")) {
                     if auth.isSignedIn {
                         VStack(alignment: .leading, spacing: 6) {
@@ -58,37 +115,6 @@ struct ProfileView: View {
                         .accessibilityLabel("Sign in with Apple")
                     }
                 }
-
-                // MARK: - Profile section
-                Section(header: Text("Profile")) {
-                    TextField("Name", text: $name)
-                        .textInputAutocapitalization(.words)
-                        .disableAutocorrection(true)
-
-                    Picker("Primary Instrument", selection: $primaryInstrumentName) {
-                        ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
-                            Text(n).tag(n)
-                        }
-                    }
-
-                    Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                }
-
-                // MARK: - Instruments
-                Section {
-                    Button {
-                        showInstrumentManager = true
-                    } label: {
-                        Label("Manage Instruments", systemImage: "guitars")
-                    }
-                }
-                Section {
-                    Button {
-                        showActivityManager = true
-                    } label: {
-                        Label("Manage Activities", systemImage: "figure.walk")
-                    }
-                }
             }
             .navigationTitle("Profile")
             .navigationBarTitleDisplayMode(.inline)
@@ -112,7 +138,12 @@ struct ProfileView: View {
                     .disabled(profile == nil)
                 }
             }
-            .onAppear(perform: load)
+            .onAppear {
+                load()
+                refreshUserActivities()
+                // Sync local picker from stored ref
+                primaryActivityChoice = normalizedPrimaryActivityRef()
+            }
             .sheet(isPresented: $showInstrumentManager) {
                 InstrumentListView()
                     .environment(\.managedObjectContext, ctx)
@@ -145,7 +176,7 @@ struct ProfileView: View {
             } else {
                 let p = Profile(context: ctx)
                 // Ensure required fields are present
-                p.setValue(UUID(), forKey: "id") // <- make id non-nil up front
+                p.setValue(UUID(), forKey: "id") // ensure id
                 p.name = ""
                 p.primaryInstrument = instrumentsArray.first ?? ""
                 p.defaultPrivacy = false
@@ -173,7 +204,47 @@ struct ProfileView: View {
         p.primaryInstrument = primaryInstrumentName.trimmingCharacters(in: .whitespacesAndNewlines)
         p.defaultPrivacy = defaultPrivacy
         do { try ctx.save() } catch {
-            // You could surface a user-facing alert here if desired
+            // Consider surfacing a user-facing alert if needed
         }
     }
+
+    // MARK: - Primary Activity helpers
+
+    private func refreshUserActivities() {
+        do {
+            userActivities = try PersistenceController.shared.fetchUserActivities(in: ctx)
+        } catch {
+            userActivities = []
+        }
+    }
+
+    /// Returns a normalized, valid ref. Falls back to "core:0" if invalid or custom missing.
+    private func normalizedPrimaryActivityRef() -> String {
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               SessionActivityType(rawValue: Int16(v)) != nil {
+                return "core:\(v)"
+            } else {
+                return "core:0"
+            }
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                return "custom:\(name)"
+            } else {
+                // custom no longer exists → fallback to Practice
+                return "core:0"
+            }
+        } else {
+            return "core:0"
+        }
+    }
+
+    private func writePrimaryActivityRef(_ value: String) {
+        // Persist to AppStorage/UserDefaults; no other side effects here
+        primaryActivityRef = value
+    }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 Scope1 — post-primary-activity (primary pickers moved; no separators; account at bottom)

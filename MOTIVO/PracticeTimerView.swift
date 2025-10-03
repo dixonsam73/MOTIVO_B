@@ -5,6 +5,7 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //  P0: Background-safe timer implementation (compute-on-resume; persisted state)
 //  [ROLLBACK ANCHOR] v7.8 pre-hotfix — PracticeTimer first-use lag
+//  [ROLLBACK ANCHOR] v7.8 Scope1 — primary-activity preselect applied (no migration)
 //
 import SwiftUI
 import Combine
@@ -27,6 +28,9 @@ struct PracticeTimerView: View {
     @State private var activityChoice: String = "core:0"
     @State private var activityDetail: String = ""
 
+    // Primary Activity (Stage 1)
+    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
 
@@ -42,8 +46,6 @@ struct PracticeTimerView: View {
 
     // Review sheet
     @State private var showReviewSheet = false
-
-    // Info sheets for prebuilt-in recording guidance
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -99,18 +101,7 @@ struct PracticeTimerView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .onChange(of: activityChoice) { choice in
-                                    if choice.hasPrefix("core:") {
-                                        if let raw = Int(choice.split(separator: ":").last ?? "0") {
-                                            activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
-                                        } else {
-                                            activity = .practice
-                                        }
-                                        activityDetail = ""
-                                    } else if choice.hasPrefix("custom:") {
-                                        let name = String(choice.dropFirst("custom:".count))
-                                        activity = .practice
-                                        activityDetail = name
-                                    }
+                                    applyChoice(choice)
                                 }
                             }
                             .padding(.horizontal)
@@ -165,6 +156,9 @@ struct PracticeTimerView: View {
                 // Prefetch custom activities so the Activity menu is instant on first open
                 loadUserActivities()
 
+                // Apply Primary Activity if available
+                applyPrimaryActivityRef()
+
                 // Ensure the picker reflects current state
                 syncActivityChoiceFromState()
             }
@@ -201,7 +195,7 @@ struct PracticeTimerView: View {
                     durationSeconds: finalizedDuration,
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
-                    activityDetailPrefill: activityDetail.isEmpty ? nil : activityDetail,
+                    activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     onSaved: {
                         // After saving, clear timer state and close timer sheet
                         clearPersistedTimer()
@@ -210,7 +204,49 @@ struct PracticeTimerView: View {
                     }
                 )
             }
-                                }
+        }
+    }
+
+    // MARK: - Apply choices / primary
+
+    private func applyChoice(_ choice: String) {
+        if choice.hasPrefix("core:") {
+            if let raw = Int(choice.split(separator: ":").last ?? "0") {
+                activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
+            } else {
+                activity = .practice
+            }
+            activityDetail = ""
+        } else if choice.hasPrefix("custom:") {
+            let name = String(choice.dropFirst("custom:".count))
+            activity = .practice
+            activityDetail = name
+        }
+    }
+
+    private func applyPrimaryActivityRef() {
+        let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if raw.hasPrefix("core:") {
+            if let v = Int(raw.split(separator: ":").last ?? "0"),
+               let t = SessionActivityType(rawValue: Int16(v)) {
+                activity = t
+                activityDetail = ""
+                activityChoice = "core:\(v)"
+                return
+            }
+        } else if raw.hasPrefix("custom:") {
+            let name = String(raw.dropFirst("custom:".count))
+            if userActivities.contains(where: { ($0.displayName ?? "") == name }) {
+                activity = .practice
+                activityDetail = name
+                activityChoice = "custom:\(name)"
+                return
+            }
+        }
+        // Fallback to Practice
+        activity = .practice
+        activityDetail = ""
+        activityChoice = "core:0"
     }
 
     // MARK: - Actions & fetches
@@ -359,7 +395,7 @@ struct PracticeTimerView: View {
             let ud = UserDefaults.standard
             ud.set(isRunning, forKey: TimerDefaultsKey.running.rawValue)
             ud.set(newAccum, forKey: TimerDefaultsKey.accumulated.rawValue)
-            ud.set(now.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue) // keep running from 'now' to avoid double counting on long sleeps
+            ud.set(now.timeIntervalSince1970, forKey: TimerDefaultsKey.startedAtEpoch.rawValue) // keep running from 'now'
         } else {
             persistTimerState()
         }
@@ -399,4 +435,3 @@ struct PracticeTimerView: View {
         }
     }
 }
-

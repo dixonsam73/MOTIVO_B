@@ -1,14 +1,15 @@
 ////////
 //  SessionDetailView.swift
 //  MOTIVO
-//  P2: Layout tweak — Description first; meta card second
+//
+//  [ROLLBACK ANCHOR] v7.8 Scope0 — pre-unify (detail view had local label/description logic)
+//
+//  Scope 0: Route all activity labels/titles/descriptions through SessionActivityHelpers.
+//  No behavior changes expected; removes duplicate derivation logic.
 //
 import SwiftUI
 import CoreData
 import UIKit
-
-// SessionActivityType moved to SessionActivityType.swift
-
 
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -23,12 +24,20 @@ struct SessionDetailView: View {
 
     private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
+    // Unified via helpers
+    private var headerTitle: String {
+        SessionActivity.headerTitle(for: session)
+    }
+    private var activityDescriptionText: String {
+        SessionActivity.description(for: session)
+    }
+
     var body: some View {
         Form {
             // 1) Top card — Activity Description (headline), shown only if non-empty
-            if let desc = activityDescription, !desc.isEmpty {
+            if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Section {
-                    Text(desc)
+                    Text(activityDescriptionText)
                         .fixedSize(horizontal: false, vertical: true) // allow multiline
                 }
             }
@@ -104,23 +113,7 @@ struct SessionDetailView: View {
         }
     }
 
-    // MARK: - Computed helpers (strings)
-
-    private var chosenActivityName: String {
-        let label = ((session.value(forKey: "userActivityLabel") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !label.isEmpty { return label }
-        return SessionActivityType.from(session.value(forKey: "activityType") as? Int16).label
-    }
-
-    private var headerTitle: String {
-        let instrumentName = (session.instrument?.name ?? "Instrument")
-        return "\(instrumentName) : \(chosenActivityName)"
-    }
-
-    private var activityDescription: String? {
-        let desc = (session.value(forKey: "activityDetail") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return desc.isEmpty ? nil : desc
-    }
+    // MARK: - Meta line (date • time • duration)
 
     private var metaLine: String {
         let ts = session.timestamp ?? Date()
@@ -128,6 +121,7 @@ struct SessionDetailView: View {
         dateFormatter.doesRelativeDateFormatting = true
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .none
+
         let timeFormatter = DateFormatter()
         timeFormatter.dateStyle = .none
         timeFormatter.timeStyle = .short
@@ -146,7 +140,7 @@ struct SessionDetailView: View {
         return "\(m)m"
     }
 
-    // MARK: - Attachments split
+    // MARK: - Attachments split & preview
 
     private func splitAttachments() -> (images: [Attachment], others: [Attachment]) {
         let set = (session.attachments as? Set<Attachment>) ?? []
@@ -260,3 +254,5 @@ fileprivate struct ThumbCell: View {
         }
     }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
