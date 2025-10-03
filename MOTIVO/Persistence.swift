@@ -2,7 +2,8 @@
 //  Persistence.swift
 //  MOTIVO
 //
-
+//  [ROLLBACK ANCHOR] v7.8 Maintenance — pre-context-niceties (no name/undo tweaks)
+//
 import Foundation
 import CoreData
 
@@ -28,6 +29,10 @@ final class PersistenceController {
         // Merge policy & context niceties
         container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
         container.viewContext.automaticallyMergesChangesFromParent = true
+
+        // v7.8 Maintenance: clearer debugging + avoid unused undo stack work
+        container.viewContext.name = "viewContext"
+        container.viewContext.undoManager = nil
     }
 }
 
@@ -169,3 +174,5 @@ extension PersistenceController {
         return
     }
 }
+
+//  [ROLLBACK ANCHOR] v7.8 Maintenance — post-context-niceties (viewContext named; undo disabled)
