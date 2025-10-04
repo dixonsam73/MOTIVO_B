@@ -116,6 +116,14 @@ fileprivate struct SessionsRootView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: Theme.Spacing.l) {
+
+                // ---------- Stats (card) ----------
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    let statsInput: [Session] = filteredSessions
+                    StatsBannerView(sessions: statsInput)
+                }
+                .cardSurface()
+
                 // ---------- Filters (card) ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Filters").sectionHeader()
@@ -128,13 +136,6 @@ fileprivate struct SessionsRootView: View {
                         selectedScope: $selectedScope,
                         searchText: $searchText
                     )
-                }
-                .cardSurface()
-
-                // ---------- Stats (card) ----------
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    let statsInput: [Session] = filteredSessions
-                    StatsBannerView(sessions: statsInput)
                 }
                 .cardSurface()
 
@@ -386,15 +387,18 @@ fileprivate struct StatsBannerView: View {
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Sessions")
+                Text("Your Sessions")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(Theme.Colors.secondaryText)
-                Text("\(count) • \(totalTimeDisplay) total")
+                Text("\(count) activities")
+                    .font(.subheadline)
+                Text("\(totalTimeDisplay) total")
                     .font(.subheadline)
             }
             Spacer()
         }
         .padding(.vertical, 4)
+
     }
 }
 
@@ -404,6 +408,8 @@ fileprivate struct StatsBannerView: View {
 
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
+    // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
+    @State private var _refreshTick: Int = 0
 
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
@@ -441,6 +447,13 @@ fileprivate struct SessionRow: View {
             }
         }
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
+        .id(_refreshTick)
+        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
+            guard let updates = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject> else { return }
+            if updates.contains(where: { ($0 as? Attachment)?.session == self.session }) {
+                _refreshTick &+= 1
+            }
+        }
     }
 }
 
@@ -645,27 +658,51 @@ fileprivate func attachmentKind(_ a: Attachment) -> String {
 }
 
 fileprivate func attachmentFileURL(_ a: Attachment) -> URL? {
+
+    func fallbackByFilename(_ filename: String) -> URL? {
+        let fm = FileManager.default
+        let dirs: [URL?] = [
+            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            URL(fileURLWithPath: NSTemporaryDirectory())
+        ]
+        for d in dirs.compactMap({ $0 }) {
+            let candidate = d.appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
+    }
     let props = a.entity.propertiesByName
 
     // URL-typed properties
     let urlKeysURL = ["url", "fileURL", "pathURL", "localURL"]
     for k in urlKeysURL where props[k] != nil {
-        if let u = a.value(forKey: k) as? URL { return u }
+        if let u = a.value(forKey: k) as? URL {
+            if u.isFileURL {
+                if FileManager.default.fileExists(atPath: u.path) { return u }
+                if let alt = fallbackByFilename(u.lastPathComponent) { return alt }
+            } else {
+                return u
+            }
+        }
     }
 
     // String-typed properties
     let urlKeysString = ["url", "fileURL", "path", "localPath", "filename"]
     for k in urlKeysString where props[k] != nil {
-        if let s = a.value(forKey: k) as? String, !s.isEmpty {
-            if let u = URL(string: s), u.scheme?.hasPrefix("file") == true { return u }
+        if let sVal = a.value(forKey: k) as? String, !sVal.isEmpty {
+            // If it's a file:// URL string
+            if let u = URL(string: sVal), u.scheme?.hasPrefix("file") == true {
+                if FileManager.default.fileExists(atPath: u.path) { return u }
+                if let alt = fallbackByFilename(u.lastPathComponent) { return alt }
+            }
+            // Absolute path string
+            if sVal.hasPrefix("/") {
+                if FileManager.default.fileExists(atPath: sVal) { return URL(fileURLWithPath: sVal) }
+                if let alt = fallbackByFilename(URL(fileURLWithPath: sVal).lastPathComponent) { return alt }
+            }
             // Relative path or plain filename
-            let fm = FileManager.default
-            let candidates: [URL] = [
-                fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-                fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-                URL(fileURLWithPath: NSTemporaryDirectory())
-            ].compactMap { $0 }.map { $0.appendingPathComponent(s) }
-            if let hit = candidates.first(where: { fm.fileExists(atPath: $0.path) }) { return hit }
+            if let alt = fallbackByFilename(sVal) { return alt }
         }
     }
 

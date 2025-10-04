@@ -301,7 +301,7 @@ struct PracticeTimerView: View {
                 Button(isRunning ? "Pause" : "Start") {
                     isRunning ? pause() : start()
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
                 .tint(Theme.Colors.accent)
                 .disabled(hasNoInstruments || instrument == nil)
 

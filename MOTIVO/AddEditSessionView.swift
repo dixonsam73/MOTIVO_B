@@ -3,13 +3,11 @@
 //
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
-//  v7.8 — AddEditSessionView parity + remove Title
-//  - Removes explicit Title field/state; Activity description now acts as the title.
-//  - On save, Session.title = activityDetail (trimmed) or falls back to "<Instrument> : <Activity>".
-//  - Auto "Activity description" defaulting logic preserved (updates until user edits).
-//  - Primary-first Activity wheel (Primary → core → customs) unchanged.
-//  - Full attachments flow via StagedAttachment + StagedAttachmentsSectionView.
-//  - No schema/migrations. Visuals remain Design-Lite.
+//  v7.8 — Edit thumbnails: preload existing images safely
+//  - Preload uses only known fields (id, kind, fileURL, isThumbnail).
+//  - Image bytes resolved from: absolute path → file:// URL → relative-in-Documents.
+//  - Avoids duplicating existing attachments on Save; updates cover flag.
+//  - No schema/migrations. No other behaviour changes.
 //
 
 import SwiftUI
@@ -17,6 +15,7 @@ import CoreData
 import PhotosUI
 import AVFoundation
 import UIKit
+import UniformTypeIdentifiers
 
 struct AddEditSessionView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -63,6 +62,9 @@ struct AddEditSessionView: View {
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
+
+    // Track which staged attachments came from Core Data (existing) to prevent duplication on save
+    @State private var existingAttachmentIDs: Set<UUID> = []
 
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
@@ -327,6 +329,11 @@ struct AddEditSessionView: View {
             lastAutoActivityDetail = auto
             userEditedActivityDetail = false
         }
+
+        // Preload existing attachments for edit mode (only once to avoid duplicates)
+        if session != nil, stagedAttachments.isEmpty {
+            preloadExistingAttachments()
+        }
     }
 
     private func applyPrimaryActivityRefIfNeeded() {
@@ -386,7 +393,7 @@ struct AddEditSessionView: View {
             s.setValue(uid, forKey: "ownerUserID")
         }
 
-        // Commit staged attachments
+        // Commit staged attachments (skip existing to avoid duplicates; update thumbnail flags)
         commitStagedAttachments(to: s, ctx: viewContext)
 
         do {
@@ -403,7 +410,7 @@ struct AddEditSessionView: View {
     private func activityDisplayName(for choice: String) -> String {
         if choice.hasPrefix("core:") {
             if let raw = Int(choice.split(separator: ":").last ?? "0"),
-                let t = SessionActivityType(rawValue: Int16(raw)) {
+               let t = SessionActivityType(rawValue: Int16(raw)) {
                 return t.label
             }
             return SessionActivityType.practice.label
@@ -507,7 +514,95 @@ struct AddEditSessionView: View {
         }
     }
 
-    // MARK: - Attachments (stage & commit)
+    // MARK: - Attachments (preload, stage & commit)
+
+    /// Preload existing Core Data attachments so they appear in the grid during Edit (no duplication on save).
+    private func preloadExistingAttachments() {
+        guard let s = session else { return }
+        // Try to fetch via relationship; fall back to fetch request if needed.
+        var existing: [Attachment] = []
+        if let set = s.value(forKey: "attachments") as? Set<Attachment> {
+            existing = Array(set)
+        } else {
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "session == %@", s.objectID)
+            existing = (try? viewContext.fetch(req)) ?? []
+        }
+
+        // Sort by createdAt if available for stable order
+        existing.sort {
+            let a = ($0.value(forKey: "createdAt") as? Date) ?? .distantPast
+            let b = ($1.value(forKey: "createdAt") as? Date) ?? .distantPast
+            return a < b
+        }
+
+        // Map Core Data attachments into staged rows (image data for previews; icons for others).
+        for a in existing {
+            let kindStr = (a.value(forKey: "kind") as? String) ?? "file"
+            let kind = AttachmentKind(rawValue: kindStr) ?? .file
+            let id = (a.value(forKey: "id") as? UUID) ?? UUID()
+
+            var data = Data()
+            if kind == .image, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                if let d = loadImageData(at: path) { data = d }
+            }
+
+            // Stage item and remember it's existing to avoid duplication on save.
+            let staged = StagedAttachment(id: id, data: data, kind: kind)
+            stagedAttachments.append(staged)
+            existingAttachmentIDs.insert(id)
+
+            if (a.value(forKey: "isThumbnail") as? Bool) == true {
+                selectedThumbnailID = id
+            }
+        }
+    }
+
+    /// Attempts to read image bytes from: absolute path → file:// URL → relative path in Documents directory.
+    private func loadImageData(at pathOrURLString: String) -> Data? {
+        let trimmed = pathOrURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        func loadAtAbsolutePath(_ abs: String) -> Data? {
+            if FileManager.default.fileExists(atPath: abs) {
+                if let ui = UIImage(contentsOfFile: abs) {
+                    if let jpg = ui.jpegData(compressionQuality: 0.85) { return jpg }
+                }
+                if let raw = try? Data(contentsOf: URL(fileURLWithPath: abs)) { return raw }
+            }
+            return nil
+        }
+
+        // Case A: absolute filesystem path
+        if trimmed.hasPrefix("/") {
+            if let d = loadAtAbsolutePath(trimmed) { return d }
+            // Fallback: treat as stale absolute path; try lastPathComponent in Documents
+            if let filename = URL(fileURLWithPath: trimmed).pathComponents.last, !filename.isEmpty {
+                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
+                if let hit = docs?.appendingPathComponent(filename), FileManager.default.fileExists(atPath: hit.path) {
+                    if let ui = UIImage(contentsOfFile: hit.path) {
+                        if let jpg = ui.jpegData(compressionQuality: 0.85) { return jpg }
+                    }
+                    if let raw = try? Data(contentsOf: hit) { return raw }
+                }
+            }
+        }
+
+        // Case B: URL string (e.g., "file:///...")
+        if let url = URL(string: trimmed), url.isFileURL {
+            if let d = loadAtAbsolutePath(url.path) { return d }
+            if let raw = try? Data(contentsOf: url) { return raw }
+        }
+
+        // Case C: relative path previously stored (resolve against Documents directory)
+        if !trimmed.isEmpty, !trimmed.contains(":"), !trimmed.hasPrefix("/") {
+            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let candidate = docs.appendingPathComponent(trimmed).path
+                if let d = loadAtAbsolutePath(candidate) { return d }
+            }
+        }
+
+        return nil
+    }
 
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
@@ -520,6 +615,7 @@ struct AddEditSessionView: View {
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
+        existingAttachmentIDs.remove(a.id)
         if selectedThumbnailID == a.id {
             selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
         }
@@ -547,12 +643,15 @@ struct AddEditSessionView: View {
         return .file
     }
 
+    /// Adds only newly staged attachments (not those that originated from Core Data) and updates thumbnail flags for all.
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        // Determine chosen thumbnail (if any)
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
         if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
 
-        for att in stagedAttachments {
+        // 1) Add ONLY newly staged attachments (skip those that were preloaded from Core Data)
+        for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
                 let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
@@ -563,7 +662,24 @@ struct AddEditSessionView: View {
             }
         }
 
+        // 2) Update thumbnail flags across ALL existing attachments to reflect selection
+        do {
+            // Fetch all attachments for this session
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "session == %@", session.objectID)
+            let existing = try ctx.fetch(req)
+            for a in existing {
+                let id = (a.value(forKey: "id") as? UUID)
+                let isThumb = (id != nil) && (id == chosenThumbID)
+                a.setValue(isThumb, forKey: "isThumbnail")
+            }
+        } catch {
+            print("Failed to update thumbnail flags: ", error)
+        }
+
+        // Clear the staging area after commit
         stagedAttachments.removeAll()
+        existingAttachmentIDs.removeAll()
     }
 
     // MARK: - Fetches & misc helpers

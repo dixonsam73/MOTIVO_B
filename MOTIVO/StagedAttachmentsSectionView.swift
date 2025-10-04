@@ -56,16 +56,26 @@ fileprivate struct AttachmentThumb: View {
                         .stroke(.secondary.opacity(0.15), lineWidth: 1)
                 )
 
-            // Star overlay: tap to set thumbnail (always visible on images)
-            if att.kind == .image {
-                Text(isThumbnail ? "★" : "☆")
-                    .font(.system(size: 16))
+
+            // Overlays (top-right): Thumbnail star (images only) + Delete (all kinds)
+            HStack(spacing: 6) {
+                if att.kind == .image {
+                    Text(isThumbnail ? "★" : "☆")
+                        .font(.system(size: 16))
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .onTapGesture { onMakeThumbnail() }
+                        .accessibilityLabel(isThumbnail ? "Thumbnail (selected)" : "Set as Thumbnail")
+                }
+                Image(systemName: "trash")
+                    .font(.system(size: 14, weight: .semibold))
                     .padding(6)
                     .background(.ultraThinMaterial, in: Circle())
-                    .padding(4)
-                    .onTapGesture { onMakeThumbnail() }
-                    .accessibilityLabel(isThumbnail ? "Thumbnail (selected)" : "Set as Thumbnail")
+                    .onTapGesture { onRemove() }
+                    .accessibilityLabel("Delete attachment")
             }
+            .padding(4)
+
         }
         .contextMenu {
             if att.kind == .image {
