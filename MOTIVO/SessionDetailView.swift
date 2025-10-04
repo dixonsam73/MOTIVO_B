@@ -13,6 +13,7 @@
 import SwiftUI
 import CoreData
 import UIKit
+import Combine
 
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -25,6 +26,9 @@ struct SessionDetailView: View {
     @State private var previewURL: URL?
     @State private var isShowingPreview = false
 
+    // Forces view refresh when attachments of this session change
+    @State private var _refreshTick: Int = 0
+
     private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
     // Unified via helpers
@@ -36,36 +40,43 @@ struct SessionDetailView: View {
     }
 
     var body: some View {
-        Form {
+    ScrollView {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+
             // 1) Top card — Activity Description (headline), shown only if non-empty
             if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Section {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(activityDescriptionText)
                         .fixedSize(horizontal: false, vertical: true) // allow multiline
                 }
+                .cardSurface()
             }
 
             // 2) Second card — Instrument : Activity + Date • Time • Duration
-            Section {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(headerTitle)
-                        Spacer()
-                    }
-                    Text(metaLine)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(headerTitle)
+                    Spacer()
                 }
+                Text(metaLine)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
+            .cardSurface()
 
             // Notes
             if let notes = session.notes,
                !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Section("Notes") { Text(notes) }
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Notes").sectionHeader()
+                    Text(notes)
+                }
+                .cardSurface()
             }
 
             // Attachments
-            Section("Attachments") {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Attachments").sectionHeader()
                 let (images, others) = splitAttachments()
                 if images.isEmpty && others.isEmpty {
                     Text("No attachments").foregroundStyle(.secondary)
@@ -87,33 +98,57 @@ struct SessionDetailView: View {
                     }
                 }
             }
+            .cardSurface()
         }
-        .navigationTitle("Session")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    Button("Edit") { showEdit = true }
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Image(systemName: "trash")
-                    }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.l)
+        .padding(.bottom, Theme.Spacing.xl)
+    }
+    .navigationTitle("Session")
+    .toolbar {
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 12) {
+                Button("Edit") { showEdit = true }
+                Button(role: .destructive) { showDeleteConfirm = true } label: {
+                    Image(systemName: "trash")
                 }
             }
         }
-        // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
-        .fullScreenCover(isPresented: $showEdit) {
-            // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
-            AddEditSessionView(session: session)
+    }
+    // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
+    .fullScreenCover(isPresented: $showEdit) {
+        // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
+        AddEditSessionView(session: session)
+    }
+    .sheet(isPresented: $isShowingPreview) {
+        if let url = previewURL { QuickLookPreview(url: url) }
+    }
+    .alert("Delete Session?", isPresented: $showDeleteConfirm) {
+        Button("Delete", role: .destructive) { deleteSession() }
+        Button("Cancel", role: .cancel) { }
+    }
+    
+    .id(_refreshTick)
+    .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
+        func touchesThisSession(_ set: Set<NSManagedObject>?) -> Bool {
+            guard let set = set else { return false }
+            for obj in set {
+                if let att = obj as? Attachment, att.session == self.session { return true }
+                if let ses = obj as? Session, ses.objectID == self.session.objectID { return true }
+            }
+            return false
         }
-        .sheet(isPresented: $isShowingPreview) {
-            if let url = previewURL { QuickLookPreview(url: url) }
-        }
-        .alert("Delete Session?", isPresented: $showDeleteConfirm) {
-            Button("Delete", role: .destructive) { deleteSession() }
-            Button("Cancel", role: .cancel) { }
+        let updated = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject>
+        let inserted = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>
+        let deleted = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>
+        if touchesThisSession(updated) || touchesThisSession(inserted) || touchesThisSession(deleted) {
+            _refreshTick &+= 1
         }
     }
+.appBackground()
+}
 
-    // MARK: - Meta line (date • time • duration)
+// MARK: - Meta line (date • time • duration)
 
     private var metaLine: String {
         let ts = session.timestamp ?? Date()
@@ -188,6 +223,9 @@ struct SessionDetailView: View {
         dismiss()
     }
 }
+
+
+
 
 // MARK: - Rows
 

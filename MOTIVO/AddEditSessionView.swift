@@ -50,6 +50,7 @@ struct AddEditSessionView: View {
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
     @State private var showActivityPicker = false
+    @State private var showInstrumentPicker = false
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
@@ -79,71 +80,134 @@ struct AddEditSessionView: View {
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
     var body: some View {
-        NavigationStack {
-            Form {
+    NavigationStack {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+
+                // No instruments / Instrument picker
                 if hasNoInstruments {
-                    Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("No instruments found").font(.headline)
-                            Text("Add an instrument in your Profile to save this session.")
-                                .foregroundStyle(.secondary).font(.subheadline)
-                        }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("No instruments found").font(.headline)
+                        Text("Add an instrument in your Profile to save this session.")
+                            .foregroundStyle(.secondary).font(.subheadline)
                     }
+                    .cardSurface()
                 } else if hasMultipleInstruments {
-                    Section {
-                        Picker("Instrument", selection: $instrument) {
-                            Text("Select instrument…").tag(nil as Instrument?)
-                            ForEach(instruments, id: \.self) { inst in
-                                Text(inst.name ?? "").tag(inst as Instrument?)
-                            }
-                        }
-                    }
+                    // Instrument (always visible if any instruments exist)
+VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+    Text("Instrument").sectionHeader()
+    if hasMultipleInstruments {
+        // Tappable row → wheel sheet
+        Button {
+            showInstrumentPicker = true
+        } label: {
+            HStack {
+                Text(instrument?.name ?? "Select instrument…")
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+        .buttonStyle(.plain)
+    } else {
+        // Read-only row for single instrument (no chevron)
+        HStack {
+            Text(instrument?.name ?? "Instrument")
+            Spacer()
+        }
+        .accessibilityLabel(instrument?.name ?? "Instrument")
+    }
+}
+.cardSurface()
                 }
 
-                Section {
+                // Activity
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Activity").sectionHeader()
                     Button {
                         showActivityPicker = true
                     } label: {
                         let display = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : selectedCustomName
                         HStack {
-                            Text("Activity")
+                            Text(display)
                             Spacer()
-                            Text(display).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
+                .cardSurface()
 
-                // Activity description (short detail) — auto-seeded and kept in sync until user edits
-                Section {
+                // Activity description (short detail)
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Description").sectionHeader()
                     TextField("Activity description", text: $activityDetail, axis: .vertical)
                         .lineLimit(1...3)
                 }
+                .cardSurface()
 
-                Section {
+                // Start Time
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Start Time").sectionHeader()
                     Button {
                         tempDate = timestamp
                         showStartPicker = true
                     } label: {
-                        HStack { Text("Start Time"); Spacer(); Text(formattedDate(timestamp)).foregroundStyle(.secondary) }
+                        HStack {
+                            Text(formattedDate(timestamp))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
+                .cardSurface()
 
-                Section {
+                // Duration
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Duration").sectionHeader()
                     Button {
                         let hm = secondsToHM(durationSeconds)
                         tempHours = hm.0; tempMinutes = hm.1
                         showDurationPicker = true
                     } label: {
-                        HStack { Text("Duration"); Spacer(); Text(formattedDuration(durationSeconds)).foregroundStyle(.secondary) }
+                        HStack {
+                            Text(formattedDuration(durationSeconds))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                     }
+                    .buttonStyle(.plain)
                     if durationSeconds == 0 {
                         Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
                     }
                 }
+                .cardSurface()
 
-                Section { Toggle("Public", isOn: $isPublic) }
+                // Privacy
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Toggle("Public", isOn: $isPublic)
+                }
+                .cardSurface()
 
-                Section {
+                // Notes
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Notes").sectionHeader()
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
                         if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -151,69 +215,108 @@ struct AddEditSessionView: View {
                         }
                     }
                 }
+                .cardSurface()
 
-                // Staged attachments grid + actions
-                StagedAttachmentsSectionView(
-                    attachments: stagedAttachments,
-                    onRemove: removeStagedAttachment,
-                    selectedThumbnailID: $selectedThumbnailID
-                )
-                Section {
+                // Attachments grid
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Attachments").sectionHeader()
+                    StagedAttachmentsSectionView(
+                        attachments: stagedAttachments,
+                        onRemove: removeStagedAttachment,
+                        selectedThumbnailID: $selectedThumbnailID
+                    )
+                }
+                .cardSurface()
+
+                // Add buttons
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Button("Add Photo") { showPhotoPicker = true }
                     Button("Add File") { showFileImporter = true }
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
                         Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
                     }
                 }
+                .cardSurface()
+
             }
-            .navigationTitle(isEdit ? "Edit Session" : "New Session")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.xl)
+        }
+        .navigationTitle(isEdit ? "Edit Session" : "New Session")
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { dismiss() }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") { save() }
+                    .disabled(durationSeconds == 0 || instrument == nil)
+            }
+        }
+        .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
+        .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
+        .sheet(isPresented: $showStartPicker) { startPicker }
+        .sheet(isPresented: $showDurationPicker) { durationPicker }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
+        .task(id: photoPickerItem) {
+            guard let item = photoPickerItem else { return }
+            if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureView { image in
+                if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
+            }
+        }
+        .alert("Camera access denied",
+               isPresented: $showCameraDeniedAlert,
+               actions: {
+                   Button("OK", role: .cancel) {}
+                   Button("Open Settings") {
+                       if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                   }
+               },
+               message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        .task { hydrate() } // unified first-appearance init
+        .onChange(of: activity) { _, _ in
+            maybeUpdateActivityDetailFromDefaults()
+        }
+        .onChange(of: timestamp) { _, _ in
+            maybeUpdateActivityDetailFromDefaults()
+        }
+        .onChange(of: activityDetail) { old, new in
+            let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+            userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+        }
+        .appBackground()
+    }
+}
+
+    // Instrument picker sheet (wheel style)
+private var instrumentPicker: some View {
+    NavigationStack {
+        VStack {
+            Picker("Instrument", selection: $instrument) {
+                Text("Select instrument…").tag(nil as Instrument?)
+                ForEach(instruments, id: \.self) { inst in
+                    Text(inst.name ?? "").tag(inst as Instrument?)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .disabled(durationSeconds == 0 || instrument == nil)
-                }
             }
-            .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
-            .sheet(isPresented: $showStartPicker) { startPicker }
-            .sheet(isPresented: $showDurationPicker) { durationPicker }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
-            .task(id: photoPickerItem) {
-                guard let item = photoPickerItem else { return }
-                if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
+            .pickerStyle(.wheel)
+        }
+        .navigationTitle("Instrument")
+        .toolbar {
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Done") { showInstrumentPicker = false }
             }
-            .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
-            .sheet(isPresented: $showCamera) {
-                CameraCaptureView { image in
-                    if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
-                }
-            }
-            .alert("Camera access denied",
-                   isPresented: $showCameraDeniedAlert,
-                   actions: {
-                       Button("OK", role: .cancel) {}
-                       Button("Open Settings") {
-                           if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                       }
-                   },
-                   message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-            .task { hydrate() } // unified first-appearance init
-            .onChange(of: activity) { _, _ in
-                maybeUpdateActivityDetailFromDefaults()
-            }
-            .onChange(of: timestamp) { _, _ in
-                maybeUpdateActivityDetailFromDefaults()
-            }
-            .onChange(of: activityDetail) { old, new in
-                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") { showInstrumentPicker = false }
             }
         }
     }
+}
 
-    // MARK: - Subviews (pinned activity wheel + pickers)
+// MARK: - Subviews (pinned activity wheel + pickers)
 
     private var activityPickerPinned: some View {
         NavigationStack {

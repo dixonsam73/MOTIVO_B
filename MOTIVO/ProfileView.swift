@@ -26,6 +26,8 @@ struct ProfileView: View {
     @State private var primaryInstrumentName: String = ""
     @State private var defaultPrivacy: Bool = false
 
+    @FocusState private var isNameFocused: Bool
+
     @State private var showInstrumentManager: Bool = false
     @State private var showActivityManager: Bool = false
     @State private var profile: Profile?
@@ -51,7 +53,13 @@ struct ProfileView: View {
                         TextField("Name", text: $name)
                             .textInputAutocapitalization(.words)
                             .disableAutocorrection(true)
-
+                            .focused($isNameFocused)
+                            .scaleEffect(isNameFocused ? 0.995 : 1)
+                            .overlay(alignment: .bottomLeading) {
+                                Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
+                            }
+                            .animation(.easeInOut(duration: 0.18), value: isNameFocused)
+                            
                         Toggle("Default to Private Posts", isOn: $defaultPrivacy)
                     }
                 }
@@ -65,10 +73,19 @@ struct ProfileView: View {
                     Button {
                         showInstrumentManager = true
                     } label: {
-                        Text("Manage Instruments")
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Text("Manage Instruments")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
 
                     VStack(spacing: Theme.Spacing.s) {
                         Picker("Primary Instrument", selection: $primaryInstrumentName) {
@@ -87,10 +104,19 @@ struct ProfileView: View {
                     Button {
                         showActivityManager = true
                     } label: {
-                        Text("Manage Activities")
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        HStack {
+                            Text("Manage Activities")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                     }
                     .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
 
                     VStack(spacing: Theme.Spacing.s) {
                         Picker("Primary Activity", selection: $primaryActivityChoice) {
