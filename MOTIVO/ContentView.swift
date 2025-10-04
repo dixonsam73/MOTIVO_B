@@ -126,11 +126,23 @@ fileprivate struct SessionsRootView: View {
 
                 // ---------- Filters (card) ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Filters").sectionHeader()
+                    // Header now toggles expansion; chevron on same line
+                    Button { withAnimation { filtersExpanded.toggle() } } label: {
+                        HStack {
+                            Text("feed filter").sectionHeader()
+                            Spacer()
+                            Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+
                     FilterBar(
                         filtersExpanded: $filtersExpanded,
                         instruments: Array(instruments),
-                        customNames: userActivities.map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty },
+                        customNames: userActivities
+                            .map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty },
                         selectedInstrument: $selectedInstrument,
                         selectedActivity: $selectedActivity,
                         selectedScope: $selectedScope,
@@ -289,17 +301,7 @@ fileprivate struct FilterBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            // Toggle
-            Button { withAnimation { filtersExpanded.toggle() } } label: {
-                HStack {
-                    Text("Show/Hide").font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
-                    Spacer()
-                    Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-            }
-            .buttonStyle(.plain)
-
+            // Header button now controls expansion; this view only renders contents when expanded
             if filtersExpanded {
                 VStack(alignment: .leading, spacing: Theme.Spacing.m) {
                     // Scope
@@ -403,8 +405,6 @@ fileprivate struct StatsBannerView: View {
 }
 
 // MARK: - Row (shows derived title and subtitle)
-
-
 
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session

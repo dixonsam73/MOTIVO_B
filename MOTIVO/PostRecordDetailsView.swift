@@ -1,21 +1,14 @@
-//  PostRecordDetailsView.swift
+//  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
-//  [ROLLBACK ANCHOR] v7.8 pre-hotfix commit: remove first-use lag in picker/notes
-//  [ROLLBACK ANCHOR] v7.8 Stage2 — pre (before Primary pinned-first)
 //
-//  v7.8 Stage 2 — Primary pinned-first in Activity wheel
-//  - Pins Primary Activity at top (deduped), then core, then customs.
-//  - Restores local helper functions used in the original file (formattedDate, secondsToHM, formattedDuration, ensureCameraAuthorized).
-//  - Breaks up complex expressions to keep the compiler happy.
-//  - No schema/migrations.
-//
+//  Visual polish + Instrument row chevron fix
+//  Silent if one instrument, chevron row if multiple.
+
 import SwiftUI
 import CoreData
 import PhotosUI
 import AVFoundation
 import UIKit
-
-// SessionActivityType moved to SessionActivityType.swift
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -38,24 +31,21 @@ struct PostRecordDetailsView: View {
     @State private var effort: Int = 5
     @State private var notes: String = ""
     @State private var activityDetail: String = ""
-    // P3: default description tracking
     @State private var lastAutoActivityDetail: String = ""
     @State private var userEditedActivityDetail: Bool = false
 
-    // Title control
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
 
-    // Wheels
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
     @State private var showActivityPicker = false
+    @State private var showInstrumentPicker = false
     @State private var tempDate = Date()
     @State private var tempHours = 0
     @State private var tempMinutes = 0
     @State private var tempActivity: SessionActivityType = .practice
 
-    // Staged attachments + thumbnail choice
     @State private var stagedAttachments: [StagedAttachment] = []
     @State private var selectedThumbnailID: UUID? = nil
     @State private var showPhotoPicker = false
@@ -64,7 +54,6 @@ struct PostRecordDetailsView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
-    // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
     var onSaved: (() -> Void)?
@@ -100,108 +89,188 @@ struct PostRecordDetailsView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                if hasNoInstruments {
-                    Section {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("No instruments found").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+
+                    // ---------- Instrument ----------
+                    if hasNoInstruments {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("No instruments found").sectionHeader()
                             Text("Add an instrument in your Profile to save this session.")
-                                .foregroundStyle(.secondary).font(.subheadline)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .cardSurface()
+                    } else if hasMultipleInstruments {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("Instrument").sectionHeader()
+                            Button {
+                                showInstrumentPicker = true
+                            } label: {
+                                HStack {
+                                    Text(instrument?.name ?? "Select instrument…")
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.footnote.weight(.semibold))
+                                        .padding(6)
+                                        .background(.ultraThinMaterial, in: Circle())
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .cardSurface()
+                    }
+                    // Silent if exactly one instrument
+
+                    // ---------- Activity ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Activity").sectionHeader()
+                        Button {
+                            tempActivity = activity
+                            showActivityPicker = true
+                        } label: {
+                            HStack {
+                                let display = selectedCustomName.isEmpty ? activity.label : selectedCustomName
+                                Text(display)
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .cardSurface()
+
+                    // ---------- Activity description ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Description").sectionHeader()
+                        TextField("Activity description", text: $activityDetail, axis: .vertical)
+                            .lineLimit(1...3)
+                            .textFieldStyle(.roundedBorder)
+                            .textInputAutocapitalization(.never)
+                    }
+                    .cardSurface()
+
+                    // ---------- Start time ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Start Time").sectionHeader()
+                        Button {
+                            tempDate = timestamp
+                            showStartPicker = true
+                        } label: {
+                            HStack {
+                                Text(formattedDate(timestamp))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .cardSurface()
+
+                    // ---------- Duration ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Duration").sectionHeader()
+                        Button {
+                            let hm = secondsToHM(durationSeconds)
+                            tempHours = hm.0
+                            tempMinutes = hm.1
+                            showDurationPicker = true
+                        } label: {
+                            HStack {
+                                Text(formattedDuration(durationSeconds))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+
+                        if durationSeconds == 0 {
+                            Text("Duration must be greater than 0")
+                                .font(.footnote)
+                                .foregroundColor(.red)
                         }
                     }
-                } else if hasMultipleInstruments {
-                    Section {
-                        Picker("Instrument", selection: $instrument) {
-                            Text("Select instrument…").tag(nil as Instrument?)
-                            ForEach(instruments, id: \.self) { inst in
-                                let name = inst.name ?? ""
-                                Text(name).tag(inst as Instrument?)
+                    .cardSurface()
+
+                    // ---------- Visibility ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Visibility").sectionHeader()
+                        Toggle("Public", isOn: $isPublic)
+                    }
+                    .cardSurface()
+
+                    // ---------- Mood & Effort ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                        Text("Mood & Effort").sectionHeader()
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(Theme.Colors.secondaryText) }
+                            Slider(value: Binding(get: { Double(mood) }, set: { mood = Int($0.rounded()) }), in: 0...10, step: 1)
+                        }
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack { Text("Effort"); Spacer(); Text("\(effort)").foregroundStyle(Theme.Colors.secondaryText) }
+                            Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
+                        }
+                    }
+                    .cardSurface()
+
+                    // ---------- Notes ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Notes").sectionHeader()
+                        ZStack(alignment: .topLeading) {
+                            TextEditor(text: $notes).frame(minHeight: 120)
+                            if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text("Notes")
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 9)
                             }
                         }
                     }
-                }
+                    .cardSurface()
 
-                Section {
-                    Button {
-                        tempActivity = activity
-                        showActivityPicker = true
-                    } label: {
-                        let display = selectedCustomName.isEmpty ? activity.label : selectedCustomName
-                        HStack { Text("Activity"); Spacer(); Text(display).foregroundStyle(.secondary) }
-                    }
-                }
-
-                // Activity description (short detail)
-                Section {
-                    TextField("Activity description", text: $activityDetail, axis: .vertical)
-                        .lineLimit(1...3)
-                }
-
-                Section {
-                    Button {
-                        tempDate = timestamp
-                        showStartPicker = true
-                    } label: {
-                        let dateStr = formattedDate(timestamp)
-                        HStack { Text("Start Time"); Spacer(); Text(dateStr).foregroundStyle(.secondary) }
-                    }
-                }
-
-                Section {
-                    Button {
-                        let hm = secondsToHM(durationSeconds)
-                        tempHours = hm.0
-                        tempMinutes = hm.1
-                        showDurationPicker = true
-                    } label: {
-                        let durStr = formattedDuration(durationSeconds)
-                        HStack { Text("Duration"); Spacer(); Text(durStr).foregroundStyle(.secondary) }
-                    }
-                    if durationSeconds == 0 {
-                        Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
-                    }
-                }
-
-                Section { Toggle("Public", isOn: $isPublic) }
-
-                Section("Mood & Effort") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(.secondary) }
-                        Slider(value: Binding(get: { Double(mood) }, set: { mood = Int($0.rounded()) }), in: 0...10, step: 1)
-                    }
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack { Text("Effort"); Spacer(); Text("\(effort)").foregroundStyle(.secondary) }
-                        Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
-                    }
-                }
-
-                Section {
-                    ZStack(alignment: .topLeading) {
-                        TextEditor(text: $notes).frame(minHeight: 100)
-                        if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("Notes").foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 8)
+                    // ---------- Attachments ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Attachments").sectionHeader()
+                        StagedAttachmentsSectionView(
+                            attachments: stagedAttachments,
+                            onRemove: removeStagedAttachment,
+                            selectedThumbnailID: $selectedThumbnailID
+                        )
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Button("Add Photo") { showPhotoPicker = true }
+                            Button("Add File") { showFileImporter = true }
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                Button("Take Photo") {
+                                    ensureCameraAuthorized { showCamera = true }
+                                }
+                            }
                         }
+                        .padding(.top, 2)
                     }
+                    .cardSurface()
                 }
-                // Staged attachments with thumbnail selection
-                StagedAttachmentsSectionView(
-                    attachments: stagedAttachments,
-                    onRemove: removeStagedAttachment,
-                    selectedThumbnailID: $selectedThumbnailID
-                )
-
-                Section {
-                    Button("Add Photo") { showPhotoPicker = true }
-                    Button("Add File") { showFileImporter = true }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") {
-                            ensureCameraAuthorized { showCamera = true }
-                        }
-                    }
-                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
             }
             .navigationTitle("Session Review")
-            // [v7.8 hotfix] merged into unified .task to avoid duplicate first-paint work
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { isPresented = false }
@@ -214,6 +283,8 @@ struct PostRecordDetailsView: View {
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
             }
+            // Sheets
+            .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
             .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
@@ -234,9 +305,7 @@ struct PostRecordDetailsView: View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .task {
-                // [v7.8 hotfix] Unified first-appearance init to avoid duplicate work and main-thread stalls.
                 instruments = fetchInstruments()
-
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
                        let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
@@ -245,49 +314,59 @@ struct PostRecordDetailsView: View {
                         instrument = instruments.first
                     }
                 }
-
-                // IMPORTANT: do NOT reset `activity` here; it was preselected from the Timer.
                 tempActivity = activity
-
                 if title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let auto = defaultTitle(for: instrument, activity: activity)
                     title = auto
                     initialAutoTitle = auto
                     isTitleEdited = false
                 }
-                // Prefill default description on first open if blank
                 if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     let autoDesc = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
                     activityDetail = autoDesc
                     lastAutoActivityDetail = autoDesc
                     userEditedActivityDetail = false
                 }
-
-                // Preload user-local activities once so the activity picker opens instantly.
                 loadUserActivities()
-                // Keep the string selector in sync with current state.
                 syncActivityChoiceFromState()
             }
-            .onChange(of: instrument) { _, _ in
-                refreshAutoTitleIfNeeded()
-            }
-            .onChange(of: activity) { _, _ in
-                // P3: keep description synced if still default
-                maybeUpdateActivityDetailFromDefaults()
-            }
+            .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
+            .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
             .onChange(of: activityDetail) { old, new in
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
             }
+            .appBackground()
         }
     }
 
     // MARK: - Subviews
 
+    // Instrument picker sheet
+    private var instrumentPicker: some View {
+        NavigationStack {
+            VStack {
+                Picker("Instrument", selection: $instrument) {
+                    Text("Select instrument…").tag(nil as Instrument?)
+                    ForEach(instruments, id: \.self) { inst in
+                        Text(inst.name ?? "").tag(inst as Instrument?)
+                    }
+                }
+                .pickerStyle(.wheel)
+                Spacer()
+            }
+            .navigationTitle("Instrument")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { showInstrumentPicker = false } }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showInstrumentPicker = false } }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
     private var activityPickerPinned: some View {
         NavigationStack {
             VStack {
-                // Break out choices to ease type-checking
                 let choices = activityChoicesPinned()
                 Picker("", selection: $activityChoice) {
                     ForEach(choices, id: \.self) { choice in
@@ -301,9 +380,7 @@ struct PostRecordDetailsView: View {
             }
             .navigationTitle("Activity")
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showActivityPicker = false }
-                }
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         if activityChoice.hasPrefix("core:") {
@@ -315,23 +392,19 @@ struct PostRecordDetailsView: View {
                                 activity = .practice
                             }
                             selectedCustomName = ""
-                            // leave description alone
                         } else if activityChoice.hasPrefix("custom:") {
                             let name = String(activityChoice.dropFirst("custom:".count))
                             tempActivity = .practice
                             activity = .practice
                             selectedCustomName = name
-                            // keep description blank
                         }
                         showActivityPicker = false
-                        // P3: Update default description if appropriate
                         maybeUpdateActivityDetailFromDefaults()
                         refreshAutoTitleIfNeeded()
                     }
                 }
             }
             .onAppear {
-                // Keep wheel aligned with current state when presented
                 if !selectedCustomName.isEmpty {
                     activityChoice = "custom:\(selectedCustomName)"
                 } else {
@@ -369,15 +442,13 @@ struct PostRecordDetailsView: View {
             .navigationTitle("Duration")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
-                }
+                ToolbarItem(placement: .confirmationAction) { Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false } }
             }
         }
         .presentationDetents([.medium])
     }
 
-    // MARK: - Helpers for pinned list
+    // MARK: - Helpers
 
     private func activityDisplayName(for choice: String) -> String {
         if choice.hasPrefix("core:") {
@@ -393,18 +464,13 @@ struct PostRecordDetailsView: View {
     }
 
     private func activityChoicesPinned() -> [String] {
-        // Core list
         let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
-        // Custom list
         let customs: [String] = userActivities.compactMap { ua in
             let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             return n.isEmpty ? nil : "custom:\(n)"
         }
-
-        // Normalize primary
         let primary = normalizedPrimary()
         var result: [String] = []
-
         if let p = primary { result.append(p) }
         for c in core where !result.contains(c) { result.append(c) }
         for cu in customs where !result.contains(cu) { result.append(cu) }
@@ -431,11 +497,8 @@ struct PostRecordDetailsView: View {
     }
 
     private func loadUserActivities() {
-        do {
-            userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext)
-        } catch {
-            userActivities = []
-        }
+        do { userActivities = try PersistenceController.shared.fetchUserActivities(in: viewContext) }
+        catch { userActivities = [] }
     }
 
     private func syncActivityChoiceFromState() {
@@ -446,7 +509,6 @@ struct PostRecordDetailsView: View {
         }
     }
 
-    // MARK: - P3 Helpers — Default description logic (editor)
     private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
         let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
         let hour = Calendar.current.component(.hour, from: timestamp)
@@ -460,7 +522,6 @@ struct PostRecordDetailsView: View {
         return "\(part) \(label)"
     }
 
-    // Update activityDetail only if it's empty OR still equal to the last auto-generated default
     private func maybeUpdateActivityDetailFromDefaults() {
         let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
         if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activityDetail == lastAutoActivityDetail {
@@ -470,19 +531,15 @@ struct PostRecordDetailsView: View {
         }
     }
 
-    // MARK: - Save
-
     @MainActor
     private func saveToCoreData() {
         let s = Session(context: viewContext)
-
         if (s.value(forKey: "id") as? UUID) == nil {
             let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
             s.setValue(trimmedCustom.isEmpty ? nil : trimmedCustom, forKey: "userActivityLabel")
             s.setValue(UUID(), forKey: "id")
         }
         if s.timestamp == nil { s.timestamp = Date() }
-
         s.instrument = instrument
         s.title = title.isEmpty ? defaultTitle(for: instrument, activity: activity) : title
         s.timestamp = timestamp
@@ -492,28 +549,17 @@ struct PostRecordDetailsView: View {
         s.effort = Int16(effort)
         s.notes = notes
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
-
-        // Persist activity type
         s.setValue(activity.rawValue, forKey: "activityType")
-
-        // Stamp owner (required)
         if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
-        // Commit staged attachments with thumbnail choice
         commitStagedAttachments(to: s, ctx: viewContext)
-
         do {
             try viewContext.save()
-            // 👇 Nudge SwiftUI immediately after saving in the same context.
             viewContext.processPendingChanges()
             onSaved?()
-        } catch {
-            print("Error saving session (timer review): \(error)")
-        }
+        } catch { print("Error saving session (timer review): \(error)") }
     }
-
-    // MARK: - Attachments (stage & commit)
 
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
@@ -557,22 +603,16 @@ struct PostRecordDetailsView: View {
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
         if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
-
         for att in stagedAttachments {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
                 let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
-            } catch {
-                print("Attachment commit failed: ", error)
-            }
+            } catch { print("Attachment commit failed: ", error) }
         }
-
         stagedAttachments.removeAll()
     }
-
-    // MARK: - Misc helpers
 
     private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
         if let name = (inst ?? instrument)?.name, !name.isEmpty { return "\(name) : \(activity.label)" }
@@ -601,41 +641,39 @@ struct PostRecordDetailsView: View {
                 let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines)
                 return (trimmed?.isEmpty == false) ? trimmed : nil
             }
-        } catch {
-            print("Profile fetch failed: \(error)")
-        }
+        } catch { print("Profile fetch failed: \(error)") }
         return nil
     }
 
-    // Restored local helpers (from original file patterns)
-
     private func secondsToHM(_ seconds: Int) -> (Int, Int) {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
         return (h, m)
     }
 
     private func formattedDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.doesRelativeDateFormatting = true
-        f.dateStyle = .medium; f.timeStyle = .short
+        let f = DateFormatter()
+        f.doesRelativeDateFormatting = true
+        f.dateStyle = .medium
+        f.timeStyle = .short
         return f.string(from: date)
     }
 
     private func formattedDuration(_ seconds: Int) -> String {
-        let h = seconds / 3600; let m = (seconds % 3600) / 60
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
     private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
-        case .authorized:
-            onAuthorized()
+        case .authorized: onAuthorized()
         case .notDetermined:
             AVCaptureDevice.requestAccess(for: .video) { granted in
                 DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
             }
-        default:
-            self.showCameraDeniedAlert = true
+        default: self.showCameraDeniedAlert = true
         }
     }
 }

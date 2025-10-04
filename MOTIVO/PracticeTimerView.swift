@@ -117,7 +117,7 @@ struct PracticeTimerView: View {
                 hydrateTimerFromStorage()
                 startTicker()
             }
-            .onChange(of: scenePhase) { newPhase in
+            .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
                 case .active:
                     hydrateTimerFromStorage()
@@ -169,7 +169,7 @@ struct PracticeTimerView: View {
                         }
                         .pickerStyle(.wheel)
                         .labelsHidden()
-                        .onChange(of: activityChoice) { choice in
+                        .onChange(of: activityChoice) { _, choice in
                             applyChoice(choice)
                         }
                     }

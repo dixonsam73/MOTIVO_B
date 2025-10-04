@@ -129,7 +129,7 @@ struct ProfileView: View {
                                 Text(name).tag("custom:\(name)")
                             }
                         }
-                        .onChange(of: primaryActivityChoice) { newValue in
+                        .onChange(of: primaryActivityChoice) { _, newValue in
                             writePrimaryActivityRef(newValue)
                         }
                     }

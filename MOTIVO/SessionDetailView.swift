@@ -35,6 +35,18 @@ struct SessionDetailView: View {
     private var headerTitle: String {
         SessionActivity.headerTitle(for: session)
     }
+    private var headerLine: String {
+        let line = headerTitle
+        let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2 else { return line }
+        let instrument = parts[0]
+        let activity = parts[1]
+        let title = session.title ?? ""
+        if title.range(of: activity, options: .caseInsensitive) != nil {
+            return String(instrument)
+        }
+        return line
+    }
     private var activityDescriptionText: String {
         SessionActivity.description(for: session)
     }
@@ -55,7 +67,7 @@ struct SessionDetailView: View {
             // 2) Second card — Instrument : Activity + Date • Time • Duration
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text(headerTitle)
+                    Text(headerLine)
                     Spacer()
                 }
                 Text(metaLine)
