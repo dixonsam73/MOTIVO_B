@@ -78,6 +78,34 @@ struct PracticeTimerView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     selectorsCard()
                     timerCard()
+
+                    // ---------- Recording helpers (moved below timer) ----------
+                    VStack(spacing: 12) {
+                        Divider().padding(.horizontal)
+                        HStack(spacing: 24) {
+                            Button { showAudioHelp = true } label: {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(Text("Record audio help"))
+                            .accessibilityHint(Text("Opens instructions for using your device’s app to capture audio."))
+
+                            Button { showVideoHelp = true } label: {
+                                Image(systemName: "video.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(Text("Record video help"))
+                            .accessibilityHint(Text("Opens instructions for using your device’s app to capture video."))
+                        }
+                    }
+                    .padding(.horizontal)
+                    .cardSurface()
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
@@ -296,6 +324,7 @@ struct PracticeTimerView: View {
             Text(formattedElapsed(elapsedSeconds))
                 .font(.system(size: 56, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .center)
 
             HStack(spacing: Theme.Spacing.m) {
                 Button(isRunning ? "Pause" : "Start") {
@@ -320,34 +349,9 @@ struct PracticeTimerView: View {
                         .disabled((elapsedSeconds == 0) || instrument == nil)
                 }
             }
-
-            // Recording icons (info-only, prebuilt-ins)
-            VStack(spacing: 12) {
-                Divider().padding(.horizontal)
-                HStack(spacing: 24) {
-                    Button { showAudioHelp = true } label: {
-                        Image(systemName: "mic.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(Text("Record audio help"))
-                    .accessibilityHint(Text("Opens instructions for using your device’s app to capture audio."))
-
-                    Button { showVideoHelp = true } label: {
-                        Image(systemName: "video.fill")
-                            .font(.system(size: 22, weight: .semibold))
-                            .frame(width: 44, height: 44)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel(Text("Record video help"))
-                    .accessibilityHint(Text("Opens instructions for using your device’s app to capture video."))
-                }
-            }
-            .padding(.horizontal)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
+        .frame(maxWidth: .infinity, alignment: .center)
         .cardSurface()
     }
 
@@ -650,3 +654,4 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+

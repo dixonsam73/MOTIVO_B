@@ -216,53 +216,42 @@ struct PostRecordDetailsView: View {
                     }
                     .cardSurface()
 
-                    // ---------- Mood & Effort ----------
-                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                        Text("Mood & Effort").sectionHeader()
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack { Text("Mood"); Spacer(); Text("\(mood)").foregroundStyle(Theme.Colors.secondaryText) }
-                            Slider(value: Binding(get: { Double(mood) }, set: { mood = Int($0.rounded()) }), in: 0...10, step: 1)
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            HStack { Text("Effort"); Spacer(); Text("\(effort)").foregroundStyle(Theme.Colors.secondaryText) }
-                            Slider(value: Binding(get: { Double(effort) }, set: { effort = Int($0.rounded()) }), in: 0...10, step: 1)
-                        }
-                    }
-                    .cardSurface()
-
                     // ---------- Notes ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Notes").sectionHeader()
-                        ZStack(alignment: .topLeading) {
-                            TextEditor(text: $notes).frame(minHeight: 120)
-                            if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text("Notes")
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 9)
-                            }
-                        }
+                        TextEditor(text: $notes)
+                            .frame(minHeight: 120)
                     }
                     .cardSurface()
 
                     // ---------- Attachments ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Attachments").sectionHeader()
-                        StagedAttachmentsSectionView(
-                            attachments: stagedAttachments,
-                            onRemove: removeStagedAttachment,
-                            selectedThumbnailID: $selectedThumbnailID
-                        )
-                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            Button("Add Photo") { showPhotoPicker = true }
-                            Button("Add File") { showFileImporter = true }
-                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                                Button("Take Photo") {
-                                    ensureCameraAuthorized { showCamera = true }
-                                }
-                            }
+                        if !stagedAttachments.isEmpty {
+                            StagedAttachmentsSectionView(
+                                attachments: stagedAttachments,
+                                onRemove: removeStagedAttachment,
+                                selectedThumbnailID: $selectedThumbnailID
+                            )
                         }
-                        .padding(.top, 2)
+                    }
+                    .cardSurface()
+
+                    // ---------- Add Attachments Controls ----------
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Button("Add Photo") { showPhotoPicker = true }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
+                        Button("Add File") { showFileImporter = true }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
+                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                            Button("Take Photo") {
+                                ensureCameraAuthorized { showCamera = true }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(.secondary)
+                        }
                     }
                     .cardSurface()
                 }
@@ -677,3 +666,4 @@ struct PostRecordDetailsView: View {
         }
     }
 }
+
