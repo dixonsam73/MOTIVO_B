@@ -9,6 +9,8 @@
 //
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
+// CHANGE-ID: 20251008_164453_70d21
+// SCOPE: Visual-only — capitalize 'Feed Filter'; tint Instrument & Activity pickers to header light grey
 import SwiftUI
 import CoreData
 import Combine
@@ -129,7 +131,7 @@ fileprivate struct SessionsRootView: View {
                     // Header now toggles expansion; chevron on same line
                     Button { withAnimation { filtersExpanded.toggle() } } label: {
                         HStack {
-                            Text("feed filter").sectionHeader()
+                            Text("Feed Filter").sectionHeader()
                             Spacer()
                             Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -329,6 +331,7 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .tint(Theme.Colors.secondaryText)
                     }
 
                     // Activity — include customs
@@ -349,6 +352,7 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .tint(Theme.Colors.secondaryText)
                     }
                 }
             }

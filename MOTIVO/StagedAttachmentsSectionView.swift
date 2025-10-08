@@ -16,7 +16,7 @@ struct StagedAttachmentsSectionView: View {
     private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
     var body: some View {
-        Section("Attachments") {
+        Section {
             if attachments.isEmpty {
                 Text("No attachments yet")
                     .foregroundStyle(.secondary)

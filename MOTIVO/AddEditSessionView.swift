@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251008_172540_aa2f1
+// SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
 //  MOTIVO
 //
@@ -210,9 +212,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Notes").sectionHeader()
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
-                        if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Text("Notes").foregroundStyle(.secondary).padding(.horizontal, 5).padding(.vertical, 8)
-                        }
                     }
                 }
                 .cardSurface()
@@ -220,21 +219,25 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
-                    StagedAttachmentsSectionView(
-                        attachments: stagedAttachments,
-                        onRemove: removeStagedAttachment,
-                        selectedThumbnailID: $selectedThumbnailID
-                    )
+                    Group {
+                        if !stagedAttachments.isEmpty {
+                            StagedAttachmentsSectionView(
+                                attachments: stagedAttachments,
+                                onRemove: removeStagedAttachment,
+                                selectedThumbnailID: $selectedThumbnailID
+                            )
+                        }
+                    }
                 }
                 .cardSurface()
 
                 // Add buttons
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Button("Add Photo") { showPhotoPicker = true }
-                    Button("Add File") { showFileImporter = true }
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
-                    }
+                    Button("Add Photo") { showPhotoPicker = true } .tint(Theme.Colors.secondaryText)
+Button("Add File") { showFileImporter = true } .tint(Theme.Colors.secondaryText)
+if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } } .tint(Theme.Colors.secondaryText)
+}
                 }
                 .cardSurface()
 
