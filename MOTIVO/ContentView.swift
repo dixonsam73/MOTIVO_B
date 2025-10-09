@@ -437,12 +437,15 @@ fileprivate struct SessionRow: View {
             Text(feedTitle)
                 .font(.headline)
                 .lineLimit(2)
+                .accessibilityIdentifier("row.title")
 
             // Subtitle
             Text(feedSubtitle)
                 .font(.subheadline)
                 .foregroundStyle(Theme.Colors.secondaryText)
                 .lineLimit(2)
+                .accessibilityLabel("Instrument and activity")
+                .accessibilityIdentifier("row.subtitle")
 
             // Thumbnails/icons strip
             if !attachments.isEmpty {
@@ -452,6 +455,9 @@ fileprivate struct SessionRow: View {
         }
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
         .id(_refreshTick)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Open session")
+        .accessibilityIdentifier("row.openDetail")
         .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
             guard let updates = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject> else { return }
             if updates.contains(where: { ($0 as? Attachment)?.session == self.session }) {
@@ -479,6 +485,8 @@ fileprivate struct AttachmentStrip: View {
                     .frame(width: 64, height: 64)
             }
         }
+        .accessibilityLabel("Attachment preview")
+        .accessibilityIdentifier("row.attachmentPreview")
     }
 }
 
@@ -763,3 +771,4 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+

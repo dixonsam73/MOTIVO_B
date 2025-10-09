@@ -69,13 +69,18 @@ struct SessionDetailView: View {
 
             // 2) Second card — Instrument : Activity + Date • Time • Duration
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(headerLine)
-                    Spacer()
+                Group {
+                    HStack {
+                        Text(headerLine)
+                            .accessibilitySortPriority(2)
+                        Spacer()
+                    }
+                    Text(metaLine)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilitySortPriority(1)
                 }
-                Text(metaLine)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                .accessibilityElement(children: .contain)
             }
             .cardSurface()
 
@@ -103,6 +108,9 @@ struct SessionDetailView: View {
                                     image: loadImage(a),
                                     isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true
                                 )
+                                .contentShape(Rectangle())
+                                .accessibilityLabel({ let name = (a.value(forKey: "fileURL") as? String).flatMap { URL(fileURLWithPath: $0).lastPathComponent }; return name.map { "Attachment \(idx+1) of \(images.count), \($0)" } ?? "Attachment \(idx+1) of \(images.count)" }())
+                                .accessibilityIdentifier("thumb.attachment.\(idx)")
                                 .onTapGesture {
                                     viewerStartIndex = idx
                                     isShowingAttachmentViewer = true
@@ -130,6 +138,8 @@ struct SessionDetailView: View {
                 Button(role: .destructive) { showDeleteConfirm = true } label: {
                     Image(systemName: "trash")
                 }
+                .accessibilityLabel("Delete session")
+                .accessibilityIdentifier("button.deleteSession")
             }
         }
     }

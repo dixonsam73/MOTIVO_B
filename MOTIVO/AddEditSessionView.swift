@@ -115,6 +115,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Instrument")
+        .accessibilityIdentifier("picker.instrument")
     } else {
         // Read-only row for single instrument (no chevron)
         HStack {
@@ -145,6 +147,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         }
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Activity")
+                    .accessibilityIdentifier("picker.activity")
                 }
                 .cardSurface()
 
@@ -214,6 +218,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Notes").sectionHeader()
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes).frame(minHeight: 100)
+                            .accessibilityLabel("Notes")
                     }
                 }
                 .cardSurface()
@@ -232,14 +237,37 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     }
                 }
                 .cardSurface()
+                .accessibilityLabel("Attachments")
 
                 // Add buttons
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Button("Add Photo") { showPhotoPicker = true } .tint(Theme.Colors.secondaryText)
-Button("Add File") { showFileImporter = true } .tint(Theme.Colors.secondaryText)
-if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } } .tint(Theme.Colors.secondaryText)
-}
+                    Button("Add Photo") { showPhotoPicker = true }
+                        .tint(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Add photo")
+                        .accessibilityHint("Choose a photo from your library or camera")
+                        .accessibilityIdentifier("addAttachment.photo")
+                    Button("Add File") { showFileImporter = true }
+                        .tint(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Add file")
+                        .accessibilityHint("Choose a file from your library")
+                        .accessibilityIdentifier("addAttachment.file")
+                    Button("Add Video") { showFileImporter = true }
+                        .tint(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Add video")
+                        .accessibilityHint("Choose a video from your library or camera")
+                        .accessibilityIdentifier("addAttachment.video")
+                    Button("Add Audio") { showFileImporter = true }
+                        .tint(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Add audio")
+                        .accessibilityHint("Record or attach an audio clip")
+                        .accessibilityIdentifier("addAttachment.audio")
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
+                            .tint(Theme.Colors.secondaryText)
+                            .accessibilityLabel("Add photo")
+                            .accessibilityHint("Choose a photo from your library or camera")
+                            .accessibilityIdentifier("addAttachment.photo")
+                    }
                 }
                 .cardSurface()
 
@@ -256,6 +284,8 @@ if UIImagePickerController.isSourceTypeAvailable(.camera) {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Save") { save() }
                     .disabled(durationSeconds == 0 || instrument == nil)
+                    .accessibilityLabel("Save session")
+                    .accessibilityIdentifier("button.saveSession")
             }
         }
         .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
@@ -895,4 +925,5 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
