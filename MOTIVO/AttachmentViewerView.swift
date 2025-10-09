@@ -1,31 +1,77 @@
 import SwiftUI
 
+private final class _ImageCache {
+    static let shared = _ImageCache()
+    let cache = NSCache<NSURL, UIImage>()
+    private init() {}
+}
+
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
     @State var startIndex: Int
+    var themeBackground: Color = Color(.systemBackground) // dynamic light/dark
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int = 0
+    @State private var isPagerInteractable = false
+    @State private var pendingDragTranslation: CGFloat = 0
+    @State private var hasCommittedOnce: Bool = false
 
-    init(imageURLs: [URL], startIndex: Int) {
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground)) {
         self.imageURLs = imageURLs
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
+        self.themeBackground = themeBackground
     }
 
     var body: some View {
         ZStack {
-            Color.black.ignoresSafeArea()
+            themeBackground.ignoresSafeArea()
 
-            TabView(selection: $currentIndex) {
-                ForEach(imageURLs.indices, id: \.self) { i in
-                    URLImageView(url: imageURLs[i])
-                        .tag(i)
+            GeometryReader { proxy in
+                TabView(selection: $currentIndex) {
+                    ForEach(imageURLs.indices, id: \.self) { i in
+                        URLImageView(url: imageURLs[i], background: themeBackground)
+                            .frame(width: proxy.size.width, height: proxy.size.height)
+                            .background(Color.clear)
+                            .clipped()
+                            .tag(i)
+                    }
                 }
-            }
-            .tabViewStyle(.page(indexDisplayMode: .automatic))
-            .onAppear {
-                currentIndex = startIndex.clamped(to: 0...(imageURLs.count - 1))
+                .frame(width: proxy.size.width, height: proxy.size.height) // <-- key
+                .contentShape(Rectangle()) // full-area swipe target
+                .tabViewStyle(.page(indexDisplayMode: .automatic))
+                .indexViewStyle(.page(backgroundDisplayMode: .automatic))
+                .allowsHitTesting(isPagerInteractable)
+                .onChange(of: currentIndex) { idx in
+                    let clamped = idx.clamped(to: 0...(max(imageURLs.count - 1, 0)))
+                    if clamped != idx {
+                        currentIndex = clamped
+                        return
+                    }
+                    // Nudge once after index changes to ensure commit, without stealing gestures
+                    DispatchQueue.main.async {
+                        if currentIndex == clamped {
+                            currentIndex = clamped
+                        }
+                        hasCommittedOnce = true
+                    }
+                    prefetchNeighbors(around: clamped)
+                }
+                .onAppear {
+                    let idx = startIndex.clamped(to: 0...(max(imageURLs.count - 1, 0)))
+                    currentIndex = idx
+                    // Ensure UIPageViewController locks onto the initial page post-layout:
+                    DispatchQueue.main.async {
+                        currentIndex = idx
+                    }
+                    prefetchNeighbors(around: idx)
+                    // Optional: extra nudge after layout + image decode
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        currentIndex = idx
+                        isPagerInteractable = true // enable interaction after first layout settle
+                    }
+                }
             }
 
             // Top controls
@@ -64,11 +110,27 @@ struct AttachmentViewerView: View {
             .allowsHitTesting(true)
         }
     }
+    
+    private func prefetchNeighbors(around index: Int) {
+        guard !imageURLs.isEmpty else { return }
+        let neighbors = [index - 1, index, index + 1].filter { imageURLs.indices.contains($0) }
+        for i in neighbors {
+            let url = imageURLs[i] as NSURL
+            if _ImageCache.shared.cache.object(forKey: url) != nil { continue }
+            Task.detached {
+                if let data = try? Data(contentsOf: url as URL),
+                   let img = UIImage(data: data) {
+                    _ImageCache.shared.cache.setObject(img, forKey: url)
+                }
+            }
+        }
+    }
 }
 
 // MARK: - Async URL Image Loader (no blocking on main)
 private struct URLImageView: View {
     let url: URL
+    var background: Color = Color(.systemBackground)
     @State private var uiImage: UIImage?
     @State private var isLoading = false
 
@@ -87,7 +149,7 @@ private struct URLImageView: View {
         .task {
             await loadIfNeeded()
         }
-        .background(Color.black)
+        .background(background)
         .ignoresSafeArea()
     }
 
@@ -99,6 +161,13 @@ private struct URLImageView: View {
     private func loadIfNeeded() async {
         if uiImage != nil || isLoading { return }
         isLoading = true
+        // Check cache first
+        let key = url as NSURL
+        if let cached = _ImageCache.shared.cache.object(forKey: key) {
+            await setImage(cached)
+            isLoading = false
+            return
+        }
         // Load off the main thread
         let data: Data? = await withCheckedContinuation { cont in
             Task.detached {
@@ -108,6 +177,7 @@ private struct URLImageView: View {
         }
         if let data, let img = UIImage(data: data) {
             await setImage(img)
+            _ImageCache.shared.cache.setObject(img, forKey: key)
         } else {
             // neutral placeholder if missing/unreadable
             await setImage(UIImage(systemName: "photo"))
