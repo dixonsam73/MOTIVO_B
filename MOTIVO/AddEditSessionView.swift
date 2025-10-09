@@ -315,7 +315,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         .task { hydrate() } // unified first-appearance init
         .onAppear {
             syncActivityChoiceFromState()
-            maybeUpdateActivityDetailFromDefaults_v2()
         }
         .onChange(of: activity) { _, _ in
             maybeUpdateActivityDetailFromDefaults()
@@ -474,6 +473,11 @@ private var instrumentPicker: some View {
             lastAutoActivityDetail = auto
             userEditedActivityDetail = false
         }
+        // If we loaded a non-empty description that differs from the last auto, treat it as user-customized
+        else if activityDetail != lastAutoActivityDetail {
+            userHasEditedActivityDetail = true
+            userEditedActivityDetail = true
+        }
 
         // Preload existing attachments for edit mode (only once to avoid duplicates)
         if session != nil, stagedAttachments.isEmpty {
@@ -527,10 +531,12 @@ private var instrumentPicker: some View {
         s.setValue(activity.rawValue, forKey: "activityType")
         s.setValue(trimmedDetail, forKey: "activityDetail")
 
-        // If a custom name is selected, also stamp userActivityLabel if model supports it (safe no-op if ignored)
+        // If a custom name is selected, stamp userActivityLabel; otherwise clear any previous custom label
         let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmedCustom.isEmpty {
             s.setValue(trimmedCustom, forKey: "userActivityLabel")
+        } else {
+            s.setValue(nil, forKey: "userActivityLabel")
         }
 
         // Owner stamp
@@ -925,5 +931,7 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
 
 
