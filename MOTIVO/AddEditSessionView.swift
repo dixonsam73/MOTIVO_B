@@ -37,6 +37,7 @@ struct AddEditSessionView: View {
     @State private var activityDetail: String = ""
     @State private var lastAutoActivityDetail: String = ""     // tracks the last generated default
     @State private var userEditedActivityDetail: Bool = false  // breaks auto-sync once user types
+    @State private var userHasEditedActivityDetail: Bool = false
 
     // User-local activities + selection
     @State private var userActivities: [UserActivity] = []
@@ -152,6 +153,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Description").sectionHeader()
                     TextField("Activity description", text: $activityDetail, axis: .vertical)
                         .lineLimit(1...3)
+                        .onChange(of: activityDetail) { _, new in handleActivityDetailChange_v2(new) }
                 }
                 .cardSurface()
 
@@ -281,12 +283,18 @@ if UIImagePickerController.isSourceTypeAvailable(.camera) {
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
         .task { hydrate() } // unified first-appearance init
+        .onAppear {
+            syncActivityChoiceFromState()
+            maybeUpdateActivityDetailFromDefaults_v2()
+        }
         .onChange(of: activity) { _, _ in
             maybeUpdateActivityDetailFromDefaults()
         }
         .onChange(of: timestamp) { _, _ in
             maybeUpdateActivityDetailFromDefaults()
         }
+        .onChange(of: timestamp) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
+        .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
         .onChange(of: activityDetail) { old, new in
             let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
             userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
@@ -342,6 +350,7 @@ private var instrumentPicker: some View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
                         applyActivityChoice()
+                        maybeUpdateActivityDetailFromDefaults_v2()
                         showActivityPicker = false
                         // After changing activity/custom, update default description if appropriate.
                         maybeUpdateActivityDetailFromDefaults()
@@ -597,6 +606,44 @@ private var instrumentPicker: some View {
 
     // MARK: - Default description logic
 
+    private func timeOfDayString(for date: Date) -> String {
+        let hour = Calendar.current.component(.hour, from: date)
+        switch hour {
+        case 5..<12:   return "Morning"
+        case 12..<17:  return "Afternoon"
+        case 17..<22:  return "Evening"
+        default:       return "Night"
+        }
+    }
+
+    private func editorDefaultDescription(timestamp: Date, activityDisplayName: String) -> String {
+        "\(timeOfDayString(for: timestamp)) \(activityDisplayName)"
+    }
+
+    private func currentActivityDisplayName() -> String {
+        let custom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !custom.isEmpty { return custom }
+        return activity.label
+    }
+
+    private func maybeUpdateActivityDetailFromDefaults_v2() {
+        guard !userHasEditedActivityDetail else { return }
+        let auto = editorDefaultDescription(timestamp: timestamp, activityDisplayName: currentActivityDisplayName())
+        activityDetail = auto
+        lastAutoActivityDetail = auto
+    }
+
+    private func handleActivityDetailChange_v2(_ new: String) {
+        let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            userHasEditedActivityDetail = false
+            return
+        }
+        if new != lastAutoActivityDetail {
+            userHasEditedActivityDetail = true
+        }
+    }
+
     private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
         let label = customName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : customName
         let hour = Calendar.current.component(.hour, from: timestamp)
@@ -848,3 +895,4 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
