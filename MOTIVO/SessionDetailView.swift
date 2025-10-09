@@ -25,6 +25,9 @@ struct SessionDetailView: View {
     @State private var showDeleteConfirm = false
     @State private var previewURL: URL?
     @State private var isShowingPreview = false
+    
+    @State private var isShowingAttachmentViewer = false
+    @State private var viewerStartIndex = 0
 
     // Forces view refresh when attachments of this session change
     @State private var _refreshTick: Int = 0
@@ -95,12 +98,15 @@ struct SessionDetailView: View {
                 } else {
                     if !images.isEmpty {
                         LazyVGrid(columns: grid, spacing: 12) {
-                            ForEach(images, id: \.objectID) { a in
+                            ForEach(Array(images.enumerated()), id: \.element.objectID) { (idx, a) in
                                 ThumbCell(
                                     image: loadImage(a),
                                     isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true
                                 )
-                                .onTapGesture { openQuickLook(a) }
+                                .onTapGesture {
+                                    viewerStartIndex = idx
+                                    isShowingAttachmentViewer = true
+                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -134,6 +140,17 @@ struct SessionDetailView: View {
     }
     .sheet(isPresented: $isShowingPreview) {
         if let url = previewURL { QuickLookPreview(url: url) }
+    }
+    .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
+        // Build URLs from the same source-of-truth order as thumbnails
+        let images = splitAttachments().images
+        let urls: [URL] = images.compactMap { a in
+            // If you have a typed property, prefer it:
+            // (a.fileURL as? URL) ?? resolveAttachmentURL(from: a.fileURLString)
+            // Otherwise, keep this KVC fallback:
+            resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+        }
+        AttachmentViewerView(imageURLs: urls, startIndex: viewerStartIndex)
     }
     .alert("Delete Session?", isPresented: $showDeleteConfirm) {
         Button("Delete", role: .destructive) { deleteSession() }
@@ -223,6 +240,44 @@ struct SessionDetailView: View {
         return nil
     }
 
+    // Resolves legacy/new stored fileURL strings to actual local file URLs on disk.
+    // Handles: file:// URLs, absolute paths, and bare filenames (searching common app dirs).
+    private func resolveAttachmentURL(from stored: String?) -> URL? {
+        guard let s = stored, !s.isEmpty else { return nil }
+
+        // Case 1: Already a valid file URL string
+        if let u = URL(string: s), u.isFileURL {
+            return u
+        }
+
+        // Case 2: Absolute POSIX path
+        if s.hasPrefix("/") {
+            let u = URL(fileURLWithPath: s)
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+        }
+
+        // Case 3: Bare filename or relative path → search common app folders
+        let filename = URL(fileURLWithPath: s).lastPathComponent
+        let fm = FileManager.default
+
+        let candidateDirs: [URL] = [
+            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
+            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+            fm.temporaryDirectory
+        ].compactMap { $0 }
+
+        for base in candidateDirs {
+            let candidate = base.appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate.path) {
+                return candidate
+            }
+        }
+
+        return nil
+    }
+
     private func loadImage(_ a: Attachment) -> UIImage? {
         guard let url = resolveURL(a) else { return nil }
         if let data = try? Data(contentsOf: url) { return UIImage(data: data) }
@@ -306,3 +361,5 @@ fileprivate struct ThumbCell: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
+
+
