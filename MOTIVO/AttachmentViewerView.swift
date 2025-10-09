@@ -43,13 +43,17 @@ struct AttachmentViewerView: View {
                 .tabViewStyle(.page(indexDisplayMode: .automatic))
                 .indexViewStyle(.page(backgroundDisplayMode: .automatic))
                 .allowsHitTesting(isPagerInteractable)
-                .onChange(of: currentIndex) { idx in
-                    let clamped = idx.clamped(to: 0...(max(imageURLs.count - 1, 0)))
-                    if clamped != idx {
+                .onChange(of: currentIndex) { oldValue, newValue in
+                    guard !imageURLs.isEmpty else {
+                        currentIndex = 0
+                        return
+                    }
+                    let upper = imageURLs.count - 1
+                    let clamped = min(max(newValue, 0), upper)
+                    if clamped != newValue {
                         currentIndex = clamped
                         return
                     }
-                    // Nudge once after index changes to ensure commit, without stealing gestures
                     DispatchQueue.main.async {
                         if currentIndex == clamped {
                             currentIndex = clamped
@@ -59,17 +63,19 @@ struct AttachmentViewerView: View {
                     prefetchNeighbors(around: clamped)
                 }
                 .onAppear {
-                    let idx = startIndex.clamped(to: 0...(max(imageURLs.count - 1, 0)))
-                    currentIndex = idx
-                    // Ensure UIPageViewController locks onto the initial page post-layout:
-                    DispatchQueue.main.async {
-                        currentIndex = idx
+                    let idx: Int
+                    if imageURLs.isEmpty {
+                        idx = 0
+                    } else {
+                        let upper = imageURLs.count - 1
+                        idx = min(max(startIndex, 0), upper)
                     }
+                    currentIndex = idx
+                    DispatchQueue.main.async { currentIndex = idx }
                     prefetchNeighbors(around: idx)
-                    // Optional: extra nudge after layout + image decode
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         currentIndex = idx
-                        isPagerInteractable = true // enable interaction after first layout settle
+                        isPagerInteractable = true
                     }
                 }
             }
@@ -161,25 +167,21 @@ private struct URLImageView: View {
     private func loadIfNeeded() async {
         if uiImage != nil || isLoading { return }
         isLoading = true
-        // Check cache first
         let key = url as NSURL
         if let cached = _ImageCache.shared.cache.object(forKey: key) {
             await setImage(cached)
             isLoading = false
             return
         }
-        // Load off the main thread
-        let data: Data? = await withCheckedContinuation { cont in
-            Task.detached {
-                let d = try? Data(contentsOf: url)
-                cont.resume(returning: d)
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            if let img = UIImage(data: data) {
+                await setImage(img)
+                _ImageCache.shared.cache.setObject(img, forKey: key)
+            } else {
+                await setImage(UIImage(systemName: "photo"))
             }
-        }
-        if let data, let img = UIImage(data: data) {
-            await setImage(img)
-            _ImageCache.shared.cache.setObject(img, forKey: key)
-        } else {
-            // neutral placeholder if missing/unreadable
+        } catch {
             await setImage(UIImage(systemName: "photo"))
         }
         isLoading = false
