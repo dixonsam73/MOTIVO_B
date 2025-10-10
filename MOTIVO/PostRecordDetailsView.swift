@@ -152,7 +152,6 @@ struct PostRecordDetailsView: View {
                         Text("Description").sectionHeader()
                         TextField("Activity description", text: $activityDetail, axis: .vertical)
                             .lineLimit(1...3)
-                            .textFieldStyle(.roundedBorder)
                             .textInputAutocapitalization(.never)
                     }
                     .cardSurface()

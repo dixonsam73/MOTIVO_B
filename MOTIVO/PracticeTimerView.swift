@@ -81,7 +81,6 @@ struct PracticeTimerView: View {
 
                     // ---------- Recording helpers (moved below timer) ----------
                     VStack(spacing: 12) {
-                        Divider().padding(.horizontal)
                         HStack(spacing: 24) {
                             Button { showAudioHelp = true } label: {
                                 Image(systemName: "mic.fill")
@@ -103,7 +102,9 @@ struct PracticeTimerView: View {
                             .accessibilityLabel(Text("Record video help"))
                             .accessibilityHint(Text("Opens instructions for using your device’s app to capture video."))
                         }
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal)
                     .cardSurface()
                 }
@@ -654,4 +655,6 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
 
