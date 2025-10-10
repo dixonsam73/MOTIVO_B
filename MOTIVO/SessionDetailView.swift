@@ -15,6 +15,26 @@ import CoreData
 import UIKit
 import Combine
 
+private let kPrivacyMapKey = "attachmentPrivacyMap_v1" // [String: Bool] keyed by URL.absoluteString
+
+private func privacyMap() -> [String: Bool] {
+    (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+}
+
+private func isPrivateURL(_ url: URL) -> Bool {
+    privacyMap()[url.absoluteString] ?? false
+}
+
+private func setPrivacy(_ isPrivate: Bool, for url: URL) {
+    var map = privacyMap()
+    map[url.absoluteString] = isPrivate
+    UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+}
+
+private func togglePrivacy(for url: URL) {
+    setPrivacy(!isPrivateURL(url), for: url)
+}
+
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
@@ -28,6 +48,8 @@ struct SessionDetailView: View {
     
     @State private var isShowingAttachmentViewer = false
     @State private var viewerStartIndex = 0
+
+    @State private var privacyToken: Int = 0
 
     // Forces view refresh when attachments of this session change
     @State private var _refreshTick: Int = 0
@@ -199,7 +221,14 @@ struct SessionDetailView: View {
                     return (a.value(forKey: "isThumbnail") as? Bool) == true
                 }
                 return false
-            })
+            }
+            , onTogglePrivacy: { url in
+                togglePrivacy(for: url)
+            }
+            , isPrivate: { url in
+                isPrivateURL(url)
+            }
+        )
     }
     .alert("Delete Session?", isPresented: $showDeleteConfirm) {
         Button("Delete", role: .destructive) { deleteSession() }
@@ -410,6 +439,5 @@ fileprivate struct ThumbCell: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
-
 
 

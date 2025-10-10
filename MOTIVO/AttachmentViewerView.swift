@@ -16,11 +16,19 @@ struct AttachmentViewerView: View {
     @State private var isPagerInteractable = false
     @State private var pendingDragTranslation: CGFloat = 0
     @State private var hasCommittedOnce: Bool = false
+    @State private var localIsPrivate: Bool = false
+    @State private var cachedURL: URL? = nil
     var onDelete: ((URL) -> Void)? = nil
     var onFavourite: ((URL) -> Void)? = nil
     var isFavourite: ((URL) -> Bool)? = nil
+    var onTogglePrivacy: ((URL) -> Void)? = nil
+    var isPrivate: ((URL) -> Bool)? = nil
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil) {
+    private func currentURL() -> URL? {
+        imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
+    }
+
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil) {
         self.imageURLs = imageURLs
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
@@ -28,6 +36,8 @@ struct AttachmentViewerView: View {
         self.onDelete = onDelete
         self.onFavourite = onFavourite
         self.isFavourite = isFavourite
+        self.onTogglePrivacy = onTogglePrivacy
+        self.isPrivate = isPrivate
     }
 
     var body: some View {
@@ -67,6 +77,10 @@ struct AttachmentViewerView: View {
                         hasCommittedOnce = true
                     }
                     prefetchNeighbors(around: clamped)
+                    if let url = currentURL() {
+                        cachedURL = url
+                        localIsPrivate = isPrivate?(url) ?? false
+                    }
                 }
                 .onAppear {
                     let idx: Int
@@ -82,6 +96,10 @@ struct AttachmentViewerView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                         currentIndex = idx
                         isPagerInteractable = true
+                    }
+                    if let url = currentURL() {
+                        cachedURL = url
+                        localIsPrivate = isPrivate?(url) ?? false
                     }
                 }
             }
@@ -106,6 +124,7 @@ struct AttachmentViewerView: View {
                         let isFav = (imageURLs.indices.contains(currentIndex)
                                      ? (isFavourite?(imageURLs[currentIndex]) ?? false)
                                      : false)
+                        let isPriv = localIsPrivate
 
                         Button {
                             if imageURLs.indices.contains(currentIndex) {
@@ -119,6 +138,21 @@ struct AttachmentViewerView: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
+
+                        Button {
+                            if let url = currentURL() {
+                                // Optimistic UI update – no rebuild, no flash
+                                localIsPrivate.toggle()
+                                onTogglePrivacy?(url)
+                            }
+                        } label: {
+                            Image(systemName: isPriv ? "eye.slash" : "eye")
+                                .font(.system(size: 17, weight: .semibold))
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isPriv ? "Make attachment visible to others" : "Hide attachment from others")
 
                         Button {
                             if imageURLs.indices.contains(currentIndex) {
