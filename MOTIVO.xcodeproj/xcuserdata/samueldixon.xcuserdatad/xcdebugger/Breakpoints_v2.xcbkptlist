@@ -30,9 +30,9 @@
             filePath = "MOTIVO/SessionDetailView.swift"
             startingColumnNumber = "9223372036854775807"
             endingColumnNumber = "9223372036854775807"
-            startingLineNumber = "237"
-            endingLineNumber = "237"
-            landmarkName = "resolveURL(_:)"
+            startingLineNumber = "225"
+            endingLineNumber = "225"
+            landmarkName = "splitAttachments()"
             landmarkType = "7">
          </BreakpointContent>
       </BreakpointProxy>

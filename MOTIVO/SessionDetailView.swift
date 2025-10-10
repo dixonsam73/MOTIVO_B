@@ -160,7 +160,23 @@ struct SessionDetailView: View {
             // Otherwise, keep this KVC fallback:
             resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
         }
-        AttachmentViewerView(imageURLs: urls, startIndex: viewerStartIndex)
+        AttachmentViewerView(
+            imageURLs: urls,
+            startIndex: viewerStartIndex,
+            onDelete: { url in
+                // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
+                let set = (session.attachments as? Set<Attachment>) ?? []
+                if let match = set.first(where: { att in
+                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                    return resolveAttachmentURL(from: stored) == url
+                }) {
+                    viewContext.delete(match)
+                    do { try viewContext.save() } catch { print("Attachment delete error: \(error)") }
+                } else {
+                    print("[AttachmentViewer] No matching attachment found for URL: \(url)")
+                }
+            }
+        )
     }
     .alert("Delete Session?", isPresented: $showDeleteConfirm) {
         Button("Delete", role: .destructive) { deleteSession() }
@@ -371,5 +387,6 @@ fileprivate struct ThumbCell: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
+
 
 

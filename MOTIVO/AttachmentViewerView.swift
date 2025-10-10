@@ -16,12 +16,14 @@ struct AttachmentViewerView: View {
     @State private var isPagerInteractable = false
     @State private var pendingDragTranslation: CGFloat = 0
     @State private var hasCommittedOnce: Bool = false
+    var onDelete: ((URL) -> Void)? = nil
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground)) {
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), onDelete: ((URL) -> Void)? = nil) {
         self.imageURLs = imageURLs
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
+        self.onDelete = onDelete
     }
 
     var body: some View {
@@ -97,6 +99,22 @@ struct AttachmentViewerView: View {
                     Spacer()
 
                     if imageURLs.indices.contains(currentIndex) {
+                        // NEW: Replace trash button as requested
+                        Button {
+                            if imageURLs.indices.contains(currentIndex) {
+                                let url = imageURLs[currentIndex]
+                                onDelete?(url) // app-only delete provided by presenter
+                            }
+                            dismiss()
+                        } label: {
+                            Image(systemName: "trash")
+                                .imageScale(.large)
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Delete attachment")
+
                         ShareLink(item: imageURLs[currentIndex]) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 17, weight: .semibold))

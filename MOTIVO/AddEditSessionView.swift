@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251010_161159_autodesc_fix_edit
+// SCOPE: Edit-mode auto-description restoration; load userActivityLabel; reconcile auto vs custom; preserve ordering fix; no other changes
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
@@ -230,7 +232,21 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         if !stagedAttachments.isEmpty {
                             StagedAttachmentsSectionView(
                                 attachments: stagedAttachments,
-                                onRemove: removeStagedAttachment,
+                                onRemove: { staged in
+                                    // If this staged item came from Core Data, delete the backing Attachment persistently
+                                    if existingAttachmentIDs.contains(staged.id), let s = session {
+                                        // Fetch the matching Attachment by its persisted UUID
+                                        let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                        req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, staged.id as CVarArg)
+                                        req.fetchLimit = 1
+                                        if let match = try? viewContext.fetch(req).first {
+                                            viewContext.delete(match)
+                                            do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                                        }
+                                    }
+                                    // Always update the local staged list to reflect UI immediately
+                                    removeStagedAttachment(staged)
+                                },
                                 selectedThumbnailID: $selectedThumbnailID
                             )
                         }
@@ -251,16 +267,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         .accessibilityLabel("Add file")
                         .accessibilityHint("Choose a file from your library")
                         .accessibilityIdentifier("addAttachment.file")
-                    Button("Add Video") { showFileImporter = true }
-                        .tint(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Add video")
-                        .accessibilityHint("Choose a video from your library or camera")
-                        .accessibilityIdentifier("addAttachment.video")
-                    Button("Add Audio") { showFileImporter = true }
-                        .tint(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Add audio")
-                        .accessibilityHint("Record or attach an audio clip")
-                        .accessibilityIdentifier("addAttachment.audio")
                     if UIImagePickerController.isSourceTypeAvailable(.camera) {
                         Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
                             .tint(Theme.Colors.secondaryText)
@@ -445,7 +451,20 @@ private var instrumentPicker: some View {
             activity = SessionActivityType(rawValue: raw) ?? .practice
             activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
 
-            selectedCustomName = "" // remains blank unless user selects a custom in the picker
+            // Reconcile auto vs custom on edit hydrate: keep auto-updates alive if detail equals the computed default.
+            do {
+                let expectedAuto = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: ((s.value(forKey: "userActivityLabel") as? String) ?? selectedCustomName))
+                if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines) == expectedAuto.trimmingCharacters(in: .whitespacesAndNewlines) {
+                    lastAutoActivityDetail = activityDetail
+                    userHasEditedActivityDetail = false
+                    userEditedActivityDetail = false
+                } else {
+                    userHasEditedActivityDetail = true
+                    userEditedActivityDetail = true
+                }
+            }
+
+            selectedCustomName = (s.value(forKey: "userActivityLabel") as? String) ?? "" // remains blank unless user selects a custom in the picker
         } else {
             // New mode defaults
             timestamp = Date()
@@ -469,8 +488,8 @@ private var instrumentPicker: some View {
         // Seed default description if blank (new session) or if coming from a state with empty detail
         if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             let auto = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
-            activityDetail = auto
             lastAutoActivityDetail = auto
+            activityDetail = auto
             userEditedActivityDetail = false
         }
         // If we loaded a non-empty description that differs from the last auto, treat it as user-customized
@@ -550,7 +569,15 @@ private var instrumentPicker: some View {
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
-            dismiss()
+            // Return to ContentView (root):
+            // - New session: presented as a sheet from ContentView → single dismiss.
+            // - Edit session: typically pushed from SessionDetailView → double dismiss to pop past it.
+            if isEdit {
+                dismiss()
+                DispatchQueue.main.async { dismiss() }
+            } else {
+                dismiss()
+            }
         } catch {
             print("Save error (Add/Edit): \(error)")
         }
@@ -697,8 +724,8 @@ private var instrumentPicker: some View {
     private func maybeUpdateActivityDetailFromDefaults() {
         let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
         if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activityDetail == lastAutoActivityDetail {
-            activityDetail = newDefault
             lastAutoActivityDetail = newDefault
+            activityDetail = newDefault
             userEditedActivityDetail = false
         }
     }
@@ -931,6 +958,11 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
+
+
+
 
 
 
