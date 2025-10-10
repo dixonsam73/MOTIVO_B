@@ -176,7 +176,30 @@ struct SessionDetailView: View {
                     print("[AttachmentViewer] No matching attachment found for URL: \(url)")
                 }
             }
-        )
+            , onFavourite: { url in
+                // Resolve the Attachment for this url from the session’s attachments (reuse in-memory objects)
+                let set = (session.attachments as? Set<Attachment>) ?? []
+                if let match = set.first(where: { att in
+                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                    return resolveAttachmentURL(from: stored) == url
+                }) {
+                    // Ensure only one favourite
+                    for att in set { att.setValue(att == match, forKey: "isThumbnail") }
+                    do { try viewContext.save() } catch { print("Favourite save error:", error) }
+                } else {
+                    print("onFavourite: attachment not found for", url)
+                }
+            }
+            , isFavourite: { url in
+                let set = (session.attachments as? Set<Attachment>) ?? []
+                if let a = set.first(where: { att in
+                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                    return resolveAttachmentURL(from: stored) == url
+                }) {
+                    return (a.value(forKey: "isThumbnail") as? Bool) == true
+                }
+                return false
+            })
     }
     .alert("Delete Session?", isPresented: $showDeleteConfirm) {
         Button("Delete", role: .destructive) { deleteSession() }

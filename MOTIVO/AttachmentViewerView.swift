@@ -17,13 +17,17 @@ struct AttachmentViewerView: View {
     @State private var pendingDragTranslation: CGFloat = 0
     @State private var hasCommittedOnce: Bool = false
     var onDelete: ((URL) -> Void)? = nil
+    var onFavourite: ((URL) -> Void)? = nil
+    var isFavourite: ((URL) -> Bool)? = nil
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), onDelete: ((URL) -> Void)? = nil) {
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil) {
         self.imageURLs = imageURLs
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
         self.onDelete = onDelete
+        self.onFavourite = onFavourite
+        self.isFavourite = isFavourite
     }
 
     var body: some View {
@@ -99,7 +103,23 @@ struct AttachmentViewerView: View {
                     Spacer()
 
                     if imageURLs.indices.contains(currentIndex) {
-                        // NEW: Replace trash button as requested
+                        let isFav = (imageURLs.indices.contains(currentIndex)
+                                     ? (isFavourite?(imageURLs[currentIndex]) ?? false)
+                                     : false)
+
+                        Button {
+                            if imageURLs.indices.contains(currentIndex) {
+                                onFavourite?(imageURLs[currentIndex])
+                            }
+                        } label: {
+                            Image(systemName: isFav ? "star.fill" : "star")
+                                .font(.system(size: 17, weight: .semibold))
+                                .padding(10)
+                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
+
                         Button {
                             if imageURLs.indices.contains(currentIndex) {
                                 let url = imageURLs[currentIndex]
@@ -108,7 +128,7 @@ struct AttachmentViewerView: View {
                             dismiss()
                         } label: {
                             Image(systemName: "trash")
-                                .imageScale(.large)
+                                .font(.system(size: 17, weight: .semibold))
                                 .padding(10)
                                 .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
                         }
@@ -141,7 +161,7 @@ struct AttachmentViewerView: View {
         for i in neighbors {
             let url = imageURLs[i] as NSURL
             if _ImageCache.shared.cache.object(forKey: url) != nil { continue }
-            Task.detached {
+            Task(priority: .background) {
                 if let data = try? Data(contentsOf: url as URL),
                    let img = UIImage(data: data) {
                     _ImageCache.shared.cache.setObject(img, forKey: url)
@@ -157,6 +177,7 @@ private struct URLImageView: View {
     var background: Color = Color(.systemBackground)
     @State private var uiImage: UIImage?
     @State private var isLoading = false
+    @State private var loadTask: Task<Void, Never>? = nil
 
     var body: some View {
         Group {
@@ -171,7 +192,13 @@ private struct URLImageView: View {
             }
         }
         .task {
-            await loadIfNeeded()
+            // Track the load task so we can cancel on disappear/reuse
+            loadTask = Task { await loadIfNeeded() }
+            await loadTask?.value
+        }
+        .onDisappear {
+            loadTask?.cancel()
+            loadTask = nil
         }
         .background(background)
         .ignoresSafeArea()
@@ -183,16 +210,19 @@ private struct URLImageView: View {
     }
 
     private func loadIfNeeded() async {
+        if Task.isCancelled { return }
         if uiImage != nil || isLoading { return }
         isLoading = true
         let key = url as NSURL
         if let cached = _ImageCache.shared.cache.object(forKey: key) {
             await setImage(cached)
+            if Task.isCancelled { return }
             isLoading = false
             return
         }
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
+            if Task.isCancelled { return }
             if let img = UIImage(data: data) {
                 await setImage(img)
                 _ImageCache.shared.cache.setObject(img, forKey: key)
