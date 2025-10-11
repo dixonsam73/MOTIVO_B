@@ -69,6 +69,10 @@ struct AddEditSessionView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
+    // UI stability (instruments empty-state)
+    @State private var instrumentsGateArmed = false
+    @State private var instrumentsReady = false
+
     // Track which staged attachments came from Core Data (existing) to prevent duplication on save
     @State private var existingAttachmentIDs: Set<UUID> = []
 
@@ -77,6 +81,11 @@ struct AddEditSessionView: View {
 
     init(session: Session? = nil) {
         self.session = session
+        // Seed time-related fields on edit so they don’t flash empty
+        if let s = session {
+            if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
+            _durationSeconds = State(initialValue: Int(s.durationSeconds))
+        }
     }
 
     private var isEdit: Bool { session != nil }
@@ -91,12 +100,18 @@ struct AddEditSessionView: View {
 
                 // No instruments / Instrument picker
                 if hasNoInstruments {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("No instruments found").font(.headline)
-                        Text("Add an instrument in your Profile to save this session.")
-                            .foregroundStyle(.secondary).font(.subheadline)
+                    // Show the empty-state card only after the first 120ms tick
+                    if instrumentsGateArmed && !instrumentsReady {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("No instruments found").font(.headline)
+                            Text("Add an instrument in your Profile to save this session.")
+                                .foregroundStyle(.secondary).font(.subheadline)
+                        }
+                        .cardSurface()
+                    } else {
+                        // Render nothing until either the arm time passes or instruments arrive
+                        EmptyView()
                     }
-                    .cardSurface()
                 } else if hasMultipleInstruments {
                     // Instrument (always visible if any instruments exist)
 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -333,6 +348,20 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         .onChange(of: activityDetail) { old, new in
             let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
             userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+        }
+        .onAppear {
+            instrumentsGateArmed = false
+            instrumentsReady = false
+            // Give instruments a breath to bind if they’re coming from Core Data
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                instrumentsGateArmed = true
+                // If they’re already non-empty by now, mark ready
+                if !instruments.isEmpty { instrumentsReady = true }
+            }
+        }
+        .onChange(of: instruments.count) { _, newCount in
+            // As soon as instruments arrive, it's safe to render their section
+            if newCount > 0 { instrumentsReady = true }
         }
         .appBackground()
     }
@@ -958,6 +987,7 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
