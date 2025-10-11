@@ -14,6 +14,8 @@
 //  - No schema/migrations. No other behaviour changes.
 //
 
+private let kPrivacyMapKey = "attachmentPrivacyMap_v1"
+
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -78,6 +80,37 @@ struct AddEditSessionView: View {
 
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
+    // ---- Privacy cache & helpers (ID-first, URL-fallback) ----
+    @State private var privacyMap: [String: Bool] = [:]
+
+    private func privacyKey(id: UUID?, url: URL?) -> String? {
+        if let id { return "id://\(id.uuidString)" }
+        if let url { return url.absoluteString }
+        return nil
+    }
+
+    private func loadPrivacyMap() {
+        privacyMap = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+    }
+
+    private func isPrivate(id: UUID?, url: URL?) -> Bool {
+        if let key = privacyKey(id: id, url: url) {
+            if let v = privacyMap[key] { return v }
+            let map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+            return map[key] ?? false
+        }
+        return false
+    }
+
+    private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
+        guard let key = privacyKey(id: id, url: url) else { return }
+        privacyMap[key] = value
+        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+        map[key] = value
+        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+    }
+    // ---- end privacy helpers ----
 
     init(session: Session? = nil) {
         self.session = session
@@ -243,28 +276,89 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
-                    Group {
-                        if !stagedAttachments.isEmpty {
-                            StagedAttachmentsSectionView(
-                                attachments: stagedAttachments,
-                                onRemove: { staged in
-                                    // If this staged item came from Core Data, delete the backing Attachment persistently
-                                    if existingAttachmentIDs.contains(staged.id), let s = session {
-                                        // Fetch the matching Attachment by its persisted UUID
-                                        let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-                                        req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, staged.id as CVarArg)
-                                        req.fetchLimit = 1
-                                        if let match = try? viewContext.fetch(req).first {
-                                            viewContext.delete(match)
-                                            do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                    if !stagedAttachments.isEmpty {
+                        let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(stagedAttachments) { att in
+                                ZStack(alignment: .topTrailing) {
+                                    // Tile content
+                                    AttachmentTileContent(att: att)
+                                        .frame(width: 128, height: 128)
+                                        .background(Color.secondary.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                                        )
+
+                                    // Right-side vertical controls: Star, Privacy, Delete
+                                    VStack(spacing: 6) {
+                                        if att.kind == .image {
+                                            Text(selectedThumbnailID == att.id ? "★" : "☆")
+                                                .font(.system(size: 16))
+                                                .padding(8)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                                .onTapGesture { selectedThumbnailID = att.id }
+                                                .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
                                         }
+
+                                        let fileURL: URL? = surrogateURL(for: att)
+                                        let priv: Bool = isPrivate(id: att.id, url: fileURL)
+                                        Button {
+                                            setPrivate(id: att.id, url: fileURL, !priv)
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        } label: {
+                                            Image(systemName: priv ? "eye.slash" : "eye")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .padding(8)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+
+                                        Button {
+                                            // Preserve existing persistent delete behavior for items sourced from Core Data
+                                            if existingAttachmentIDs.contains(att.id), let s = session {
+                                                let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                                req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                                req.fetchLimit = 1
+                                                if let match = try? viewContext.fetch(req).first {
+                                                    viewContext.delete(match)
+                                                    do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                                                }
+                                            }
+                                            removeStagedAttachment(att)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .padding(8)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("Delete attachment")
                                     }
-                                    // Always update the local staged list to reflect UI immediately
-                                    removeStagedAttachment(staged)
-                                },
-                                selectedThumbnailID: $selectedThumbnailID
-                            )
+                                    .padding(6)
+                                }
+                                .contextMenu {
+                                    if att.kind == .image {
+                                        Button("Set as Thumbnail") { selectedThumbnailID = att.id }
+                                    }
+                                    Button(role: .destructive) { 
+                                        if existingAttachmentIDs.contains(att.id), let s = session {
+                                            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                            req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                            req.fetchLimit = 1
+                                            if let match = try? viewContext.fetch(req).first {
+                                                viewContext.delete(match)
+                                                do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                                            }
+                                        }
+                                        removeStagedAttachment(att)
+                                    } label: { Text("Remove") }
+                                }
+                            }
                         }
+                        .padding(.vertical, 4)
                     }
                 }
                 .cardSurface()
@@ -336,6 +430,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         .task { hydrate() } // unified first-appearance init
         .onAppear {
             syncActivityChoiceFromState()
+            loadPrivacyMap()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            loadPrivacyMap()
         }
         .onChange(of: activity) { _, _ in
             maybeUpdateActivityDetailFromDefaults()
@@ -979,9 +1077,36 @@ private var instrumentPicker: some View {
             self.showCameraDeniedAlert = true
         }
     }
+    
+    @ViewBuilder
+    private func AttachmentTileContent(att: StagedAttachment) -> some View {
+        switch att.kind {
+        case .image:
+            if let ui = UIImage(data: att.data) {
+                Image(uiImage: ui).resizable().scaledToFill()
+            } else {
+                Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
+            }
+        case .audio:
+            Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
+        case .video:
+            Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary)
+        case .file:
+            Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
+        }
+    }
+
+    private func surrogateURL(for att: StagedAttachment) -> URL? {
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension(ext)
+    }
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
 
 
 

@@ -1,3 +1,5 @@
+private let kPrivacyMapKey = "attachmentPrivacyMap_v1"
+
 //  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
 //
@@ -55,6 +57,61 @@ struct PostRecordDetailsView: View {
     @State private var showCameraDeniedAlert = false
 
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
+    // ---- Privacy cache & helpers (inside the view struct) ----
+    @State private var privacyMap: [String: Bool] = [:]
+
+    private func privacyKey(id: UUID?, url: URL?) -> String? {
+        if let id { return "id://\(id.uuidString)" }
+        if let url { return url.absoluteString }
+        return nil
+    }
+
+    private func loadPrivacyMap() {
+        privacyMap = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+    }
+
+    private func isPrivate(id: UUID?, url: URL?) -> Bool {
+        // Prefer live cache; fall back to persisted map for back-compat
+        if let key = privacyKey(id: id, url: url) {
+            if let v = privacyMap[key] { return v }
+            let map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+            return map[key] ?? false
+        }
+        return false
+    }
+
+    private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
+        guard let key = privacyKey(id: id, url: url) else { return }
+        // Update cache first (instant UI), then persist
+        privacyMap[key] = value
+        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+        map[key] = value
+        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+    }
+
+    private func migratePrivacy(fromStagedID stagedID: UUID, stagedURL: URL?, toNewID newID: UUID?, newURL: URL?) {
+        // Read current maps fresh to avoid stale cache writes
+        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+
+        // Resolve any value stored under staged keys
+        let stagedIDKey = "id://\(stagedID.uuidString)"
+        let stagedURLKey = stagedURL?.absoluteString
+
+        // Prefer explicit staged id value; otherwise fallback to staged URL value
+        let stagedValue: Bool? = map[stagedIDKey] ?? (stagedURLKey.flatMap { map[$0] })
+
+        guard let value = stagedValue else { return }
+
+        // Write the same value to the final keys (ID-first, URL fallback)
+        if let newID { map["id://\(newID.uuidString)"] = value }
+        if let newURL { map[newURL.absoluteString] = value }
+
+        // Persist and update live cache for immediate UI reflection
+        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+        privacyMap = map
+    }
+    // ---- end privacy helpers ----
 
     var onSaved: (() -> Void)?
 
@@ -227,11 +284,24 @@ struct PostRecordDetailsView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Attachments").sectionHeader()
                         if !stagedAttachments.isEmpty {
-                            StagedAttachmentsSectionView(
-                                attachments: stagedAttachments,
-                                onRemove: removeStagedAttachment,
-                                selectedThumbnailID: $selectedThumbnailID
-                            )
+                            let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                ForEach(stagedAttachments) { att in
+                                    AttachmentThumbCell(
+                                        att: att,
+                                        isThumbnail: selectedThumbnailID == att.id,
+                                        onMakeThumbnail: { selectedThumbnailID = att.id },
+                                        onRemove: { removeStagedAttachment(att) },
+                                        isPrivate: { id, url in
+                                            return isPrivate(id: id, url: url)
+                                        },
+                                        setPrivate: { id, url, value in
+                                            setPrivate(id: id, url: url, value)
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(.vertical, 4)
                         }
                     }
                     .cardSurface()
@@ -323,6 +393,10 @@ struct PostRecordDetailsView: View {
             .onChange(of: activityDetail) { old, new in
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            }
+            .onAppear { loadPrivacyMap() }
+            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+                loadPrivacyMap()
             }
             .appBackground()
         }
@@ -549,6 +623,13 @@ struct PostRecordDetailsView: View {
         } catch { print("Error saving session (timer review): \(error)") }
     }
 
+    private func surrogateURL(for att: StagedAttachment) -> URL? {
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension(ext)
+    }
+
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
@@ -596,8 +677,14 @@ struct PostRecordDetailsView: View {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
                 let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
-            } catch { print("Attachment commit failed: ", error) }
+                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
+                // Attempt to migrate privacy from staged keys (ID/Temp URL) to final keys (ID/File URL)
+                let finalURL = URL(fileURLWithPath: path)
+                let stagedURL = surrogateURL(for: att)
+                migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
+            } catch {
+                print("Attachment commit failed: ", error)
+            }
         }
         stagedAttachments.removeAll()
     }
@@ -666,3 +753,110 @@ struct PostRecordDetailsView: View {
     }
 }
 
+fileprivate struct AttachmentThumbCell: View {
+    let att: StagedAttachment
+    let isThumbnail: Bool
+    let onMakeThumbnail: () -> Void
+    let onRemove: () -> Void
+    let isPrivate: (_ id: UUID?, _ url: URL?) -> Bool
+    let setPrivate: (_ id: UUID?, _ url: URL?, _ value: Bool) -> Void
+
+    private let tile: CGFloat = 128
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            ZStack(alignment: .topLeading) {
+                thumbContent
+                    .frame(width: tile, height: tile)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                    )
+            }
+
+            // Right-side vertical control column: Star, Privacy, Delete
+            VStack(spacing: 6) {
+                // Star (thumbnail selection for images)
+                if att.kind == .image {
+                    Text(isThumbnail ? "★" : "☆")
+                        .font(.system(size: 16))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .onTapGesture { onMakeThumbnail() }
+                        .accessibilityLabel(isThumbnail ? "Thumbnail (selected)" : "Set as Thumbnail")
+                }
+
+                // Privacy toggle (ID-first, URL fallback)
+                let priv = isPrivate(att.id, resolvedURL)
+                Button {
+                    setPrivate(att.id, resolvedURL, !priv)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Image(systemName: priv ? "eye.slash" : "eye")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+
+                // Delete
+                Button {
+                    onRemove()
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Delete attachment")
+            }
+            .padding(6)
+        }
+        .contextMenu {
+            if att.kind == .image {
+                Button("Set as Thumbnail") { onMakeThumbnail() }
+            }
+            Button(role: .destructive) { onRemove() } label: { Text("Remove") }
+        }
+    }
+
+    private var resolvedURL: URL? {
+        // Use a stable, surrogate URL in Caches/Temp using the staged id and an extension by kind.
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension(ext)
+    }
+
+    @ViewBuilder
+    private var thumbContent: some View {
+        switch att.kind {
+        case .image:
+            if let ui = UIImage(data: att.data) {
+                Image(uiImage: ui)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                placeholder(system: "photo")
+            }
+        case .audio:
+            placeholder(system: "waveform")
+        case .video:
+            placeholder(system: "film")
+        case .file:
+            placeholder(system: "doc")
+        }
+    }
+
+    private func placeholder(system: String) -> some View {
+        Image(systemName: system)
+            .resizable()
+            .scaledToFit()
+            .foregroundStyle(.secondary)
+            .padding(24)
+    }
+}

@@ -15,24 +15,40 @@ import CoreData
 import UIKit
 import Combine
 
-private let kPrivacyMapKey = "attachmentPrivacyMap_v1" // [String: Bool] keyed by URL.absoluteString
+private let kPrivacyMapKey = "attachmentPrivacyMap_v1" // [String: Bool] keyed by URL.absoluteString or id://<UUID>
 
 private func privacyMap() -> [String: Bool] {
     (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
 }
 
-private func isPrivateURL(_ url: URL) -> Bool {
-    privacyMap()[url.absoluteString] ?? false
+private func privacyKey(id: UUID?, url: URL?) -> String? {
+    if let id { return "id://\(id.uuidString)" }
+    if let url { return url.absoluteString }
+    return nil
 }
 
-private func setPrivacy(_ isPrivate: Bool, for url: URL) {
+private func isPrivateAttachment(id: UUID?, url: URL?) -> Bool {
+    let map = privacyMap()
+    if let id = id {
+        let key = "id://\(id.uuidString)"
+        if let v = map[key] { return v }
+    }
+    if let url = url {
+        if let v = map[url.absoluteString] { return v }
+    }
+    return false
+}
+
+private func setPrivacy(_ isPrivate: Bool, id: UUID?, url: URL?) {
     var map = privacyMap()
-    map[url.absoluteString] = isPrivate
+    if let id = id { map["id://\(id.uuidString)"] = isPrivate }
+    if let url = url { map[url.absoluteString] = isPrivate }
     UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
 }
 
-private func togglePrivacy(for url: URL) {
-    setPrivacy(!isPrivateURL(url), for: url)
+private func togglePrivacy(id: UUID?, url: URL?) {
+    let current = isPrivateAttachment(id: id, url: url)
+    setPrivacy(!current, id: id, url: url)
 }
 
 struct SessionDetailView: View {
@@ -127,13 +143,17 @@ struct SessionDetailView: View {
                     if !images.isEmpty {
                         LazyVGrid(columns: grid, spacing: 12) {
                             ForEach(Array(images.enumerated()), id: \.element.objectID) { (idx, a) in
+                                let img = loadImage(a)
+                                let starred = (a.value(forKey: "isThumbnail") as? Bool) == true
+                                let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
                                 ThumbCell(
-                                    image: loadImage(a),
-                                    isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true,
-                                    fileURL: resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+                                    image: img,
+                                    isStarred: starred,
+                                    fileURL: url,
+                                    attachment: a
                                 )
                                 .contentShape(Rectangle())
-                                .accessibilityLabel({ let name = (a.value(forKey: "fileURL") as? String).flatMap { URL(fileURLWithPath: $0).lastPathComponent }; return name.map { "Attachment \(idx+1) of \(images.count), \($0)" } ?? "Attachment \(idx+1) of \(images.count)" }())
+                                .accessibilityLabel(simpleThumbLabel(index: idx, total: images.count, fileURLString: a.value(forKey: "fileURL") as? String))
                                 .accessibilityIdentifier("thumb.attachment.\(idx)")
                                 .onTapGesture {
                                     viewerStartIndex = idx
@@ -235,11 +255,22 @@ struct SessionDetailView: View {
                 return false
             }
             , onTogglePrivacy: { url in
-                togglePrivacy(for: url)
+                // Also stamp by id when possible for cross-screen consistency
+                let set = (session.attachments as? Set<Attachment>) ?? []
+                let match = set.first { att in
+                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                    return resolveAttachmentURL(from: stored) == url
+                }
+                togglePrivacy(id: (match?.value(forKey: "id") as? UUID), url: url)
                 _refreshTick &+= 1
             }
             , isPrivate: { url in
-                isPrivateURL(url)
+                let set = (session.attachments as? Set<Attachment>) ?? []
+                let match = set.first { att in
+                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                    return resolveAttachmentURL(from: stored) == url
+                }
+                return isPrivateAttachment(id: (match?.value(forKey: "id") as? UUID), url: url)
             }
         )
         .onDisappear { _refreshTick &+= 1 }
@@ -385,6 +416,13 @@ struct SessionDetailView: View {
         return UIImage(contentsOfFile: url.path)
     }
 
+    private func simpleThumbLabel(index: Int, total: Int, fileURLString: String?) -> String {
+        let base = "Attachment \(index+1) of \(total)"
+        guard let s = fileURLString, !s.isEmpty else { return base }
+        let name = URL(fileURLWithPath: s).lastPathComponent
+        return name.isEmpty ? base : "\(base), \(name)"
+    }
+
     private func deleteSession() {
         viewContext.delete(session)
         do { try viewContext.save() } catch { print("Delete error: \(error)") }
@@ -436,6 +474,14 @@ fileprivate struct ThumbCell: View {
     let image: UIImage?
     let isStarred: Bool
     let fileURL: URL?
+
+    private var attachmentID: UUID? {
+        // KVC-safe lookup for id field
+        (attachment.value(forKey: "id") as? UUID)
+    }
+
+    let attachment: Attachment
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             // Existing thumbnail + star remains in an inner ZStack to keep its topTrailing alignment
@@ -462,8 +508,8 @@ fileprivate struct ThumbCell: View {
                 }
             }
 
-            // Read-only privacy badge
-            if let url = fileURL, isPrivateURL(url) {
+            // Read-only privacy badge (supports ID-first and URL fallback)
+            if isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye.slash")
                     .imageScale(.small)
                     .padding(6)
@@ -474,10 +520,4 @@ fileprivate struct ThumbCell: View {
         }
     }
 }
-
-//  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
-
-
-
-
 
