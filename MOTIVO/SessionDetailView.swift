@@ -42,6 +42,7 @@ struct SessionDetailView: View {
     let session: Session
 
     @State private var showEdit = false
+    @State private var editWasPresented: Bool = false
     @State private var showDeleteConfirm = false
     @State private var previewURL: URL?
     @State private var isShowingPreview = false
@@ -157,7 +158,10 @@ struct SessionDetailView: View {
     .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 12) {
-                Button("Edit") { showEdit = true }
+                Button("Edit") { 
+                    editWasPresented = true
+                    showEdit = true 
+                }
                 Button(role: .destructive) { showDeleteConfirm = true } label: {
                     Image(systemName: "trash")
                 }
@@ -170,6 +174,13 @@ struct SessionDetailView: View {
     .fullScreenCover(isPresented: $showEdit) {
         // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
         AddEditSessionView(session: session)
+    }
+    .onChange(of: showEdit) { _, newValue in
+        if newValue == false {
+            // Editor dismissed; if no save occurred, stop auto-pop behavior
+            // We will also clear this flag on successful save when we dismiss below
+            // (handled by the context change observer)
+        }
     }
     .sheet(isPresented: $isShowingPreview) {
         if let url = previewURL { QuickLookPreview(url: url) }
@@ -253,6 +264,15 @@ struct SessionDetailView: View {
         let deleted = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>
         if touchesThisSession(updated) || touchesThisSession(inserted) || touchesThisSession(deleted) {
             _refreshTick &+= 1
+        }
+        // If the edit sheet was (or is) presented and this session was updated, pop back to ContentView
+        if editWasPresented && (touchesThisSession(updated) || touchesThisSession(inserted)) {
+            editWasPresented = false
+            // Ensure the edit sheet is closed, then dismiss this detail view
+            showEdit = false
+            DispatchQueue.main.async {
+                dismiss()
+            }
         }
     }
 .appBackground()
@@ -456,6 +476,7 @@ fileprivate struct ThumbCell: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
+
 
 
 

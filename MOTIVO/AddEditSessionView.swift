@@ -598,15 +598,10 @@ private var instrumentPicker: some View {
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
-            // Return to ContentView (root):
-            // - New session: presented as a sheet from ContentView → single dismiss.
-            // - Edit session: typically pushed from SessionDetailView → double dismiss to pop past it.
-            if isEdit {
-                dismiss()
-                DispatchQueue.main.async { dismiss() }
-            } else {
-                dismiss()
-            }
+            // Return to ContentView (root) — triple, staggered dismiss to unwind sheet/fullScreenCover and underlying presenter
+            dismiss()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
         } catch {
             print("Save error (Add/Edit): \(error)")
         }
@@ -987,6 +982,9 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
+
 
 
 
