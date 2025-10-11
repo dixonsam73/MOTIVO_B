@@ -128,7 +128,8 @@ struct SessionDetailView: View {
                             ForEach(Array(images.enumerated()), id: \.element.objectID) { (idx, a) in
                                 ThumbCell(
                                     image: loadImage(a),
-                                    isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true
+                                    isStarred: (a.value(forKey: "isThumbnail") as? Bool) == true,
+                                    fileURL: resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
                                 )
                                 .contentShape(Rectangle())
                                 .accessibilityLabel({ let name = (a.value(forKey: "fileURL") as? String).flatMap { URL(fileURLWithPath: $0).lastPathComponent }; return name.map { "Attachment \(idx+1) of \(images.count), \($0)" } ?? "Attachment \(idx+1) of \(images.count)" }())
@@ -224,11 +225,13 @@ struct SessionDetailView: View {
             }
             , onTogglePrivacy: { url in
                 togglePrivacy(for: url)
+                _refreshTick &+= 1
             }
             , isPrivate: { url in
                 isPrivateURL(url)
             }
         )
+        .onDisappear { _refreshTick &+= 1 }
     }
     .alert("Delete Session?", isPresented: $showDeleteConfirm) {
         Button("Delete", role: .destructive) { deleteSession() }
@@ -412,32 +415,48 @@ fileprivate struct AttachmentRow: View {
 fileprivate struct ThumbCell: View {
     let image: UIImage?
     let isStarred: Bool
+    let fileURL: URL?
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            Group {
-                if let ui = image { Image(uiImage: ui).resizable().scaledToFill() }
-                else { Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary) }
-            }
-            .frame(width: 84, height: 84)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
-            )
+        ZStack(alignment: .topLeading) {
+            // Existing thumbnail + star remains in an inner ZStack to keep its topTrailing alignment
+            ZStack(alignment: .topTrailing) {
+                Group {
+                    if let ui = image { Image(uiImage: ui).resizable().scaledToFill() }
+                    else { Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary) }
+                }
+                .frame(width: 84, height: 84)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                )
 
-            if isStarred {
-                Text("★")
-                    .font(.system(size: 16))
+                if isStarred {
+                    Text("★")
+                        .font(.system(size: 16))
+                        .padding(6)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .padding(4)
+                        .accessibilityLabel("Thumbnail")
+                }
+            }
+
+            // Read-only privacy badge
+            if let url = fileURL, isPrivateURL(url) {
+                Image(systemName: "eye.slash")
+                    .imageScale(.small)
                     .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .padding(4)
-                    .accessibilityLabel("Thumbnail")
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(6)
+                    .accessibilityHidden(true)
             }
         }
     }
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Scope0 — post-unify (detail view now uses SessionActivity helpers)
+
+
 
 
