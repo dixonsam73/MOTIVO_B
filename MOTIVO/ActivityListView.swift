@@ -1,6 +1,6 @@
 //
 //  ActivityListView.swift
-//  MOTIVO
+//  MOTIVO_making sure github is working
 //
 //  v7.8 Stage 2 — Primary fallback + one-time notice flag
 //
