@@ -133,13 +133,11 @@ struct SessionDetailView: View {
                 .cardSurface()
             }
 
-            // Attachments
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                Text("Attachments").sectionHeader()
-                let (images, others) = splitAttachments()
-                if images.isEmpty && others.isEmpty {
-                    Text("No attachments").foregroundStyle(.secondary)
-                } else {
+            // Attachments (only show when present)
+            let (images, others) = splitAttachments()
+            if !(images.isEmpty && others.isEmpty) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Attachments").sectionHeader()
                     if !images.isEmpty {
                         LazyVGrid(columns: grid, spacing: 12) {
                             ForEach(Array(images.enumerated()), id: \.element.objectID) { (idx, a) in
@@ -167,8 +165,8 @@ struct SessionDetailView: View {
                         AttachmentRow(attachment: a) { openQuickLook(a) }
                     }
                 }
+                .cardSurface()
             }
-            .cardSurface()
         }
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.top, Theme.Spacing.l)

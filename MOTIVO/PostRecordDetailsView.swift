@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251012_202320-tasks-pad-a2
+// SCOPE: Add optional notesPrefill parameter and init notes from it
+
 private let kPrivacyMapKey = "attachmentPrivacyMap_v1"
 
 //  PostRecordDetailsView_20251004c.swift
@@ -122,7 +125,8 @@ struct PostRecordDetailsView: View {
         instrument: Instrument? = nil,
         activityTypeRaw: Int16? = nil,
         activityDetailPrefill: String? = nil,
-        onSaved: (() -> Void)? = nil
+        notesPrefill: String? = nil,
+                onSaved: (() -> Void)? = nil
     ) {
         self._isPresented = isPresented
         self.prefillTimestamp = timestamp ?? Date()
@@ -137,6 +141,7 @@ struct PostRecordDetailsView: View {
             self._activityChoice = State(initialValue: "custom:\(prefill)")
         }
         if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
+        self._notes = State(initialValue: notesPrefill ?? "")
         self.onSaved = onSaved
     }
 
@@ -400,7 +405,7 @@ struct PostRecordDetailsView: View {
             }
             .appBackground()
         }
-    }
+}
 
     // MARK: - Subviews
 

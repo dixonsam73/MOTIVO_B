@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251012_202320-tasks-pad-a2
+// SCOPE: Fix tasks pad placement; proper state; pass notesPrefill
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -72,6 +75,47 @@ struct PracticeTimerView: View {
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
+
+    // --- Tasks/Notes Pad State (v7.9A) ---
+    @State private var showTasksPad: Bool = false
+    struct TaskLine: Identifiable {
+        let id: UUID = UUID()
+        var text: String
+        var isDone: Bool = false
+    }
+    @State private var taskLines: [TaskLine] = []
+    private let tasksDefaultsKey: String = "practiceTasks_v1"
+
+    private func loadDefaultTasksIfNeeded() {
+        guard activity == .practice, taskLines.isEmpty else { return }
+        if let defaults = UserDefaults.standard.array(forKey: tasksDefaultsKey) as? [String] {
+            self.taskLines = defaults.map { TaskLine(text: $0, isDone: false) }
+        }
+    }
+    private func composeNotesString() -> String? {
+        // Keep only non-empty lines (trimmed)
+        let nonEmpty = taskLines
+            .map { (done: $0.isDone, text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .filter { !$0.text.isEmpty }
+
+        guard !nonEmpty.isEmpty else { return nil }
+
+        return nonEmpty
+            .map { ($0.done ? "✓" : "•") + " " + $0.text }
+            .joined(separator: "\n")
+    }
+    private func addEmptyTaskLine() {
+        taskLines.append(TaskLine(text: ""))
+    }
+    private func toggleDone(_ id: UUID) {
+        if let idx = taskLines.firstIndex(where: { $0.id == id }) {
+            taskLines[idx].isDone.toggle()
+        }
+    }
+    private func deleteLine(_ id: UUID) {
+        taskLines.removeAll { $0.id == id }
+        if taskLines.isEmpty { showTasksPad = false }
+    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -106,6 +150,55 @@ struct PracticeTimerView: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal)
+                    .cardSurface()
+
+                    // --- Tasks/Notes Pad (v7.9A) ---
+                    Group {
+                        if showTasksPad {
+                            VStack(alignment: .leading, spacing: 8) {
+                                // Centered header to align with rest of page
+                                Text("Notes / Tasks")
+                                    .sectionHeader()
+                                    .frame(maxWidth: .infinity, alignment: .center)
+
+                                ForEach($taskLines) { $line in
+                                    HStack(spacing: 8) {
+                                        Button { line.isDone.toggle() } label: {
+                                            Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
+                                        }
+                                        TextField("Task", text: $line.text)
+                                            .textFieldStyle(.plain)
+                                            .disableAutocorrection(true)
+
+                                        Spacer(minLength: 8)
+
+                                        Button(role: .destructive) { deleteLine(line.id) } label: {
+                                            Image(systemName: "trash")
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                                Button(action: { addEmptyTaskLine() }) {
+                                    HStack { Image(systemName: "plus"); Text("Add line") }
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 8)
+                        } else {
+                            Button(action: {
+                                showTasksPad = true
+                                loadDefaultTasksIfNeeded()
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "plus.circle")
+                                    Text("Notes / Tasks")
+                                }
+                                .frame(maxWidth: .infinity, alignment: .center)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.vertical, 8)
+                        }
+                    }
                     .cardSurface()
                 }
                 .padding(.horizontal, Theme.Spacing.l)
@@ -221,6 +314,7 @@ struct PracticeTimerView: View {
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
+                    notesPrefill: composeNotesString(),
                     onSaved: {
                         clearPersistedTimer()
                         resetUIOnly()
@@ -655,6 +749,8 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
 
 
 
