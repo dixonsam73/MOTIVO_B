@@ -107,6 +107,9 @@ fileprivate struct SessionsRootView: View {
     @State private var searchText: String = ""
     @State private var debouncedQuery: String = ""
 
+    @State private var statsRange: StatsRange = .week
+    @State private var stats: SessionStats = .init(count: 0, seconds: 0)
+
     // Sheets
     @State private var showProfile = false
     @State private var showTimer = false
@@ -121,9 +124,22 @@ fileprivate struct SessionsRootView: View {
 
                 // ---------- Stats (card) ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    let statsInput: [Session] = filteredSessions
-                    StatsBannerView(sessions: statsInput)
+                    Text("Your Sessions").sectionHeader()
+
+                    Picker("", selection: $statsRange) {
+                        ForEach(StatsRange.allCases) { r in
+                            Text(r.label).tag(r)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("\(stats.count) activities")
+                        Text("\(StatsHelper.formatDuration(stats.seconds)) total")
+                    }
                 }
+                .onAppear { refreshStats() }
+                .onChange(of: statsRange) { _ in refreshStats() }
                 .cardSurface()
 
                 // ---------- Filters (card) ----------
@@ -210,6 +226,14 @@ fileprivate struct SessionsRootView: View {
                     .sink { debouncedQuery = $0 }
             }
             .appBackground()
+        }
+    }
+
+    private func refreshStats() {
+        do {
+            stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange)
+        } catch {
+            stats = .init(count: 0, seconds: 0)
         }
     }
 
