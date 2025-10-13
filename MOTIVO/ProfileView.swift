@@ -30,6 +30,7 @@ struct ProfileView: View {
 
     @State private var showInstrumentManager: Bool = false
     @State private var showActivityManager: Bool = false
+    @State private var showTasksManager: Bool = false
     @State private var profile: Profile?
     @State private var isSaving = false
 
@@ -48,7 +49,7 @@ struct ProfileView: View {
             Form {
                 // MARK: - Profile
                 Section {
-                    Text("Profile").sectionHeader()
+                    Text("Name").sectionHeader()
                     VStack(spacing: Theme.Spacing.s) {
                         TextField("Name", text: $name)
                             .textInputAutocapitalization(.words)
@@ -59,15 +60,18 @@ struct ProfileView: View {
                                 Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
                             }
                             .animation(.easeInOut(duration: 0.18), value: isNameFocused)
-                            
-                        Toggle("Default to Private Posts", isOn: $defaultPrivacy)
                     }
+                }
+                .listRowSeparator(.hidden)
+
+                Section {
+                    Toggle("Default to Private Posts", isOn: $defaultPrivacy)
                 }
                 .listRowSeparator(.hidden)
 
                 // MARK: - Instruments (Manage above Primary)
                 Section {
-                    Text("Instruments").sectionHeader()
+                    // Removed header Text("Instruments").sectionHeader()
 
                     // Manage button aligned with section edge
                     Button {
@@ -99,7 +103,7 @@ struct ProfileView: View {
 
                 // MARK: - Activities (Manage above Primary; no separator line)
                 Section {
-                    Text("Activities").sectionHeader()
+                    // Removed header Text("Activities").sectionHeader()
 
                     Button {
                         showActivityManager = true
@@ -133,6 +137,26 @@ struct ProfileView: View {
                             writePrimaryActivityRef(newValue)
                         }
                     }
+                }
+                .listRowSeparator(.hidden)
+
+                Section {
+                    Button {
+                        showTasksManager = true
+                    } label: {
+                        HStack {
+                            Text("Manage Tasks")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityAddTraits(.isButton)
                 }
                 .listRowSeparator(.hidden)
 
@@ -212,6 +236,10 @@ struct ProfileView: View {
             }
             .sheet(isPresented: $showActivityManager) {
                 ActivityListView()
+                    .environment(\.managedObjectContext, ctx)
+            }
+            .sheet(isPresented: $showTasksManager) {
+                TasksManagerView()
                     .environment(\.managedObjectContext, ctx)
             }
         }
@@ -323,3 +351,6 @@ struct ProfileView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
+

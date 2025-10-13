@@ -92,6 +92,21 @@ struct PracticeTimerView: View {
             self.taskLines = defaults.map { TaskLine(text: $0, isDone: false) }
         }
     }
+    private func loadPracticeDefaultsIfNeeded() {
+        // Determine owner scope using current user ID from PersistenceController; fallback to device
+        let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
+        let tasksKey = "practiceTasks_v1::\(ownerScope)"
+        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)"
+
+        // Only proceed if practice activity, no existing lines, and autofill toggle is enabled
+        guard activity == .practice,
+              taskLines.isEmpty,
+              UserDefaults.standard.bool(forKey: toggleKey) == true else { return }
+
+        if let arr = UserDefaults.standard.array(forKey: tasksKey) as? [String] {
+            self.taskLines = arr.map { TaskLine(text: $0, isDone: false) }
+        }
+    }
     private func composeNotesString() -> String? {
         // Keep only non-empty lines (trimmed)
         let nonEmpty = taskLines
@@ -187,6 +202,7 @@ struct PracticeTimerView: View {
                         } else {
                             Button(action: {
                                 showTasksPad = true
+                                loadPracticeDefaultsIfNeeded()
                                 loadDefaultTasksIfNeeded()
                             }) {
                                 HStack(spacing: 6) {
@@ -749,6 +765,7 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
