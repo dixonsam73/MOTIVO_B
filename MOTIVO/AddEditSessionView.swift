@@ -81,6 +81,29 @@ struct AddEditSessionView: View {
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
+    // v7.9E — State circles (12-dot gradient, dark → light, drag select)
+    private let stateDotsCount_edit: Int = 12
+
+    @State private var selectedStateIndex_edit: Int? = nil   // 0..3 or nil
+    @State private var hoverDotIndex_edit: Int? = nil        // transient during drag
+    @State private var dragX_edit: CGFloat? = nil            // live finger x
+    @State private var lastHapticDot_edit: Int? = nil        // per-dot haptic throttle
+
+    /// DARK → LIGHT across the row (left→right). Use textPrimary so it reads in dark mode.
+    private func opacityForDot_edit(_ i: Int) -> Double {
+        let start: Double = 0.25   // darker on the left
+        let end:   Double = 0.95   // lighter/clearer on the right
+        guard stateDotsCount_edit > 1 else { return start }
+        let t = Double(i) / Double(stateDotsCount_edit - 1)
+        return start + (end - start) * t
+    }
+
+    private func zoneForDot_edit(_ i: Int) -> Int { max(0, min(3, i / 3)) }
+
+    /// Visual “center” dot per zone — ring this for consistency.
+    private func centerDot_edit(for zone: Int) -> Int {
+        switch zone { case 0: return 1; case 1: return 4; case 2: return 7; default: return 10 }
+    }
     // ---- Privacy cache & helpers (ID-first, URL-fallback) ----
     @State private var privacyMap: [String: Bool] = [:]
 
@@ -111,6 +134,54 @@ struct AddEditSessionView: View {
         UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
     }
     // ---- end privacy helpers ----
+
+    /// Remove the `StateIndex:` line from `notes` for clean UI display.
+    private func stripStateIndexTokenFromNotes_edit() {
+        let token = "StateIndex:"
+        guard let r = notes.range(of: token) else { return }
+        let tail = notes[r.upperBound...]
+        let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+        notes.removeSubrange(r.lowerBound..<end)
+
+        // Tidy whitespace/newlines after removal
+        while notes.contains("\n\n") {
+            notes = notes.replacingOccurrences(of: "\n\n", with: "\n")
+        }
+        notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Preselect from notes if a StateIndex exists
+    private func preselectStateIndexFromNotesIfNeeded_edit() {
+        // Replace `notes` with your local notes string if named differently
+        guard selectedStateIndex_edit == nil, !notes.isEmpty else { return }
+        let token = "StateIndex:"
+        if let r = notes.range(of: token) {
+            let tail = notes[r.upperBound...]
+            let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            if let n = Int(trimmed), (0...3).contains(n) {
+                selectedStateIndex_edit = n
+                // NEW: hide the token from the Notes text area
+                stripStateIndexTokenFromNotes_edit()
+            }
+        }
+    }
+
+    /// Apply/replace the StateIndex line before saving
+    private func applyStateIndexToNotesBeforeSave_edit() {
+        guard let idx = selectedStateIndex_edit else { return }
+        let token = "StateIndex:"
+        let newLine = "\(token) \(idx)"
+        if let r = notes.range(of: token) {
+            // Replace existing line up to newline (or end)
+            let tail = notes[r.upperBound...]
+            let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+            notes.replaceSubrange(r.lowerBound..<end, with: newLine)
+        } else {
+            if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
+            notes.append(newLine)
+        }
+    }
 
     init(session: Session? = nil) {
         self.session = session
@@ -273,6 +344,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 }
                 .cardSurface()
 
+                // NEW — State card (read/write)
+                stateStripCard_edit
+
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
@@ -429,8 +503,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
         .task { hydrate() } // unified first-appearance init
         .onAppear {
+            preselectStateIndexFromNotesIfNeeded_edit()
             syncActivityChoiceFromState()
             loadPrivacyMap()
+            // Ensure token is hidden in Notes whenever view appears
+            stripStateIndexTokenFromNotes_edit()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             loadPrivacyMap()
@@ -561,6 +638,99 @@ private var instrumentPicker: some View {
         .presentationDetents([.medium])
     }
 
+    // NEW — State card (read/write)
+    @ViewBuilder
+    private var stateStripCard_edit: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("State").sectionHeader()
+
+            GeometryReader { geo in
+                let totalWidth = geo.size.width
+                let spacing: CGFloat = 8
+                let count = stateDotsCount_edit
+                let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
+                let step = diameter + spacing
+
+                // Drag gesture: per-dot haptic + snap to zone; faster mapping
+                let drag = DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let x = max(0, min(value.location.x, totalWidth))
+                        dragX_edit = x
+                        let idx = Int((x + step * 0.5) / step)
+                        let clamped = max(0, min(count - 1, idx))
+                        hoverDotIndex_edit = clamped
+
+                        let newZone = zoneForDot_edit(clamped)
+                        if selectedStateIndex_edit != newZone {
+                            selectedStateIndex_edit = newZone
+                        }
+                        if lastHapticDot_edit != clamped {
+                            lastHapticDot_edit = clamped
+                            #if canImport(UIKit)
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            #endif
+                        }
+                    }
+                    .onEnded { _ in
+                        dragX_edit = nil
+                        hoverDotIndex_edit = nil
+                    }
+
+                HStack(spacing: spacing) {
+                    ForEach(0..<count, id: \.self) { i in
+                        let zone = zoneForDot_edit(i)
+                        let ringDot = selectedStateIndex_edit.map(centerDot_edit) ?? -1
+                        let isRinged = (i == ringDot)
+
+                        // Proximity bloom under finger
+                        let hoverScale: CGFloat = {
+                            guard let x = dragX_edit else { return 1.0 }
+                            let cx = CGFloat(i) * step + diameter * 0.5
+                            let distance = abs(cx - x)
+                            let proximity = max(0, 1 - (distance / (step * 1.5)))
+                            return 1.0 + (0.24 * proximity) // up to +24%
+                        }()
+
+                        // Persistent emphasis for selected zone center
+                        let selectedBase: CGFloat = isRinged ? 1.18 : 1.0
+                        let finalScale = selectedBase * hoverScale
+
+                        Circle()
+                            .fill(Color.primary.opacity(opacityForDot_edit(i))) // dark→light
+                            .overlay(
+                                Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                                lineWidth: isRinged ? 1.5 : 1)
+                            )
+                            .frame(width: diameter, height: diameter)
+                            .scaleEffect(finalScale)
+                            .animation(.easeOut(duration: 0.06), value: finalScale)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                let newZone = zone
+                                selectedStateIndex_edit = (selectedStateIndex_edit == newZone) ? nil : newZone
+                                #if canImport(UIKit)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
+                            }
+                            .accessibilityLabel({
+                                switch zone {
+                                case 0: return isRinged ? "Searching, selected" : "Searching"
+                                case 1: return isRinged ? "Working, selected"   : "Working"
+                                case 2: return isRinged ? "Flowing, selected"   : "Flowing"
+                                default: return isRinged ? "Breakthrough, selected" : "Breakthrough"
+                                }
+                            }())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .gesture(drag)
+            }
+            .frame(height: 48)    // half-height feel
+            .padding(.vertical, 2)
+        }
+        .cardSurface()
+    }
+
     // MARK: - Data hydration
 
     private func hydrate() {
@@ -573,6 +743,10 @@ private var instrumentPicker: some View {
             durationSeconds = Int(s.durationSeconds)
             isPublic = s.isPublic
             notes = s.notes ?? ""
+            // Preselect state index from notes before stripping token so the dots reflect persisted state
+            preselectStateIndexFromNotesIfNeeded_edit()
+            // Ensure the token is not visible in the Notes UI on edit hydrate
+            stripStateIndexTokenFromNotes_edit()
 
             let raw = Int16(s.value(forKey: "activityType") as? Int ?? 0)
             activity = SessionActivityType(rawValue: raw) ?? .practice
@@ -671,6 +845,13 @@ private var instrumentPicker: some View {
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
+
+        if let _ = selectedStateIndex_edit {
+            applyStateIndexToNotesBeforeSave_edit()
+        } else {
+            // No state selected — ensure token is not persisted
+            stripStateIndexTokenFromNotes_edit()
+        }
         s.notes = notes
 
         // Persist activity type + detail
@@ -1105,6 +1286,10 @@ private var instrumentPicker: some View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
+
+
 
 
 

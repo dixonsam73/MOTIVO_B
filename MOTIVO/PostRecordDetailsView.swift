@@ -61,6 +61,38 @@ struct PostRecordDetailsView: View {
 
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
+    // v7.9E — State circles (neutral greys)
+    private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
+
+    // v7.9E — 12-dot gradient strip (dark → light) with drag selection
+    private let stateDotsCount: Int = 12
+
+    @State private var selectedStateIndex: Int? = nil   // 0..3 or nil
+    @State private var hoverDotIndex: Int? = nil        // transient dot under finger during drag
+    @State private var lastHapticZone: Int? = nil       // throttle haptic to zone changes
+
+    // Drag refinements
+    @State private var dragX: CGFloat? = nil          // live finger x within the strip
+    @State private var lastHapticDot: Int? = nil      // fire haptic when this changes
+
+    /// DARK ➜ LIGHT across the row. On dark themes this reads as “clearer toward the right”.
+    private func opacityForDot(_ i: Int) -> Double {
+        // 0 = darkest (low opacity), 11 = lightest (high opacity)
+        let start: Double = 0.25   // darker
+        let end:   Double = 0.95   // lighter/clearer
+        guard stateDotsCount > 1 else { return start }
+        let t = Double(i) / Double(stateDotsCount - 1)
+        return start + (end - start) * t
+    }
+
+    /// Map a dot index to one of four zones (0..2, 3..5, 6..8, 9..11).
+    private func zoneForDot(_ i: Int) -> Int { max(0, min(3, i / 3)) }
+
+    /// Visual “anchor” dot for each zone — we ring this for consistency.
+    private func centerDot(for zone: Int) -> Int {
+        switch zone { case 0: return 1; case 1: return 4; case 2: return 7; default: return 10 }
+    }
+
     // ---- Privacy cache & helpers (inside the view struct) ----
     @State private var privacyMap: [String: Bool] = [:]
 
@@ -285,6 +317,8 @@ struct PostRecordDetailsView: View {
                     }
                     .cardSurface()
 
+                    stateStripCard
+
                     // ---------- Attachments ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Attachments").sectionHeader()
@@ -368,6 +402,7 @@ struct PostRecordDetailsView: View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .task {
+                preselectStateIndexFromNotesIfNeeded()
                 instruments = fetchInstruments()
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
@@ -408,6 +443,107 @@ struct PostRecordDetailsView: View {
 }
 
     // MARK: - Subviews
+
+    @ViewBuilder
+    private var stateStripCard: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("State").sectionHeader()
+            // Half-height horizontal strip of twelve neutral-grey circles with gradient fade
+            GeometryReader { geo in
+                let totalWidth = geo.size.width
+                let spacing: CGFloat = 8
+                let count = stateDotsCount
+
+                // compute diameter so dots + spacings fill available width; allow a bit larger
+                let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
+                let step = diameter + spacing
+
+                let drag = DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        let x = max(0, min(value.location.x, totalWidth))
+                        dragX = x
+
+                        // Map x to nearest dot center (snappier than round on step edges)
+                        let idx = Int((x + step * 0.5) / step)
+                        let clamped = max(0, min(count - 1, idx))
+
+                        hoverDotIndex = clamped
+
+                        // Convert to zone (0..3) for selection storage
+                        let newZone = zoneForDot(clamped)
+                        if selectedStateIndex != newZone {
+                            selectedStateIndex = newZone
+                        }
+
+                        // Per-dot haptic (not just per-zone)
+                        if lastHapticDot != clamped {
+                            lastHapticDot = clamped
+                            #if canImport(UIKit)
+                            UISelectionFeedbackGenerator().selectionChanged()
+                            #endif
+                        }
+                    }
+                    .onEnded { _ in
+                        dragX = nil
+                        hoverDotIndex = nil
+                    }
+
+                HStack(spacing: spacing) {
+                    ForEach(0..<count, id: \.self) { i in
+                        let zone = zoneForDot(i)
+                        let ringDot = selectedStateIndex.map(centerDot) ?? -1
+                        let isRinged = (i == ringDot)
+
+                        // Proximity bloom (drag hover)
+                        let hoverScale: CGFloat = {
+                            guard let x = dragX else { return 1.0 }
+                            let cx = CGFloat(i) * step + diameter * 0.5
+                            let distance = abs(cx - x)
+                            let proximity = max(0, 1 - (distance / (step * 1.5)))   // 0…1
+                            return 1.0 + (0.24 * proximity)                          // up to +24%
+                        }()
+
+                        // NEW: persistent selected scale so chosen dot always stands out
+                        let selectedBaseScale: CGFloat = isRinged ? 1.18 : 1.0       // +18% when selected
+
+                        // Final scale = persistent selected scale × hover bloom
+                        let finalScale = selectedBaseScale * hoverScale
+
+                        Circle()
+                            .fill(Color.primary.opacity(opacityForDot(i)))
+                            .overlay(
+                                Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                                lineWidth: isRinged ? 1.5 : 1)
+                            )
+                            .frame(width: diameter, height: diameter)
+                            .scaleEffect(finalScale)
+                            .animation(.easeOut(duration: 0.06), value: finalScale)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                let newZone = zone
+                                selectedStateIndex = (selectedStateIndex == newZone) ? nil : newZone
+                                #if canImport(UIKit)
+                                UISelectionFeedbackGenerator().selectionChanged()
+                                #endif
+                            }
+                            .accessibilityLabel({
+                                switch zone {
+                                case 0: return isRinged ? "Searching, selected" : "Searching"
+                                case 1: return isRinged ? "Working, selected"   : "Working"
+                                case 2: return isRinged ? "Flowing, selected"   : "Flowing"
+                                default: return isRinged ? "Breakthrough, selected" : "Breakthrough"
+                                }
+                            }())
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .gesture(drag)
+            }
+            .frame(height: 48)       // a touch taller for the bloom
+            .padding(.vertical, 2)
+        }
+        .cardSurface()
+    }
 
     // Instrument picker sheet
     private var instrumentPicker: some View {
@@ -598,6 +734,33 @@ struct PostRecordDetailsView: View {
         }
     }
 
+    private func preselectStateIndexFromNotesIfNeeded() {
+        guard selectedStateIndex == nil, !notes.isEmpty else { return }
+        if let r = notes.range(of: "StateIndex:") {
+            let tail = notes[r.upperBound...]
+            // read up to line end
+            let firstLine = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            let trimmed = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
+            // Expect formats like " 2" or "2"
+            if let n = Int(trimmed) { selectedStateIndex = (0...3).contains(n) ? n : nil }
+        }
+    }
+
+    private func applyStateIndexToNotesBeforeSave() {
+        guard let idx = selectedStateIndex else { return }
+        let token = "StateIndex:"
+        let newLine = "\(token) \(idx)"
+        if let r = notes.range(of: token) {
+            // replace existing line up to newline (or end)
+            let tail = notes[r.upperBound...]
+            let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+            notes.replaceSubrange(r.lowerBound..<end, with: newLine)
+        } else {
+            if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
+            notes.append(newLine)
+        }
+    }
+
     @MainActor
     private func saveToCoreData() {
         let s = Session(context: viewContext)
@@ -614,7 +777,10 @@ struct PostRecordDetailsView: View {
         s.isPublic = isPublic
         s.mood = Int16(mood)
         s.effort = Int16(effort)
+
+        applyStateIndexToNotesBeforeSave()
         s.notes = notes
+
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
         s.setValue(activity.rawValue, forKey: "activityType")
         if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
@@ -865,3 +1031,4 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(24)
     }
 }
+

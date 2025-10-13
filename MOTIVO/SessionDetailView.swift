@@ -124,11 +124,56 @@ struct SessionDetailView: View {
             .cardSurface()
 
             // Notes
-            if let notes = session.notes,
-               !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let originalNotes = session.notes ?? ""
+            let (stateIndex, displayNotes) = extractStateIndex(from: originalNotes)
+            if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Notes").sectionHeader()
-                    Text(notes)
+                    Text(displayNotes)
+                }
+                .cardSurface()
+            }
+
+            // Read-only State card (only if StateIndex exists)
+            if let idx = stateIndex {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("State").sectionHeader()
+
+                    GeometryReader { geo in
+                        let totalWidth = geo.size.width
+                        let spacing: CGFloat = 8
+                        let count = stateDotsCountDetail
+                        // compute diameter so dots + spacings fill available width
+                        let diameter = max(14, min(32,
+                            (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
+                        let ringDot = detailZoneCenterDot(for: idx)
+
+                        HStack(spacing: spacing) {
+                            ForEach(0..<count, id: \.self) { i in
+                                let isRinged = (i == ringDot)
+                                let baseScale: CGFloat = isRinged ? 1.18 : 1.0
+                                Circle()
+                                    .fill(Color.primary.opacity(detailOpacityForDot(i))) // dark→light
+                                    .overlay(
+                                        Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                                        lineWidth: isRinged ? 1.5 : 1)
+                                    )
+                                    .frame(width: diameter, height: diameter)
+                                    .scaleEffect(baseScale)                // NEW: persistent emphasis
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: 44)
+                    .accessibilityLabel({
+                        switch idx {
+                        case 0: return "State: Searching"
+                        case 1: return "State: Working"
+                        case 2: return "State: Flowing"
+                        default: return "State: Breakthrough"
+                        }
+                    }())
                 }
                 .cardSurface()
             }
@@ -333,6 +378,40 @@ struct SessionDetailView: View {
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
     }
+
+// v7.9E — Read-only State strip (must match editor semantics)
+private let stateDotsCountDetail: Int = 12
+
+/// DARK → LIGHT across the row (left→right).
+private func detailOpacityForDot(_ i: Int) -> Double {
+    let start: Double = 0.25   // darker on the left
+    let end:   Double = 0.95   // lighter/clearer on the right
+    guard stateDotsCountDetail > 1 else { return start }
+    let t = Double(i) / Double(stateDotsCountDetail - 1)
+    return start + (end - start) * t
+}
+
+private func detailZoneCenterDot(for zone: Int) -> Int {
+    switch zone { case 0: return 1; case 1: return 4; case 2: return 7; default: return 10 }
+}
+
+/// Extracts StateIndex (0…3) and returns (index?, cleanedNotesWithoutToken)
+private func extractStateIndex(from notes: String) -> (Int?, String) {
+    let token = "StateIndex:"
+    guard let r = notes.range(of: token) else { return (nil, notes) }
+
+    let tail = notes[r.upperBound...]
+    let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+    let raw = String(notes[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+    let idx = Int(raw).flatMap { (0...3).contains($0) ? $0 : nil }
+
+    var cleaned = notes
+    cleaned.removeSubrange(r.lowerBound..<end)
+    while cleaned.contains("\n\n") { cleaned = cleaned.replacingOccurrences(of: "\n\n", with: "\n") }
+    cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    return (idx, cleaned)
+}
 
     // MARK: - Attachments split & preview
 
