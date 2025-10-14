@@ -125,7 +125,7 @@ struct SessionDetailView: View {
 
             // Notes
             let originalNotes = session.notes ?? ""
-            let (stateIndex, displayNotes) = extractStateIndex(from: originalNotes)
+            let (focusDotIndex, displayNotes) = extractFocusDotIndex(from: originalNotes)
             if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Notes").sectionHeader()
@@ -134,8 +134,8 @@ struct SessionDetailView: View {
                 .cardSurface()
             }
 
-            // Read-only State card (only if StateIndex exists)
-            if let idx = stateIndex {
+            // Read-only State card (only if FocusDotIndex exists)
+            if let dot = focusDotIndex {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Focus").sectionHeader()
 
@@ -146,7 +146,7 @@ struct SessionDetailView: View {
                         // compute diameter so dots + spacings fill available width
                         let diameter = max(14, min(32,
                             (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
-                        let ringDot = detailZoneCenterDot(for: idx)
+                        let ringDot = max(0, min(count - 1, dot))
 
                         HStack(spacing: spacing) {
                             ForEach(0..<count, id: \.self) { i in
@@ -167,12 +167,14 @@ struct SessionDetailView: View {
                     }
                     .frame(height: 44)
                     .accessibilityLabel({
-                        switch idx {
-                        case 0: return "State: Searching"
-                        case 1: return "State: Working"
-                        case 2: return "State: Flowing"
-                        default: return "State: Breakthrough"
+                        let bucket: String
+                        switch (dot / 3) {
+                        case 0: bucket = "State: Searching"
+                        case 1: bucket = "State: Working"
+                        case 2: bucket = "State: Flowing"
+                        default: bucket = "State: Breakthrough"
                         }
+                        return bucket
                     }())
                 }
                 .cardSurface()
@@ -401,22 +403,43 @@ private func detailZoneCenterDot(for zone: Int) -> Int {
     }
 }
 
-/// Extracts StateIndex (0…3) and returns (index?, cleanedNotesWithoutToken)
-private func extractStateIndex(from notes: String) -> (Int?, String) {
-    let token = "StateIndex:"
-    guard let r = notes.range(of: token) else { return (nil, notes) }
+/// Extracts FocusDotIndex (0…11) if present; falls back to legacy StateIndex (0…3 → mapped to center dots).
+/// Returns (dotIndex?, cleanedNotesWithoutTokens)
+private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
+    var working = notes
 
-    let tail = notes[r.upperBound...]
-    let end = tail.firstIndex(of: "\n") ?? notes.endIndex
-    let raw = String(notes[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
-    let idx = Int(raw).flatMap { (0...3).contains($0) ? $0 : nil }
+    // 1) Prefer FocusDotIndex: n (0…11)
+    if let r = working.range(of: "FocusDotIndex:") {
+        let tail = working[r.upperBound...]
+        let end = tail.firstIndex(of: "\n") ?? working.endIndex
+        let raw = String(working[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let n = Int(raw), (0...11).contains(n) {
+            // Remove the token line
+            working.removeSubrange(r.lowerBound..<end)
+            while working.contains("\n\n") { working = working.replacingOccurrences(of: "\n\n", with: "\n") }
+            working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (n, working)
+        }
+    }
 
-    var cleaned = notes
-    cleaned.removeSubrange(r.lowerBound..<end)
-    while cleaned.contains("\n\n") { cleaned = cleaned.replacingOccurrences(of: "\n\n", with: "\n") }
-    cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    // 2) Fallback: legacy StateIndex: n (0…3) → map to representative center dots [1,4,7,10]
+    if let r = working.range(of: "StateIndex:") {
+        let tail = working[r.upperBound...]
+        let end = tail.firstIndex(of: "\n") ?? working.endIndex
+        let raw = String(working[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let n = Int(raw), (0...3).contains(n) {
+            let centers = [1, 4, 7, 10]
+            let dot = centers[n]
+            // Remove the token line
+            working.removeSubrange(r.lowerBound..<end)
+            while working.contains("\n\n") { working = working.replacingOccurrences(of: "\n\n", with: "\n") }
+            working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (dot, working)
+        }
+    }
 
-    return (idx, cleaned)
+    // 3) No tokens found → return original notes
+    return (nil, notes)
 }
 
     // MARK: - Attachments split & preview
@@ -603,5 +626,4 @@ fileprivate struct ThumbCell: View {
         }
     }
 }
-
 

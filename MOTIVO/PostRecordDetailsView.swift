@@ -67,7 +67,6 @@ struct PostRecordDetailsView: View {
     // v7.9E — 12-dot gradient strip (dark → light) with drag selection
     private let stateDotsCount: Int = 12
 
-    @State private var selectedStateIndex: Int? = nil   // 0..3 or nil
     @State private var selectedDotIndex: Int? = nil
     @State private var hoverDotIndex: Int? = nil        // transient dot under finger during drag
     @State private var lastHapticZone: Int? = nil       // throttle haptic to zone changes
@@ -84,14 +83,6 @@ struct PostRecordDetailsView: View {
         guard stateDotsCount > 1 else { return start }
         let t = Double(i) / Double(stateDotsCount - 1)
         return start + (end - start) * t
-    }
-
-    /// Map a dot index to one of four zones (0..2, 3..5, 6..8, 9..11).
-    private func zoneForDot(_ i: Int) -> Int { max(0, min(3, i / 3)) }
-
-    /// Visual “anchor” dot for each zone — we ring this for consistency.
-    private func centerDot(for zone: Int) -> Int {
-        switch zone { case 0: return 1; case 1: return 4; case 2: return 7; default: return 10 }
     }
 
     // ---- Privacy cache & helpers (inside the view struct) ----
@@ -403,7 +394,7 @@ struct PostRecordDetailsView: View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .task {
-                preselectStateIndexFromNotesIfNeeded()
+                preselectFocusFromNotesIfNeeded()
                 instruments = fetchInstruments()
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
@@ -473,13 +464,7 @@ struct PostRecordDetailsView: View {
                         let clamped = max(0, min(count - 1, idx))
 
                         hoverDotIndex = clamped
-                        selectedDotIndex = clamped
-
-                        // Convert to zone (0..3) for persistence
-                        let newZone = zoneForDot(clamped)
-                        if selectedStateIndex != newZone {
-                            selectedStateIndex = newZone
-                        }
+                        selectedDotIndex = clamped  // single source of truth
 
                         // Per-dot haptic (not just per-zone)
                         if lastHapticDot != clamped {
@@ -496,7 +481,6 @@ struct PostRecordDetailsView: View {
 
                 HStack(spacing: spacing) {
                     ForEach(0..<count, id: \.self) { i in
-                        let zone = zoneForDot(i)
                         let isRinged = (i == selectedDotIndex)
 
                         // Proximity bloom (drag hover)
@@ -526,18 +510,20 @@ struct PostRecordDetailsView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedDotIndex = (selectedDotIndex == i) ? nil : i
-                                selectedStateIndex = selectedDotIndex.map(zoneForDot)
                                 #if canImport(UIKit)
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 #endif
                             }
                             .accessibilityLabel({
-                                switch zone {
-                                case 0: return isRinged ? "Searching, selected" : "Searching"
-                                case 1: return isRinged ? "Working, selected"   : "Working"
-                                case 2: return isRinged ? "Flowing, selected"   : "Flowing"
-                                default: return isRinged ? "Breakthrough, selected" : "Breakthrough"
+                                // Bucket labels for clarity
+                                let bucket: String
+                                switch i / 3 {
+                                case 0: bucket = "Searching"
+                                case 1: bucket = "Working"
+                                case 2: bucket = "Flowing"
+                                default: bucket = "Breakthrough"
                                 }
+                                return isRinged ? "\(bucket), selected" : bucket
                             }())
                     }
                 }
@@ -739,31 +725,53 @@ struct PostRecordDetailsView: View {
         }
     }
 
-    private func preselectStateIndexFromNotesIfNeeded() {
-        guard selectedStateIndex == nil, !notes.isEmpty else { return }
+    private func preselectFocusFromNotesIfNeeded() {
+        guard selectedDotIndex == nil, !notes.isEmpty else { return }
+
+        if let r = notes.range(of: "FocusDotIndex:") {
+            let tail = notes[r.upperBound...]
+            let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            if let n = Int(line.trimmingCharacters(in: .whitespacesAndNewlines)), (0...11).contains(n) {
+                selectedDotIndex = n
+                stripFocusTokensFromNotes()
+                return
+            }
+        }
+
+        // Back-compat from legacy StateIndex: 0–3 → center dots
         if let r = notes.range(of: "StateIndex:") {
             let tail = notes[r.upperBound...]
-            // read up to line end
-            let firstLine = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
-            let trimmed = String(firstLine).trimmingCharacters(in: .whitespacesAndNewlines)
-            // Expect formats like " 2" or "2"
-            if let n = Int(trimmed) { selectedStateIndex = (0...3).contains(n) ? n : nil }
+            let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            if let n = Int(line.trimmingCharacters(in: .whitespacesAndNewlines)), (0...3).contains(n) {
+                let centers = [1, 4, 7, 10]
+                selectedDotIndex = centers[n]
+                stripFocusTokensFromNotes()
+            }
         }
     }
 
-    private func applyStateIndexToNotesBeforeSave() {
-        guard let idx = selectedStateIndex else { return }
-        let token = "StateIndex:"
-        let newLine = "\(token) \(idx)"
-        if let r = notes.range(of: token) {
-            // replace existing line up to newline (or end)
-            let tail = notes[r.upperBound...]
-            let end = tail.firstIndex(of: "\n") ?? notes.endIndex
-            notes.replaceSubrange(r.lowerBound..<end, with: newLine)
-        } else {
-            if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
-            notes.append(newLine)
+    private func stripFocusTokensFromNotes() {
+        let tokens = ["FocusDotIndex:", "StateIndex:"]
+        for t in tokens {
+            while let r = notes.range(of: t) {
+                let tail = notes[r.upperBound...]
+                let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+                notes.removeSubrange(r.lowerBound..<end)
+                // Remove a trailing newline if we left an empty line
+                if notes.hasSuffix("\n\n") { notes.removeLast() }
+            }
         }
+    }
+
+    private func applyFocusToNotesBeforeSave() {
+        guard let dot = selectedDotIndex else {
+            stripFocusTokensFromNotes()
+            return
+        }
+
+        stripFocusTokensFromNotes()
+        if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
+        notes.append("FocusDotIndex: \(dot)")
     }
 
     @MainActor
@@ -783,7 +791,7 @@ struct PostRecordDetailsView: View {
         s.mood = Int16(mood)
         s.effort = Int16(effort)
 
-        applyStateIndexToNotesBeforeSave()
+        applyFocusToNotesBeforeSave()
         s.notes = notes
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")

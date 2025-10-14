@@ -84,7 +84,6 @@ struct AddEditSessionView: View {
     // v7.9E — State circles (12-dot gradient, dark → light, drag select)
     private let stateDotsCount_edit: Int = 12
 
-    @State private var selectedStateIndex_edit: Int? = nil   // 0..3 or nil
     @State private var selectedDotIndex_edit: Int? = nil
     @State private var hoverDotIndex_edit: Int? = nil        // transient during drag
     @State private var dragX_edit: CGFloat? = nil            // live finger x
@@ -99,8 +98,6 @@ struct AddEditSessionView: View {
         let t = Double(i) / Double(stateDotsCount_edit - 1)
         return start + (end - start) * t
     }
-
-    private func zoneForDot_edit(_ i: Int) -> Int { max(0, min(3, i / 3)) }
 
     /// Visual “center” dot per zone — ring this for consistency.
     private func centerDot_edit(for zone: Int) -> Int {
@@ -137,52 +134,56 @@ struct AddEditSessionView: View {
     }
     // ---- end privacy helpers ----
 
-    /// Remove the `StateIndex:` line from `notes` for clean UI display.
-    private func stripStateIndexTokenFromNotes_edit() {
-        let token = "StateIndex:"
-        guard let r = notes.range(of: token) else { return }
-        let tail = notes[r.upperBound...]
-        let end = tail.firstIndex(of: "\n") ?? notes.endIndex
-        notes.removeSubrange(r.lowerBound..<end)
-
-        // Tidy whitespace/newlines after removal
-        while notes.contains("\n\n") {
-            notes = notes.replacingOccurrences(of: "\n\n", with: "\n")
+    /// Remove the `FocusDotIndex:` and `StateIndex:` lines from `notes` for clean UI display.
+    private func stripFocusTokensFromNotes_edit() {
+        let tokens = ["FocusDotIndex:", "StateIndex:"]
+        for t in tokens {
+            while let r = notes.range(of: t) {
+                let tail = notes[r.upperBound...]
+                let end = tail.firstIndex(of: "\n") ?? notes.endIndex
+                notes.removeSubrange(r.lowerBound..<end)
+                if notes.hasSuffix("\n\n") { notes.removeLast() }
+            }
         }
         notes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Preselect from notes if a StateIndex exists
-    private func preselectStateIndexFromNotesIfNeeded_edit() {
-        // Replace `notes` with your local notes string if named differently
-        guard selectedStateIndex_edit == nil, !notes.isEmpty else { return }
-        let token = "StateIndex:"
-        if let r = notes.range(of: token) {
+    /// Preselect from notes if a FocusDotIndex or legacy StateIndex exists
+    private func preselectFocusFromNotesIfNeeded_edit() {
+        guard selectedDotIndex_edit == nil, !notes.isEmpty else { return }
+
+        if let r = notes.range(of: "FocusDotIndex:") {
             let tail = notes[r.upperBound...]
             let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
-            let trimmed = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
-            if let n = Int(trimmed), (0...3).contains(n) {
-                selectedStateIndex_edit = n
-                // NEW: hide the token from the Notes text area
-                stripStateIndexTokenFromNotes_edit()
+            if let n = Int(line.trimmingCharacters(in: .whitespacesAndNewlines)), (0...11).contains(n) {
+                selectedDotIndex_edit = n
+                stripFocusTokensFromNotes_edit()
+                return
+            }
+        }
+
+        // Back-compat from legacy StateIndex: 0–3 → center dots
+        if let r = notes.range(of: "StateIndex:") {
+            let tail = notes[r.upperBound...]
+            let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
+            if let n = Int(line.trimmingCharacters(in: .whitespacesAndNewlines)), (0...3).contains(n) {
+                let centers = [1, 4, 7, 10]
+                selectedDotIndex_edit = centers[n]
+                stripFocusTokensFromNotes_edit()
             }
         }
     }
 
-    /// Apply/replace the StateIndex line before saving
-    private func applyStateIndexToNotesBeforeSave_edit() {
-        guard let idx = selectedStateIndex_edit else { return }
-        let token = "StateIndex:"
-        let newLine = "\(token) \(idx)"
-        if let r = notes.range(of: token) {
-            // Replace existing line up to newline (or end)
-            let tail = notes[r.upperBound...]
-            let end = tail.firstIndex(of: "\n") ?? notes.endIndex
-            notes.replaceSubrange(r.lowerBound..<end, with: newLine)
-        } else {
-            if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
-            notes.append(newLine)
+    /// Apply/replace the FocusDotIndex line before saving
+    private func applyFocusToNotesBeforeSave_edit() {
+        guard let dot = selectedDotIndex_edit else {
+            stripFocusTokensFromNotes_edit()
+            return
         }
+
+        stripFocusTokensFromNotes_edit()
+        if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
+        notes.append("FocusDotIndex: \(dot)")
     }
 
     init(session: Session? = nil) {
@@ -505,11 +506,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
         .task { hydrate() } // unified first-appearance init
         .onAppear {
-            preselectStateIndexFromNotesIfNeeded_edit()
+            preselectFocusFromNotesIfNeeded_edit()
             syncActivityChoiceFromState()
             loadPrivacyMap()
             // Ensure token is hidden in Notes whenever view appears
-            stripStateIndexTokenFromNotes_edit()
+            stripFocusTokensFromNotes_edit()
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             loadPrivacyMap()
@@ -668,13 +669,9 @@ private var instrumentPicker: some View {
                         let clamped = max(0, min(count - 1, idx))
 
                         hoverDotIndex_edit = clamped
-                        selectedDotIndex_edit = clamped
+                        selectedDotIndex_edit = clamped  // single source of truth
 
-                        // Persist zone (0..3) derived from selected dot
-                        let newZone = zoneForDot_edit(clamped)
-                        if selectedStateIndex_edit != newZone {
-                            selectedStateIndex_edit = newZone
-                        }
+                        // Per-dot haptic
                         if lastHapticDot_edit != clamped {
                             lastHapticDot_edit = clamped
                             #if canImport(UIKit)
@@ -689,7 +686,6 @@ private var instrumentPicker: some View {
 
                 HStack(spacing: spacing) {
                     ForEach(0..<count, id: \.self) { i in
-                        let zone = zoneForDot_edit(i)
                         let isRinged = (i == selectedDotIndex_edit)
 
                         // Proximity bloom under finger
@@ -717,18 +713,19 @@ private var instrumentPicker: some View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 selectedDotIndex_edit = (selectedDotIndex_edit == i) ? nil : i
-                                selectedStateIndex_edit = selectedDotIndex_edit.map(zoneForDot_edit)
                                 #if canImport(UIKit)
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 #endif
                             }
                             .accessibilityLabel({
-                                switch zone {
-                                case 0: return isRinged ? "Searching, selected" : "Searching"
-                                case 1: return isRinged ? "Working, selected"   : "Working"
-                                case 2: return isRinged ? "Flowing, selected"   : "Flowing"
-                                default: return isRinged ? "Breakthrough, selected" : "Breakthrough"
+                                let bucket: String
+                                switch i / 3 {
+                                case 0: bucket = "Searching"
+                                case 1: bucket = "Working"
+                                case 2: bucket = "Flowing"
+                                default: bucket = "Breakthrough"
                                 }
+                                return isRinged ? "\(bucket), selected" : bucket
                             }())
                     }
                 }
@@ -753,10 +750,10 @@ private var instrumentPicker: some View {
             durationSeconds = Int(s.durationSeconds)
             isPublic = s.isPublic
             notes = s.notes ?? ""
-            // Preselect state index from notes before stripping token so the dots reflect persisted state
-            preselectStateIndexFromNotesIfNeeded_edit()
+            // Preselect focus from notes before stripping token so the dots reflect persisted state
+            preselectFocusFromNotesIfNeeded_edit()
             // Ensure the token is not visible in the Notes UI on edit hydrate
-            stripStateIndexTokenFromNotes_edit()
+            stripFocusTokensFromNotes_edit()
 
             let raw = Int16(s.value(forKey: "activityType") as? Int ?? 0)
             activity = SessionActivityType(rawValue: raw) ?? .practice
@@ -856,11 +853,11 @@ private var instrumentPicker: some View {
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
 
-        if let _ = selectedStateIndex_edit {
-            applyStateIndexToNotesBeforeSave_edit()
+        if selectedDotIndex_edit != nil {
+            applyFocusToNotesBeforeSave_edit()
         } else {
-            // No state selected — ensure token is not persisted
-            stripStateIndexTokenFromNotes_edit()
+            // No focus selected — ensure tokens are not persisted
+            stripFocusTokensFromNotes_edit()
         }
         s.notes = notes
 
@@ -1295,4 +1292,5 @@ private var instrumentPicker: some View {
     }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
