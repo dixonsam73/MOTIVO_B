@@ -119,6 +119,17 @@ struct PracticeTimerView: View {
             .map { ($0.done ? "✓" : "•") + " " + $0.text }
             .joined(separator: "\n")
     }
+    // Returns a bulleted string of ONLY completed task lines, or nil if none.
+    // Uses the same boolean flag that drives the checkbox in the task pad.
+    private func composeCompletedTasksNotesString() -> String? {
+        let trimmedCompleted = taskLines
+            .filter { $0.isDone }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !trimmedCompleted.isEmpty else { return nil }
+        return trimmedCompleted.map { "• \($0)" }.joined(separator: "\n")
+    }
     private func addEmptyTaskLine() {
         taskLines.append(TaskLine(text: ""))
     }
@@ -330,7 +341,7 @@ struct PracticeTimerView: View {
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-                    notesPrefill: composeNotesString(),
+                    notesPrefill: composeCompletedTasksNotesString(),
                     onSaved: {
                         clearPersistedTimer()
                         resetUIOnly()
@@ -765,6 +776,7 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
