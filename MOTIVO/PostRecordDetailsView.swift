@@ -68,6 +68,7 @@ struct PostRecordDetailsView: View {
     private let stateDotsCount: Int = 12
 
     @State private var selectedStateIndex: Int? = nil   // 0..3 or nil
+    @State private var selectedDotIndex: Int? = nil
     @State private var hoverDotIndex: Int? = nil        // transient dot under finger during drag
     @State private var lastHapticZone: Int? = nil       // throttle haptic to zone changes
 
@@ -77,9 +78,9 @@ struct PostRecordDetailsView: View {
 
     /// DARK ➜ LIGHT across the row. On dark themes this reads as “clearer toward the right”.
     private func opacityForDot(_ i: Int) -> Double {
-        // 0 = darkest (low opacity), 11 = lightest (high opacity)
-        let start: Double = 0.25   // darker
-        let end:   Double = 0.95   // lighter/clearer
+        // 0 = darkest (high opacity), 11 = lightest (low opacity)
+        let start: Double = 0.95   // darker (more opaque) on the left
+        let end:   Double = 0.15   // lighter (less opaque) on the right (slightly lighter than before)
         guard stateDotsCount > 1 else { return start }
         let t = Double(i) / Double(stateDotsCount - 1)
         return start + (end - start) * t
@@ -447,7 +448,7 @@ struct PostRecordDetailsView: View {
     @ViewBuilder
     private var stateStripCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("State").sectionHeader()
+            Text("Focus").sectionHeader()
             // Half-height horizontal strip of twelve neutral-grey circles with gradient fade
             GeometryReader { geo in
                 let totalWidth = geo.size.width
@@ -460,16 +461,21 @@ struct PostRecordDetailsView: View {
 
                 let drag = DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        let x = max(0, min(value.location.x, totalWidth))
+                        // Clamp within the actual occupied width of the dot strip so extremes are reachable
+                        let totalWidthUsed = diameter * CGFloat(count) + spacing * CGFloat(count - 1)
+                        let x = max(0, min(value.location.x, totalWidthUsed))
+
                         dragX = x
 
-                        // Map x to nearest dot center (snappier than round on step edges)
-                        let idx = Int((x + step * 0.5) / step)
+                        // Map x to nearest dot center across [0, totalWidthUsed]
+                        let projected = (x / max(1, totalWidthUsed)) * CGFloat(count - 1)
+                        let idx = Int(round(projected))
                         let clamped = max(0, min(count - 1, idx))
 
                         hoverDotIndex = clamped
+                        selectedDotIndex = clamped
 
-                        // Convert to zone (0..3) for selection storage
+                        // Convert to zone (0..3) for persistence
                         let newZone = zoneForDot(clamped)
                         if selectedStateIndex != newZone {
                             selectedStateIndex = newZone
@@ -491,8 +497,7 @@ struct PostRecordDetailsView: View {
                 HStack(spacing: spacing) {
                     ForEach(0..<count, id: \.self) { i in
                         let zone = zoneForDot(i)
-                        let ringDot = selectedStateIndex.map(centerDot) ?? -1
-                        let isRinged = (i == ringDot)
+                        let isRinged = (i == selectedDotIndex)
 
                         // Proximity bloom (drag hover)
                         let hoverScale: CGFloat = {
@@ -520,8 +525,8 @@ struct PostRecordDetailsView: View {
                             .animation(.easeOut(duration: 0.06), value: finalScale)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                let newZone = zone
-                                selectedStateIndex = (selectedStateIndex == newZone) ? nil : newZone
+                                selectedDotIndex = (selectedDotIndex == i) ? nil : i
+                                selectedStateIndex = selectedDotIndex.map(zoneForDot)
                                 #if canImport(UIKit)
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 #endif

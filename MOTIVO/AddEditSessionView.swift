@@ -85,14 +85,16 @@ struct AddEditSessionView: View {
     private let stateDotsCount_edit: Int = 12
 
     @State private var selectedStateIndex_edit: Int? = nil   // 0..3 or nil
+    @State private var selectedDotIndex_edit: Int? = nil
     @State private var hoverDotIndex_edit: Int? = nil        // transient during drag
     @State private var dragX_edit: CGFloat? = nil            // live finger x
     @State private var lastHapticDot_edit: Int? = nil        // per-dot haptic throttle
 
     /// DARK → LIGHT across the row (left→right). Use textPrimary so it reads in dark mode.
     private func opacityForDot_edit(_ i: Int) -> Double {
-        let start: Double = 0.25   // darker on the left
-        let end:   Double = 0.95   // lighter/clearer on the right
+        // 0 = darkest (high opacity), 11 = lightest (low opacity)
+        let start: Double = 0.95   // darker (more opaque) on the left
+        let end:   Double = 0.15   // lighter (less opaque) on the right
         guard stateDotsCount_edit > 1 else { return start }
         let t = Double(i) / Double(stateDotsCount_edit - 1)
         return start + (end - start) * t
@@ -642,7 +644,7 @@ private var instrumentPicker: some View {
     @ViewBuilder
     private var stateStripCard_edit: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("State").sectionHeader()
+            Text("Focus").sectionHeader()
 
             GeometryReader { geo in
                 let totalWidth = geo.size.width
@@ -654,12 +656,21 @@ private var instrumentPicker: some View {
                 // Drag gesture: per-dot haptic + snap to zone; faster mapping
                 let drag = DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        let x = max(0, min(value.location.x, totalWidth))
-                        dragX_edit = x
-                        let idx = Int((x + step * 0.5) / step)
-                        let clamped = max(0, min(count - 1, idx))
-                        hoverDotIndex_edit = clamped
+                        // Clamp within the actual occupied width of the dot strip so extremes are reachable
+                        let totalWidthUsed = diameter * CGFloat(count) + spacing * CGFloat(count - 1)
+                        let x = max(0, min(value.location.x, totalWidthUsed))
 
+                        dragX_edit = x
+
+                        // Map x to nearest dot center across [0, totalWidthUsed]
+                        let projected = (x / max(1, totalWidthUsed)) * CGFloat(count - 1)
+                        let idx = Int(round(projected))
+                        let clamped = max(0, min(count - 1, idx))
+
+                        hoverDotIndex_edit = clamped
+                        selectedDotIndex_edit = clamped
+
+                        // Persist zone (0..3) derived from selected dot
                         let newZone = zoneForDot_edit(clamped)
                         if selectedStateIndex_edit != newZone {
                             selectedStateIndex_edit = newZone
@@ -679,8 +690,7 @@ private var instrumentPicker: some View {
                 HStack(spacing: spacing) {
                     ForEach(0..<count, id: \.self) { i in
                         let zone = zoneForDot_edit(i)
-                        let ringDot = selectedStateIndex_edit.map(centerDot_edit) ?? -1
-                        let isRinged = (i == ringDot)
+                        let isRinged = (i == selectedDotIndex_edit)
 
                         // Proximity bloom under finger
                         let hoverScale: CGFloat = {
@@ -706,8 +716,8 @@ private var instrumentPicker: some View {
                             .animation(.easeOut(duration: 0.06), value: finalScale)
                             .contentShape(Rectangle())
                             .onTapGesture {
-                                let newZone = zone
-                                selectedStateIndex_edit = (selectedStateIndex_edit == newZone) ? nil : newZone
+                                selectedDotIndex_edit = (selectedDotIndex_edit == i) ? nil : i
+                                selectedStateIndex_edit = selectedDotIndex_edit.map(zoneForDot_edit)
                                 #if canImport(UIKit)
                                 UISelectionFeedbackGenerator().selectionChanged()
                                 #endif
@@ -1284,24 +1294,5 @@ private var instrumentPicker: some View {
             .appendingPathExtension(ext)
     }
 }
-
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 

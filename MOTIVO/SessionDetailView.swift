@@ -137,7 +137,7 @@ struct SessionDetailView: View {
             // Read-only State card (only if StateIndex exists)
             if let idx = stateIndex {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("State").sectionHeader()
+                    Text("Focus").sectionHeader()
 
                     GeometryReader { geo in
                         let totalWidth = geo.size.width
@@ -384,15 +384,21 @@ private let stateDotsCountDetail: Int = 12
 
 /// DARK → LIGHT across the row (left→right).
 private func detailOpacityForDot(_ i: Int) -> Double {
-    let start: Double = 0.25   // darker on the left
-    let end:   Double = 0.95   // lighter/clearer on the right
+    // 0 = darkest (high opacity), 11 = lightest (low opacity)
+    let start: Double = 0.95   // darker (more opaque) on the left
+    let end:   Double = 0.15   // lighter (less opaque) on the right
     guard stateDotsCountDetail > 1 else { return start }
     let t = Double(i) / Double(stateDotsCountDetail - 1)
     return start + (end - start) * t
 }
 
 private func detailZoneCenterDot(for zone: Int) -> Int {
-    switch zone { case 0: return 1; case 1: return 4; case 2: return 7; default: return 10 }
+    switch zone {
+    case 0: return 0      // leftmost dot for zone 0 (matches editor extreme behavior)
+    case 1: return 4
+    case 2: return 7
+    default: return 11    // rightmost dot for zone 3
+    }
 }
 
 /// Extracts StateIndex (0…3) and returns (index?, cleanedNotesWithoutToken)
@@ -597,4 +603,5 @@ fileprivate struct ThumbCell: View {
         }
     }
 }
+
 
