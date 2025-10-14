@@ -219,6 +219,9 @@ fileprivate struct SessionsRootView: View {
             .task {
                 setUpDebounce()
             }
+            .onChange(of: userID) { _, _ in
+                refreshStats()
+            }
             .task(id: searchText) {
                 debounceCancellable?.cancel()
                 debounceCancellable = Just(searchText)
@@ -230,6 +233,11 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func refreshStats() {
+        // De-populate when signed out to mirror other data fields
+        guard userID != nil else {
+            stats = .init(count: 0, seconds: 0)
+            return
+        }
         do {
             stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange)
         } catch {
