@@ -362,7 +362,10 @@ struct PostRecordDetailsView: View {
             .navigationTitle("Session Review")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { isPresented = false }
+                    Button("Cancel") { 
+                        isPresented = false
+                        dismissToRoot()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
@@ -934,6 +937,15 @@ struct PostRecordDetailsView: View {
             }
         default: self.showCameraDeniedAlert = true
         }
+    }
+
+    private func dismissToRoot() {
+        #if canImport(UIKit)
+        let scenes = UIApplication.shared.connectedScenes
+        let windowScene = scenes.first { $0.activationState == .foregroundActive } as? UIWindowScene
+        let keyWindow = windowScene?.windows.first { $0.isKeyWindow }
+        keyWindow?.rootViewController?.dismiss(animated: true)
+        #endif
     }
 }
 
