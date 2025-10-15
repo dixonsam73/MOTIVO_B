@@ -65,6 +65,7 @@ struct PracticeTimerView: View {
 
     // Review sheet
     @State private var showReviewSheet = false
+    @State private var didSaveFromReview: Bool = false
 
     // Info-only recording helpers
     @State private var showAudioHelp = false
@@ -343,11 +344,19 @@ struct PracticeTimerView: View {
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     notesPrefill: composeCompletedTasksNotesString(),
                     onSaved: {
+                        didSaveFromReview = true
                         clearPersistedTimer()
                         resetUIOnly()
                         isPresented = false
                     }
                 )
+            }
+            .onChange(of: showReviewSheet) { oldValue, newValue in
+                // If the review sheet was closed and no save occurred, reset timer for next opening
+                if oldValue == true && newValue == false && didSaveFromReview == false {
+                    clearPersistedTimer()
+                    resetUIOnly()
+                }
             }
             // Info sheets for recording help
             .sheet(isPresented: $showAudioHelp) {
@@ -642,6 +651,7 @@ struct PracticeTimerView: View {
         let total = trueElapsedSeconds()
         finalizedDuration = total
         pause()
+        didSaveFromReview = false
         showReviewSheet = true
     }
 
@@ -776,6 +786,7 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
