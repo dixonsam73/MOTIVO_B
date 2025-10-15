@@ -124,8 +124,20 @@ fileprivate struct SessionsRootView: View {
 
                 // ---------- Stats (card) ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Your Sessions").sectionHeader()
-
+                    // CHANGE-ID: 20251015_132452-me-entry-icononly
+                    // SCOPE: Add inline icon-only Me dashboard entry in Your Sessions header
+                    HStack {
+                        Text("Your Sessions").sectionHeader()
+                        Spacer()
+                        NavigationLink {
+                            MeView()
+                        } label: {
+                            Image(systemName: "chart.bar")
+                                .imageScale(.large)
+                                .accessibilityLabel("Open Dashboard")
+                        }
+                        .buttonStyle(.plain)
+                    }
                     Picker("", selection: $statsRange) {
                         ForEach(StatsRange.allCases) { r in
                             Text(r.label).tag(r)
