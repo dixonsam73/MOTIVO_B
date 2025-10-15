@@ -12,6 +12,8 @@ struct MeView: View {
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
+    @State private var topInstrument: (name: String, count: Int)? = nil
+    @State private var topActivity: (name: String, count: Int)? = nil
 
     var body: some View {
         ScrollView {
@@ -22,6 +24,8 @@ struct MeView: View {
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     FocusCard(average: avgFocus)
+                    TopWinnerCard(title: "Top instrument", winner: topInstrument)
+                    TopWinnerCard(title: "Top activity", winner: topActivity)
                 }
             }
             .padding()
@@ -49,6 +53,10 @@ struct MeView: View {
         allSessions = fetchSessions(limit: nil, start: nil, end: nil)
         let (start, end) = StatsHelper.dateBounds(for: range)
         avgFocus = averageFocus(start: start, end: end)
+        let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
+        // Compute top winners within the current range
+        topInstrument = bestInstrument(from: sessionsInRange)
+        topActivity   = bestActivity(from: sessionsInRange)
     }
 
     private func fetchSessions(limit: Int?, start: Date?, end: Date?) -> [Session] {
@@ -125,6 +133,77 @@ struct MeView: View {
     }
 
     private func clamp011(_ v: Double) -> Double { max(0.0, min(11.0, v)) }
+
+    // MARK: - Top winners (instrument / activity)
+    private func bestInstrument(from sessions: [Session]) -> (name: String, count: Int)? {
+        var counts: [String: Int] = [:]
+        var latest: [String: Date] = [:]
+        for s in sessions {
+            guard let label = instrumentLabel(for: s) else { continue }
+            counts[label, default: 0] += 1
+            let d = (s.entity.attributesByName["timestamp"] != nil ? (s.value(forKey: "timestamp") as? Date) : nil) ?? .distantPast
+            latest[label] = max(latest[label] ?? .distantPast, d)
+        }
+        return pickWinner(from: counts, latest: latest)
+    }
+
+    private func bestActivity(from sessions: [Session]) -> (name: String, count: Int)? {
+        var counts: [String: Int] = [:]
+        var latest: [String: Date] = [:]
+        for s in sessions {
+            let raw = SessionActivity.name(for: s as NSManagedObject)
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !label.isEmpty else { continue }
+            counts[label, default: 0] += 1
+            let d = (s.entity.attributesByName["timestamp"] != nil ? (s.value(forKey: "timestamp") as? Date) : nil) ?? .distantPast
+            latest[label] = max(latest[label] ?? .distantPast, d)
+        }
+        return pickWinner(from: counts, latest: latest)
+    }
+
+    private func pickWinner(from counts: [String: Int], latest: [String: Date]) -> (name: String, count: Int)? {
+        guard !counts.isEmpty else { return nil }
+        let sorted = counts.sorted { (lhs, rhs) in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            if let dl = latest[lhs.key], let dr = latest[rhs.key], dl != dr { return dl > dr }
+            return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
+        }
+        if let top = sorted.first { return (top.key, top.value) }
+        return nil
+    }
+
+    // MARK: Instrument label (safe)
+    private func instrumentLabel(for s: Session) -> String? {
+        let rels = s.entity.relationshipsByName
+        if rels["instrument"] != nil, let obj = s.value(forKey: "instrument") as? NSManagedObject {
+            if let name = stringAttribute(from: obj, keys: ["name","title","label"]) { return name }
+        }
+        if let name = stringAttribute(from: s, keys: ["instrumentName","instrument","instrument_title","instrumentLabel"]) { return name }
+        return stringAttribute(containing: "instrument", from: s)
+    }
+
+    private func stringAttribute(from obj: AnyObject, keys: [String]) -> String? {
+        guard let mo = obj as? NSManagedObject else { return nil }
+        let attrs = mo.entity.attributesByName
+        for k in keys {
+            if attrs[k] != nil, let s = mo.value(forKey: k) as? String {
+                let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
+        }
+        return nil
+    }
+
+    private func stringAttribute(containing needle: String, from obj: AnyObject) -> String? {
+        guard let mo = obj as? NSManagedObject else { return nil }
+        let attrs = mo.entity.attributesByName
+        if let k = attrs.keys.first(where: { $0.lowercased().contains(needle.lowercased()) }),
+           let s = mo.value(forKey: k) as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return nil
+    }
 
     private func label(for r: StatsRange) -> String {
         switch r {
@@ -258,6 +337,31 @@ fileprivate struct FocusDots: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(height: 44)
+    }
+}
+
+fileprivate struct TopWinnerCard: View {
+    let title: String
+    let winner: (name: String, count: Int)?
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline)
+                if let w = winner {
+                    HStack {
+                        Text(w.name).font(.title3).bold().lineLimit(1).truncationMode(.tail)
+                        Spacer()
+                        Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("No data in this period.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(winner != nil ? "\(title): \(winner!.name), \(winner!.count) sessions" : "\(title): no data")
     }
 }
 
