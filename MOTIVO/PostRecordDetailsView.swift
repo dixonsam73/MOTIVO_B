@@ -499,9 +499,9 @@ struct PostRecordDetailsView: View {
                         let finalScale = selectedBaseScale * hoverScale
 
                         Circle()
-                            .fill(Color.primary.opacity(opacityForDot(i)))
+                            .fill(Color.black.opacity(opacityForDot(i)))
                             .overlay(
-                                Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                Circle().stroke(isRinged ? Color.black.opacity(0.95) : Color.clear,
                                                 lineWidth: isRinged ? 1.5 : 1)
                             )
                             .frame(width: diameter, height: diameter)

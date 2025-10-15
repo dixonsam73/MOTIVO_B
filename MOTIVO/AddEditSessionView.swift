@@ -702,9 +702,9 @@ private var instrumentPicker: some View {
                         let finalScale = selectedBase * hoverScale
 
                         Circle()
-                            .fill(Color.primary.opacity(opacityForDot_edit(i))) // dark→light
+                            .fill(Color.black.opacity(opacityForDot_edit(i))) // dark→light (fixed base)
                             .overlay(
-                                Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                Circle().stroke(isRinged ? Color.black.opacity(0.95) : Color.clear,
                                                 lineWidth: isRinged ? 1.5 : 1)
                             )
                             .frame(width: diameter, height: diameter)
@@ -1292,5 +1292,6 @@ private var instrumentPicker: some View {
     }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 

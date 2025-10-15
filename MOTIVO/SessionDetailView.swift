@@ -153,9 +153,9 @@ struct SessionDetailView: View {
                                 let isRinged = (i == ringDot)
                                 let baseScale: CGFloat = isRinged ? 1.18 : 1.0
                                 Circle()
-                                    .fill(Color.primary.opacity(detailOpacityForDot(i))) // dark→light
+                                    .fill(Color.black.opacity(detailOpacityForDot(i))) // dark→light (fixed base)
                                     .overlay(
-                                        Circle().stroke(isRinged ? Color.primary.opacity(0.95) : Color.clear,
+                                        Circle().stroke(isRinged ? Color.black.opacity(0.95) : Color.clear,
                                                         lineWidth: isRinged ? 1.5 : 1)
                                     )
                                     .frame(width: diameter, height: diameter)
