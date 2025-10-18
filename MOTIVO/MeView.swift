@@ -5,6 +5,31 @@
 import SwiftUI
 import CoreData
 
+private struct ActivitySlice { let name: String; let seconds: Int }
+
+private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
+    var totals: [String: Int] = [:]
+    for s in sessions {
+        let label = SessionActivity.name(for: s as NSManagedObject).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !label.isEmpty else { continue }
+        let secs = (s.value(forKey: "durationSeconds") as? Int) ?? 0
+        guard secs > 0 else { continue }
+        totals[label, default: 0] += secs
+    }
+    guard !totals.isEmpty else { return [] }
+    let sorted = totals.sorted { $0.value > $1.value }
+    let head = Array(sorted.prefix(4))
+    let tail = sorted.dropFirst(4)
+    let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
+    let otherTotal = tail.reduce(0) { $0 + $1.value }
+    return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
+}
+
+private func percent(_ part: Int, of total: Int) -> Int {
+    guard total > 0 else { return 0 }
+    return Int(round((Double(part) / Double(total)) * 100.0))
+}
+
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
 
@@ -14,6 +39,7 @@ struct MeView: View {
     @State private var avgFocus: Double? = nil
     @State private var topInstrument: (name: String, count: Int)? = nil
     @State private var topActivity: (name: String, count: Int)? = nil
+    @State private var timeDistributionSlices: [ActivitySlice] = []
 
     var body: some View {
         ScrollView {
@@ -24,6 +50,7 @@ struct MeView: View {
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     FocusCard(average: avgFocus)
+                    TimeDistributionCard(slices: timeDistributionSlices)
                     TopWinnerCard(title: "Top instrument", winner: topInstrument)
                     TopWinnerCard(title: "Top activity", winner: topActivity)
                 }
@@ -54,6 +81,8 @@ struct MeView: View {
         let (start, end) = StatsHelper.dateBounds(for: range)
         avgFocus = averageFocus(start: start, end: end)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
+        let timeDistributionSlices = timeDistribution(from: sessionsInRange)
+        self.timeDistributionSlices = timeDistributionSlices
         // Compute top winners within the current range
         topInstrument = bestInstrument(from: sessionsInRange)
         topActivity   = bestActivity(from: sessionsInRange)
@@ -384,6 +413,63 @@ fileprivate struct Card<Content: View>: View {
             .padding(16)
             .background(.thinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+fileprivate struct TimeDistributionCard: View {
+    let slices: [ActivitySlice]
+
+    var body: some View {
+        Card {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Time distribution").font(.headline)
+                if slices.isEmpty {
+                    Text("No time logged this period.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    GeometryReader { geo in
+                        let total = slices.reduce(0) { $0 + $1.seconds }
+                        HStack(spacing: 0) {
+                            ForEach(0..<slices.count, id: \.self) { i in
+                                let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
+                                Rectangle()
+                                    .frame(width: max(0, w), height: 12)
+                                    .opacity(0.6)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    }
+                    .frame(height: 12)
+
+                    let total = slices.reduce(0) { $0 + $1.seconds }
+                    VStack(alignment: .leading, spacing: 4) {
+                        ForEach(0..<slices.count, id: \.self) { i in
+                            HStack {
+                                Circle().frame(width: 8, height: 8).opacity(0.6)
+                                Text("\(slices[i].name)")
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer()
+                                Text("\(percent(slices[i].seconds, of: total))%")
+                                    .foregroundStyle(.secondary)
+                                    .font(.subheadline)
+                            }
+                            .font(.subheadline)
+                        }
+                    }
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        guard !slices.isEmpty else { return "Time distribution by activity: no data this period" }
+        let total = slices.reduce(0) { $0 + $1.seconds }
+        let parts = slices.map { "\($0.name) \(percent($0.seconds, of: total)) percent" }
+        return "Time distribution by activity: " + parts.joined(separator: ", ")
     }
 }
 
