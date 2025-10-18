@@ -30,6 +30,8 @@ private func percent(_ part: Int, of total: Int) -> Int {
     return Int(round((Double(part) / Double(total)) * 100.0))
 }
 
+private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count }
+
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
 
@@ -40,6 +42,7 @@ struct MeView: View {
     @State private var topInstrument: (name: String, count: Int)? = nil
     @State private var topActivity: (name: String, count: Int)? = nil
     @State private var timeDistributionSlices: [ActivitySlice] = []
+    @State private var totalInRange: Int = 0
 
     var body: some View {
         ScrollView {
@@ -51,8 +54,8 @@ struct MeView: View {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     FocusCard(average: avgFocus)
                     TimeDistributionCard(slices: timeDistributionSlices)
-                    TopWinnerCard(title: "Top instrument", winner: topInstrument)
-                    TopWinnerCard(title: "Top activity", winner: topActivity)
+                    TopWinnerCard(title: "Top instrument", winner: topInstrument, totalCount: totalInRange)
+                    TopWinnerCard(title: "Top activity",   winner: topActivity,   totalCount: totalInRange)
                 }
             }
             .padding()
@@ -81,8 +84,8 @@ struct MeView: View {
         let (start, end) = StatsHelper.dateBounds(for: range)
         avgFocus = averageFocus(start: start, end: end)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
-        let timeDistributionSlices = timeDistribution(from: sessionsInRange)
-        self.timeDistributionSlices = timeDistributionSlices
+        self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
+        self.totalInRange = totalSessionsCount(in: sessionsInRange)
         // Compute top winners within the current range
         topInstrument = bestInstrument(from: sessionsInRange)
         topActivity   = bestActivity(from: sessionsInRange)
@@ -384,6 +387,8 @@ fileprivate struct FocusDots: View {
 fileprivate struct TopWinnerCard: View {
     let title: String
     let winner: (name: String, count: Int)?
+    let totalCount: Int
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
@@ -394,6 +399,11 @@ fileprivate struct TopWinnerCard: View {
                         Spacer()
                         Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
                     }
+                    if totalCount > 0 {
+                        Text("\(Int(round((Double(w.count) / Double(totalCount)) * 100)))% of sessions")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                     Text("No data in this period.")
                         .font(.subheadline)
@@ -402,7 +412,20 @@ fileprivate struct TopWinnerCard: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(winner != nil ? "\(title): \(winner!.name), \(winner!.count) sessions" : "\(title): no data")
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if let w = winner {
+            if totalCount > 0 {
+                let pct = Int(round((Double(w.count) / Double(totalCount)) * 100))
+                return "\(title): \(w.name), \(w.count) sessions, \(pct) percent of sessions"
+            } else {
+                return "\(title): \(w.name), \(w.count) sessions"
+            }
+        } else {
+            return "\(title): no data"
+        }
     }
 }
 
