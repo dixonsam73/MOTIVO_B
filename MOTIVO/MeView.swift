@@ -5,6 +5,14 @@
 import SwiftUI
 import CoreData
 
+private let kCardMinHeightCompact: CGFloat = 120
+private let kCardMinHeightRegular: CGFloat = 140
+
+@inline(__always)
+private func baselineCardMinHeight(for hSizeClass: UserInterfaceSizeClass?) -> CGFloat {
+    (hSizeClass == .regular) ? kCardMinHeightRegular : kCardMinHeightCompact
+}
+
 private struct ActivitySlice { let name: String; let seconds: Int }
 
 private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
@@ -34,6 +42,7 @@ private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count 
 
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 
     @State private var range: StatsRange = .week
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
@@ -43,6 +52,7 @@ struct MeView: View {
     @State private var topActivity: (name: String, count: Int)? = nil
     @State private var timeDistributionSlices: [ActivitySlice] = []
     @State private var totalInRange: Int = 0
+    @State private var uniqueInstrumentCount: Int = 0
 
     var body: some View {
         ScrollView {
@@ -89,6 +99,14 @@ struct MeView: View {
         // Compute top winners within the current range
         topInstrument = bestInstrument(from: sessionsInRange)
         topActivity   = bestActivity(from: sessionsInRange)
+
+        self.uniqueInstrumentCount = {
+            var set = Set<String>()
+            for s in allSessions {
+                if let label = instrumentLabel(for: s) { set.insert(label) }
+            }
+            return set.count
+        }()
     }
 
     private func fetchSessions(limit: Int?, start: Date?, end: Date?) -> [Session] {
@@ -265,6 +283,8 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
 // MARK: - Cards
 
 fileprivate struct TimeCard: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     let seconds: Int; let count: Int; let range: StatsRange
     var dateRange: String? = nil
     var body: some View {
@@ -278,6 +298,7 @@ fileprivate struct TimeCard: View {
                 Text(StatsHelper.formatDuration(seconds)).font(.system(size: 34, weight: .bold, design: .rounded))
                 Text("\(count) sessions").font(.subheadline).foregroundStyle(.secondary)
             }
+            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -286,6 +307,8 @@ fileprivate struct TimeCard: View {
 }
 
 fileprivate struct StreaksCard: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     let current: Int; let best: Int
     var body: some View {
         Card {
@@ -297,6 +320,7 @@ fileprivate struct StreaksCard: View {
                     VStack(alignment: .leading) { Text("Best").font(.caption).foregroundStyle(.secondary); Text("\(best) days").font(.title3).bold() }
                 }
             }
+            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Streaks: current \(current) days, best \(best) days")
@@ -304,6 +328,8 @@ fileprivate struct StreaksCard: View {
 }
 
 fileprivate struct FocusCard: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     let average: Double?
     var body: some View {
         Card {
@@ -320,6 +346,7 @@ fileprivate struct FocusCard: View {
                     Text("No focus data in this period.").font(.subheadline).foregroundStyle(.secondary)
                 }
             }
+            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .accessibilityLabel(average != nil ? "Focus average" : "No focus data")
@@ -385,6 +412,8 @@ fileprivate struct FocusDots: View {
 }
 
 fileprivate struct TopWinnerCard: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     let title: String
     let winner: (name: String, count: Int)?
     let totalCount: Int
@@ -410,6 +439,7 @@ fileprivate struct TopWinnerCard: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
@@ -440,6 +470,8 @@ fileprivate struct Card<Content: View>: View {
 }
 
 fileprivate struct TimeDistributionCard: View {
+    @Environment(\.horizontalSizeClass) private var hSizeClass
+
     let slices: [ActivitySlice]
 
     var body: some View {
@@ -483,6 +515,7 @@ fileprivate struct TimeDistributionCard: View {
                     }
                 }
             }
+            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
