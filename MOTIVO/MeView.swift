@@ -295,6 +295,8 @@ fileprivate struct FocusCard: View {
 }
 
 fileprivate struct FocusDots: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let value: Double
     let highlightedIndex: Int?
 
@@ -323,11 +325,21 @@ fileprivate struct FocusDots: View {
                     let isRinged = (i == ringDot)
                     let baseScale: CGFloat = isRinged ? 1.18 : 1.0
                     Circle()
-                        .fill(Color.black.opacity(opacityForDot(i))) // dark→light gradient look
+                        .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
+                        // Hairline outline for guaranteed contrast on all dots
                         .overlay(
-                            Circle()
-                                .stroke(isRinged ? Color.black.opacity(0.95) : Color.clear,
-                                        lineWidth: isRinged ? 1.5 : 1)
+                            Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
+                        )
+                        // Adaptive ring for the selected/average index
+                        .overlay(
+                            Group {
+                                if i == ringDot {
+                                    Circle().stroke(
+                                        FocusDotStyle.ringColor(for: colorScheme),
+                                        lineWidth: FocusDotStyle.ringWidth
+                                    )
+                                }
+                            }
                         )
                         .frame(width: diameter, height: diameter)
                         .scaleEffect(baseScale)

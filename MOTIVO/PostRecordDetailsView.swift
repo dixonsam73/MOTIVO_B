@@ -17,6 +17,7 @@ import UIKit
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.colorScheme) private var colorScheme
 
     @Binding var isPresented: Bool
     private let prefillTimestamp: Date
@@ -502,10 +503,22 @@ struct PostRecordDetailsView: View {
                         let finalScale = selectedBaseScale * hoverScale
 
                         Circle()
-                            .fill(Color.black.opacity(opacityForDot(i)))
+                            // Adaptive fill: black in light mode, white in dark mode, using centralized opacity ramp
+                            .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
+                            // Hairline outline on every dot for guaranteed contrast
                             .overlay(
-                                Circle().stroke(isRinged ? Color.black.opacity(0.95) : Color.clear,
-                                                lineWidth: isRinged ? 1.5 : 1)
+                                Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
+                            )
+                            // Adaptive ring for the selected index
+                            .overlay(
+                                Group {
+                                    if isRinged {
+                                        Circle().stroke(
+                                            FocusDotStyle.ringColor(for: colorScheme),
+                                            lineWidth: FocusDotStyle.ringWidth
+                                        )
+                                    }
+                                }
                             )
                             .frame(width: diameter, height: diameter)
                             .scaleEffect(finalScale)
@@ -1056,4 +1069,3 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(24)
     }
 }
-

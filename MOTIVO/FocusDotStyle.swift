@@ -72,6 +72,29 @@ public struct FocusDotStyle {
         return lerp(start, end, t: t)
     }
 
+    /// Returns the adaptive fill color for a dot at a given index.
+    /// In Light Mode, uses black with descending opacity (dark→light left→right).
+    /// In Dark Mode, uses white with ascending opacity (dark→light left→right).
+    /// - Parameters:
+    ///   - index: Zero-based index; 0 is leftmost (darkest).
+    ///   - total: Total number of dots; defaults to `totalDefault`.
+    ///   - colorScheme: The current color scheme (light or dark).
+    /// - Returns: A `Color` with appropriate base (black/white) and adaptive opacity ramp.
+    public static func fillColor(index: Int, total: Int = totalDefault, colorScheme: ColorScheme) -> Color {
+        let opacity = fillOpacity(index: index, total: total, colorScheme: colorScheme)
+        switch colorScheme {
+        case .light:
+            // Black base, higher opacity on the left → darker to lighter left→right
+            return Color.black.opacity(opacity)
+        case .dark:
+            // White base, invert opacity so left is darkest (low white) and right is lightest (high white)
+            let effective = 1 - opacity
+            return Color.white.opacity(effective)
+        @unknown default:
+            return Color.black.opacity(opacity)
+        }
+    }
+
     /// Returns the adaptive color for the selected/average ring.
     /// - Parameter colorScheme: The current color scheme.
     /// - Returns: Black(0.85) in light mode, White(0.85) in dark mode.
@@ -98,3 +121,4 @@ public struct FocusDotStyle {
         return a + (b - a) * tt
     }
 }
+
