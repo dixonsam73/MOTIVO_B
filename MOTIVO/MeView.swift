@@ -60,7 +60,7 @@ struct MeView: View {
             VStack(alignment: .leading, spacing: 16) {
                 rangePickerHeader
                 // Full-width Time card with date range header
-                TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: range, dateRange: dateWindowSubtitle(for: range))
+                TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range))
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     FocusCard(average: avgFocus)
@@ -80,12 +80,7 @@ struct MeView: View {
     }
 
     private var rangePickerHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Range", selection: $range) {
-                ForEach(StatsRange.allCases) { r in Text(label(for: r)).tag(r) }
-            }
-            .pickerStyle(.segmented)
-        }
+        VStack(alignment: .leading, spacing: 8) { }
     }
 
     private var currentStreakDays: Int { Stats.currentStreakDays(sessions: allSessions) }
@@ -297,11 +292,29 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
 fileprivate struct TimeCard: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
-    let seconds: Int; let count: Int; let range: StatsRange
+    let seconds: Int; let count: Int; @Binding var range: StatsRange
     var dateRange: String? = nil
+
+    private func labelForRange(_ r: StatsRange) -> String {
+        switch r {
+        case .week: return "Week"
+        case .month: return "Month"
+        case .year: return "Year"
+        case .total: return "Total"
+        }
+    }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
+                Picker("Range", selection: $range) {
+                    ForEach(StatsRange.allCases) { r in Text(labelForRange(r)).tag(r) }
+                }
+                .pickerStyle(.segmented)
+                .padding(4)
+                .background(.regularMaterial.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                
                 if let dateRange {
                     Text(dateRange)
                         .font(.footnote)
@@ -486,43 +499,70 @@ fileprivate struct TimeDistributionCard: View {
 
     let slices: [ActivitySlice]
 
+    // rank-based shades (index 0 = biggest slice)
+    private let opacities: [Double] = [0.95, 0.75, 0.6, 0.45, 0.3]
+
+    private func opacityForIndex(_ i: Int) -> Double {
+        guard i < opacities.count else { return 0.3 }
+        return opacities[i]
+    }
+
+    private func percent(_ part: Int, of total: Int) -> Int {
+        guard total > 0 else { return 0 }
+        return Int(round((Double(part) / Double(total)) * 100.0))
+    }
+
     var body: some View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Time distribution").font(.headline)
+
                 if slices.isEmpty {
                     Text("No time logged this period.")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 } else {
+                    // --- stacked bar (100% width) ---
                     GeometryReader { geo in
                         let total = slices.reduce(0) { $0 + $1.seconds }
-                        HStack(spacing: 0) {
-                            ForEach(0..<slices.count, id: \.self) { i in
-                                let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
-                                Rectangle()
-                                    .frame(width: max(0, w), height: 12)
-                                    .opacity(0.6)
+                        ZStack {
+                            // background track for clarity
+                            Capsule().fill(.secondary.opacity(0.15))
+                            // segments
+                            HStack(spacing: 0) {
+                                ForEach(0..<slices.count, id: \.self) { i in
+                                    let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
+                                    Rectangle()
+                                        .foregroundStyle(.primary)     // system adaptive
+                                        .opacity(opacityForIndex(i))    // rank shade
+                                        .frame(width: max(1, w), height: 12) // ensure visible slivers
+                                }
                             }
+                            .clipShape(Capsule())
                         }
-                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
                     }
                     .frame(height: 12)
 
+                    // --- legend (dots share the same shade as segments) ---
                     let total = slices.reduce(0) { $0 + $1.seconds }
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: 8) {
                         ForEach(0..<slices.count, id: \.self) { i in
-                            HStack {
-                                Circle().frame(width: 8, height: 8).opacity(0.6)
-                                Text("\(slices[i].name)")
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
+                            HStack(alignment: .firstTextBaseline) {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .frame(width: 8, height: 8)
+                                        .foregroundStyle(.primary)
+                                        .opacity(opacityForIndex(i))
+                                    Text(slices[i].name)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
                                 Spacer()
                                 Text("\(percent(slices[i].seconds, of: total))%")
-                                    .foregroundStyle(.secondary)
                                     .font(.subheadline)
+                                    .foregroundStyle(.secondary)
                             }
-                            .font(.subheadline)
+                            .font(.title3)
                         }
                     }
                 }
@@ -530,10 +570,10 @@ fileprivate struct TimeDistributionCard: View {
             .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibilityText)
+        .accessibilityLabel(a11yText)
     }
 
-    private var accessibilityText: String {
+    private var a11yText: String {
         guard !slices.isEmpty else { return "Time distribution by activity: no data this period" }
         let total = slices.reduce(0) { $0 + $1.seconds }
         let parts = slices.map { "\($0.name) \(percent($0.seconds, of: total)) percent" }
@@ -546,4 +586,3 @@ fileprivate struct TimeDistributionCard: View {
         MeView().environment(\.managedObjectContext, PersistenceController.shared.container.viewContext)
     }
 }
-
