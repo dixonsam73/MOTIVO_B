@@ -53,6 +53,7 @@ struct MeView: View {
     @State private var timeDistributionSlices: [ActivitySlice] = []
     @State private var totalInRange: Int = 0
     @State private var uniqueInstrumentCount: Int = 0
+    @State private var uniqueActivityCount: Int = 0
 
     var body: some View {
         ScrollView {
@@ -65,7 +66,9 @@ struct MeView: View {
                     FocusCard(average: avgFocus)
                     TimeDistributionCard(slices: timeDistributionSlices)
                     TopWinnerCard(title: "Top instrument", winner: topInstrument, totalCount: totalInRange)
-                    TopWinnerCard(title: "Top activity",   winner: topActivity,   totalCount: totalInRange)
+                    if uniqueActivityCount > 1 {
+                        TopWinnerCard(title: "Top activity",   winner: topActivity,   totalCount: totalInRange)
+                    }
                 }
             }
             .padding()
@@ -104,6 +107,15 @@ struct MeView: View {
             var set = Set<String>()
             for s in allSessions {
                 if let label = instrumentLabel(for: s) { set.insert(label) }
+            }
+            return set.count
+        }()
+        self.uniqueActivityCount = {
+            var set = Set<String>()
+            for s in allSessions {
+                let raw = SessionActivity.name(for: s as NSManagedObject)
+                let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !label.isEmpty { set.insert(label) }
             }
             return set.count
         }()
@@ -534,3 +546,4 @@ fileprivate struct TimeDistributionCard: View {
         MeView().environment(\.managedObjectContext, PersistenceController.shared.container.viewContext)
     }
 }
+
