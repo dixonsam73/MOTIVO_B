@@ -142,6 +142,7 @@ struct PostRecordDetailsView: View {
     // ---- end privacy helpers ----
 
     var onSaved: (() -> Void)?
+    private let prefillAttachments: [StagedAttachment]?
 
     init(
         isPresented: Binding<Bool>,
@@ -151,7 +152,8 @@ struct PostRecordDetailsView: View {
         activityTypeRaw: Int16? = nil,
         activityDetailPrefill: String? = nil,
         notesPrefill: String? = nil,
-                onSaved: (() -> Void)? = nil
+        prefillAttachments: [StagedAttachment]? = nil,
+        onSaved: (() -> Void)? = nil
     ) {
         self._isPresented = isPresented
         self.prefillTimestamp = timestamp ?? Date()
@@ -167,6 +169,7 @@ struct PostRecordDetailsView: View {
         }
         if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
         self._notes = State(initialValue: notesPrefill ?? "")
+        self.prefillAttachments = prefillAttachments
         self.onSaved = onSaved
     }
 
@@ -398,6 +401,9 @@ struct PostRecordDetailsView: View {
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
             .task {
+                if let pre = prefillAttachments, !pre.isEmpty, stagedAttachments.isEmpty {
+                    stagedAttachments.append(contentsOf: pre)
+                }
                 preselectFocusFromNotesIfNeeded()
                 instruments = fetchInstruments()
                 if instrument == nil {
@@ -1069,3 +1075,4 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(24)
     }
 }
+

@@ -19,6 +19,7 @@
 import SwiftUI
 import Combine
 import CoreData
+import AVFoundation
 
 // SessionActivityType moved to SessionActivityType.swift
 
@@ -70,6 +71,12 @@ struct PracticeTimerView: View {
     // Info-only recording helpers
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
+
+    // New audio recording and attachments state
+    @State private var showAudioRecorder: Bool = false
+    @State private var stagedAudio: [StagedAttachment] = []
+    @State private var audioPlayer: AVAudioPlayer? = nil
+    @State private var currentlyPlayingID: UUID? = nil
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -153,7 +160,7 @@ struct PracticeTimerView: View {
                     // ---------- Recording helpers (moved below timer) ----------
                     VStack(spacing: 12) {
                         HStack(spacing: 24) {
-                            Button { showAudioHelp = true } label: {
+                            Button { showAudioRecorder = true } label: {
                                 Image(systemName: "mic.fill")
                                     .font(.system(size: 22, weight: .semibold))
                                     .frame(width: 44, height: 44)
@@ -228,6 +235,34 @@ struct PracticeTimerView: View {
                         }
                     }
                     .cardSurface()
+
+                    // --- Attachments card (audio clips) ---
+                    if !stagedAudio.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Attachments").sectionHeader()
+                            ForEach(stagedAudio, id: \.id) { att in
+                                HStack(spacing: 12) {
+                                    Button(action: { togglePlay(att.id) }) {
+                                        Image(systemName: currentlyPlayingID == att.id ? "pause.fill" : "play.fill")
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Text("Audio Clip")
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+
+                                    Spacer(minLength: 8)
+
+                                    Button(role: .destructive, action: { deleteAudio(att.id) }) {
+                                        Image(systemName: "trash")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                            }
+                        }
+                        .cardSurface()
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
@@ -343,10 +378,12 @@ struct PracticeTimerView: View {
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     notesPrefill: composeCompletedTasksNotesString(),
+                    prefillAttachments: stagedAudio,
                     onSaved: {
                         didSaveFromReview = true
                         clearPersistedTimer()
                         resetUIOnly()
+                        stagedAudio.removeAll()
                         isPresented = false
                     }
                 )
@@ -356,6 +393,7 @@ struct PracticeTimerView: View {
                 if oldValue == true && newValue == false && didSaveFromReview == false {
                     clearPersistedTimer()
                     resetUIOnly()
+                    stagedAudio.removeAll()
                 }
             }
             // Info sheets for recording help
@@ -382,6 +420,15 @@ struct PracticeTimerView: View {
                     ],
                     primaryCTA: nil
                 )
+                .presentationDetents([.medium])
+                .presentationDragIndicator(.visible)
+            }
+            // Audio recorder sheet
+            .sheet(isPresented: $showAudioRecorder) {
+                AudioRecorderView { url in
+                    stageAudioURL(url)
+                    showAudioRecorder = false
+                }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
@@ -752,6 +799,49 @@ struct PracticeTimerView: View {
             activityChoice = "custom:\(activityDetail)"
         }
     }
+
+    // MARK: - Audio attachment helpers
+
+    private func stageAudioURL(_ url: URL) {
+        do {
+            let data = try Data(contentsOf: url)
+            // Clean up original file to avoid duplicates taking space
+            try? FileManager.default.removeItem(at: url)
+            let id = UUID()
+            stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
+        } catch {
+            print("Failed to stage audio: \(error)")
+        }
+    }
+
+    private func togglePlay(_ id: UUID) {
+        if currentlyPlayingID == id {
+            // Pause/stop current
+            audioPlayer?.stop()
+            audioPlayer = nil
+            currentlyPlayingID = nil
+            return
+        }
+        guard let item = stagedAudio.first(where: { $0.id == id }) else { return }
+        do {
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
+            try? item.data.write(to: tmp, options: .atomic)
+            audioPlayer = try AVAudioPlayer(contentsOf: tmp)
+            audioPlayer?.play()
+            currentlyPlayingID = id
+        } catch {
+            print("Playback error: \(error)")
+        }
+    }
+
+    private func deleteAudio(_ id: UUID) {
+        if currentlyPlayingID == id {
+            audioPlayer?.stop()
+            audioPlayer = nil
+            currentlyPlayingID = nil
+        }
+        stagedAudio.removeAll { $0.id == id }
+    }
 }
 
 // MARK: - Local InfoSheetView (minimal)
@@ -786,11 +876,4 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
-
-
-
-
-
-
-
 
