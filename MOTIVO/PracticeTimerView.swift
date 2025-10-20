@@ -77,6 +77,10 @@ struct PracticeTimerView: View {
     @State private var stagedAudio: [StagedAttachment] = []
     @State private var audioPlayer: AVAudioPlayer? = nil
     @State private var currentlyPlayingID: UUID? = nil
+    
+    // Added state for audio titles and focus
+    @State private var audioTitles: [UUID: String] = [:]
+    @FocusState private var focusedAudioTitleID: UUID?
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -247,10 +251,14 @@ struct PracticeTimerView: View {
                                     }
                                     .buttonStyle(.bordered)
 
-                                    Text("Audio Clip")
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
+                                    TextField("Audio Clip", text: Binding(
+                                        get: { audioTitles[att.id] ?? "" },
+                                        set: { audioTitles[att.id] = $0 }
+                                    ))
+                                    .textFieldStyle(.plain)
+                                    .disableAutocorrection(true)
+                                    .focused($focusedAudioTitleID, equals: att.id)
+                                    .onTapGesture { focusedAudioTitleID = att.id }
 
                                     Spacer(minLength: 8)
 
@@ -379,11 +387,13 @@ struct PracticeTimerView: View {
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     notesPrefill: composeCompletedTasksNotesString(),
                     prefillAttachments: stagedAudio,
+                    prefillAttachmentNames: audioTitles,
                     onSaved: {
                         didSaveFromReview = true
                         clearPersistedTimer()
                         resetUIOnly()
                         stagedAudio.removeAll()
+                        audioTitles.removeAll()
                         isPresented = false
                     }
                 )
@@ -394,6 +404,7 @@ struct PracticeTimerView: View {
                     clearPersistedTimer()
                     resetUIOnly()
                     stagedAudio.removeAll()
+                    audioTitles.removeAll()
                 }
             }
             // Info sheets for recording help
@@ -808,6 +819,7 @@ struct PracticeTimerView: View {
             // Clean up original file to avoid duplicates taking space
             try? FileManager.default.removeItem(at: url)
             let id = UUID()
+            audioTitles[id] = "Audio Clip"
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
         } catch {
             print("Failed to stage audio: \(error)")
@@ -841,6 +853,7 @@ struct PracticeTimerView: View {
             currentlyPlayingID = nil
         }
         stagedAudio.removeAll { $0.id == id }
+        audioTitles.removeValue(forKey: id)
     }
 }
 
@@ -876,4 +889,5 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 

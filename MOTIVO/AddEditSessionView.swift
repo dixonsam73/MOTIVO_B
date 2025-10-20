@@ -1081,6 +1081,20 @@ private var instrumentPicker: some View {
             let kind = AttachmentKind(rawValue: kindStr) ?? .file
             let id = (a.value(forKey: "id") as? UUID) ?? UUID()
 
+            // For audio attachments, populate the temporary names map used for captions
+            if kind == .audio {
+                if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                    let filename = (path as NSString).lastPathComponent
+                    let stem = (filename as NSString).deletingPathExtension
+                    if !stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        let key = "stagedAudioNames_temp"
+                        var dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+                        dict[id.uuidString] = stem
+                        UserDefaults.standard.set(dict, forKey: key)
+                    }
+                }
+            }
+
             var data = Data()
             if kind == .image, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
                 if let d = loadImageData(at: path) { data = d }
@@ -1289,7 +1303,19 @@ private var instrumentPicker: some View {
                 Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary)
             }
         case .audio:
-            Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
+                // Use the same temporary names map seeded during review/timer if present
+                let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                if let display = namesDict[att.id.uuidString], !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(display)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 6)
+                }
+            }
         case .video:
             Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary)
         case .file:
@@ -1305,5 +1331,7 @@ private var instrumentPicker: some View {
     }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
 
 

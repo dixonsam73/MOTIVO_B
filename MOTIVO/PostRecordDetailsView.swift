@@ -143,6 +143,7 @@ struct PostRecordDetailsView: View {
 
     var onSaved: (() -> Void)?
     private let prefillAttachments: [StagedAttachment]?
+    private let prefillAttachmentNames: [UUID: String]?
 
     init(
         isPresented: Binding<Bool>,
@@ -153,6 +154,7 @@ struct PostRecordDetailsView: View {
         activityDetailPrefill: String? = nil,
         notesPrefill: String? = nil,
         prefillAttachments: [StagedAttachment]? = nil,
+        prefillAttachmentNames: [UUID: String]? = nil,
         onSaved: (() -> Void)? = nil
     ) {
         self._isPresented = isPresented
@@ -170,6 +172,7 @@ struct PostRecordDetailsView: View {
         if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
         self._notes = State(initialValue: notesPrefill ?? "")
         self.prefillAttachments = prefillAttachments
+        self.prefillAttachmentNames = prefillAttachmentNames
         self.onSaved = onSaved
     }
 
@@ -403,6 +406,17 @@ struct PostRecordDetailsView: View {
             .task {
                 if let pre = prefillAttachments, !pre.isEmpty, stagedAttachments.isEmpty {
                     stagedAttachments.append(contentsOf: pre)
+                    if let nameMap = prefillAttachmentNames {
+                        // Store in a temporary map via UserDefaults for the lifetime of this view, keyed by staged id
+                        let key = "stagedAudioNames_temp"
+                        var dict = UserDefaults.standard.dictionary(forKey: key) as? [String: String] ?? [:]
+                        for att in pre {
+                            if let title = nameMap[att.id], !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                dict[att.id.uuidString] = title
+                            }
+                        }
+                        UserDefaults.standard.set(dict, forKey: key)
+                    }
                 }
                 preselectFocusFromNotesIfNeeded()
                 instruments = fetchInstruments()
@@ -878,10 +892,20 @@ struct PostRecordDetailsView: View {
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
         if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
+
+        let namesKey = "stagedAudioNames_temp"
+        let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
+
         for att in stagedAttachments {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
+                let baseName: String
+                if let custom = namesDict[att.id.uuidString], !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    baseName = custom
+                } else {
+                    baseName = att.id.uuidString
+                }
+                let path = try AttachmentStore.saveData(att.data, suggestedName: baseName, ext: ext)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
                 // Attempt to migrate privacy from staged keys (ID/Temp URL) to final keys (ID/File URL)
@@ -892,6 +916,7 @@ struct PostRecordDetailsView: View {
                 print("Attachment commit failed: ", error)
             }
         }
+        UserDefaults.standard.removeObject(forKey: namesKey)
         stagedAttachments.removeAll()
     }
 
@@ -1059,7 +1084,20 @@ fileprivate struct AttachmentThumbCell: View {
                 placeholder(system: "photo")
             }
         case .audio:
-            placeholder(system: "waveform")
+            VStack(spacing: 6) {
+                placeholder(system: "waveform")
+                // Read display name from temp names map if present; else show filename stem
+                let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                let display = namesDict[att.id.uuidString] ?? ""
+                if !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(display)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 6)
+                }
+            }
         case .video:
             placeholder(system: "film")
         case .file:
