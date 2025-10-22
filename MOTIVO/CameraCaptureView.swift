@@ -41,8 +41,9 @@ struct CameraCaptureView: UIViewControllerRepresentable {
 
         if UIImagePickerController.isSourceTypeAvailable(.camera) {
             picker.sourceType = .camera
-            picker.cameraDevice = .rear     // force rear camera
+            picker.cameraDevice = .front    // default to front (selfie) camera
             picker.cameraCaptureMode = .photo
+            picker.cameraFlashMode = .off
             picker.mediaTypes = [UTType.image.identifier]
         } else {
             picker.sourceType = .photoLibrary
@@ -56,3 +57,4 @@ struct CameraCaptureView: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: UIImagePickerController, context: Context) {}
 }
+

@@ -85,6 +85,12 @@ struct PracticeTimerView: View {
     @State private var audioDurations: [UUID: Int] = [:]
     @FocusState private var focusedAudioTitleID: UUID?
 
+    // Image capture state (mirrors AddEdit/PostRecord behavior)
+    @State private var stagedImages: [StagedAttachment] = []
+    @State private var selectedThumbnailID: UUID? = nil
+    @State private var showCamera: Bool = false
+    @State private var showCameraDeniedAlert: Bool = false
+
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
@@ -189,6 +195,21 @@ struct PracticeTimerView: View {
                             .accessibilityLabel(Text("Record audio help"))
                             .accessibilityHint(Text("Opens instructions for using your device’s app to capture audio."))
 
+                            // New: Take Photo button (camera) inserted between mic and video
+                            if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                                Button {
+                                    ensureCameraAuthorized { showCamera = true }
+                                } label: {
+                                    Image(systemName: "camera.fill")
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.bordered)
+                                .accessibilityLabel(Text("Take photo"))
+                                .accessibilityHint(Text("Opens the camera to take a photo."))
+                            }
+
                             Button { showVideoHelp = true } label: {
                                 Image(systemName: "video.fill")
                                     .font(.system(size: 22, weight: .semibold))
@@ -274,10 +295,68 @@ struct PracticeTimerView: View {
                     }
                     .cardSurface()
 
-                    // --- Attachments card (audio clips) ---
-                    if !stagedAudio.isEmpty {
+                    // --- Attachments card (images + audio) ---
+                    if !stagedImages.isEmpty || !stagedAudio.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Attachments").sectionHeader()
+
+                            // Images grid
+                            if !stagedImages.isEmpty {
+                                let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                                LazyVGrid(columns: columns, spacing: 12) {
+                                    ForEach(stagedImages, id: \.id) { att in
+                                        ZStack(alignment: .topTrailing) {
+                                            if let ui = UIImage(data: att.data) {
+                                                Image(uiImage: ui)
+                                                    .resizable()
+                                                    .scaledToFill()
+                                                    .frame(width: 128, height: 128)
+                                                    .background(Color.secondary.opacity(0.08))
+                                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                    .overlay(
+                                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                                    )
+                                            } else {
+                                                ZStack {
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(Color.secondary.opacity(0.08))
+                                                    Image(systemName: "photo")
+                                                        .imageScale(.large)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .frame(width: 128, height: 128)
+                                            }
+
+                                            // Controls: star to set thumbnail, delete
+                                            VStack(spacing: 6) {
+                                                Text(selectedThumbnailID == att.id ? "★" : "☆")
+                                                    .font(.system(size: 16))
+                                                    .padding(8)
+                                                    .background(.ultraThinMaterial, in: Circle())
+                                                    .onTapGesture { selectedThumbnailID = att.id }
+
+                                                Button {
+                                                    stagedImages.removeAll { $0.id == att.id }
+                                                    if selectedThumbnailID == att.id {
+                                                        selectedThumbnailID = stagedImages.first?.id
+                                                    }
+                                                } label: {
+                                                    Image(systemName: "trash")
+                                                        .font(.system(size: 16, weight: .semibold))
+                                                        .padding(8)
+                                                        .background(.ultraThinMaterial, in: Circle())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(6)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+
+                            // Audio list
                             ForEach(stagedAudio, id: \.id) { att in
                                 HStack(spacing: 12) {
                                     Button(action: { togglePlay(att.id) }) {
@@ -292,26 +371,19 @@ struct PracticeTimerView: View {
                                     .textFieldStyle(.plain)
                                     .disableAutocorrection(true)
                                     .focused($focusedAudioTitleID, equals: att.id)
-                                    .onTapGesture {
-                                        focusedAudioTitleID = att.id
-                                    }
+                                    .onTapGesture { focusedAudioTitleID = att.id }
                                     .onSubmit {
-                                        // If user leaves it empty, restore auto title
                                         let current = (audioTitles[att.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if current.isEmpty {
-                                            audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
-                                        }
+                                        if current.isEmpty { audioTitles[att.id] = audioAutoTitles[att.id] ?? "" }
                                     }
                                     .onChange(of: focusedAudioTitleID) { _, newFocus in
                                         if newFocus == att.id {
-                                            // If current title equals auto-title, clear it so user starts fresh
                                             if (audioTitles[att.id] ?? "") == (audioAutoTitles[att.id] ?? "") {
                                                 audioTitles[att.id] = ""
                                             }
                                         }
                                     }
 
-                                    // Duration label mm:ss
                                     if let secs = audioDurations[att.id] {
                                         Text(formattedClipDuration(secs))
                                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -444,7 +516,7 @@ struct PracticeTimerView: View {
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     notesPrefill: composeCompletedTasksNotesString(),
-                    prefillAttachments: stagedAudio,
+                    prefillAttachments: (stagedImages + stagedAudio),
                     prefillAttachmentNames: audioTitles,
                     onSaved: {
                         didSaveFromReview = true
@@ -452,6 +524,8 @@ struct PracticeTimerView: View {
                         resetUIOnly()
                         stagedAudio.removeAll()
                         audioTitles.removeAll()
+                        stagedImages.removeAll()
+                        selectedThumbnailID = nil
                         isPresented = false
                     }
                 )
@@ -463,6 +537,8 @@ struct PracticeTimerView: View {
                     resetUIOnly()
                     stagedAudio.removeAll()
                     audioTitles.removeAll()
+                    stagedImages.removeAll()
+                    selectedThumbnailID = nil
                 }
             }
             // Info sheets for recording help
@@ -501,6 +577,20 @@ struct PracticeTimerView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showCamera) {
+                CameraCaptureView { image in
+                    stageImage(image)
+                }
+            }
+            .alert("Camera access denied",
+                   isPresented: $showCameraDeniedAlert,
+                   actions: {
+                       Button("OK", role: .cancel) {}
+                       Button("Open Settings") {
+                           if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                       }
+                   },
+                   message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
         }
     }
 
@@ -953,6 +1043,31 @@ struct PracticeTimerView: View {
         }
         stagedAudio.removeAll { $0.id == id }
         audioTitles.removeValue(forKey: id)
+    }
+
+    // MARK: - Image attachment helpers (camera)
+    private func stageImage(_ image: UIImage) {
+        if let data = image.jpegData(compressionQuality: 0.8) {
+            let id = UUID()
+            stagedImages.append(StagedAttachment(id: id, data: data, kind: .image))
+            // Auto-select first image as thumbnail
+            let imageCount = stagedImages.count
+            if imageCount == 1 { selectedThumbnailID = id }
+        }
+    }
+
+    private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
+        let status = AVCaptureDevice.authorizationStatus(for: .video)
+        switch status {
+        case .authorized:
+            onAuthorized()
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { granted ? onAuthorized() : { self.showCameraDeniedAlert = true }() }
+            }
+        default:
+            self.showCameraDeniedAlert = true
+        }
     }
 }
 
