@@ -77,6 +77,7 @@ struct PracticeTimerView: View {
     @State private var stagedAudio: [StagedAttachment] = []
     @State private var audioPlayer: AVAudioPlayer? = nil
     @State private var currentlyPlayingID: UUID? = nil
+    @State private var audioPlayerDelegate: AudioPlayerDelegateBridge? = nil
     
     // Added state for audio titles and focus
     @State private var audioTitles: [UUID: String] = [:]
@@ -839,6 +840,15 @@ struct PracticeTimerView: View {
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
             try? item.data.write(to: tmp, options: .atomic)
             audioPlayer = try AVAudioPlayer(contentsOf: tmp)
+            let delegate = AudioPlayerDelegateBridge(onFinish: {
+                DispatchQueue.main.async {
+                    if currentlyPlayingID == id {
+                        currentlyPlayingID = nil
+                    }
+                }
+            })
+            audioPlayer?.delegate = delegate
+            audioPlayerDelegate = delegate // retain delegate so callbacks fire
             audioPlayer?.play()
             currentlyPlayingID = id
         } catch {
@@ -890,4 +900,9 @@ fileprivate struct InfoSheetView: View {
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
 
+private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
+    let onFinish: () -> Void
+    init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
+}
 
