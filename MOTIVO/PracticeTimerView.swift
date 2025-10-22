@@ -81,6 +81,8 @@ struct PracticeTimerView: View {
     
     // Added state for audio titles and focus
     @State private var audioTitles: [UUID: String] = [:]
+    @State private var audioAutoTitles: [UUID: String] = [:]
+    @State private var audioDurations: [UUID: Int] = [:]
     @FocusState private var focusedAudioTitleID: UUID?
 
     // Convenience flags
@@ -97,12 +99,19 @@ struct PracticeTimerView: View {
         var isDone: Bool = false
     }
     @State private var taskLines: [TaskLine] = []
+    @State private var autoTaskTexts: [UUID: String] = [:]
+    @FocusState private var focusedTaskID: UUID?
     private let tasksDefaultsKey: String = "practiceTasks_v1"
 
     private func loadDefaultTasksIfNeeded() {
         guard activity == .practice, taskLines.isEmpty else { return }
         if let defaults = UserDefaults.standard.array(forKey: tasksDefaultsKey) as? [String] {
-            self.taskLines = defaults.map { TaskLine(text: $0, isDone: false) }
+            let mapped = defaults.map { TaskLine(text: $0, isDone: false) }
+            self.taskLines = mapped
+            // Store auto-texts for restore behavior
+            for line in mapped {
+                autoTaskTexts[line.id] = line.text
+            }
         }
     }
     private func loadPracticeDefaultsIfNeeded() {
@@ -117,7 +126,11 @@ struct PracticeTimerView: View {
               UserDefaults.standard.bool(forKey: toggleKey) == true else { return }
 
         if let arr = UserDefaults.standard.array(forKey: tasksKey) as? [String] {
-            self.taskLines = arr.map { TaskLine(text: $0, isDone: false) }
+            let mapped = arr.map { TaskLine(text: $0, isDone: false) }
+            self.taskLines = mapped
+            for line in mapped {
+                autoTaskTexts[line.id] = line.text
+            }
         }
     }
     private func composeNotesString() -> String? {
@@ -153,6 +166,7 @@ struct PracticeTimerView: View {
     }
     private func deleteLine(_ id: UUID) {
         taskLines.removeAll { $0.id == id }
+        autoTaskTexts.removeValue(forKey: id)
         if taskLines.isEmpty { showTasksPad = false }
     }
     var body: some View {
@@ -208,6 +222,25 @@ struct PracticeTimerView: View {
                                         TextField("Task", text: $line.text)
                                             .textFieldStyle(.plain)
                                             .disableAutocorrection(true)
+                                            .focused($focusedTaskID, equals: line.id)
+                                            .onTapGesture {
+                                                focusedTaskID = line.id
+                                            }
+                                            .onSubmit {
+                                                // If user leaves it empty, restore auto text if available
+                                                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if trimmed.isEmpty, let auto = autoTaskTexts[line.id] {
+                                                    line.text = auto
+                                                }
+                                            }
+                                            .onChange(of: focusedTaskID) { _, newFocus in
+                                                if newFocus == line.id {
+                                                    // If current equals auto text, clear to start fresh
+                                                    if let auto = autoTaskTexts[line.id], line.text == auto {
+                                                        line.text = ""
+                                                    }
+                                                }
+                                            }
 
                                         Spacer(minLength: 8)
 
@@ -252,14 +285,38 @@ struct PracticeTimerView: View {
                                     }
                                     .buttonStyle(.bordered)
 
-                                    TextField("Audio Clip", text: Binding(
+                                    TextField("Title", text: Binding(
                                         get: { audioTitles[att.id] ?? "" },
                                         set: { audioTitles[att.id] = $0 }
                                     ))
                                     .textFieldStyle(.plain)
                                     .disableAutocorrection(true)
                                     .focused($focusedAudioTitleID, equals: att.id)
-                                    .onTapGesture { focusedAudioTitleID = att.id }
+                                    .onTapGesture {
+                                        focusedAudioTitleID = att.id
+                                    }
+                                    .onSubmit {
+                                        // If user leaves it empty, restore auto title
+                                        let current = (audioTitles[att.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                        if current.isEmpty {
+                                            audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
+                                        }
+                                    }
+                                    .onChange(of: focusedAudioTitleID) { _, newFocus in
+                                        if newFocus == att.id {
+                                            // If current title equals auto-title, clear it so user starts fresh
+                                            if (audioTitles[att.id] ?? "") == (audioAutoTitles[att.id] ?? "") {
+                                                audioTitles[att.id] = ""
+                                            }
+                                        }
+                                    }
+
+                                    // Duration label mm:ss
+                                    if let secs = audioDurations[att.id] {
+                                        Text(formattedClipDuration(secs))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                            .font(.subheadline)
+                                    }
 
                                     Spacer(minLength: 8)
 
@@ -751,6 +808,20 @@ struct PracticeTimerView: View {
                       : String(format: "%02d:%02d", m, s)
     }
 
+    private func formattedAutoTitle(from date: Date) -> String {
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.dateFormat = "yyyyLLLdd_HH:mm"
+        let s = df.string(from: date)
+        return s.lowercased()
+    }
+
+    private func formattedClipDuration(_ secs: Int) -> String {
+        let m = secs / 60
+        let s = secs % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
     // MARK: - Persistence (UserDefaults)
     private enum TimerDefaultsKey: String {
         case startedAtEpoch = "PracticeTimer.startedAtEpoch"
@@ -820,7 +891,25 @@ struct PracticeTimerView: View {
             // Clean up original file to avoid duplicates taking space
             try? FileManager.default.removeItem(at: url)
             let id = UUID()
-            audioTitles[id] = "Audio Clip"
+
+            // Auto-generate title from recording date/time (using file's creation date if available, else now)
+            let title: String
+            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+               let cdate = attrs[.creationDate] as? Date {
+                title = formattedAutoTitle(from: cdate)
+            } else {
+                title = formattedAutoTitle(from: Date())
+            }
+            audioAutoTitles[id] = title
+            audioTitles[id] = title
+
+            // Compute duration from audio data
+            var durationSeconds: Int = 0
+            if let player = try? AVAudioPlayer(data: data) {
+                durationSeconds = max(0, Int(player.duration.rounded()))
+            }
+            audioDurations[id] = durationSeconds
+
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
         } catch {
             print("Failed to stage audio: \(error)")
