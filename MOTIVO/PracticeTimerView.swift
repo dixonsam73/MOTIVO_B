@@ -406,6 +406,13 @@ struct PracticeTimerView: View {
                                     .buttonStyle(.plain)
                                 }
                             }
+                            
+                            if let warn = stagedSizeWarning {
+                                Text(warn)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .padding(.top, 4)
+                            }
                         }
                         .cardSurface()
                     }
@@ -457,6 +464,7 @@ struct PracticeTimerView: View {
                     stopTicker()
                     persistTimerSnapshot()
                     removeAudioObserversIfNeeded()
+                    purgeStagedTempFiles()
                 @unknown default:
                     break
                 }
@@ -548,6 +556,7 @@ struct PracticeTimerView: View {
                     audioTitles.removeAll()
                     stagedImages.removeAll()
                     selectedThumbnailID = nil
+                    purgeStagedTempFiles()
                 }
             }
             // Info sheets for recording help
@@ -981,6 +990,37 @@ struct PracticeTimerView: View {
             activityChoice = "custom:\(activityDetail)"
         }
     }
+    
+    // Best-effort purge for surrogate temp files created for staged items
+    private func purgeStagedTempFiles() {
+        let fm = FileManager.default
+        // Purge audio surrogates
+        for att in stagedAudio {
+            let ext = "m4a"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(att.id.uuidString)
+                .appendingPathExtension(ext)
+            try? fm.removeItem(at: url)
+        }
+        // Purge image surrogates
+        for att in stagedImages {
+            let ext = "jpg"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(att.id.uuidString)
+                .appendingPathExtension(ext)
+            try? fm.removeItem(at: url)
+        }
+    }
+    
+    private var totalStagedBytes: Int {
+        let imgs = stagedImages.reduce(0) { $0 + $1.data.count }
+        let auds = stagedAudio.reduce(0) { $0 + $1.data.count }
+        return imgs + auds
+    }
+    private var stagedSizeWarning: String? {
+        let limit = 100 * 1024 * 1024 // 100 MB
+        return totalStagedBytes > limit ? "Large staging size (~\(totalStagedBytes / (1024*1024)) MB). Consider saving or removing some items." : nil
+    }
 
     // MARK: - Audio attachment helpers
 
@@ -1082,6 +1122,9 @@ struct PracticeTimerView: View {
             currentlyPlayingID = nil
             isAudioPlaying = false
         }
+        // Remove surrogate temp file best-effort
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
+        try? FileManager.default.removeItem(at: tmp)
         stagedAudio.removeAll { $0.id == id }
         audioTitles.removeValue(forKey: id)
     }

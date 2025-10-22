@@ -1,5 +1,5 @@
 ///
-//  AttachmentStore.swift
+///  AttachmentStore.swift
 //  MOTIVO
 //
 
@@ -21,6 +21,24 @@ struct AttachmentStore {
         let url = dir.appendingPathComponent(filename, isDirectory: false)
         try data.write(to: url, options: [.atomic])
         return url.path
+    }
+
+    /// Writes data to Documents and returns (path, rollback) where rollback removes the file if invoked.
+    static func saveDataWithRollback(_ data: Data, suggestedName: String, ext: String) throws -> (path: String, rollback: () -> Void) {
+        let dir = try ensureDocumentsDir()
+        let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
+        let url = dir.appendingPathComponent(filename, isDirectory: false)
+        try data.write(to: url, options: [.atomic])
+        let rollback = { removeIfExists(path: url.path) }
+        return (url.path, rollback)
+    }
+
+    // Best-effort removal helper (safe no-op if missing)
+    static func removeIfExists(path: String) {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: path) {
+            try? fm.removeItem(atPath: path)
+        }
     }
 
     /// Creates and attaches a Core Data `Attachment` to a session.

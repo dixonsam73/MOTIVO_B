@@ -141,6 +141,26 @@ struct PostRecordDetailsView: View {
     }
     // ---- end privacy helpers ----
 
+    // Best-effort purge for surrogate temp files created for staged items
+    private func purgeStagedTempFiles() {
+        let fm = FileManager.default
+        for att in stagedAttachments {
+            let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(att.id.uuidString)
+                .appendingPathExtension(ext)
+            try? fm.removeItem(at: url)
+        }
+    }
+
+    private var totalStagedBytes: Int {
+        stagedAttachments.reduce(0) { $0 + $1.data.count }
+    }
+    private var stagedSizeWarning: String? {
+        let limit = 100 * 1024 * 1024 // 100 MB
+        return totalStagedBytes > limit ? "Large staging size (~\(totalStagedBytes / (1024*1024)) MB). Consider saving or removing some items." : nil
+    }
+
     var onSaved: (() -> Void)?
     private let prefillAttachments: [StagedAttachment]?
     private let prefillAttachmentNames: [UUID: String]?
@@ -341,6 +361,12 @@ struct PostRecordDetailsView: View {
                             }
                             .padding(.vertical, 4)
                         }
+                        if let warn = stagedSizeWarning {
+                            Text(warn)
+                                .font(.footnote)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .padding(.top, 4)
+                        }
                     }
                     .cardSurface()
 
@@ -372,6 +398,7 @@ struct PostRecordDetailsView: View {
                     Button("Cancel") { 
                         isPresented = false
                         dismissToRoot()
+                        purgeStagedTempFiles()
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -453,6 +480,9 @@ struct PostRecordDetailsView: View {
             .onAppear { loadPrivacyMap() }
             .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
                 loadPrivacyMap()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                purgeStagedTempFiles()
             }
             .appBackground()
         }
@@ -840,7 +870,11 @@ struct PostRecordDetailsView: View {
             try viewContext.save()
             viewContext.processPendingChanges()
             onSaved?()
-        } catch { print("Error saving session (timer review): \(error)") }
+        } catch {
+            // Best-effort cleanup: purge any temp surrogates; committed files may remain if save failed after write.
+            purgeStagedTempFiles()
+            print("Error saving session (timer review): \(error)")
+        }
     }
 
     private func surrogateURL(for att: StagedAttachment) -> URL? {
