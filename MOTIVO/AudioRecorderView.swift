@@ -23,6 +23,8 @@ struct AudioRecorderView: View {
     // Timer for elapsed recording time
     @State private var startTime: Date?
     @State private var elapsed: TimeInterval = 0
+    @State private var accumulatedRecordedTime: TimeInterval = 0
+    @State private var finalRecordedTime: TimeInterval = 0
     @State private var timer: Timer?
 
     // MARK: - Body
@@ -49,15 +51,27 @@ struct AudioRecorderView: View {
                 }
                 .accessibilityLabel("Delete recording")
 
-                // Record
-                ControlButton(systemName: "record.circle.fill", tint: .red, isEnabled: state.canRecord) {
-                    Task { await startRecording() }
+                // Record / Pause (recording)
+                ControlButton(
+                    systemName: (state == .recording) ? "pause.circle.fill" : "record.circle.fill",
+                    tint: .red,
+                    isEnabled: state.canRecord || state == .recording
+                ) {
+                    Task {
+                        if state == .recording {
+                            pauseRecording()
+                        } else if state == .pausedRecording {
+                            await resumeRecording()
+                        } else {
+                            await startRecording()
+                        }
+                    }
                 }
-                .accessibilityLabel("Start recording")
+                .accessibilityLabel(state == .recording ? "Pause recording" : (state == .pausedRecording ? "Resume recording" : "Start recording"))
 
                 // Stop
                 ControlButton(systemName: "stop.fill", tint: .primary, isEnabled: state.canStop) {
-                    stopAll()
+                    stopAllAndFinalizeRecording()
                 }
                 .accessibilityLabel("Stop")
 
@@ -104,26 +118,37 @@ private extension AudioRecorderView {
     enum RecordingState: Equatable {
         case idle
         case recording
+        case pausedRecording
         case playing
         case paused
 
-        var isIdleLike: Bool { self == .idle || self == .paused }
+        var isIdleLike: Bool { self == .idle || self == .paused || self == .pausedRecording }
         var canRecord: Bool { self != .recording }
-        var canStop: Bool { self == .recording || self == .playing || self == .paused }
-        var canPlayToggle: Bool { self != .recording }
+        var canStop: Bool { self == .recording || self == .playing || self == .paused || self == .pausedRecording }
+        var canPlayToggle: Bool { self != .recording && self != .pausedRecording }
     }
 
     var titleForState: String {
         switch state {
         case .idle: return "Ready"
         case .recording: return "Recording…"
+        case .pausedRecording: return "Paused"
         case .playing: return "Playing…"
         case .paused: return "Paused"
         }
     }
 
     var timeString: String {
-        let total = state == .recording ? elapsed : (player?.currentTime ?? 0)
+        let total: TimeInterval
+        switch state {
+        case .recording:
+            total = accumulatedRecordedTime + elapsed
+        case .pausedRecording, .idle:
+            // When paused recording or stopped, show the accumulated total (frozen)
+            total = accumulatedRecordedTime > 0 ? accumulatedRecordedTime : finalRecordedTime
+        case .playing, .paused:
+            total = player?.currentTime ?? 0
+        }
         let minutes = Int(total) / 60
         let seconds = Int(total) % 60
         let fraction = Int((total - floor(total)) * 10)
@@ -161,7 +186,8 @@ private extension AudioRecorderView {
     }
 
     func startRecording() async {
-        guard state != .recording else { return }
+        // Start a new recording (fresh). Only allowed when not currently recording or pausedRecording.
+        guard state != .recording && state != .pausedRecording else { return }
         await configureSessionIfNeeded()
         let url = newRecordingURL()
 
@@ -172,6 +198,9 @@ private extension AudioRecorderView {
 
             if recorder?.record() == true {
                 recordingURL = url
+                // Reset accumulated time because this is a new file
+                accumulatedRecordedTime = 0
+                finalRecordedTime = 0
                 startElapsedTimer()
                 state = .recording
                 errorMessage = nil
@@ -183,24 +212,63 @@ private extension AudioRecorderView {
         }
     }
 
+    func pauseRecording() {
+        guard state == .recording else { return }
+        recorder?.pause()
+        // Add the elapsed chunk to accumulated time and stop the timer
+        accumulatedRecordedTime += elapsed
+        stopElapsedTimer()
+        // Reset per-chunk elapsed
+        elapsed = 0
+        state = .pausedRecording
+    }
+
+    func resumeRecording() async {
+        guard state == .pausedRecording else { return }
+        do {
+            // Ensure session is active
+            await configureSessionIfNeeded()
+            if recorder?.record() == true {
+                startElapsedTimer()
+                state = .recording
+            } else {
+                setError("Failed to resume recording.")
+            }
+        }
+    }
+
     func stopAll() {
         if recorder?.isRecording == true {
+            recorder?.stop()
+        } else if state == .pausedRecording {
             recorder?.stop()
         }
         if player?.isPlaying == true {
             player?.stop()
         }
-        // Full reset for playback
         player?.currentTime = 0
         playbackPosition = 0
         stopElapsedTimer()
+        // Do not change accumulatedRecordedTime here; let finalization compute total
+    }
+
+    func stopAllAndFinalizeRecording() {
+        let wasRecording = (state == .recording) || (state == .pausedRecording)
+        stopAll()
+        if wasRecording {
+            // If we were in active or paused recording, compute total recorded time
+            let total = accumulatedRecordedTime + ((state == .recording) ? elapsed : 0)
+            finalRecordedTime = max(total, accumulatedRecordedTime)
+            // Reset per-chunk elapsed
+            elapsed = 0
+        }
         state = .idle
     }
 
     func togglePlayback() {
         guard let url = recordingURL else { return }
-        // If currently recording, ignore play toggles
-        guard state != .recording else { return }
+        // If currently recording or paused recording, ignore play toggles
+        guard state != .recording && state != .pausedRecording else { return }
 
         switch state {
         case .playing:
@@ -230,7 +298,7 @@ private extension AudioRecorderView {
                 setError("Playback error: \(error.localizedDescription)")
             }
 
-        case .recording:
+        case .recording, .pausedRecording:
             break
         }
     }
@@ -242,13 +310,17 @@ private extension AudioRecorderView {
             try FileManager.default.removeItem(at: url)
             recordingURL = nil
             playbackPosition = 0
+            accumulatedRecordedTime = 0
+            finalRecordedTime = 0
+            elapsed = 0
+            state = .idle
         } catch {
             setError("Delete failed: \(error.localizedDescription)")
         }
     }
 
     func saveRecording() {
-        stopAll()
+        stopAllAndFinalizeRecording()
         guard let url = recordingURL else {
             setError("No recording to save.")
             return
@@ -282,6 +354,9 @@ private extension AudioRecorderView {
         stopAll()
         recorder = nil
         player = nil
+        accumulatedRecordedTime = 0
+        finalRecordedTime = 0
+        elapsed = 0
     }
 }
 
