@@ -16,6 +16,7 @@ struct AudioRecorderView: View {
     @State private var player: AVAudioPlayer?
     @State private var recordingURL: URL?
     @State private var playbackPosition: TimeInterval = 0
+    @State private var displayTime: TimeInterval = 0
 
     @State private var state: RecordingState = .idle
     @State private var errorMessage: String?
@@ -26,6 +27,11 @@ struct AudioRecorderView: View {
     @State private var accumulatedRecordedTime: TimeInterval = 0
     @State private var finalRecordedTime: TimeInterval = 0
     @State private var timer: Timer?
+    @State private var playbackTimer: Timer?
+    
+    @State private var wasRecordingBeforeInterruption: Bool = false
+    @State private var wasPlayingBeforeInterruption: Bool = false
+    @State private var observersInstalled: Bool = false
 
     // MARK: - Body
     var body: some View {
@@ -105,7 +111,24 @@ struct AudioRecorderView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color(.secondarySystemBackground))
         )
-        .onDisappear { cleanup() }
+        .onAppear {
+            installObserversIfNeeded()
+            // Sync display to current state on appear
+            switch state {
+            case .recording:
+                displayTime = accumulatedRecordedTime + elapsed
+            case .pausedRecording:
+                displayTime = accumulatedRecordedTime
+            case .playing, .paused:
+                displayTime = playbackPosition
+            case .idle:
+                displayTime = finalRecordedTime
+            }
+        }
+        .onDisappear {
+            removeObserversIfNeeded()
+            cleanup()
+        }
         .task { await configureSessionIfNeeded() }
         #if DEBUG
         .animation(.default, value: state)
@@ -139,19 +162,12 @@ private extension AudioRecorderView {
     }
 
     var timeString: String {
-        let total: TimeInterval
-        switch state {
-        case .recording:
-            total = accumulatedRecordedTime + elapsed
-        case .pausedRecording, .idle:
-            // When paused recording or stopped, show the accumulated total (frozen)
-            total = accumulatedRecordedTime > 0 ? accumulatedRecordedTime : finalRecordedTime
-        case .playing, .paused:
-            total = player?.currentTime ?? 0
-        }
-        let minutes = Int(total) / 60
-        let seconds = Int(total) % 60
-        let fraction = Int((total - floor(total)) * 10)
+        let clamped = max(0, displayTime)
+        let totalTenths = Int((clamped * 10).rounded(.down))
+        let wholeSeconds = totalTenths / 10
+        let minutes = wholeSeconds / 60
+        let seconds = wholeSeconds % 60
+        let fraction = totalTenths % 10
         return String(format: "%02d:%02d.%01d", minutes, seconds, fraction)
     }
 
@@ -178,11 +194,143 @@ private extension AudioRecorderView {
     func configureSessionIfNeeded() async {
         do {
             let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth])
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
             try session.setActive(true)
         } catch {
             setError("Audio session error: \(error.localizedDescription)")
         }
+    }
+
+    func installObserversIfNeeded() {
+        guard !observersInstalled else { return }
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
+            handleInterruption(note)
+        }
+        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            handleRouteChange(note)
+        }
+        #if canImport(UIKit)
+        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            handleAppWillResignActive()
+        }
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            handleAppDidBecomeActive()
+        }
+        #endif
+        observersInstalled = true
+    }
+
+    func removeObserversIfNeeded() {
+        guard observersInstalled else { return }
+        let nc = NotificationCenter.default
+        nc.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        nc.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        #if canImport(UIKit)
+        nc.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        nc.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+        #endif
+        observersInstalled = false
+    }
+
+    func handleInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        switch type {
+        case .began:
+            // Pause recording or playback and mark flags
+            wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
+            wasPlayingBeforeInterruption = (state == .playing)
+            if state == .recording { pauseRecording() }
+            if state == .playing {
+                playbackPosition = player?.currentTime ?? playbackPosition
+                displayTime = playbackPosition
+                player?.pause()
+                state = .paused
+                stopPlaybackTimer()
+            }
+        case .ended:
+            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            // Try to resume if system suggests
+            if options.contains(.shouldResume) {
+                if wasRecordingBeforeInterruption {
+                    Task { await resumeRecording() }
+                } else if wasPlayingBeforeInterruption {
+                    // Only resume playback if not recording
+                    if state != .recording && state != .pausedRecording {
+                        player?.play()
+                        state = .playing
+                        startPlaybackTimer()
+                    }
+                }
+            }
+            wasRecordingBeforeInterruption = false
+            wasPlayingBeforeInterruption = false
+        @unknown default:
+            break
+        }
+    }
+
+    func handleRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        switch reason {
+        case .oldDeviceUnavailable:
+            // Headphones unplugged or BT lost
+            if state == .recording { pauseRecording() }
+            if state == .playing {
+                playbackPosition = player?.currentTime ?? playbackPosition
+                displayTime = playbackPosition
+                player?.pause()
+                state = .paused
+                stopPlaybackTimer()
+            }
+        case .newDeviceAvailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange, .unknown:
+            // Do not auto-resume recording; optionally resume playback if it was playing before
+            if wasPlayingBeforeInterruption && state != .recording && state != .pausedRecording {
+                // Validate there is at least one output route
+                let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
+                if let _ = outputs.first {
+                    player?.play()
+                    state = .playing
+                    startPlaybackTimer()
+                }
+                wasPlayingBeforeInterruption = false
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    func handleAppWillResignActive() {
+        // Mirror interruption began
+        wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
+        wasPlayingBeforeInterruption = (state == .playing)
+        if state == .recording { pauseRecording() }
+        if state == .playing {
+            playbackPosition = player?.currentTime ?? playbackPosition
+            displayTime = playbackPosition
+            player?.pause()
+            state = .paused
+            stopPlaybackTimer()
+        }
+    }
+
+    func handleAppDidBecomeActive() {
+        // Mirror interruption ended: do not force resume unless we had been playing and not recording
+        if wasRecordingBeforeInterruption {
+            // Allow user to resume manually; if system indicates shouldResume we'd handle in interruption handler
+        }
+        if wasPlayingBeforeInterruption && state != .recording && state != .pausedRecording {
+            player?.play()
+            state = .playing
+            startPlaybackTimer()
+        }
+        wasRecordingBeforeInterruption = false
+        wasPlayingBeforeInterruption = false
     }
 
     func startRecording() async {
@@ -201,6 +349,7 @@ private extension AudioRecorderView {
                 // Reset accumulated time because this is a new file
                 accumulatedRecordedTime = 0
                 finalRecordedTime = 0
+                displayTime = 0
                 startElapsedTimer()
                 state = .recording
                 errorMessage = nil
@@ -220,6 +369,7 @@ private extension AudioRecorderView {
         stopElapsedTimer()
         // Reset per-chunk elapsed
         elapsed = 0
+        displayTime = accumulatedRecordedTime
         state = .pausedRecording
     }
 
@@ -249,6 +399,7 @@ private extension AudioRecorderView {
         player?.currentTime = 0
         playbackPosition = 0
         stopElapsedTimer()
+        stopPlaybackTimer()
         // Do not change accumulatedRecordedTime here; let finalization compute total
     }
 
@@ -261,6 +412,7 @@ private extension AudioRecorderView {
             finalRecordedTime = max(total, accumulatedRecordedTime)
             // Reset per-chunk elapsed
             elapsed = 0
+            displayTime = finalRecordedTime
         }
         state = .idle
     }
@@ -274,8 +426,10 @@ private extension AudioRecorderView {
         case .playing:
             // Pause and store current time
             playbackPosition = player?.currentTime ?? playbackPosition
+            displayTime = playbackPosition
             player?.pause()
             state = .paused
+            stopPlaybackTimer()
 
         case .paused, .idle:
             do {
@@ -286,14 +440,17 @@ private extension AudioRecorderView {
                             // Reset to idle and clear position when finished
                             state = .idle
                             playbackPosition = 0
+                            displayTime = 0
                         }
                     })
                     player?.prepareToPlay()
                 }
                 // Resume from last position if available
                 player?.currentTime = playbackPosition
+                displayTime = player?.currentTime ?? playbackPosition
                 player?.play()
                 state = .playing
+                startPlaybackTimer()
             } catch {
                 setError("Playback error: \(error.localizedDescription)")
             }
@@ -313,6 +470,8 @@ private extension AudioRecorderView {
             accumulatedRecordedTime = 0
             finalRecordedTime = 0
             elapsed = 0
+            displayTime = 0
+            stopPlaybackTimer()
             state = .idle
         } catch {
             setError("Delete failed: \(error.localizedDescription)")
@@ -339,6 +498,7 @@ private extension AudioRecorderView {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             if let start = startTime {
                 elapsed = Date().timeIntervalSince(start)
+                displayTime = accumulatedRecordedTime + elapsed
             }
         }
         RunLoop.main.add(timer!, forMode: .common)
@@ -350,13 +510,36 @@ private extension AudioRecorderView {
         startTime = nil
     }
 
+    func startPlaybackTimer() {
+        // Avoid duplicating timers
+        if playbackTimer != nil { return }
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+            if state == .playing {
+                let current = player?.currentTime ?? playbackPosition
+                playbackPosition = current
+                displayTime = current
+            }
+        }
+        if let t = playbackTimer {
+            RunLoop.main.add(t, forMode: .common)
+        }
+    }
+
+    func stopPlaybackTimer() {
+        playbackTimer?.invalidate()
+        playbackTimer = nil
+    }
+
     func cleanup() {
         stopAll()
+        removeObserversIfNeeded()
+        stopPlaybackTimer()
         recorder = nil
         player = nil
         accumulatedRecordedTime = 0
         finalRecordedTime = 0
         elapsed = 0
+        displayTime = 0
     }
 }
 
@@ -404,3 +587,4 @@ private struct ControlButton: View {
     }
     .padding()
 }
+

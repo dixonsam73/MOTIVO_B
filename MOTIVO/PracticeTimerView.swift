@@ -78,12 +78,17 @@ struct PracticeTimerView: View {
     @State private var audioPlayer: AVAudioPlayer? = nil
     @State private var currentlyPlayingID: UUID? = nil
     @State private var audioPlayerDelegate: AudioPlayerDelegateBridge? = nil
-    
+    @State private var isAudioPlaying: Bool = false
+
     // Added state for audio titles and focus
     @State private var audioTitles: [UUID: String] = [:]
     @State private var audioAutoTitles: [UUID: String] = [:]
     @State private var audioDurations: [UUID: Int] = [:]
     @FocusState private var focusedAudioTitleID: UUID?
+
+    // Audio observer and interruption flags
+    @State private var audioObserversInstalled: Bool = false
+    @State private var wasPlayingBeforeInterruption_timer: Bool = false
 
     // Image capture state (mirrors AddEdit/PostRecord behavior)
     @State private var stagedImages: [StagedAttachment] = []
@@ -185,7 +190,10 @@ struct PracticeTimerView: View {
                     // ---------- Recording helpers (moved below timer) ----------
                     VStack(spacing: 12) {
                         HStack(spacing: 24) {
-                            Button { showAudioRecorder = true } label: {
+                            Button {
+                                stopAttachmentPlayback()
+                                showAudioRecorder = true
+                            } label: {
                                 Image(systemName: "mic.fill")
                                     .font(.system(size: 22, weight: .semibold))
                                     .frame(width: 44, height: 44)
@@ -360,7 +368,7 @@ struct PracticeTimerView: View {
                             ForEach(stagedAudio, id: \.id) { att in
                                 HStack(spacing: 12) {
                                     Button(action: { togglePlay(att.id) }) {
-                                        Image(systemName: currentlyPlayingID == att.id ? "pause.fill" : "play.fill")
+                                        Image(systemName: (currentlyPlayingID == att.id && isAudioPlaying) ? "pause.fill" : "play.fill")
                                     }
                                     .buttonStyle(.bordered)
 
@@ -448,6 +456,7 @@ struct PracticeTimerView: View {
                 case .inactive, .background:
                     stopTicker()
                     persistTimerSnapshot()
+                    removeAudioObserversIfNeeded()
                 @unknown default:
                     break
                 }
@@ -1007,12 +1016,40 @@ struct PracticeTimerView: View {
     }
 
     private func togglePlay(_ id: UUID) {
+        if showAudioRecorder {
+            return
+        }
         if currentlyPlayingID == id {
-            // Pause/stop current
+            // Toggle play/pause for the same item and keep the selection so the icon flips reliably
+            if let p = audioPlayer {
+                if p.isPlaying {
+                    p.pause()
+                    isAudioPlaying = false
+                    // Keep currentlyPlayingID so UI shows the item as selected (pause icon becomes play on next render)
+                    // No change needed to currentlyPlayingID here
+                } else {
+                    // Attempt to resume
+                    p.play()
+                    isAudioPlaying = p.isPlaying
+                    if !p.isPlaying {
+                        // Resume failed; clear selection to avoid stuck icon
+                        currentlyPlayingID = nil
+                        isAudioPlaying = false
+                    }
+                }
+            } else {
+                // Player is nil; clear selection so the button becomes actionable again
+                currentlyPlayingID = nil
+                isAudioPlaying = false
+            }
+            return
+        }
+        // Stop any existing playback first (single-player policy)
+        if audioPlayer?.isPlaying == true || currentlyPlayingID != nil {
             audioPlayer?.stop()
             audioPlayer = nil
             currentlyPlayingID = nil
-            return
+            isAudioPlaying = false
         }
         guard let item = stagedAudio.first(where: { $0.id == id }) else { return }
         do {
@@ -1023,12 +1060,15 @@ struct PracticeTimerView: View {
                 DispatchQueue.main.async {
                     if currentlyPlayingID == id {
                         currentlyPlayingID = nil
+                        isAudioPlaying = false
                     }
                 }
             })
             audioPlayer?.delegate = delegate
             audioPlayerDelegate = delegate // retain delegate so callbacks fire
+            installAudioObserversIfNeeded()
             audioPlayer?.play()
+            isAudioPlaying = (audioPlayer?.isPlaying == true)
             currentlyPlayingID = id
         } catch {
             print("Playback error: \(error)")
@@ -1040,9 +1080,118 @@ struct PracticeTimerView: View {
             audioPlayer?.stop()
             audioPlayer = nil
             currentlyPlayingID = nil
+            isAudioPlaying = false
         }
         stagedAudio.removeAll { $0.id == id }
         audioTitles.removeValue(forKey: id)
+    }
+
+    private func stopAttachmentPlayback() {
+        if audioPlayer?.isPlaying == true {
+            audioPlayer?.stop()
+        }
+        audioPlayer = nil
+        isAudioPlaying = false
+        currentlyPlayingID = nil
+    }
+
+    private func installAudioObserversIfNeeded() {
+        guard !audioObserversInstalled else { return }
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
+            handleTimerAudioInterruption(note)
+        }
+        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            handleTimerAudioRouteChange(note)
+        }
+        #if canImport(UIKit)
+        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            if audioPlayer?.isPlaying == true {
+                wasPlayingBeforeInterruption_timer = true
+                audioPlayer?.pause()
+                isAudioPlaying = false
+                // do not clear currentlyPlayingID so UI shows paused state
+            }
+        }
+        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            if wasPlayingBeforeInterruption_timer, audioPlayer != nil {
+                audioPlayer?.play()
+                isAudioPlaying = true
+            } else if audioPlayer == nil {
+                // Player deallocated or invalid — reset UI so the button toggles work
+                currentlyPlayingID = nil
+                isAudioPlaying = false
+            }
+            wasPlayingBeforeInterruption_timer = false
+        }
+        #endif
+        audioObserversInstalled = true
+    }
+
+    private func removeAudioObserversIfNeeded() {
+        guard audioObserversInstalled else { return }
+        let nc = NotificationCenter.default
+        nc.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        nc.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        #if canImport(UIKit)
+        nc.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        nc.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+        #endif
+        audioObserversInstalled = false
+    }
+
+    private func handleTimerAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+        switch type {
+        case .began:
+            if audioPlayer?.isPlaying == true {
+                wasPlayingBeforeInterruption_timer = true
+                audioPlayer?.pause()
+                isAudioPlaying = false
+                // Keep currentlyPlayingID set so UI shows paused state
+            }
+        case .ended:
+            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+            if options.contains(.shouldResume), wasPlayingBeforeInterruption_timer, audioPlayer != nil {
+                // Try to resume playback
+                audioPlayer?.play()
+                isAudioPlaying = true
+            } else {
+                // If we can't resume, clear stuck UI by resetting currentlyPlayingID
+                wasPlayingBeforeInterruption_timer = false
+                if audioPlayer == nil || audioPlayer?.url == nil {
+                    currentlyPlayingID = nil
+                    isAudioPlaying = false
+                }
+            }
+            wasPlayingBeforeInterruption_timer = false
+        @unknown default:
+            break
+        }
+    }
+
+    private func handleTimerAudioRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        switch reason {
+        case .oldDeviceUnavailable:
+            if audioPlayer?.isPlaying == true {
+                wasPlayingBeforeInterruption_timer = true
+                audioPlayer?.pause()
+                isAudioPlaying = false
+            }
+        default:
+            break
+        }
+        // If the route change invalidated the player, clear UI selection to prevent a stuck button
+        if audioPlayer == nil {
+            currentlyPlayingID = nil
+            isAudioPlaying = false
+        }
     }
 
     // MARK: - Image attachment helpers (camera)
