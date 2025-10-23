@@ -96,6 +96,10 @@ struct PracticeTimerView: View {
     @State private var showCamera: Bool = false
     @State private var showCameraDeniedAlert: Bool = false
 
+    // --- Inserted video recording and attachments state ---
+    @State private var showVideoRecorder: Bool = false
+    @State private var stagedVideos: [StagedAttachment] = []
+
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
@@ -218,15 +222,18 @@ struct PracticeTimerView: View {
                                 .accessibilityHint(Text("Opens the camera to take a photo."))
                             }
 
-                            Button { showVideoHelp = true } label: {
+                            Button {
+                                stopAttachmentPlayback()
+                                showVideoRecorder = true
+                            } label: {
                                 Image(systemName: "video.fill")
                                     .font(.system(size: 22, weight: .semibold))
                                     .frame(width: 44, height: 44)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityLabel(Text("Record video help"))
-                            .accessibilityHint(Text("Opens instructions for using your device’s app to capture video."))
+                            .accessibilityLabel(Text("Record video"))
+                            .accessibilityHint(Text("Opens the camera to record a video."))
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -303,8 +310,8 @@ struct PracticeTimerView: View {
                     }
                     .cardSurface()
 
-                    // --- Attachments card (images + audio) ---
-                    if !stagedImages.isEmpty || !stagedAudio.isEmpty {
+                    // --- Attachments card (images + audio + videos) ---
+                    if !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Attachments").sectionHeader()
 
@@ -407,6 +414,43 @@ struct PracticeTimerView: View {
                                 }
                             }
                             
+                            // Videos grid (placeholder thumbs)
+                            if !stagedVideos.isEmpty {
+                                let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                                LazyVGrid(columns: columns, spacing: 12) {
+                                    ForEach(stagedVideos, id: \.id) { att in
+                                        ZStack(alignment: .topTrailing) {
+                                            ZStack {
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .fill(Color.secondary.opacity(0.08))
+                                                Image(systemName: "film")
+                                                    .imageScale(.large)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .frame(width: 128, height: 128)
+
+                                            // Delete
+                                            VStack(spacing: 6) {
+                                                Button {
+                                                    // Remove surrogate temp file best-effort
+                                                    let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension("mov")
+                                                    try? FileManager.default.removeItem(at: tmp)
+                                                    stagedVideos.removeAll { $0.id == att.id }
+                                                } label: {
+                                                    Image(systemName: "trash")
+                                                        .font(.system(size: 16, weight: .semibold))
+                                                        .padding(8)
+                                                        .background(.ultraThinMaterial, in: Circle())
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                            .padding(6)
+                                        }
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+
                             if let warn = stagedSizeWarning {
                                 Text(warn)
                                     .font(.footnote)
@@ -533,7 +577,7 @@ struct PracticeTimerView: View {
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                     notesPrefill: composeCompletedTasksNotesString(),
-                    prefillAttachments: (stagedImages + stagedAudio),
+                    prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                     prefillAttachmentNames: audioTitles,
                     onSaved: {
                         didSaveFromReview = true
@@ -542,6 +586,7 @@ struct PracticeTimerView: View {
                         stagedAudio.removeAll()
                         audioTitles.removeAll()
                         stagedImages.removeAll()
+                        stagedVideos.removeAll()
                         selectedThumbnailID = nil
                         isPresented = false
                     }
@@ -555,6 +600,7 @@ struct PracticeTimerView: View {
                     stagedAudio.removeAll()
                     audioTitles.removeAll()
                     stagedImages.removeAll()
+                    stagedVideos.removeAll()
                     selectedThumbnailID = nil
                     purgeStagedTempFiles()
                 }
@@ -594,6 +640,21 @@ struct PracticeTimerView: View {
                 }
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
+            }
+            // Video recorder fullScreenCover replacement
+            .fullScreenCover(isPresented: $showVideoRecorder) {
+                NavigationStack {
+                    VideoRecorderView { url in
+                        stageVideoURL(url)
+                        showVideoRecorder = false
+                    }
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Close") { showVideoRecorder = false }
+                        }
+                    }
+                    .navigationBarTitleDisplayMode(.inline)
+                }
             }
             .sheet(isPresented: $showCamera) {
                 CameraCaptureView { image in
@@ -1010,16 +1071,35 @@ struct PracticeTimerView: View {
                 .appendingPathExtension(ext)
             try? fm.removeItem(at: url)
         }
+        // Purge video surrogates
+        for att in stagedVideos {
+            let ext = "mov"
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(att.id.uuidString)
+                .appendingPathExtension(ext)
+            try? fm.removeItem(at: url)
+        }
     }
     
-    private var totalStagedBytes: Int {
+    private var totalStagedBytesImagesAudio: Int {
         let imgs = stagedImages.reduce(0) { $0 + $1.data.count }
         let auds = stagedAudio.reduce(0) { $0 + $1.data.count }
         return imgs + auds
     }
+    private var totalStagedBytesVideo: Int {
+        stagedVideos.reduce(0) { $0 + $1.data.count }
+    }
     private var stagedSizeWarning: String? {
-        let limit = 100 * 1024 * 1024 // 100 MB
-        return totalStagedBytes > limit ? "Large staging size (~\(totalStagedBytes / (1024*1024)) MB). Consider saving or removing some items." : nil
+        let nonVideoLimit = 100 * 1024 * 1024 // 100 MB (existing behavior)
+        let videoLimit = 500 * 1024 * 1024     // 500 MB for videos
+        var warnings: [String] = []
+        if totalStagedBytesImagesAudio > nonVideoLimit {
+            warnings.append("Large staging size for images/audio (~\(totalStagedBytesImagesAudio / (1024*1024)) MB). Consider saving or removing some items.")
+        }
+        if totalStagedBytesVideo > videoLimit {
+            warnings.append("Large video staging size (~\(totalStagedBytesVideo / (1024*1024)) MB). Consider trimming or removing some items.")
+        }
+        return warnings.isEmpty ? nil : warnings.joined(separator: "\n")
     }
 
     // MARK: - Audio attachment helpers
@@ -1052,6 +1132,18 @@ struct PracticeTimerView: View {
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
         } catch {
             print("Failed to stage audio: \(error)")
+        }
+    }
+
+    private func stageVideoURL(_ url: URL) {
+        do {
+            let data = try Data(contentsOf: url)
+            // Clean up original file to avoid duplicates taking space
+            try? FileManager.default.removeItem(at: url)
+            let id = UUID()
+            stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
+        } catch {
+            print("Failed to stage video: \(error)")
         }
     }
 
