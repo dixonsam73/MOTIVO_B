@@ -871,7 +871,16 @@ struct PostRecordDetailsView: View {
             viewContext.processPendingChanges()
             onSaved?()
         } catch {
-            // Best-effort cleanup: purge any temp surrogates; committed files may remain if save failed after write.
+            // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
+            let fm = FileManager.default
+            if let set = s.attachments as? Set<Attachment> {
+                for a in set {
+                    if a.objectID.isTemporaryID, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                        AttachmentStore.removeIfExists(path: path)
+                    }
+                }
+            }
+            viewContext.rollback()
             purgeStagedTempFiles()
             print("Error saving session (timer review): \(error)")
         }
@@ -930,6 +939,11 @@ struct PostRecordDetailsView: View {
         let namesKey = "stagedAudioNames_temp"
         let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
 
+        // Track rollback closures for files written during this commit attempt
+        var rollbacks: [() -> Void] = []
+        var createdAttachments: [Attachment] = []
+
+        // 1) Write files using rollback-safe API and create Attachment objects
         for att in stagedAttachments {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
@@ -939,19 +953,47 @@ struct PostRecordDetailsView: View {
                 } else {
                     baseName = att.id.uuidString
                 }
-                let path = try AttachmentStore.saveData(att.data, suggestedName: baseName, ext: ext)
+                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: baseName, ext: ext)
+                rollbacks.append(result.rollback)
+
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
+                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
+
                 // Attempt to migrate privacy from staged keys (ID/Temp URL) to final keys (ID/File URL)
-                let finalURL = URL(fileURLWithPath: path)
+                let finalURL = URL(fileURLWithPath: result.path)
                 let stagedURL = surrogateURL(for: att)
                 migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
+
+                createdAttachments.append(created)
             } catch {
+                // If any write/add fails mid-loop, best-effort rollback files written so far and clear created objects from the context
+                for rb in rollbacks { rb() }
+                rollbacks.removeAll()
+                // Delete any created attachments from the context (unsaved yet)
+                for a in createdAttachments { ctx.delete(a) }
+                createdAttachments.removeAll()
                 print("Attachment commit failed: ", error)
+                break
             }
         }
+
+        // 2) Update thumbnail flags across ALL attachments in this session to reflect selection
+        do {
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "session == %@", session.objectID)
+            let existing = try ctx.fetch(req)
+            for a in existing {
+                let id = (a.value(forKey: "id") as? UUID)
+                let isThumb = (id != nil) && (id == chosenThumbID)
+                a.setValue(isThumb, forKey: "isThumbnail")
+            }
+        } catch {
+            // If thumbnail update fails before save, it will be covered by context save error handling outside.
+            print("Failed to update thumbnail flags: ", error)
+        }
+
+        // Note: Do not save the context here; caller will attempt save and handle rollback of files on failure.
         UserDefaults.standard.removeObject(forKey: namesKey)
-        stagedAttachments.removeAll()
     }
 
     private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {

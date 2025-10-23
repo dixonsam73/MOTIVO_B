@@ -897,11 +897,19 @@ private var instrumentPicker: some View {
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
-            // Return to ContentView (root) — triple, staggered dismiss to unwind sheet/fullScreenCover and underlying presenter
             dismiss()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
         } catch {
+            // Delete any files written during this commit attempt by scanning attachments without permanent IDs
+            if let set = s.attachments as? Set<Attachment> {
+                for a in set {
+                    if a.objectID.isTemporaryID, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                        AttachmentStore.removeIfExists(path: path)
+                    }
+                }
+            }
+            viewContext.rollback()
             print("Save error (Add/Edit): \(error)")
         }
     }
@@ -1203,21 +1211,32 @@ private var instrumentPicker: some View {
         var chosenThumbID = selectedThumbnailID
         if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
 
+        // Track rollback closures for files written during this commit attempt
+        var rollbacks: [() -> Void] = []
+        var createdAttachments: [Attachment] = []
+
         // 1) Add ONLY newly staged attachments (skip those that were preloaded from Core Data)
         for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-                let path = try AttachmentStore.saveData(att.data, suggestedName: att.id.uuidString, ext: ext)
+                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: att.id.uuidString, ext: ext)
+                rollbacks.append(result.rollback)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                _ = try AttachmentStore.addAttachment(kind: att.kind, filePath: path, to: session, isThumbnail: isThumb, ctx: ctx)
+                let created = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
+                createdAttachments.append(created)
             } catch {
+                // Roll back any files written so far and discard created (unsaved) attachments
+                for rb in rollbacks { rb() }
+                rollbacks.removeAll()
+                for a in createdAttachments { ctx.delete(a) }
+                createdAttachments.removeAll()
                 print("Attachment commit failed: ", error)
+                break
             }
         }
 
         // 2) Update thumbnail flags across ALL existing attachments to reflect selection
         do {
-            // Fetch all attachments for this session
             let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
             req.predicate = NSPredicate(format: "session == %@", session.objectID)
             let existing = try ctx.fetch(req)
@@ -1230,7 +1249,7 @@ private var instrumentPicker: some View {
             print("Failed to update thumbnail flags: ", error)
         }
 
-        // Clear the staging area after commit
+        // Clear the staging area after successful commit creation (actual persistence depends on context.save())
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
     }
@@ -1331,6 +1350,7 @@ private var instrumentPicker: some View {
     }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
