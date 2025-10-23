@@ -337,15 +337,24 @@ private extension AudioRecorderView {
         // Start a new recording (fresh). Only allowed when not currently recording or pausedRecording.
         guard state != .recording && state != .pausedRecording else { return }
         await configureSessionIfNeeded()
-        let url = newRecordingURL()
+        
+        let fileURL = newRecordingURL() // ensure .m4a extension
+
+        let settings: [String: Any] = [
+            AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
+            AVSampleRateKey: 44100,
+            AVNumberOfChannelsKey: 1,
+            AVEncoderBitRateKey: 128000,
+            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+        ]
 
         do {
-            recorder = try AVAudioRecorder(url: url, settings: recordingSettings())
+            recorder = try AVAudioRecorder(url: fileURL, settings: settings)
             recorder?.isMeteringEnabled = true
             recorder?.prepareToRecord()
 
             if recorder?.record() == true {
-                recordingURL = url
+                recordingURL = fileURL
                 // Reset accumulated time because this is a new file
                 accumulatedRecordedTime = 0
                 finalRecordedTime = 0
@@ -406,6 +415,38 @@ private extension AudioRecorderView {
     func stopAllAndFinalizeRecording() {
         let wasRecording = (state == .recording) || (state == .pausedRecording)
         stopAll()
+
+        // Junk Clip Suppression: discard very short accidental taps
+        if let fileURL = recordingURL {
+            // Measure finalized file duration using AVAudioPlayer for reliability
+            var duration: TimeInterval = 0
+            if let p = try? AVAudioPlayer(contentsOf: fileURL) {
+                duration = p.duration
+            } else {
+                // Fallback: use recorder's last known currentTime if available
+                duration = recorder?.currentTime ?? 0
+            }
+
+            if duration < 0.5 {
+                recorder?.deleteRecording()
+                try? FileManager.default.removeItem(at: fileURL)
+                recorder = nil
+                print("Discarded junk recording (<0.5s)")
+                // Reset state for a clean slate
+                recordingURL = nil
+                playbackPosition = 0
+                accumulatedRecordedTime = 0
+                finalRecordedTime = 0
+                elapsed = 0
+                displayTime = 0
+                state = .idle
+                return
+            } else {
+                // Optional: confirm format consistency
+                print("Saved audio: 44.1kHz AAC Mono, duration: \(duration)s")
+            }
+        }
+
         if wasRecording {
             // If we were in active or paused recording, compute total recorded time
             let total = accumulatedRecordedTime + ((state == .recording) ? elapsed : 0)
