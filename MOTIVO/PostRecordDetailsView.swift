@@ -395,7 +395,7 @@ struct PostRecordDetailsView: View {
             .navigationTitle("Session Review")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { 
+                    Button("Cancel") {
                         isPresented = false
                         dismissToRoot()
                         purgeStagedTempFiles()
@@ -1077,6 +1077,9 @@ fileprivate struct AttachmentThumbCell: View {
     let isPrivate: (_ id: UUID?, _ url: URL?) -> Bool
     let setPrivate: (_ id: UUID?, _ url: URL?, _ value: Bool) -> Void
 
+    @State private var videoPoster: UIImage? = nil
+    @State private var isPresentingVideo = false
+
     private let tile: CGFloat = 128
 
     var body: some View {
@@ -1175,7 +1178,28 @@ fileprivate struct AttachmentThumbCell: View {
                 }
             }
         case .video:
-            placeholder(system: "film")
+            ZStack {
+                if let poster = videoPoster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    placeholder(system: "film")
+                        .task(id: resolvedURL) {
+                            guard let url = resolvedURL else { return }
+                            await generatePosterIfNeeded(for: url)
+                        }
+                }
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 2)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture { if resolvedURL != nil { isPresentingVideo = true } }
+            .sheet(isPresented: $isPresentingVideo) {
+                if let url = resolvedURL { VideoPlayerSheet(url: url) }
+            }
         case .file:
             placeholder(system: "doc")
         }
@@ -1188,5 +1212,35 @@ fileprivate struct AttachmentThumbCell: View {
             .foregroundStyle(.secondary)
             .padding(24)
     }
+
+    private func generatePosterIfNeeded(for url: URL) async {
+        if videoPoster != nil { return }
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                #if canImport(UIKit)
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                #else
+                let img: UIImage? = nil
+                #endif
+                DispatchQueue.main.async {
+                    self.videoPoster = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
 }
 
+#if canImport(UIKit)
+import AVKit
+fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = AVPlayer(url: url)
+        vc.player?.isMuted = true
+        return vc
+    }
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+}
+#endif

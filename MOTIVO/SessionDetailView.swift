@@ -194,8 +194,8 @@ struct SessionDetailView: View {
             }
 
             // Attachments (only show when present)
-            let (images, others) = splitAttachments()
-            if !(images.isEmpty && others.isEmpty) {
+            let (images, videos, others) = splitAttachments()
+            if !(images.isEmpty && videos.isEmpty && others.isEmpty) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
                     if !images.isEmpty {
@@ -217,6 +217,19 @@ struct SessionDetailView: View {
                                     viewerStartIndex = idx
                                     isShowingAttachmentViewer = true
                                 }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    if !videos.isEmpty {
+                        LazyVGrid(columns: grid, spacing: 12) {
+                            ForEach(Array(videos.enumerated()), id: \.element.objectID) { (idx, a) in
+                                let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+                                VideoThumbCell(fileURL: url, attachment: a)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if let u = url { previewURL = u; isShowingPreview = true }
+                                    }
                             }
                         }
                         .padding(.vertical, 4)
@@ -457,19 +470,24 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
 
     // MARK: - Attachments split & preview
 
-    private func splitAttachments() -> (images: [Attachment], others: [Attachment]) {
+    private func splitAttachments() -> (images: [Attachment], videos: [Attachment], others: [Attachment]) {
         let set = (session.attachments as? Set<Attachment>) ?? []
         let images = set.filter { ($0.kind ?? "") == "image" }.sorted { (a, b) in
             let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
             let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
             return da < db
         }
-        let others = set.filter { ($0.kind ?? "") != "image" }.sorted { (a, b) in
+        let videos = set.filter { ($0.kind ?? "") == "video" }.sorted { (a, b) in
             let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
             let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
             return da < db
         }
-        return (images, others)
+        let others = set.filter { let k = ($0.kind ?? ""); return k != "image" && k != "video" }.sorted { (a, b) in
+            let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
+            let db = (b.value(forKey: "createdAt") as? Date) ?? .distantPast
+            return da < db
+        }
+        return (images, videos, others)
     }
 
     private func openQuickLook(_ a: Attachment) {
@@ -640,3 +658,69 @@ fileprivate struct ThumbCell: View {
     }
 }
 
+#if canImport(UIKit)
+import AVKit
+fileprivate struct VideoThumbCell: View {
+    let fileURL: URL?
+    let attachment: Attachment
+    @State private var poster: UIImage? = nil
+
+    private var attachmentID: UUID? { (attachment.value(forKey: "id") as? UUID) }
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            ZStack(alignment: .center) {
+                Group {
+                    if let poster {
+                        Image(uiImage: poster).resizable().scaledToFill()
+                    } else {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .fill(Color.secondary.opacity(0.08))
+                            Image(systemName: "video")
+                                .imageScale(.large)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                }
+                .frame(width: 84, height: 84)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                )
+
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 2)
+            }
+            if isPrivateAttachment(id: attachmentID, url: fileURL) {
+                Image(systemName: "eye.slash")
+                    .imageScale(.small)
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(6)
+                    .accessibilityHidden(true)
+            }
+        }
+        .task(id: fileURL) {
+            guard poster == nil, let u = fileURL else { return }
+            await generatePoster(u)
+        }
+    }
+
+    private func generatePoster(_ url: URL) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                DispatchQueue.main.async {
+                    self.poster = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
+}
+#endif

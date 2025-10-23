@@ -20,6 +20,7 @@ import SwiftUI
 import Combine
 import CoreData
 import AVFoundation
+import AVKit
 
 // SessionActivityType moved to SessionActivityType.swift
 
@@ -99,6 +100,9 @@ struct PracticeTimerView: View {
     // --- Inserted video recording and attachments state ---
     @State private var showVideoRecorder: Bool = false
     @State private var stagedVideos: [StagedAttachment] = []
+    @State private var videoThumbnails: [UUID: UIImage] = [:]
+    @State private var showVideoPlayer: Bool = false
+    @State private var videoPlayerItem: AVPlayer? = nil
 
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -420,22 +424,50 @@ struct PracticeTimerView: View {
                                 LazyVGrid(columns: columns, spacing: 12) {
                                     ForEach(stagedVideos, id: \.id) { att in
                                         ZStack(alignment: .topTrailing) {
-                                            ZStack {
-                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                    .fill(Color.secondary.opacity(0.08))
-                                                Image(systemName: "film")
-                                                    .imageScale(.large)
-                                                    .foregroundStyle(.secondary)
+                                            GeometryReader { geo in
+                                                let side = geo.size.width
+                                                ZStack {
+                                                    if let thumb = videoThumbnails[att.id] {
+                                                        Image(uiImage: thumb)
+                                                            .resizable()
+                                                            .scaledToFill()
+                                                            .frame(width: side, height: side)
+                                                            .clipped()
+                                                    } else {
+                                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                            .fill(Color.secondary.opacity(0.08))
+                                                        Image(systemName: "film")
+                                                            .imageScale(.large)
+                                                            .foregroundStyle(.secondary)
+                                                    }
+                                                    // Center play overlay button
+                                                    Button(action: { playVideo(att.id) }) {
+                                                        ZStack {
+                                                            Circle()
+                                                                .fill(.ultraThinMaterial)
+                                                                .frame(width: 44, height: 44)
+                                                            Image(systemName: "play.fill")
+                                                                .font(.system(size: 18, weight: .semibold))
+                                                                .foregroundStyle(.primary)
+                                                        }
+                                                    }
+                                                }
+                                                .frame(width: side, height: side)
+                                                .background(Color.secondary.opacity(0.08))
+                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                                )
                                             }
-                                            .frame(width: 128, height: 128)
-
-                                            // Delete
+                                            // Delete button remains in the top-right
                                             VStack(spacing: 6) {
                                                 Button {
                                                     // Remove surrogate temp file best-effort
                                                     let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension("mov")
                                                     try? FileManager.default.removeItem(at: tmp)
                                                     stagedVideos.removeAll { $0.id == att.id }
+                                                    videoThumbnails.removeValue(forKey: att.id)
                                                 } label: {
                                                     Image(systemName: "trash")
                                                         .font(.system(size: 16, weight: .semibold))
@@ -446,6 +478,7 @@ struct PracticeTimerView: View {
                                             }
                                             .padding(6)
                                         }
+                                        .aspectRatio(1, contentMode: .fit)
                                     }
                                 }
                                 .padding(.vertical, 4)
@@ -587,6 +620,7 @@ struct PracticeTimerView: View {
                         audioTitles.removeAll()
                         stagedImages.removeAll()
                         stagedVideos.removeAll()
+                        videoThumbnails.removeAll()
                         selectedThumbnailID = nil
                         isPresented = false
                     }
@@ -601,6 +635,7 @@ struct PracticeTimerView: View {
                     audioTitles.removeAll()
                     stagedImages.removeAll()
                     stagedVideos.removeAll()
+                    videoThumbnails.removeAll()
                     selectedThumbnailID = nil
                     purgeStagedTempFiles()
                 }
@@ -659,6 +694,19 @@ struct PracticeTimerView: View {
             .sheet(isPresented: $showCamera) {
                 CameraCaptureView { image in
                     stageImage(image)
+                }
+            }
+            .sheet(isPresented: $showVideoPlayer, onDismiss: {
+                videoPlayerItem?.pause()
+                videoPlayerItem = nil
+            }) {
+                if let player = videoPlayerItem {
+                    VideoPlayer(player: player)
+                        .onAppear { player.play() }
+                        .ignoresSafeArea()
+                } else {
+                    Text("Unable to play video")
+                        .padding()
                 }
             }
             .alert("Camera access denied",
@@ -1079,6 +1127,8 @@ struct PracticeTimerView: View {
                 .appendingPathExtension(ext)
             try? fm.removeItem(at: url)
         }
+        // Clear cached video thumbnails when purging staged items
+        videoThumbnails.removeAll()
     }
     
     private var totalStagedBytesImagesAudio: Int {
@@ -1141,9 +1191,52 @@ struct PracticeTimerView: View {
             // Clean up original file to avoid duplicates taking space
             try? FileManager.default.removeItem(at: url)
             let id = UUID()
+
+            // Generate thumbnail from the video data and cache it
+            if let thumb = generateVideoThumbnail(from: data, id: id) {
+                videoThumbnails[id] = thumb
+            }
+
             stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
         } catch {
             print("Failed to stage video: \(error)")
+        }
+    }
+
+    // Prepare and present a video player for a given staged video ID
+    private func playVideo(_ id: UUID) {
+        guard let att = stagedVideos.first(where: { $0.id == id }) else { return }
+        // Write data to a temp file for AVPlayer
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+        do {
+            try att.data.write(to: url, options: .atomic)
+            videoPlayerItem = AVPlayer(url: url)
+            showVideoPlayer = true
+        } catch {
+            print("Failed to prepare video for playback: \(error)")
+        }
+    }
+
+    // Generate a thumbnail image for a video from raw Data by writing a temp file and using AVAssetImageGenerator
+    private func generateVideoThumbnail(from data: Data, id: UUID) -> UIImage? {
+        // Write to a temporary surrogate URL so AVAsset can read it
+        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+        do {
+            try data.write(to: tmp, options: .atomic)
+            let asset = AVAsset(url: tmp)
+            let imgGen = AVAssetImageGenerator(asset: asset)
+            imgGen.appliesPreferredTrackTransform = true
+            imgGen.maximumSize = CGSize(width: 512, height: 512)
+            // Choose a representative frame around 40% into the clip (fallback to 0.2s)
+            let duration = asset.duration
+            let durationSeconds = duration.isNumeric ? duration.seconds : 0
+            let targetSeconds = durationSeconds > 0 ? min(max(durationSeconds * 0.4, 0.2), max(durationSeconds - 0.1, 0.2)) : 0.2
+            let time = CMTime(seconds: targetSeconds, preferredTimescale: 600)
+            let cg = try imgGen.copyCGImage(at: time, actualTime: nil)
+            return UIImage(cgImage: cg)
+        } catch {
+            print("Thumbnail generation failed: \(error)")
+            return nil
         }
     }
 

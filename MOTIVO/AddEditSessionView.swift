@@ -1336,7 +1336,13 @@ private var instrumentPicker: some View {
                 }
             }
         case .video:
-            Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary)
+            ZStack {
+                VideoPosterView(url: surrogateURL(for: att))
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 2)
+            }
         case .file:
             Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
         }
@@ -1352,6 +1358,105 @@ private var instrumentPicker: some View {
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
 
 
+#if canImport(UIKit)
+import AVKit
+fileprivate struct VideoPosterView: View {
+    let url: URL?
+    @State private var poster: UIImage? = nil
+    @State private var isPresenting = false
 
+    var body: some View {
+        ZStack {
+            if let poster {
+                Image(uiImage: poster)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .clipped()
+            } else {
+                Image(systemName: "film")
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task { if let u = await resolvedPlayableURL() { isPresenting = true } }
+        }
+        .sheet(isPresented: $isPresenting) {
+            TaskView { // lightweight wrapper to bridge async URL resolution into the sheet
+                if let u = await resolvedPlayableURL() { VideoPlayerSheet_AE(url: u) }
+            }
+        }
+        .task(id: url) {
+            if poster == nil, let u = await resolvedPlayableURL() {
+                await generatePoster(u)
+            }
+        }
+    }
 
+    // Prefer the surrogate temp URL if it exists on disk; otherwise fall back to the persisted file URL if available.
+    private func resolvedPlayableURL() async -> URL? {
+        if let u = url, FileManager.default.fileExists(atPath: u.path) { return u }
+        // Attempt to derive from staged id embedded in the surrogate path (..../<uuid>.mov)
+        if let u = url, let id = UUID(uuidString: u.deletingPathExtension().lastPathComponent) {
+            // Search Core Data for an Attachment with this id to get the persisted file path
+            let ctx = PersistenceController.shared.container.viewContext
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.fetchLimit = 1
+            req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
+            if let match = try? ctx.fetch(req).first, let stored = match.value(forKey: "fileURL") as? String, !stored.isEmpty {
+                // Resolve to a real file URL on disk
+                if let direct = URL(string: stored), direct.isFileURL, FileManager.default.fileExists(atPath: direct.path) { return direct }
+                if FileManager.default.fileExists(atPath: stored) { return URL(fileURLWithPath: stored) }
+                let filename = URL(fileURLWithPath: stored).lastPathComponent
+                let fm = FileManager.default
+                let dirs: [URL?] = [
+                    fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+                    fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+                    fm.temporaryDirectory
+                ]
+                for base in dirs.compactMap({ $0 }) {
+                    let candidate = base.appendingPathComponent(filename)
+                    if fm.fileExists(atPath: candidate.path) { return candidate }
+                }
+            }
+        }
+        return url // last resort
+    }
+
+    private func generatePoster(_ url: URL) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                DispatchQueue.main.async {
+                    self.poster = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
+}
+
+// Async-to-View bridge for sheet content
+fileprivate struct TaskView<Content: View>: View {
+    @ViewBuilder var content: () async -> Content
+    @State private var built: Content? = nil
+    var body: some View {
+        Group { if let built { built } else { ProgressView() } }
+            .task { built = await content() }
+    }
+}
+
+fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
+    let url: URL
+    func makeUIViewController(context: Context) -> AVPlayerViewController {
+        let vc = AVPlayerViewController()
+        vc.player = AVPlayer(url: url)
+        vc.player?.isMuted = true
+        return vc
+    }
+    func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
+}
+#endif
 

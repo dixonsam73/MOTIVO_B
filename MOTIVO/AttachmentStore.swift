@@ -6,12 +6,49 @@
 import Foundation
 import CoreData
 import UniformTypeIdentifiers
+import AVFoundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 enum AttachmentKind: String {
     case audio, video, image, file
 }
 
 struct AttachmentStore {
+
+    // MARK: - Lightweight video poster generation (in-memory cache)
+    #if canImport(UIKit)
+    private final class _PosterCache {
+        static let shared = _PosterCache()
+        let cache = NSCache<NSString, UIImage>()
+        private init() {}
+    }
+    #endif
+
+    /// Generates (and caches) a poster image for a local video URL.
+    /// - Note: Synchronous generator is called off-main by callers. This method is safe to call from background threads.
+    #if canImport(UIKit)
+    static func generateVideoPoster(url: URL, at seconds: Double = 0.5) -> UIImage? {
+        let key = url.path as NSString
+        if let cached = _PosterCache.shared.cache.object(forKey: key) { return cached }
+        let asset = AVAsset(url: url)
+        let gen = AVAssetImageGenerator(asset: asset)
+        gen.appliesPreferredTrackTransform = true
+        gen.requestedTimeToleranceBefore = .zero
+        gen.requestedTimeToleranceAfter = .zero
+        let duration = asset.duration.seconds
+        let clamped = min(max(seconds, 0), max(duration * 0.5, 0.5))
+        do {
+            let cg = try gen.copyCGImage(at: CMTime(seconds: clamped, preferredTimescale: 600), actualTime: nil)
+            let img = UIImage(cgImage: cg)
+            _PosterCache.shared.cache.setObject(img, forKey: key)
+            return img
+        } catch {
+            return nil
+        }
+    }
+    #endif
 
     // MARK: - Public API
 
@@ -93,3 +130,4 @@ struct AttachmentStore {
         return candidate
     }
 }
+
