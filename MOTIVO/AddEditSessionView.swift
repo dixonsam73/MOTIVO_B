@@ -368,7 +368,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                                     // Right-side vertical controls: Star, Privacy, Delete
                                     VStack(spacing: 6) {
-                                        if att.kind == .image {
+                                        if att.kind == .image || att.kind == .audio || att.kind == .video {
                                             Text(selectedThumbnailID == att.id ? "★" : "☆")
                                                 .font(.system(size: 16))
                                                 .padding(8)
@@ -415,7 +415,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                     .padding(6)
                                 }
                                 .contextMenu {
-                                    if att.kind == .image {
+                                    if att.kind == .image || att.kind == .audio || att.kind == .video {
                                         Button("Set as Thumbnail") { selectedThumbnailID = att.id }
                                     }
                                     Button(role: .destructive) { 
@@ -1456,4 +1456,5 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 

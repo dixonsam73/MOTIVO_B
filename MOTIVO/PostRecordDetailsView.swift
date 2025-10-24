@@ -1092,8 +1092,8 @@ fileprivate struct AttachmentThumbCell: View {
 
             // Right-side vertical control column: Star, Privacy, Delete
             VStack(spacing: 6) {
-                // Star (thumbnail selection for images)
-                if att.kind == .image {
+                // Star (thumbnail selection for images, audio, and video)
+                if att.kind == .image || att.kind == .audio || att.kind == .video {
                     Text(isThumbnail ? "★" : "☆")
                         .font(.system(size: 16))
                         .padding(8)
@@ -1131,7 +1131,7 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(6)
         }
         .contextMenu {
-            if att.kind == .image {
+            if att.kind == .image || att.kind == .audio || att.kind == .video {
                 Button("Set as Thumbnail") { onMakeThumbnail() }
             }
             Button(role: .destructive) { onRemove() } label: { Text("Remove") }

@@ -465,14 +465,8 @@ fileprivate struct SessionRow: View {
     private var attachments: [Attachment] {
         (session.attachments as? Set<Attachment>).map { Array($0) } ?? []
     }
-    private var imageAttachments: [Attachment] {
-        attachments.filter { attachmentKind($0) == "image" }
-    }
-    private var nonImageAttachments: [Attachment] {
-        attachments.filter { attachmentKind($0) != "image" }
-    }
-    private var favoriteImage: Attachment? {
-        pickFavoriteImage(from: imageAttachments)
+    private var favoriteAttachment: Attachment? {
+        pickFavoriteAttachment(from: attachments)
     }
 
     var body: some View {
@@ -491,9 +485,9 @@ fileprivate struct SessionRow: View {
                 .accessibilityLabel("Instrument and activity")
                 .accessibilityIdentifier("row.subtitle")
 
-            // Thumbnails/icons strip
-            if !attachments.isEmpty {
-                AttachmentStrip(favoriteImage: favoriteImage, nonImageAttachments: nonImageAttachments)
+            // Single favorite attachment preview (only one allowed/displayed)
+            if let fav = favoriteAttachment {
+                SingleAttachmentPreview(attachment: fav)
                     .padding(.top, 2)
             }
         }
@@ -508,29 +502,6 @@ fileprivate struct SessionRow: View {
                 _refreshTick &+= 1
             }
         }
-    }
-}
-
-// Shows at most one image (favorite if present) plus up to 2 non-image icons.
-fileprivate struct AttachmentStrip: View {
-    let favoriteImage: Attachment?
-    let nonImageAttachments: [Attachment]
-
-    var body: some View {
-        HStack(spacing: 8) {
-            if let imgAtt = favoriteImage {
-                AttachmentThumb(attachment: imgAtt)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
-            }
-            ForEach(Array(nonImageAttachments.prefix( favoriteImage == nil ? 3 : 2 )), id: \.objectID) { att in
-                VideoOrIconTile(attachment: att)
-                    .frame(width: 64, height: 64)
-            }
-        }
-        .accessibilityLabel("Attachment preview")
-        .accessibilityIdentifier("row.attachmentPreview")
     }
 }
 
@@ -577,6 +548,79 @@ fileprivate struct VideoOrIconTile: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(.black.opacity(0.05), lineWidth: 1)
         )
+    }
+
+    private func symbolName(for kind: String) -> String {
+        switch kind {
+        case "audio": return "waveform"
+        case "video": return "video"
+        case "pdf":   return "doc.richtext"
+        default:        return "doc"
+        }
+    }
+
+    private func loadPoster(_ url: URL) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                DispatchQueue.main.async {
+                    self.poster = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
+}
+
+fileprivate struct SingleAttachmentPreview: View {
+    let attachment: Attachment
+    @State private var poster: UIImage? = nil
+
+    var body: some View {
+        let kind = attachmentKind(attachment)
+        ZStack(alignment: .center) {
+            if kind == "image" {
+                AttachmentThumb(attachment: attachment)
+                    .frame(width: 64, height: 64)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+            } else if kind == "video" {
+                ZStack(alignment: .center) {
+                    if let poster {
+                        Image(uiImage: poster)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 64, height: 64)
+                            .clipped()
+                    } else {
+                        Image(systemName: "video")
+                            .imageScale(.large)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
+                }
+                .task {
+                    if poster == nil, let url = attachmentFileURL(attachment) { await loadPoster(url) }
+                }
+                .frame(width: 64, height: 64)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+            } else {
+                Image(systemName: symbolName(for: kind))
+                    .imageScale(.large)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .frame(width: 64, height: 64)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+            }
+        }
+        .accessibilityLabel("Attachment preview")
+        .accessibilityIdentifier("row.attachmentPreview")
     }
 
     private func symbolName(for kind: String) -> String {
@@ -759,6 +803,18 @@ fileprivate func pickFavoriteImage(from images: [Attachment]) -> Attachment? {
     }
     // Otherwise, first image
     return images.first
+}
+
+fileprivate func pickFavoriteAttachment(from attachments: [Attachment]) -> Attachment? {
+    // Prefer explicit favorite/primary/thumbnail flags if present across any kind
+    for a in attachments {
+        if isTrueFlag(a, keys: ["isThumbnail","thumbnail","isFavorite","favorite","isStarred","starred","isPrimary","isCover"]) {
+            return a
+        }
+    }
+    // Otherwise, prefer first image, else first attachment of any kind
+    if let firstImage = attachments.first(where: { attachmentKind($0) == "image" }) { return firstImage }
+    return attachments.first
 }
 
 fileprivate func isTrueFlag(_ a: Attachment, keys: [String]) -> Bool {
