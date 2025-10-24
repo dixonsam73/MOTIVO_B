@@ -66,6 +66,7 @@ struct SessionDetailView: View {
     
     @State private var isShowingAttachmentViewer = false
     @State private var viewerStartIndex = 0
+    @State private var viewerTappedURL: URL? = nil
 
     @State private var privacyToken: Int = 0
 
@@ -214,7 +215,7 @@ struct SessionDetailView: View {
                                 .accessibilityLabel(simpleThumbLabel(index: idx, total: images.count, fileURLString: a.value(forKey: "fileURL") as? String))
                                 .accessibilityIdentifier("thumb.attachment.\(idx)")
                                 .onTapGesture {
-                                    viewerStartIndex = idx
+                                    viewerTappedURL = url
                                     isShowingAttachmentViewer = true
                                 }
                             }
@@ -228,7 +229,10 @@ struct SessionDetailView: View {
                                 VideoThumbCell(fileURL: url, attachment: a)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        if let u = url { previewURL = u; isShowingPreview = true }
+                                        if let u = url {
+                                            viewerTappedURL = u
+                                            isShowingAttachmentViewer = true
+                                        }
                                     }
                             }
                         }
@@ -278,16 +282,43 @@ struct SessionDetailView: View {
     }
     .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
         // Build URLs from the same source-of-truth order as thumbnails
-        let images = splitAttachments().images
-        let urls: [URL] = images.compactMap { a in
-            // If you have a typed property, prefer it:
-            // (a.fileURL as? URL) ?? resolveAttachmentURL(from: a.fileURLString)
-            // Otherwise, keep this KVC fallback:
+        let split = splitAttachments()
+        let images = split.images
+        let videos = split.videos
+        let others = split.others
+
+        let imageURLs: [URL] = images.compactMap { a in
             resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
         }
+        let videoURLs: [URL] = videos.compactMap { a in
+            resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+        }
+        // Treat non-image, non-video attachments as audio when possible
+        let audioURLs: [URL] = others.compactMap { a in
+            let kind = (a.kind ?? "")
+            guard kind == "audio" else { return nil }
+            return resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+        }
+
+        // Compute start index based on the tapped URL within the combined media order [images, videos, audios]
+        let combined: [URL] = imageURLs + videoURLs + audioURLs
+        let startIndex: Int = {
+            guard let tapped = viewerTappedURL, let idx = combined.firstIndex(of: tapped) else {
+                // Fallback: if we only had an image index previously, try to map it
+                if let first = imageURLs.first, combined.firstIndex(of: first) != nil {
+                    return min(max(viewerStartIndex, 0), (combined.count > 0 ? combined.count - 1 : 0))
+                }
+                return 0
+            }
+            return idx
+        }()
+
         AttachmentViewerView(
-            imageURLs: urls,
-            startIndex: viewerStartIndex,
+            imageURLs: imageURLs,
+            startIndex: startIndex,
+            themeBackground: Color(.systemBackground),
+            videoURLs: videoURLs,
+            audioURLs: audioURLs,
             onDelete: { url in
                 // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
                 let set = (session.attachments as? Set<Attachment>) ?? []
@@ -300,9 +331,8 @@ struct SessionDetailView: View {
                 } else {
                     print("[AttachmentViewer] No matching attachment found for URL: \(url)")
                 }
-            }
-            , onFavourite: { url in
-                // Resolve the Attachment for this url from the session’s attachments (reuse in-memory objects)
+            },
+            onFavourite: { url in
                 let set = (session.attachments as? Set<Attachment>) ?? []
                 if let match = set.first(where: { att in
                     guard let stored = att.value(forKey: "fileURL") as? String else { return false }
@@ -314,8 +344,8 @@ struct SessionDetailView: View {
                 } else {
                     print("onFavourite: attachment not found for", url)
                 }
-            }
-            , isFavourite: { url in
+            },
+            isFavourite: { url in
                 let set = (session.attachments as? Set<Attachment>) ?? []
                 if let a = set.first(where: { att in
                     guard let stored = att.value(forKey: "fileURL") as? String else { return false }
@@ -324,9 +354,8 @@ struct SessionDetailView: View {
                     return (a.value(forKey: "isThumbnail") as? Bool) == true
                 }
                 return false
-            }
-            , onTogglePrivacy: { url in
-                // Also stamp by id when possible for cross-screen consistency
+            },
+            onTogglePrivacy: { url in
                 let set = (session.attachments as? Set<Attachment>) ?? []
                 let match = set.first { att in
                     guard let stored = att.value(forKey: "fileURL") as? String else { return false }
@@ -334,8 +363,8 @@ struct SessionDetailView: View {
                 }
                 togglePrivacy(id: (match?.value(forKey: "id") as? UUID), url: url)
                 _refreshTick &+= 1
-            }
-            , isPrivate: { url in
+            },
+            isPrivate: { url in
                 let set = (session.attachments as? Set<Attachment>) ?? []
                 let match = set.first { att in
                     guard let stored = att.value(forKey: "fileURL") as? String else { return false }
@@ -724,3 +753,4 @@ fileprivate struct VideoThumbCell: View {
     }
 }
 #endif
+
