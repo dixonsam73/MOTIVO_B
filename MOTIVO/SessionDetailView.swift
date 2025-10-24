@@ -15,40 +15,24 @@ import CoreData
 import UIKit
 import Combine
 
-private let kPrivacyMapKey = "attachmentPrivacyMap_v1" // [String: Bool] keyed by URL.absoluteString or id://<UUID>
-
 private func privacyMap() -> [String: Bool] {
-    (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+    UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool] ?? [:]
 }
 
 private func privacyKey(id: UUID?, url: URL?) -> String? {
-    if let id { return "id://\(id.uuidString)" }
-    if let url { return url.absoluteString }
-    return nil
+    AttachmentPrivacy.privacyKey(id: id, url: url)
 }
 
 private func isPrivateAttachment(id: UUID?, url: URL?) -> Bool {
-    let map = privacyMap()
-    if let id = id {
-        let key = "id://\(id.uuidString)"
-        if let v = map[key] { return v }
-    }
-    if let url = url {
-        if let v = map[url.absoluteString] { return v }
-    }
-    return false
+    return AttachmentPrivacy.isPrivate(id: id, url: url)
 }
 
 private func setPrivacy(_ isPrivate: Bool, id: UUID?, url: URL?) {
-    var map = privacyMap()
-    if let id = id { map["id://\(id.uuidString)"] = isPrivate }
-    if let url = url { map[url.absoluteString] = isPrivate }
-    UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+    AttachmentPrivacy.setPrivate(id: id, url: url, isPrivate)
 }
 
 private func togglePrivacy(id: UUID?, url: URL?) {
-    let current = isPrivateAttachment(id: id, url: url)
-    setPrivacy(!current, id: id, url: url)
+    AttachmentPrivacy.toggle(id: id, url: url)
 }
 
 struct SessionDetailView: View {
@@ -239,7 +223,17 @@ struct SessionDetailView: View {
                         .padding(.vertical, 4)
                     }
                     ForEach(others, id: \.objectID) { a in
-                        AttachmentRow(attachment: a) { openQuickLook(a) }
+                        let kind = (a.kind ?? "")
+                        if kind == "audio" {
+                            AttachmentRow(attachment: a) {
+                                // Open unified AttachmentViewerView for audio, matching image/video behavior
+                                let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+                                viewerTappedURL = url
+                                isShowingAttachmentViewer = true
+                            }
+                        } else {
+                            AttachmentRow(attachment: a) { openQuickLook(a) }
+                        }
                     }
                 }
                 .cardSurface()

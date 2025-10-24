@@ -14,8 +14,6 @@
 //  - No schema/migrations. No other behaviour changes.
 //
 
-private let kPrivacyMapKey = "attachmentPrivacyMap_v1"
-
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -114,24 +112,23 @@ struct AddEditSessionView: View {
     }
 
     private func loadPrivacyMap() {
-        privacyMap = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+        privacyMap = (UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool]) ?? [:]
     }
 
     private func isPrivate(id: UUID?, url: URL?) -> Bool {
         if let key = privacyKey(id: id, url: url) {
             if let v = privacyMap[key] { return v }
-            let map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
-            return map[key] ?? false
+            return AttachmentPrivacy.isPrivate(id: id, url: url)
         }
         return false
     }
 
     private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
         guard let key = privacyKey(id: id, url: url) else { return }
+        // Update local cache first for instant UI
         privacyMap[key] = value
-        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
-        map[key] = value
-        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+        // Persist via centralized helper (also posts didChange notification)
+        AttachmentPrivacy.setPrivate(id: id, url: url, value)
     }
     // ---- end privacy helpers ----
 

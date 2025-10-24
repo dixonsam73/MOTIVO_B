@@ -1,8 +1,6 @@
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
 // SCOPE: Add optional notesPrefill parameter and init notes from it
 
-private let kPrivacyMapKey = "attachmentPrivacyMap_v1"
-
 //  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
 //
@@ -96,31 +94,28 @@ struct PostRecordDetailsView: View {
     }
 
     private func loadPrivacyMap() {
-        privacyMap = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+        privacyMap = (UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool]) ?? [:]
     }
 
     private func isPrivate(id: UUID?, url: URL?) -> Bool {
-        // Prefer live cache; fall back to persisted map for back-compat
         if let key = privacyKey(id: id, url: url) {
             if let v = privacyMap[key] { return v }
-            let map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
-            return map[key] ?? false
+            return AttachmentPrivacy.isPrivate(id: id, url: url)
         }
         return false
     }
 
     private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
         guard let key = privacyKey(id: id, url: url) else { return }
-        // Update cache first (instant UI), then persist
+        // Update cache immediately for responsive UI
         privacyMap[key] = value
-        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
-        map[key] = value
-        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+        // Persist via shared utility (also posts didChange)
+        AttachmentPrivacy.setPrivate(id: id, url: url, value)
     }
 
     private func migratePrivacy(fromStagedID stagedID: UUID, stagedURL: URL?, toNewID newID: UUID?, newURL: URL?) {
         // Read current maps fresh to avoid stale cache writes
-        var map = (UserDefaults.standard.dictionary(forKey: kPrivacyMapKey) as? [String: Bool]) ?? [:]
+        var map = (UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool]) ?? [:]
 
         // Resolve any value stored under staged keys
         let stagedIDKey = "id://\(stagedID.uuidString)"
@@ -136,7 +131,7 @@ struct PostRecordDetailsView: View {
         if let newURL { map[newURL.absoluteString] = value }
 
         // Persist and update live cache for immediate UI reflection
-        UserDefaults.standard.set(map, forKey: kPrivacyMapKey)
+        UserDefaults.standard.set(map, forKey: AttachmentPrivacy.mapKey)
         privacyMap = map
     }
     // ---- end privacy helpers ----
@@ -1244,3 +1239,4 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
