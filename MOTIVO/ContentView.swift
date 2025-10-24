@@ -468,6 +468,19 @@ fileprivate struct SessionRow: View {
     private var favoriteAttachment: Attachment? {
         pickFavoriteAttachment(from: attachments)
     }
+    private var viewerIsOwner: Bool {
+        // Compare session.ownerUserID to the current signed-in user, if available
+        let current = (try? PersistenceController.shared.currentUserID) ?? nil
+        let owner = session.ownerUserID
+        if let c = current, let o = owner { return c == o }
+        return false
+    }
+    private func isPrivate(_ att: Attachment) -> Bool {
+        let id = att.value(forKey: "id") as? UUID
+        // Resolve a stable URL if possible
+        let url = attachmentFileURL(att)
+        return AttachmentPrivacy.isPrivate(id: id, url: url)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -487,8 +500,11 @@ fileprivate struct SessionRow: View {
 
             // Single favorite attachment preview (only one allowed/displayed)
             if let fav = favoriteAttachment {
-                SingleAttachmentPreview(attachment: fav)
-                    .padding(.top, 2)
+                // If viewer isn't the owner, hide preview when favorite is private
+                if viewerIsOwner || !isPrivate(fav) {
+                    SingleAttachmentPreview(attachment: fav)
+                        .padding(.top, 2)
+                }
             }
         }
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
