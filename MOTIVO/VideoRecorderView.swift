@@ -91,7 +91,7 @@ public struct VideoRecorderView: View {
                             .accessibilityIdentifier("VideoRecorderView_Clock")
                             .lineLimit(1)
                         HStack(spacing: 20) {
-                            ControlButton(systemName: "trash", color: .red, accessibilityLabel: "Delete", action: { controller.deleteTapped() }, isDisabled: controller.state == .idle)
+                            ControlButton(systemName: "trash", color: .red, accessibilityLabel: "Delete", action: { controller.deleteTapped() }, isDisabled: controller.recordingURL == nil)
                             ControlButton(systemName: controller.recordingButtonSystemName, color: controller.recordingButtonColor, accessibilityLabel: controller.recordingButtonAccessibilityLabel, action: { controller.recordPauseResumeTapped() }, isDisabled: controller.recordingButtonDisabled)
                             ControlButton(systemName: "stop.fill", color: .red, accessibilityLabel: "Stop", action: { controller.stopTapped() }, isDisabled: !(controller.state == .recording || controller.state == .pausedRecording))
                             ControlButton(systemName: controller.playPauseButtonSystemName, color: .green, accessibilityLabel: controller.playPauseButtonAccessibilityLabel, action: { controller.playPauseTapped() }, isDisabled: controller.recordingURL == nil)
