@@ -468,6 +468,18 @@ fileprivate struct SessionRow: View {
     private var favoriteAttachment: Attachment? {
         pickFavoriteAttachment(from: attachments)
     }
+
+    // Visible attachments for the current viewer (owner sees all; others see non-private only)
+    private var visibleAttachments: [Attachment] {
+        if viewerIsOwner { return attachments }
+        return attachments.filter { !isPrivate($0) }
+    }
+
+    private var extraAttachmentCount: Int {
+        let total = visibleAttachments.count
+        return max(total - 1, 0)
+    }
+
     private var viewerIsOwner: Bool {
         // Compare session.ownerUserID to the current signed-in user, if available
         let current = (try? PersistenceController.shared.currentUserID) ?? nil
@@ -502,8 +514,20 @@ fileprivate struct SessionRow: View {
             if let fav = favoriteAttachment {
                 // If viewer isn't the owner, hide preview when favorite is private
                 if viewerIsOwner || !isPrivate(fav) {
-                    SingleAttachmentPreview(attachment: fav)
-                        .padding(.top, 2)
+                    HStack(alignment: .center, spacing: 8) {
+                        SingleAttachmentPreview(attachment: fav)
+                        Spacer()
+                        if extraAttachmentCount > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "paperclip")
+                                Text("\(extraAttachmentCount)")
+                            }
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(Text("\(extraAttachmentCount) additional attachments"))
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
         }
