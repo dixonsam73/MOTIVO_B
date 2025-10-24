@@ -241,19 +241,15 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
     }
 
     var recordingButtonSystemName: String {
-        switch state {
-        case .idle, .pausedRecording: return "record.circle.fill"
-        case .recording: return "pause.circle.fill"
-        default: return "record.circle.fill"
-        }
+        return "record.circle.fill"
     }
 
     var recordingButtonColor: Color { .red }
 
     var recordingButtonAccessibilityLabel: String {
         switch state {
-        case .idle, .pausedRecording: return "Record"
-        case .recording: return "Pause (disabled)"
+        case .recording: return "Record (disabled)"
+        case .pausedRecording: return "Record"
         default: return "Record"
         }
     }
@@ -808,3 +804,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+

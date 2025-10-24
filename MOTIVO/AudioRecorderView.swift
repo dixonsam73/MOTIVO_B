@@ -50,9 +50,9 @@ struct AudioRecorderView: View {
             .frame(maxWidth: .infinity)
 
             // Controls
-            HStack(spacing: 28) {
+            HStack(spacing: 20) {
                 // Delete
-                ControlButton(systemName: "trash", tint: .secondary, role: .destructive, isEnabled: recordingURL != nil && state.isIdleLike) {
+                ControlButton(systemName: "trash", tint: .red, role: .destructive, isEnabled: recordingURL != nil && state.isIdleLike) {
                     deleteRecording()
                 }
                 .accessibilityLabel("Delete recording")
@@ -76,24 +76,29 @@ struct AudioRecorderView: View {
                 .accessibilityLabel(state == .recording ? "Pause recording" : (state == .pausedRecording ? "Resume recording" : "Start recording"))
 
                 // Stop
-                ControlButton(systemName: "stop.fill", tint: .primary, isEnabled: state.canStop) {
+                ControlButton(systemName: "stop.fill", tint: .red, isEnabled: state.canStop) {
                     stopAllAndFinalizeRecording()
                 }
                 .accessibilityLabel("Stop")
 
                 // Play / Pause
-                ControlButton(systemName: (state == .playing) ? "pause.fill" : "play.fill", tint: .primary, isEnabled: recordingURL != nil && state.canPlayToggle) {
+                ControlButton(systemName: (state == .playing) ? "pause.fill" : "play.fill", tint: .green, isEnabled: recordingURL != nil && state.canPlayToggle) {
                     togglePlayback()
                 }
                 .accessibilityLabel(state == .playing ? "Pause" : "Play")
 
                 // Save
-                ControlButton(systemName: "checkmark.circle.fill", tint: .green, isEnabled: recordingURL != nil && state.isIdleLike) {
+                ControlButton(systemName: "checkmark.circle.fill", tint: .blue, isEnabled: recordingURL != nil && state.isIdleLike) {
                     saveRecording()
                 }
                 .accessibilityLabel("Save recording")
             }
-            .padding(.horizontal)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
 
             if let errorMessage {
                 Text(errorMessage)
@@ -602,20 +607,15 @@ private struct ControlButton: View {
     var body: some View {
         Button(role: role) { action() } label: {
             Image(systemName: systemName)
-                .symbolRenderingMode(.hierarchical)
-                .font(.system(size: 32, weight: .regular))
-                .frame(width: 56, height: 56)
-                .contentShape(.rect)
+                .font(.system(size: 32))
+                .foregroundColor(tint.opacity(isEnabled ? 1 : 0.4))
+                .frame(width: 52, height: 52)
+                .background(Circle().fill(Color(.systemGray6)).frame(width: 60, height: 60))
+                .opacity(isEnabled ? 1 : 0.5)
+                .contentShape(Circle())
         }
-        .tint(tint)
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.4)
-        .background(
-            Circle()
-                .fill(Color(.tertiarySystemBackground))
-                .frame(width: 72, height: 72)
-        )
         .accessibilityAddTraits(.isButton)
         .accessibilityHint("")
     }
