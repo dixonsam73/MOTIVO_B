@@ -500,7 +500,7 @@ fileprivate struct SessionRow: View {
             // Identity header
             if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
                 HStack(alignment: .center, spacing: 8) {
-                    // Avatar 24pt circle
+                    // Avatar 32pt circle
                     Group {
                         #if canImport(UIKit)
                         if let img = ProfileStore.avatarImage(for: ownerID) {
@@ -530,7 +530,7 @@ fileprivate struct SessionRow: View {
                             ZStack {
                                 Circle().fill(Color.gray.opacity(0.2))
                                 Text(initials)
-                                    .font(.system(size: 12, weight: .bold))
+                                    .font(.system(size: 16, weight: .bold))
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
@@ -541,7 +541,7 @@ fileprivate struct SessionRow: View {
                         }
                         #endif
                     }
-                    .frame(width: 24, height: 24)
+                    .frame(width: 32, height: 32)
                     .clipShape(Circle())
                     .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
 

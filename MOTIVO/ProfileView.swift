@@ -227,14 +227,14 @@
                      Circle()
                          .fill(Color.gray.opacity(0.2))
                      Text(initials(from: name))
-                         .font(.system(size: 12, weight: .bold))
+                         .font(.system(size: 16, weight: .bold))
                          .foregroundColor(Theme.Colors.secondaryText)
                          .minimumScaleFactor(0.5)
                          .lineLimit(1)
                  }
              }
          }
-         .frame(width: 24, height: 24)
+         .frame(width: 32, height: 32)
          .clipShape(Circle())
          .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
      }
@@ -507,6 +507,10 @@
      }
  }
  #endif
+
+
+
+
 
 
 
