@@ -141,14 +141,19 @@ public struct AvatarEditorView: View {
                         .accessibilityLabel("Cancel avatar editing")
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    #if canImport(PhotosUI)
-                    Button("Replace Photo") {
-                        showPhotoPicker = true
+                    // Overflow menu with Replace Photo and Delete
+                    Menu {
+                        #if canImport(PhotosUI)
+                        Button("Replace Photo") { showPhotoPicker = true }
+                        #endif
+                        Button("Delete", role: .destructive) { onDelete() }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .imageScale(.large)
+                            .accessibilityLabel("More options")
                     }
-                    .accessibilityLabel("Replace avatar photo")
-                    #endif
-                    Button("Delete", role: .destructive, action: onDelete)
-                        .accessibilityLabel("Delete avatar photo")
+
+                    // Primary Save action remains as a button
                     Button("Save") {
                         guard let image = workingImage else { return }
                         let effectiveScale = min(max(baseScale, minScale), maxScale)
@@ -162,6 +167,7 @@ public struct AvatarEditorView: View {
                         onSave(cropped)
                     }
                     .accessibilityLabel("Save avatar photo")
+                    .bold()
                 }
             }
             #if canImport(PhotosUI)
@@ -230,3 +236,4 @@ private extension Comparable {
         min(max(self, limits.lowerBound), limits.upperBound)
     }
 }
+
