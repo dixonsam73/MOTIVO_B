@@ -191,7 +191,7 @@ fileprivate struct SessionsRootView: View {
                         } else {
                             ForEach(rows, id: \.objectID) { session in
                                 NavigationLink(destination: SessionDetailView(session: session)) {
-                                    SessionRow(session: session)
+                                    SessionRow(session: session, scope: selectedScope)
                                 }
                             }
                             .onDelete(perform: deleteSessions)
@@ -456,6 +456,7 @@ fileprivate struct StatsBannerView: View {
 
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
+    let scope: FeedScope
     // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
     @State private var _refreshTick: Int = 0
 
@@ -497,7 +498,7 @@ fileprivate struct SessionRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // Identity header
-            if let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
+            if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
                 HStack(alignment: .center, spacing: 8) {
                     // Avatar 24pt circle
                     Group {
