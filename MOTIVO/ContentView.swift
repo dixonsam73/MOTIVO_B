@@ -496,6 +496,64 @@ fileprivate struct SessionRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // Identity header
+            if let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
+                HStack(alignment: .center, spacing: 8) {
+                    // Avatar 24pt circle
+                    Group {
+                        #if canImport(UIKit)
+                        if let img = ProfileStore.avatarImage(for: ownerID) {
+                            Image(uiImage: img)
+                                .resizable()
+                                .scaledToFill()
+                        } else {
+                            Image(systemName: "person.crop.circle")
+                                .resizable()
+                                .scaledToFit()
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        #else
+                        Image(systemName: "person.crop.circle")
+                            .resizable()
+                            .scaledToFit()
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        #endif
+                    }
+                    .frame(width: 24, height: 24)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+
+                    // Name and optional location on one line
+                    let realName: String = {
+                        // Source of truth: Core Data Profile.name for current device's user only.
+                        // For other users (future), fallback to a neutral label.
+                        if viewerIsOwner {
+                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                            req.fetchLimit = 1
+                            if let ctx = session.managedObjectContext, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                return n
+                            }
+                            return "You"
+                        } else {
+                            return "User"
+                        }
+                    }()
+
+                    let loc = ProfileStore.location(for: ownerID)
+
+                    HStack(spacing: 6) {
+                        Text(realName).font(.subheadline.weight(.semibold))
+                        if !loc.isEmpty {
+                            Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                            Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.bottom, 2) // minimal spacing to title
+            }
+
             // Title only (paperclip removed)
             Text(feedTitle)
                 .font(.headline)
