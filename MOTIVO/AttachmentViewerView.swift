@@ -216,7 +216,7 @@ struct AttachmentViewerView: View {
         }
         .onAppear {
             do {
-                try AVAudioSession.sharedInstance().setCategory(.playback, options: [.defaultToSpeaker])
+                try AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: [.defaultToSpeaker])
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
                 // Non-fatal: fall back silently
@@ -398,18 +398,63 @@ private struct VideoPage: View {
     }
 }
 
+// New class added above AudioPage
+private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPlayerDelegate {
+    @Published var isPlaying: Bool = false
+    private var player: AVAudioPlayer?
+
+    func play(url: URL) {
+        stop()
+        do {
+            player = try AVAudioPlayer(contentsOf: url)
+            player?.delegate = self
+            player?.volume = 1.0
+            player?.prepareToPlay()
+            player?.play()
+            isPlaying = true
+        } catch {
+            // Removed print statement here as requested
+            isPlaying = false
+        }
+    }
+
+    func stop() {
+        player?.stop()
+        player = nil
+        isPlaying = false
+    }
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        DispatchQueue.main.async {
+            self.isPlaying = false
+        }
+    }
+}
+
 private struct AudioPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
-    @State private var player: AVAudioPlayer? = nil
-    @State private var isPlaying: Bool = false
+    @StateObject private var audioController = AudioPlayerController()
+
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
             HStack(spacing: 16) {
-                Button(action: { togglePlay() }) {
-                    Image(systemName: isPlaying ? "pause.fill" : "play.fill")
+                Button(action: {
+                    if audioController.isPlaying {
+                        audioController.stop()
+                        isAnyPlayerActive = false
+                    } else {
+                        // Fix: ensure file exists before playback, fallback to resolveAudioURL (see SessionDetailView resolveAttachmentURL logic)
+                        guard let resolvedURL = resolveAudioURL(url) else {
+                            return
+                        }
+                        audioController.play(url: resolvedURL)
+                        isAnyPlayerActive = true
+                    }
+                }) {
+                    Image(systemName: audioController.isPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 20, weight: .semibold))
                         .padding(12)
                         .background(.ultraThinMaterial, in: Circle())
@@ -419,24 +464,34 @@ private struct AudioPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .onChange(of: onRequestStopAll) { _, _ in stop() }
-        .onDisappear { stop() }
+        .onChange(of: onRequestStopAll) { _, _ in
+            audioController.stop()
+            isAnyPlayerActive = false
+        }
+        .onDisappear {
+            audioController.stop()
+            isAnyPlayerActive = false
+        }
     }
-    private func togglePlay() {
-        if isPlaying { stop(); return }
-        onRequestStopAll.toggle()
-        do {
-            if player == nil { 
-                player = try AVAudioPlayer(contentsOf: url)
-                player?.volume = 1.0
-                player?.prepareToPlay()
-            }
-            player?.play()
-            isPlaying = true
-            isAnyPlayerActive = true
-        } catch { isPlaying = false }
+
+    /// Try to resolve a valid audio file URL from potentially stale or partial URLs. Returns nil if not found.
+    private func resolveAudioURL(_ src: URL) -> URL? {
+        let fm = FileManager.default
+        if fm.fileExists(atPath: src.path) { return src }
+        let filename = src.lastPathComponent
+        let candidateDirs: [URL?] = [
+            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
+            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+            fm.temporaryDirectory
+        ]
+        for base in candidateDirs.compactMap({ $0 }) {
+            let candidate = base.appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+        return nil
     }
-    private func stop() { player?.stop(); player = nil; isPlaying = false; isAnyPlayerActive = false }
 }
 
 // MARK: - Helpers
@@ -445,3 +500,4 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+
