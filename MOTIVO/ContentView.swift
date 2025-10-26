@@ -508,16 +508,37 @@ fileprivate struct SessionRow: View {
                                 .resizable()
                                 .scaledToFill()
                         } else {
-                            Image(systemName: "person.crop.circle")
-                                .resizable()
-                                .scaledToFit()
-                                .foregroundStyle(Theme.Colors.secondaryText)
+                            // If viewer is owner, derive initials from Profile.name; else show a neutral 'U'
+                            let initials: String = {
+                                if viewerIsOwner {
+                                    let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                    req.fetchLimit = 1
+                                    if let ctx = session.managedObjectContext,
+                                       let p = try? ctx.fetch(req).first,
+                                       let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                                        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                        return first + last
+                                    }
+                                    return "Y"
+                                } else {
+                                    return "U"
+                                }
+                            }()
+                            ZStack {
+                                Circle().fill(Color.gray.opacity(0.2))
+                                Text(initials)
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
                         }
                         #else
-                        Image(systemName: "person.crop.circle")
-                            .resizable()
-                            .scaledToFit()
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        ZStack {
+                            Circle().fill(Color.gray.opacity(0.2))
+                            Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                        }
                         #endif
                     }
                     .frame(width: 24, height: 24)

@@ -51,254 +51,245 @@
      // Stage 2: one-time notice flag (set in ActivityListView on fallback)
      @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
      @State private var showPrimaryFallbackAlert: Bool = false
+
+     // New state for avatar editor sheet
+     @State private var showAvatarEditor: Bool = false
  
      var body: some View {
-         NavigationView {
-             Form {
-                 // MARK: - Profile
-                 Section {
-                     Text("Name").sectionHeader()
-                     HStack(spacing: 12) {
-                         Button {
-                             #if canImport(PhotosUI)
-                             showPhotoPicker = true
-                             #endif
-                         } label: {
-                             Group {
-                                 if let img = avatarImage {
-                                     Image(uiImage: img)
-                                         .resizable()
-                                         .scaledToFill()
-                                 } else {
-                                     Image(systemName: "person.crop.circle.fill")
-                                         .resizable()
-                                         .scaledToFit()
-                                         .foregroundStyle(Theme.Colors.secondaryText)
-                                         .padding(4)
-                                 }
-                             }
-                             .frame(width: 24, height: 24)
-                             .clipShape(Circle())
-                             .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
-                         }
-                         .buttonStyle(.plain)
-                         .disabled({
-                             #if canImport(PhotosUI)
-                             false
-                             #else
-                             true
-                             #endif
-                         }())
- 
-                         TextField("Name", text: $name)
-                             .textInputAutocapitalization(.words)
-                             .disableAutocorrection(true)
-                             .focused($isNameFocused)
-                             .scaleEffect(isNameFocused ? 0.995 : 1)
-                             .overlay(alignment: .bottomLeading) {
-                                 Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
-                             }
-                             .animation(.easeInOut(duration: 0.18), value: isNameFocused)
+         modalsAndAlerts(
+             NavigationStack {
+                 Form {
+                     Group {
+                         profileSection
+                         privacySection
+                         instrumentsSection
                      }
- 
-                     // Location (optional)
-                     TextField("Location (optional)", text: $locationText)
-                         .textInputAutocapitalization(.words)
-                         .disableAutocorrection(true)
-                 }
-                 .listRowSeparator(.hidden)
- 
-                 Section {
-                     Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                 }
-                 .listRowSeparator(.hidden)
- 
-                 // MARK: - Instruments (Manage above Primary)
-                 Section {
-                     // Removed header Text("Instruments").sectionHeader()
- 
-                     // Manage button aligned with section edge
-                     Button {
-                         showInstrumentManager = true
-                     } label: {
-                         HStack {
-                             Text("Manage Instruments")
-                             Spacer()
-                             Image(systemName: "chevron.right")
-                             .font(.footnote.weight(.semibold))
-                             .padding(6)
-                             .background(.ultraThinMaterial, in: Circle())
-                             .foregroundStyle(Theme.Colors.secondaryText)
-                         }
+                     Group {
+                         activitiesSection
+                         tasksSection
+                         accountSection
                      }
+                 }
+                 .navigationTitle("Profile")
+                 .navigationBarTitleDisplayMode(.inline)
+                 .toolbar { toolbarContent }
+                 .appBackground()
+             }
+         )
+     }
+ 
+     @ViewBuilder
+     private var profileSection: some View {
+         Section {
+             Text("Name").sectionHeader()
+             HStack(spacing: 12) {
+                 Button { showAvatarEditor = true } label: { avatarChip }
                      .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .accessibilityAddTraits(.isButton)
+                     .disabled(false)
  
-                     VStack(spacing: Theme.Spacing.s) {
-                         Picker("Primary Instrument", selection: $primaryInstrumentName) {
-                             ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
-                                 Text(n).tag(n)
-                             }
-                         }
+                 TextField("Name", text: $name)
+                     .textInputAutocapitalization(.words)
+                     .disableAutocorrection(true)
+                     .focused($isNameFocused)
+                     .scaleEffect(isNameFocused ? 0.995 : 1)
+                     .overlay(alignment: .bottomLeading) {
+                         Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
+                     }
+                     .animation(.easeInOut(duration: 0.18), value: isNameFocused)
+             }
+ 
+             TextField("Location (optional)", text: $locationText)
+                 .textInputAutocapitalization(.words)
+                 .disableAutocorrection(true)
+         }
+         .listRowSeparator(.hidden)
+     }
+ 
+     @ViewBuilder
+     private var privacySection: some View {
+         Section {
+             Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+         }
+         .listRowSeparator(.hidden)
+     }
+ 
+     @ViewBuilder
+     private var instrumentsSection: some View {
+         Section {
+             Button { showInstrumentManager = true } label: { manageRow(title: "Manage Instruments") }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+ 
+             VStack(spacing: Theme.Spacing.s) {
+                 Picker("Primary Instrument", selection: $primaryInstrumentName) {
+                     ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
+                         Text(n).tag(n)
                      }
                  }
-                 .listRowSeparator(.hidden)
+             }
+         }
+         .listRowSeparator(.hidden)
+     }
  
-                 // MARK: - Activities (Manage above Primary; no separator line)
-                 Section {
-                     // Removed header Text("Activities").sectionHeader()
+     @ViewBuilder
+     private var activitiesSection: some View {
+         Section {
+             Button { showActivityManager = true } label: { manageRow(title: "Manage Activities") }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
  
-                     Button {
-                         showActivityManager = true
-                     } label: {
-                         HStack {
-                             Text("Manage Activities")
-                             Spacer()
-                             Image(systemName: "chevron.right")
-                             .font(.footnote.weight(.semibold))
-                             .padding(6)
-                             .background(.ultraThinMaterial, in: Circle())
-                             .foregroundStyle(Theme.Colors.secondaryText)
-                         }
+             VStack(spacing: Theme.Spacing.s) {
+                 Picker("Primary Activity", selection: $primaryActivityChoice) {
+                     ForEach(SessionActivityType.allCases) { type in
+                         Text(type.label).tag("core:\(type.rawValue)")
                      }
-                     .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .accessibilityAddTraits(.isButton)
- 
-                     VStack(spacing: Theme.Spacing.s) {
-                         Picker("Primary Activity", selection: $primaryActivityChoice) {
-                             // Core activities first
-                             ForEach(SessionActivityType.allCases) { type in
-                                 Text(type.label).tag("core:\(type.rawValue)")
-                             }
-                             // Then user customs directly
-                             ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                                 Text(name).tag("custom:\(name)")
-                             }
-                         }
-                         .onChange(of: primaryActivityChoice) { _, newValue in
-                             writePrimaryActivityRef(newValue)
-                         }
+                     ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                         Text(name).tag("custom:\(name)")
                      }
                  }
-                 .listRowSeparator(.hidden)
+                 .onChange(of: primaryActivityChoice) { _, newValue in
+                     writePrimaryActivityRef(newValue)
+                 }
+             }
+         }
+         .listRowSeparator(.hidden)
+     }
  
-                 Section {
-                     Button {
-                         showTasksManager = true
-                     } label: {
-                         HStack {
-                             Text("Manage Tasks")
-                             Spacer()
-                             Image(systemName: "chevron.right")
-                             .font(.footnote.weight(.semibold))
-                             .padding(6)
-                             .background(.ultraThinMaterial, in: Circle())
-                             .foregroundStyle(Theme.Colors.secondaryText)
-                         }
-                     }
-                     .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .accessibilityAddTraits(.isButton)
-                 }
-                 .listRowSeparator(.hidden)
+     @ViewBuilder
+     private var tasksSection: some View {
+         Section {
+             Button { showTasksManager = true } label: { manageRow(title: "Manage Tasks") }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+         }
+         .listRowSeparator(.hidden)
+     }
  
-                 // MARK: - Account (bottom)
-                 Section {
-                     Text("Account").sectionHeader()
-                     if auth.isSignedIn {
-                         VStack(alignment: .leading, spacing: 6) {
-                             Text(auth.displayName ?? "Signed in")
-                                 .font(.headline)
-                             Text("User ID: \(auth.currentUserID ?? "--")")
-                                 .font(.footnote)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-                             Button(role: .destructive) {
-                                 auth.signOut()
-                             } label: {
-                                 Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                             }
-                             .padding(.top, 6)
-                         }
-                     } else {
-                         SignInWithAppleButton(.signIn) { request in
-                             auth.configure(request)
-                         } onCompletion: { result in
-                             auth.handle(result)
-                         }
-                         .signInWithAppleButtonStyle(.black)
-                         .frame(height: 44)
-                         .accessibilityLabel(Text("Sign in with Apple"))
+     @ViewBuilder
+     private var accountSection: some View {
+         Section {
+             Text("Account").sectionHeader()
+             if auth.isSignedIn {
+                 VStack(alignment: .leading, spacing: 6) {
+                     Text(auth.displayName ?? "Signed in")
+                         .font(.headline)
+                     Text("User ID: \(auth.currentUserID ?? "--")")
+                         .font(.footnote)
+                         .foregroundStyle(Theme.Colors.secondaryText)
+                     Button(role: .destructive) { auth.signOut() } label: {
+                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
                      }
+                     .padding(.top, 6)
                  }
-                 .listRowSeparator(.hidden)
-             }
-             .navigationTitle("Profile")
-             .navigationBarTitleDisplayMode(.inline)
-             .toolbar {
-                 ToolbarItem(placement: .cancellationAction) {
-                     Button("Close") { onClose?() }
+             } else {
+                 SignInWithAppleButton(.signIn) { request in
+                     auth.configure(request)
+                 } onCompletion: { result in
+                     auth.handle(result)
                  }
-                 ToolbarItem(placement: .confirmationAction) {
-                     Button {
-                         onClose?()
-                         isSaving = true
-                         // Persist Core Data-backed fields
-                         save()
-                         // Persist lightweight identity fields
-                         ProfileStore.setLocation(locationText, for: auth.currentUserID)
-                         isSaving = false
-                     } label: { Text("Save") }
-                     .disabled(profile == nil)
-                 }
+                 .signInWithAppleButtonStyle(.black)
+                 .frame(height: 44)
+                 .accessibilityLabel(Text("Sign in with Apple"))
              }
-             .appBackground()
-             .onAppear {
-                 load()
-                 refreshUserActivities()
-                 primaryActivityChoice = normalizedPrimaryActivityRef()
-                 if primaryFallbackNoticeNeeded {
-                     showPrimaryFallbackAlert = true
-                     primaryFallbackNoticeNeeded = false
-                 }
-                 // Load avatar and location from ProfileStore
-                 self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
-                 self.locationText = ProfileStore.location(for: auth.currentUserID)
-             }
-             .onChange(of: showActivityManager) { wasPresented, isPresented in
-                 if wasPresented == true && isPresented == false {
-                     refreshUserActivities()
-                     primaryActivityChoice = normalizedPrimaryActivityRef()
-                 }
-             }
-             .onChange(of: primaryActivityRef) { _, _ in
-                 primaryActivityChoice = normalizedPrimaryActivityRef()
-             }
-             .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
-                 Button("OK", role: .cancel) {}
-             } message: {
-                 Text("Your Primary Activity was removed, so it’s been reset to Practice.")
-             }
-             .sheet(isPresented: $showInstrumentManager) {
-                 InstrumentListView()
-                     .environment(\.managedObjectContext, ctx)
-             }
-             .sheet(isPresented: $showActivityManager) {
-                 ActivityListView()
-                     .environment(\.managedObjectContext, ctx)
-             }
-             .sheet(isPresented: $showTasksManager) {
-                 TasksManagerView()
-                     .environment(\.managedObjectContext, ctx)
-             }
-             #if canImport(PhotosUI)
-             .sheet(isPresented: $showPhotoPicker) {
-                 PhotoPickerView { image in
-                     if let image { ProfileStore.saveAvatarImage(image, for: auth.currentUserID); avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) }
+         }
+         .listRowSeparator(.hidden)
+     }
+ 
+     @ToolbarContentBuilder
+     private var toolbarContent: some ToolbarContent {
+         ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose?() } }
+         ToolbarItem(placement: .confirmationAction) { saveButton }
+     }
+ 
+     private var saveButton: some View {
+         Button {
+             onClose?()
+             isSaving = true
+             save()
+             ProfileStore.setLocation(locationText, for: auth.currentUserID)
+             isSaving = false
+         } label: { Text("Save") }
+         .disabled(profile == nil)
+     }
+ 
+     @ViewBuilder
+     private var avatarChip: some View {
+         Group {
+             if let img = avatarImage {
+                 Image(uiImage: img)
+                     .resizable()
+                     .scaledToFill()
+             } else {
+                 ZStack {
+                     Circle()
+                         .fill(Color.gray.opacity(0.2))
+                     Text(initials(from: name))
+                         .font(.system(size: 12, weight: .bold))
+                         .foregroundColor(Theme.Colors.secondaryText)
+                         .minimumScaleFactor(0.5)
+                         .lineLimit(1)
                  }
              }
-             #endif
+         }
+         .frame(width: 24, height: 24)
+         .clipShape(Circle())
+         .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+     }
+ 
+     private var avatarEditorSheet: some View {
+         AvatarEditorView(
+             image: ProfileStore.avatarOriginalImage(for: auth.currentUserID) ?? ProfileStore.avatarImage(for: auth.currentUserID),
+             placeholderInitials: initials(from: name),
+             onSave: { cropped in
+                 ProfileStore.saveAvatarDerived(cropped, for: auth.currentUserID)
+                 avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
+                 showAvatarEditor = false
+             },
+             onDelete: {
+                 ProfileStore.deleteAvatar(for: auth.currentUserID)
+                 avatarImage = nil
+                 showAvatarEditor = false
+             },
+             onCancel: { showAvatarEditor = false },
+             onReplaceOriginal: { image in
+                 ProfileStore.saveAvatarOriginal(image, for: auth.currentUserID)
+                 // Do not auto-update derived; keep current derived until user taps Save in the editor.
+             }
+         )
+         .presentationDetents([.large])
+     }
+ 
+     private func onAppearLoad() {
+         load()
+         refreshUserActivities()
+         primaryActivityChoice = normalizedPrimaryActivityRef()
+         if primaryFallbackNoticeNeeded {
+             showPrimaryFallbackAlert = true
+             primaryFallbackNoticeNeeded = false
+         }
+         self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
+         self.locationText = ProfileStore.location(for: auth.currentUserID)
+     }
+ 
+     private func handleActivityManagerChange(_ wasPresented: Bool, _ isPresented: Bool) {
+         if wasPresented == true && isPresented == false {
+             refreshUserActivities()
+             primaryActivityChoice = normalizedPrimaryActivityRef()
+         }
+     }
+ 
+     private func manageRow(title: String) -> some View {
+         HStack {
+             Text(title)
+             Spacer()
+             Image(systemName: "chevron.right")
+                 .font(.footnote.weight(.semibold))
+                 .padding(6)
+                 .background(.ultraThinMaterial, in: Circle())
+                 .foregroundStyle(Theme.Colors.secondaryText)
          }
      }
  
@@ -405,6 +396,75 @@
              return "core:0"
          }
      }
+ 
+     // New helper method to compute initials from a string
+     private func initials(from string: String) -> String {
+         let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
+         if trimmed.isEmpty {
+             return "Y"
+         }
+         let words = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+         if words.count == 1 {
+             let first = words[0]
+             if let firstLetter = first.first {
+                 return String(firstLetter).uppercased()
+             }
+             return "Y"
+         } else {
+             let firstInitial = words.first?.first.map { String($0).uppercased() } ?? ""
+             let lastInitial = words.last?.first.map { String($0).uppercased() } ?? ""
+             return firstInitial + lastInitial
+         }
+     }
+ 
+     private func modalsAndAlerts<V: View>(_ base: V) -> some View {
+         var view = AnyView(base)
+         view = AnyView(view
+             .onAppear(perform: onAppearLoad)
+             .onChange(of: showActivityManager) { oldValue, newValue in
+                 handleActivityManagerChange(oldValue, newValue)
+             }
+             .onChange(of: primaryActivityRef) { _ in
+                 primaryActivityChoice = normalizedPrimaryActivityRef()
+             }
+             .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
+                 Button("OK", role: .cancel) {}
+             } message: {
+                 Text("Your Primary Activity was removed, so it’s been reset to Practice.")
+             }
+             .sheet(isPresented: $showInstrumentManager) {
+                 InstrumentListView()
+                     .environment(\.managedObjectContext, ctx)
+             }
+             .sheet(isPresented: $showActivityManager) {
+                 ActivityListView()
+                     .environment(\.managedObjectContext, ctx)
+             }
+             .sheet(isPresented: $showTasksManager) {
+                 TasksManagerView()
+                     .environment(\.managedObjectContext, ctx)
+             }
+         )
+         #if canImport(PhotosUI)
+         view = AnyView(view.sheet(isPresented: $showPhotoPicker) {
+             PhotoPickerView { image in
+                 if let image {
+                     ProfileStore.saveAvatarOriginal(image, for: auth.currentUserID)
+                     // Do not overwrite derived automatically; user confirms via editor.
+                     // If no derived exists yet, you may choose to show the editor or leave as is.
+                     if ProfileStore.avatarImage(for: auth.currentUserID) == nil {
+                         // Keep displayed avatar nil until user saves from editor
+                         avatarImage = nil
+                     } else {
+                         avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
+                     }
+                 }
+             }
+         })
+         #endif
+         view = AnyView(view.sheet(isPresented: $showAvatarEditor) { avatarEditorSheet })
+         return view
+     }
  }
  
  //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
@@ -447,3 +507,9 @@
      }
  }
  #endif
+
+
+
+
+
+
