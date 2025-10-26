@@ -39,6 +39,7 @@ struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var auth: AuthManager
 
     let session: Session
 
@@ -82,6 +83,10 @@ struct SessionDetailView: View {
     var body: some View {
     ScrollView {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+
+            SessionIdentityHeader(session: session)
+                .environmentObject(auth)
+                .padding(.bottom, 4)
 
             // 1) Top card — Activity Description (headline), shown only if non-empty
             if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -748,3 +753,95 @@ fileprivate struct VideoThumbCell: View {
 }
 #endif
 
+
+fileprivate struct SessionIdentityHeader: View {
+    let session: Session
+    @Environment(\.managedObjectContext) private var viewContext
+    @EnvironmentObject private var auth: AuthManager
+
+    private var ownerUserID: String? { session.ownerUserID ?? auth.currentUserID }
+    private var isCurrentUser: Bool { ownerUserID == auth.currentUserID }
+
+    private var avatarImage: UIImage? { ProfileStore.avatarImage(for: ownerUserID) }
+    private var location: String { ProfileStore.location(for: ownerUserID) }
+
+    private var displayName: String {
+        if isCurrentUser {
+            // Lookup real name from Profile entity
+            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+            req.fetchLimit = 1
+            if let profile = try? viewContext.fetch(req).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return n
+            }
+            return "You"
+        } else {
+            return "User"
+        }
+    }
+
+    // Placeholder privacy logic. Replace with your actual session privacy determinant.
+    private var isPrivate: Bool {
+        // If you need a per-session field, swap this logic
+        // For now, use ProfileStore.defaultPrivacy or always false
+        return false
+    }
+
+    // Fallback initials
+    private var initials: String {
+        let name = displayName
+        let words = name.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? "Y"
+        let last = words.last?.first.map { String($0).uppercased() } ?? "U"
+        return first + last
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            // Avatar
+            Group {
+                #if canImport(UIKit)
+                if let img = avatarImage {
+                    Image(uiImage: img)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.2))
+                        Text(initials)
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+                #else
+                ZStack {
+                    Circle().fill(Color.gray.opacity(0.2))
+                    Text(initials).font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                }
+                #endif
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+
+            // Name and optional location
+            HStack(spacing: 6) {
+                Text(displayName).font(.subheadline.weight(.semibold))
+                if !location.isEmpty {
+                    Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                    Text(location).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+
+            Spacer(minLength: 0)
+            // Optional privacy icon
+            if isPrivate {
+                Image(systemName: "lock.fill")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 2)
+            }
+        }
+        .padding(.bottom, 2)
+    }
+}
