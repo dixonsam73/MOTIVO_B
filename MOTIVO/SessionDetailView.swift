@@ -779,12 +779,8 @@ fileprivate struct SessionIdentityHeader: View {
         }
     }
 
-    // Placeholder privacy logic. Replace with your actual session privacy determinant.
-    private var isPrivate: Bool {
-        // If you need a per-session field, swap this logic
-        // For now, use ProfileStore.defaultPrivacy or always false
-        return false
-    }
+    // Updated privacy logic as requested
+    private var isPrivate: Bool { session.isPublic == false }
 
     // Fallback initials
     private var initials: String {
@@ -834,9 +830,9 @@ fileprivate struct SessionIdentityHeader: View {
             }
 
             Spacer(minLength: 0)
-            // Optional privacy icon
+            // Updated privacy icon from lock.fill to eye.slash
             if isPrivate {
-                Image(systemName: "lock.fill")
+                Image(systemName: "eye.slash")
                     .imageScale(.small)
                     .foregroundStyle(.secondary)
                     .padding(.leading, 2)
@@ -845,3 +841,4 @@ fileprivate struct SessionIdentityHeader: View {
         .padding(.bottom, 2)
     }
 }
+
