@@ -129,14 +129,6 @@ struct SessionDetailView: View {
             }
             .cardSurface()
 
-            // Interaction row (Like · Comment · Share)
-            if let sid = sessionUUID {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    interactionRow(sessionID: sid)
-                }
-                .cardSurface()
-            }
-
             // Notes
             let originalNotes = session.notes ?? ""
             let (focusDotIndex, displayNotes) = extractFocusDotIndex(from: originalNotes)
@@ -263,6 +255,13 @@ struct SessionDetailView: View {
                             AttachmentRow(attachment: a) { openQuickLook(a) }
                         }
                     }
+                }
+                .cardSurface()
+            }
+            
+            if let sid = sessionUUID {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    interactionRow(sessionID: sid)
                 }
                 .cardSurface()
             }
@@ -628,7 +627,7 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
     // Added interactionRow view builder for Like · Comment · Share
     @ViewBuilder
     private func interactionRow(sessionID: UUID) -> some View {
-        HStack(spacing: 20) {
+        HStack(spacing: 0) {
             // Like
             Button(action: {
                 #if canImport(UIKit)
@@ -638,25 +637,31 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
                 isLikedLocal = newState
                 likeCountLocal = FeedInteractionStore.likeCount(sessionID)
             }) {
-                HStack(spacing: 6) {
+                HStack(spacing: 8) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
+                        .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
                     Text("\(likeCountLocal)")
                         .font(.caption.monospacedDigit())
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
 
             // Comment (static for now)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 Image(systemName: "bubble.right")
+                    .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(Theme.Colors.secondaryText)
                 Text("\(commentCountLocal)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
             .accessibilityLabel("Comments")
 
             // Share
@@ -664,32 +669,30 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
                 let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
                 if isPrivatePost && !isOwner {
                     ShareLink(item: shareText()) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                            Text("Share")
-                                .font(.caption)
+                                .font(.system(size: 20, weight: .regular))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .disabled(true)
                     .opacity(0.4)
                 } else {
                     ShareLink(item: shareText()) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                            Text("Share")
-                                .font(.caption)
+                                .font(.system(size: 20, weight: .regular))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .frame(maxWidth: .infinity)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
             }
-
-            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .contain)
     }

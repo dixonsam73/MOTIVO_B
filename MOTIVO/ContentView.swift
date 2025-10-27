@@ -656,7 +656,7 @@ fileprivate struct SessionRow: View {
 
     @ViewBuilder
     private func interactionRow(sessionID: UUID) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 20) {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
             // Like
             Button(action: {
                 #if canImport(UIKit)
@@ -669,9 +669,6 @@ fileprivate struct SessionRow: View {
                 HStack(spacing: 6) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
                         .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
-                    Text("\(likeCountLocal)")
-                        .monospacedDigit()
-                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
             .buttonStyle(.plain)
@@ -683,9 +680,6 @@ fileprivate struct SessionRow: View {
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: "bubble.right")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    Text("\(commentCountLocal)")
-                        .monospacedDigit()
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
@@ -699,9 +693,6 @@ fileprivate struct SessionRow: View {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundStyle(Theme.Colors.secondaryText)
                             .opacity(0.4)
-                        Text("Share")
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .opacity(0.4)
                     }
                     .accessibilityHidden(true)
                 } else {
@@ -709,9 +700,8 @@ fileprivate struct SessionRow: View {
                         HStack(spacing: 6) {
                             Image(systemName: "square.and.arrow.up")
                                 .foregroundStyle(Theme.Colors.secondaryText)
-                            Text("Share")
-                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
