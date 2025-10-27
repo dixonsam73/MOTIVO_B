@@ -460,8 +460,21 @@ fileprivate struct SessionRow: View {
     // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
     @State private var _refreshTick: Int = 0
 
+    @State private var showDetailFromComment: Bool = false
+    @State private var isLikedLocal: Bool = false
+    @State private var likeCountLocal: Int = 0
+    @State private var commentCountLocal: Int = 0
+
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
+
+    private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
+    private var isPrivatePost: Bool { session.isPublic == false }
+
+    private func shareText() -> String {
+        let title = SessionActivity.feedTitle(for: session)
+        return "Check out my session: \(title) — via Motivo"
+    }
 
     private var attachments: [Attachment] {
         (session.attachments as? Set<Attachment>).map { Array($0) } ?? []
@@ -609,6 +622,16 @@ fileprivate struct SessionRow: View {
                     }
                     .padding(.top, 2)
                 }
+                // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
+                if let sid = sessionUUID {
+                    interactionRow(sessionID: sid)
+                        .padding(.top, 8)
+                }
+            }
+            // Fallback: if there is no thumbnail, place the interaction row below the subtitle
+            else if let sid = sessionUUID {
+                interactionRow(sessionID: sid)
+                    .padding(.top, 8)
             }
         }
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
@@ -622,6 +645,89 @@ fileprivate struct SessionRow: View {
                 _refreshTick &+= 1
             }
         }
+        .task(id: sessionUUID) {
+            if let sid = sessionUUID {
+                isLikedLocal = FeedInteractionStore.isLiked(sid)
+                likeCountLocal = FeedInteractionStore.likeCount(sid)
+                commentCountLocal = FeedInteractionStore.commentCount(sid)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func interactionRow(sessionID: UUID) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 20) {
+            // Like
+            Button(action: {
+                #if canImport(UIKit)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                let newState = FeedInteractionStore.toggleLike(sessionID)
+                isLikedLocal = newState
+                likeCountLocal = FeedInteractionStore.likeCount(sessionID)
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: isLikedLocal ? "heart.fill" : "heart")
+                        .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
+                    Text("\(likeCountLocal)")
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
+
+            // Comment (navigates to detail)
+            Button(action: {
+                showDetailFromComment = true
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bubble.right")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Text("\(commentCountLocal)")
+                        .monospacedDigit()
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Comments")
+
+            // Share
+            Group {
+                if isPrivatePost && !viewerIsOwner {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .opacity(0.4)
+                        Text("Share")
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .opacity(0.4)
+                    }
+                    .accessibilityHidden(true)
+                } else {
+                    ShareLink(item: shareText()) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            Text("Share")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .font(.subheadline)
+        .accessibilityElement(children: .contain)
+        // Hidden NavigationLink for Comment tap
+        .background(
+            NavigationLink(isActive: $showDetailFromComment) {
+                SessionDetailView(session: session)
+            } label: { EmptyView() }
+            .hidden()
+        )
     }
 }
 

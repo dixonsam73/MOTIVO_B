@@ -58,6 +58,11 @@ struct SessionDetailView: View {
     // Forces view refresh when attachments of this session change
     @State private var _refreshTick: Int = 0
 
+    // Added state for local interaction counts and liked state
+    @State private var isLikedLocal: Bool = false
+    @State private var likeCountLocal: Int = 0
+    @State private var commentCountLocal: Int = 0
+
     private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
 
     // Unified via helpers
@@ -78,6 +83,16 @@ struct SessionDetailView: View {
     }
     private var activityDescriptionText: String {
         SessionActivity.description(for: session)
+    }
+
+    // Added private computed properties for session UUID and privacy
+    private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
+    private var isPrivatePost: Bool { session.isPublic == false }
+
+    // Added helper to build share text
+    private func shareText() -> String {
+        let title = SessionActivity.headerTitle(for: session)
+        return "Check out my session: \(title) — via Motivo"
     }
 
     var body: some View {
@@ -113,6 +128,14 @@ struct SessionDetailView: View {
                 .accessibilityElement(children: .contain)
             }
             .cardSurface()
+
+            // Interaction row (Like · Comment · Share)
+            if let sid = sessionUUID {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    interactionRow(sessionID: sid)
+                }
+                .cardSurface()
+            }
 
             // Notes
             let originalNotes = session.notes ?? ""
@@ -405,7 +428,15 @@ struct SessionDetailView: View {
             }
         }
     }
-.appBackground()
+    .appBackground()
+    // Added task to hydrate local interaction state on sessionUUID change
+    .task(id: sessionUUID) {
+        if let sid = sessionUUID {
+            isLikedLocal = FeedInteractionStore.isLiked(sid)
+            likeCountLocal = FeedInteractionStore.likeCount(sid)
+            commentCountLocal = FeedInteractionStore.commentCount(sid)
+        }
+    }
 }
 
 // MARK: - Meta line (date • time • duration)
@@ -592,6 +623,75 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
         viewContext.delete(session)
         do { try viewContext.save() } catch { print("Delete error: \(error)") }
         dismiss()
+    }
+
+    // Added interactionRow view builder for Like · Comment · Share
+    @ViewBuilder
+    private func interactionRow(sessionID: UUID) -> some View {
+        HStack(spacing: 20) {
+            // Like
+            Button(action: {
+                #if canImport(UIKit)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                let newState = FeedInteractionStore.toggleLike(sessionID)
+                isLikedLocal = newState
+                likeCountLocal = FeedInteractionStore.likeCount(sessionID)
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: isLikedLocal ? "heart.fill" : "heart")
+                        .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
+                    Text("\(likeCountLocal)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
+
+            // Comment (static for now)
+            HStack(spacing: 6) {
+                Image(systemName: "bubble.right")
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Text("\(commentCountLocal)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .accessibilityLabel("Comments")
+
+            // Share
+            Group {
+                let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
+                if isPrivatePost && !isOwner {
+                    ShareLink(item: shareText()) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            Text("Share")
+                                .font(.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(true)
+                    .opacity(0.4)
+                } else {
+                    ShareLink(item: shareText()) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            Text("Share")
+                                .font(.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .contain)
     }
 }
 
