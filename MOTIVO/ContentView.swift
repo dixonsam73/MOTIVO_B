@@ -15,6 +15,10 @@ import SwiftUI
 import CoreData
 import Combine
 
+private let FEED_IMAGE_VIDEO_THUMB: CGFloat = 88
+private let FEED_AUDIO_THUMB: CGFloat = 56
+private let FEED_THUMB_CORNER: CGFloat = 10
+
 // MARK: - Local helper enums
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
@@ -106,6 +110,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedScope: FeedScope = .all
     @State private var searchText: String = ""
     @State private var debouncedQuery: String = ""
+    @State private var pushSessionID: UUID? = nil
 
     @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
@@ -180,6 +185,7 @@ fileprivate struct SessionsRootView: View {
                     )
                 }
                 .cardSurface()
+                .padding(.bottom, -8)
 
                 // ---------- Sessions List ----------
                 List {
@@ -190,9 +196,21 @@ fileprivate struct SessionsRootView: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         } else {
                             ForEach(rows, id: \.objectID) { session in
-                                NavigationLink(destination: SessionDetailView(session: session)) {
+                                ZStack {
+                                    NavigationLink(
+                                        destination: SessionDetailView(session: session),
+                                        isActive: Binding(
+                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                            set: { active in if !active { pushSessionID = nil } }
+                                        )
+                                    ) { EmptyView() }
+                                    .opacity(0)
+
                                     SessionRow(session: session, scope: selectedScope)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
                                 }
+                                .buttonStyle(.plain)
                             }
                             .onDelete(perform: deleteSessions)
                         }
@@ -201,12 +219,38 @@ fileprivate struct SessionsRootView: View {
                 .listStyle(.plain)
             }
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xl)
             // No big nav title
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { showProfile = true } label: { Text("Profile") }
+                    Button { showProfile = true } label: {
+                        #if canImport(UIKit)
+                        if let uiImage = ProfileStore.avatarImage(for: userID) {
+                            Image(uiImage: uiImage)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: 28, height: 28)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                                .padding(8)
+                        } else {
+                            Circle()
+                                .fill(Color.secondary.opacity(0.25))
+                                .frame(width: 28, height: 28)
+                                .overlay(
+                                    Image(systemName: "person.fill")
+                                        .font(.system(size: 15, weight: .medium))
+                                        .foregroundColor(.secondary)
+                                )
+                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                                .padding(8)
+                        }
+                        #else
+                        Image(systemName: "person.fill")
+                            .imageScale(.large)
+                        #endif
+                    }
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { showTimer = true } label: {
@@ -509,129 +553,123 @@ fileprivate struct SessionRow: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            // Identity header
-            if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
-                HStack(alignment: .center, spacing: 8) {
-                    // Avatar 32pt circle
-                    Group {
-                        #if canImport(UIKit)
-                        if let img = ProfileStore.avatarImage(for: ownerID) {
-                            Image(uiImage: img)
-                                .resizable()
-                                .scaledToFill()
-                        } else {
-                            // If viewer is owner, derive initials from Profile.name; else show a neutral 'U'
-                            let initials: String = {
-                                if viewerIsOwner {
-                                    let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                                    req.fetchLimit = 1
-                                    if let ctx = session.managedObjectContext,
-                                       let p = try? ctx.fetch(req).first,
-                                       let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-                                        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-                                        let first = words.first?.first.map { String($0).uppercased() } ?? ""
-                                        let last = words.last?.first.map { String($0).uppercased() } ?? ""
-                                        return first + last
+        ZStack(alignment: .bottomTrailing) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Identity header
+                if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
+                    HStack(alignment: .center, spacing: 8) {
+                        // Avatar 32pt circle
+                        Group {
+                            #if canImport(UIKit)
+                            if let img = ProfileStore.avatarImage(for: ownerID) {
+                                Image(uiImage: img)
+                                    .resizable()
+                                    .scaledToFill()
+                            } else {
+                                // If viewer is owner, derive initials from Profile.name; else show a neutral 'U'
+                                let initials: String = {
+                                    if viewerIsOwner {
+                                        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                        req.fetchLimit = 1
+                                        if let ctx = session.managedObjectContext,
+                                           let p = try? ctx.fetch(req).first,
+                                           let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                            let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                                            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                            let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                            let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                            return first + last
+                                        }
+                                        return "Y"
+                                    } else {
+                                        return "U"
                                     }
-                                    return "Y"
-                                } else {
-                                    return "U"
+                                }()
+                                ZStack {
+                                    Circle().fill(Color.gray.opacity(0.2))
+                                    Text(initials)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
                                 }
-                            }()
+                            }
+                            #else
                             ZStack {
                                 Circle().fill(Color.gray.opacity(0.2))
-                                Text(initials)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                            }
+                            #endif
+                        }
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+
+                        // Name and optional location on one line
+                        let realName: String = {
+                            // Source of truth: Core Data Profile.name for current device's user only.
+                            // For other users (future), fallback to a neutral label.
+                            if viewerIsOwner {
+                                let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                req.fetchLimit = 1
+                                if let ctx = session.managedObjectContext, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    return n
+                                }
+                                return "You"
+                            } else {
+                                return "User"
+                            }
+                        }()
+
+                        let loc = ProfileStore.location(for: ownerID)
+
+                        HStack(spacing: 6) {
+                            Text(realName).font(.subheadline.weight(.semibold))
+                            if !loc.isEmpty {
+                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                                Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
-                        #else
-                        ZStack {
-                            Circle().fill(Color.gray.opacity(0.2))
-                            Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                        }
-                        #endif
+
+                        Spacer(minLength: 0)
                     }
-                    .frame(width: 32, height: 32)
-                    .clipShape(Circle())
-                    .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+                    .padding(.bottom, 2) // minimal spacing to title
+                }
 
-                    // Name and optional location on one line
-                    let realName: String = {
-                        // Source of truth: Core Data Profile.name for current device's user only.
-                        // For other users (future), fallback to a neutral label.
-                        if viewerIsOwner {
-                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                            req.fetchLimit = 1
-                            if let ctx = session.managedObjectContext, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                return n
-                            }
-                            return "You"
-                        } else {
-                            return "User"
+                // Title only (paperclip removed)
+                Text(feedTitle)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .accessibilityIdentifier("row.title")
+
+                // Subtitle (metadata)
+                Text(feedSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(2)
+                    .padding(.top, 3)
+                    .accessibilityLabel("Instrument and activity")
+                    .accessibilityIdentifier("row.subtitle")
+
+                // Single favorite attachment preview (only one allowed/displayed)
+                if let fav = favoriteAttachment {
+                    // If viewer isn't the owner, hide preview when favorite is private
+                    if viewerIsOwner || !isPrivate(fav) {
+                        HStack(alignment: .center, spacing: 8) {
+                            SingleAttachmentPreview(attachment: fav)
+                            Spacer()
                         }
-                    }()
-
-                    let loc = ProfileStore.location(for: ownerID)
-
-                    HStack(spacing: 6) {
-                        Text(realName).font(.subheadline.weight(.semibold))
-                        if !loc.isEmpty {
-                            Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                            Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
-                        }
+                        .padding(.top, 2)
                     }
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.bottom, 2) // minimal spacing to title
-            }
-
-            // Title only (paperclip removed)
-            Text(feedTitle)
-                .font(.headline)
-                .lineLimit(2)
-                .accessibilityIdentifier("row.title")
-
-            // Subtitle
-            Text(feedSubtitle)
-                .font(.subheadline)
-                .foregroundStyle(Theme.Colors.secondaryText)
-                .lineLimit(2)
-                .accessibilityLabel("Instrument and activity")
-                .accessibilityIdentifier("row.subtitle")
-
-            // Single favorite attachment preview (only one allowed/displayed)
-            if let fav = favoriteAttachment {
-                // If viewer isn't the owner, hide preview when favorite is private
-                if viewerIsOwner || !isPrivate(fav) {
-                    HStack(alignment: .center, spacing: 8) {
-                        SingleAttachmentPreview(attachment: fav)
-                        Spacer()
-                        if extraAttachmentCount > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "paperclip")
-                                Text("\(extraAttachmentCount)")
-                            }
-                            .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel(Text("\(extraAttachmentCount) additional attachments"))
-                        }
+                    // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
+                    if let sid = sessionUUID {
+                        interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
+                            .padding(.top, 6)
                     }
-                    .padding(.top, 2)
                 }
-                // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
-                if let sid = sessionUUID {
-                    interactionRow(sessionID: sid)
-                        .padding(.top, 8)
+                // Fallback: if there is no thumbnail, place the interaction row below the subtitle
+                else if let sid = sessionUUID {
+                    interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
+                        .padding(.top, 6)
                 }
-            }
-            // Fallback: if there is no thumbnail, place the interaction row below the subtitle
-            else if let sid = sessionUUID {
-                interactionRow(sessionID: sid)
-                    .padding(.top, 8)
             }
         }
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
@@ -655,7 +693,7 @@ fileprivate struct SessionRow: View {
     }
 
     @ViewBuilder
-    private func interactionRow(sessionID: UUID) -> some View {
+    private func interactionRow(sessionID: UUID, attachmentCount: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             // Like
             Button(action: {
@@ -706,9 +744,26 @@ fileprivate struct SessionRow: View {
                     .buttonStyle(.plain)
                 }
             }
-
+            
             Spacer(minLength: 0)
+            
+            if attachmentCount > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Text("\(attachmentCount)")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .font(.caption2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
+                .padding(6)
+                .accessibilityLabel("\(attachmentCount) attachments")
+            }
         }
+        .padding(.top, -2)
         .font(.subheadline)
         .accessibilityElement(children: .contain)
         // Hidden NavigationLink for Comment tap
@@ -794,19 +849,21 @@ fileprivate struct SingleAttachmentPreview: View {
 
     var body: some View {
         let kind = attachmentKind(attachment)
+        let isAudio = (kind == "audio")
+        let size: CGFloat = isAudio ? FEED_AUDIO_THUMB : FEED_IMAGE_VIDEO_THUMB
         ZStack(alignment: .center) {
             if kind == "image" {
                 AttachmentThumb(attachment: attachment)
-                    .frame(width: 64, height: 64)
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+                    .frame(width: size, height: size)
+                    .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
             } else if kind == "video" {
                 ZStack(alignment: .center) {
                     if let poster {
                         Image(uiImage: poster)
                             .resizable()
                             .scaledToFill()
-                            .frame(width: 64, height: 64)
+                            .frame(width: size, height: size)
                             .clipped()
                     } else {
                         Image(systemName: "video")
@@ -821,18 +878,18 @@ fileprivate struct SingleAttachmentPreview: View {
                 .task {
                     if poster == nil, let url = attachmentFileURL(attachment) { await loadPoster(url) }
                 }
-                .frame(width: 64, height: 64)
+                .frame(width: size, height: size)
                 .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+                .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
             } else {
                 Image(systemName: symbolName(for: kind))
                     .imageScale(.large)
                     .foregroundStyle(Theme.Colors.secondaryText)
-                    .frame(width: 64, height: 64)
+                    .frame(width: size, height: size)
                     .background(Color.secondary.opacity(0.08))
-                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+                    .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
             }
         }
         .accessibilityLabel("Attachment preview")
