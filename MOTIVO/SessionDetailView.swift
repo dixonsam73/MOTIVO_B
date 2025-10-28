@@ -53,6 +53,17 @@ struct SessionDetailView: View {
     @State private var viewerStartIndex = 0
     @State private var viewerTappedURL: URL? = nil
 
+    #if DEBUG
+    @State private var isDebugPresented: Bool = false
+    #endif
+    #if DEBUG
+    @State private var _debugJSONBuffer: String = ""
+    #endif
+    #if DEBUG
+    @State private var debugTitle: String = "Session Debug"
+    @State private var debugSessionRef: Session? = nil
+    #endif
+
     @State private var privacyToken: Int = 0
 
     // Forces view refresh when attachments of this session change
@@ -101,6 +112,13 @@ struct SessionDetailView: View {
 
             SessionIdentityHeader(session: session)
                 .environmentObject(auth)
+                #if DEBUG
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    debugSessionRef = session
+                    debugTitle = "Session Debug"
+                    isDebugPresented = true
+                }
+                #endif
                 .padding(.bottom, 4)
 
             // 1) Top card — Activity Description (headline), shown only if non-empty
@@ -301,6 +319,23 @@ struct SessionDetailView: View {
     .sheet(isPresented: $isShowingPreview) {
         if let url = previewURL { QuickLookPreview(url: url) }
     }
+    #if DEBUG
+    .sheet(isPresented: $isDebugPresented) {
+        NavigationStack {
+            DebugViewerView(title: debugTitle, jsonString: $_debugJSONBuffer)
+                .onAppear {
+                    guard let s = debugSessionRef else {
+                        _debugJSONBuffer = "{\"error\":\"unavailable\"}"
+                        return
+                    }
+                    // Defer to next runloop to ensure presentation and fault realization
+                    DispatchQueue.main.async {
+                        _debugJSONBuffer = DebugDump.dump(session: s)
+                    }
+                }
+        }
+    }
+    #endif
     .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
         // Build URLs from the same source-of-truth order as thumbnails
         let split = splitAttachments()
