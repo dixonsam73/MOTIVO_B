@@ -235,16 +235,34 @@ fileprivate struct SessionsRootView: View {
                                 .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
                                 .padding(8)
                         } else {
-                            Circle()
-                                .fill(Color.secondary.opacity(0.25))
-                                .frame(width: 28, height: 28)
-                                .overlay(
-                                    Image(systemName: "person.fill")
-                                        .font(.system(size: 15, weight: .medium))
-                                        .foregroundColor(.secondary)
-                                )
-                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                                .padding(8)
+                            // Match initials behavior to identity row when no avatar image is available
+                            let initials: String = {
+                                // Source of truth: Core Data Profile.name for current device's user only.
+                                let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                req.fetchLimit = 1
+                                if let uid = userID, !uid.isEmpty, let ctx = viewContext as NSManagedObjectContext?, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                    let words = n.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        .components(separatedBy: .whitespacesAndNewlines)
+                                        .filter { !$0.isEmpty }
+                                    if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                    let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                    let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                    let combo = (first + last)
+                                    return combo.isEmpty ? "Y" : combo
+                                }
+                                return "Y"
+                            }()
+
+                            ZStack {
+                                Circle().fill(Color.gray.opacity(0.2))
+                                Text(initials)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .frame(width: 28, height: 28)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                            .padding(8)
                         }
                         #else
                         Image(systemName: "person.fill")
