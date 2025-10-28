@@ -14,6 +14,7 @@ import SwiftUI
 import CoreData
 import UIKit
 import Combine
+import CryptoKit
 
 private func privacyMap() -> [String: Bool] {
     UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool] ?? [:]
@@ -41,6 +42,8 @@ struct SessionDetailView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
 
+    @ObservedObject private var commentsStore = CommentsStore.shared
+
     let session: Session
 
     @State private var showEdit = false
@@ -52,6 +55,8 @@ struct SessionDetailView: View {
     @State private var isShowingAttachmentViewer = false
     @State private var viewerStartIndex = 0
     @State private var viewerTappedURL: URL? = nil
+
+    @State private var isCommentsPresented: Bool = false
 
     #if DEBUG
     @State private var isDebugPresented: Bool = false
@@ -99,6 +104,34 @@ struct SessionDetailView: View {
     // Added private computed properties for session UUID and privacy
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
+
+    // Stable session ID for comments. Prefer real UUID if present; otherwise derive from Core Data objectID.
+    private var sessionIDForComments: UUID? {
+        if let real = sessionUUID { return real }
+        #if canImport(CoreData)
+        let uri = session.objectID.uriRepresentation().absoluteString
+        return stableUUID(from: uri)
+        #else
+        return nil
+        #endif
+    }
+
+    private var commentsCount: Int {
+        guard let id = sessionIDForComments else { return 0 }
+        return commentsStore.comments(for: id).count
+    }
+
+    private func stableUUID(from string: String) -> UUID {
+        let digest = SHA256.hash(data: Data(string.utf8))
+        let bytes = Array(digest)
+        let uuid = UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+        return uuid
+    }
 
     // Added helper to build share text
     private func shareText() -> String {
@@ -318,6 +351,14 @@ struct SessionDetailView: View {
     }
     .sheet(isPresented: $isShowingPreview) {
         if let url = previewURL { QuickLookPreview(url: url) }
+    }
+    .sheet(isPresented: $isCommentsPresented) {
+        if let id = sessionIDForComments {
+            CommentsView(sessionID: id, placeholderAuthor: "You")
+        } else {
+            Text("Comments unavailable for this item.")
+                .padding()
+        }
     }
     #if DEBUG
     .sheet(isPresented: $isDebugPresented) {
@@ -686,18 +727,25 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
             .buttonStyle(.plain)
             .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
 
-            // Comment (static for now)
-            HStack(spacing: 8) {
-                Image(systemName: "bubble.right")
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                Text("\(commentCountLocal)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(Theme.Colors.secondaryText)
+            // Comment
+            Button {
+                if sessionIDForComments != nil {
+                    isCommentsPresented = true
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "text.bubble")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Text("\(commentsCount)")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
-            .contentShape(Rectangle())
-            .accessibilityLabel("Comments")
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open comments")
 
             // Share
             Group {
