@@ -8,6 +8,7 @@ public struct VideoRecorderView: View {
     }
 
     @StateObject private var controller: VideoRecorderController
+    @Environment(\.dismiss) private var dismiss
 
     public var body: some View {
         ZStack {
@@ -34,14 +35,7 @@ public struct VideoRecorderView: View {
                 HStack {
                     // Close button (left)
                     Button {
-                        #if canImport(UIKit)
-                        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-                        #endif
-                        // Dismiss presenter
-                        #if canImport(UIKit)
-                        (UIApplication.shared.connectedScenes.first { $0.activationState == .foregroundActive } as? UIWindowScene)?
-                            .windows.first { $0.isKeyWindow }?.rootViewController?.dismiss(animated: true)
-                        #endif
+                        dismiss()
                     } label: {
                         Image(systemName: "xmark")
                             .font(.system(size: 16, weight: .semibold))
