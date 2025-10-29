@@ -14,6 +14,7 @@
 import SwiftUI
 import CoreData
 import Combine
+import CryptoKit
 
 private let FEED_IMAGE_VIDEO_THUMB: CGFloat = 88
 private let FEED_AUDIO_THUMB: CGFloat = 56
@@ -522,10 +523,12 @@ fileprivate struct SessionRow: View {
     // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
     @State private var _refreshTick: Int = 0
 
-    @State private var showDetailFromComment: Bool = false
+    //@State private var showDetailFromComment: Bool = false // replaced per instructions
+    @State private var isCommentsPresented: Bool = false
     @State private var isLikedLocal: Bool = false
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
+    @ObservedObject private var commentsStore = CommentsStore.shared
 
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
@@ -533,9 +536,28 @@ fileprivate struct SessionRow: View {
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
 
-    private func shareText() -> String {
-        let title = SessionActivity.feedTitle(for: session)
-        return "Check out my session: \(title) — via Motivo"
+    private var sessionIDForComments: UUID? {
+        if let real = sessionUUID { return real }
+        let uri = session.objectID.uriRepresentation().absoluteString
+        return stableUUID(from: uri)
+    }
+    
+    private var commentsCount: Int {
+        guard let id = sessionIDForComments else { return 0 }
+        return commentsStore.comments(for: id).count
+    }
+
+    private func stableUUID(from string: String) -> UUID {
+        // Deterministic UUID v5-like using SHA256 first 16 bytes
+        let digest = SHA256.hash(data: Data(string.utf8))
+        let bytes = Array(digest)
+        let uuid = UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+        return uuid
     }
 
     private var attachments: [Attachment] {
@@ -708,6 +730,19 @@ fileprivate struct SessionRow: View {
                 commentCountLocal = FeedInteractionStore.commentCount(sid)
             }
         }
+        .onReceive(commentsStore.objectWillChange) { _ in
+            // Update only when we can resolve a stable comments ID
+            if let sid = sessionIDForComments {
+                commentCountLocal = commentsStore.comments(for: sid).count
+            }
+        }
+        .sheet(isPresented: $isCommentsPresented) {
+            if let id = sessionIDForComments {
+                CommentsView(sessionID: id, placeholderAuthor: "You")
+            } else {
+                Text("Comments unavailable for this item.").padding()
+            }
+        }
     }
 
     @ViewBuilder
@@ -730,12 +765,17 @@ fileprivate struct SessionRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
 
-            // Comment (navigates to detail)
+            // Comment (opens comments sheet)
             Button(action: {
-                showDetailFromComment = true
+                if sessionIDForComments != nil {
+                    isCommentsPresented = true
+                }
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: "bubble.right")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Text("\(commentsCount)")
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
             }
@@ -784,13 +824,11 @@ fileprivate struct SessionRow: View {
         .padding(.top, -2)
         .font(.subheadline)
         .accessibilityElement(children: .contain)
-        // Hidden NavigationLink for Comment tap
-        .background(
-            NavigationLink(isActive: $showDetailFromComment) {
-                SessionDetailView(session: session)
-            } label: { EmptyView() }
-            .hidden()
-        )
+    }
+
+    private func shareText() -> String {
+        let title = SessionActivity.feedTitle(for: session)
+        return "Check out my session: \(title) — via Motivo"
     }
 }
 
@@ -1242,4 +1280,6 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
