@@ -734,7 +734,7 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "text.bubble")
+                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(Theme.Colors.secondaryText)
                     Text("\(commentsCount)")

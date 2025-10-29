@@ -772,7 +772,7 @@ fileprivate struct SessionRow: View {
                 }
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: "bubble.right")
+                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
                     Text("\(commentsCount)")
                         .font(.caption2.monospacedDigit())
@@ -1280,6 +1280,7 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
 
 
 
