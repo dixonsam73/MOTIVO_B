@@ -68,6 +68,7 @@ public struct VideoRecorderView: View {
                 Spacer()
             }
             .ignoresSafeArea(edges: .top)
+            .zIndex(10)
 
             VStack(spacing: 12) {
                 Spacer()
@@ -104,6 +105,7 @@ public struct VideoRecorderView: View {
                     .scaleEffect(scale, anchor: .bottom)
                 }
                 .frame(height: 180)
+                .zIndex(10)
             }
         }
         .onAppear {
@@ -469,6 +471,16 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
         let url = newRecordingURL()
         recordingURL = url
         try? FileManager.default.removeItem(at: url)
+        
+        if let conn = movieOutput.connection(with: .video) {
+            if conn.isVideoOrientationSupported {
+                conn.videoOrientation = PreviewContainerView.currentOrientation()
+            }
+            if conn.isVideoMirroringSupported {
+                conn.isVideoMirrored = (preferredPosition == .front)
+            }
+        }
+        
         movieOutput.startRecording(to: url, recordingDelegate: self)
 
         elapsedRecordingTime = 0
@@ -756,7 +768,7 @@ private final class PreviewContainerView: UIView {
             }
         }
     }
-    private static func currentOrientation() -> AVCaptureVideoOrientation {
+    static func currentOrientation() -> AVCaptureVideoOrientation {
         let o = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.interfaceOrientation
@@ -786,7 +798,7 @@ private final class PlayerContainerView: UIView {
         super.layoutSubviews()
         if let l = self.layer as? AVPlayerLayer {
             l.frame = bounds
-            l.videoGravity = .resizeAspect
+            l.videoGravity = .resizeAspectFill
         }
     }
 }
