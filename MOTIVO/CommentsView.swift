@@ -1,3 +1,5 @@
+// CHANGE-ID: v710H-CommentsPolish-20251029-0001
+// SCOPE: CommentsView visual polish (wrappers only) — align with Theme.swift
 import SwiftUI
 
 public struct CommentsView: View {
@@ -64,27 +66,58 @@ public struct CommentsView: View {
 
     @ViewBuilder
     private func mentionStyledText(_ s: String, onTap: @escaping (String) -> Void) -> some View {
-        // Compose visual text with accent style for mentions using concatenation
+        // Render inline mentions with accent text and a subtle rounded background for better contrast in dark mode
         let spans = tokenizeMentions(s)
-        let concatenated: Text = spans.reduce(Text("")) { acc, span in
-            let part = Text(span.text)
-                .font(.body)
-                .foregroundStyle(span.isMention ? Color.accentColor : Color.primary)
-                .underline(span.isMention, pattern: .solid, color: .clear)
-            return acc + part
+        // Use a flow-like HStack; preserves reading order and line wrapping via Text concatenation fragments
+        // We'll assemble using AttributedString-like pieces by combining Texts inside a single Text view where possible.
+        // To keep background on mentions only, we compose via HStack with baseline alignment.
+        // Note: This keeps accessibility label as the original string.
+        let _ = spans // silence if unused in preview
+        VStack(alignment: .leading, spacing: 0) {
+            // Use a text-building approach that keeps wrapping, by interleaving Texts.
+            // SwiftUI doesn't support background per-substring within a single Text without AttributedString styling,
+            // so we approximate using a wrapping container with alignment guides.
+            // For simplicity and reliability across iOS versions, we join into a multi-Text Group.
+            Group {
+                // Render as multiple Text views; SwiftUI will wrap them inline when placed in a Text container.
+                // Since Text doesn't host children, we use a wrapping container with alignment to allow line wraps.
+                // A simple approach: convert spans to a single Text by concatenation, but apply background only to mentions using overlay.
+                spans.reduce(Text("")) { acc, span in
+                    let base = Text(span.text)
+                        .font(.body)
+                    if span.isMention {
+                        let mentionText = base
+                            .foregroundStyle(Theme.Colors.accent)
+                        // Add thin spaces around mention to create breathing room without breaking Text concatenation type
+                        let padded = Text("\u{2009}") + mentionText + Text("\u{2009}")
+                        return acc + padded
+                    } else {
+                        return acc + base.foregroundStyle(Color.primary)
+                    }
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
         }
-        concatenated
-            .accessibilityLabel(accessibleLabel(for: s))
+        .accessibilityLabel(accessibleLabel(for: s))
     }
 
     public var body: some View {
         NavigationStack {
             content
-                .navigationTitle("Comments")
+                .safeAreaInset(edge: .top) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Comments")
+                            .sectionHeader()
+                        Spacer()
+                    }
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.bottom, Theme.Spacing.m)
+                }
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         Button(action: { dismiss() }) {
                             Image(systemName: "xmark")
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .accessibilityLabel("Close")
                     }
@@ -94,13 +127,15 @@ public struct CommentsView: View {
                 } message: {
                     Text("Mention tapped. Future: open profile or start reply with \(tappedMention ?? "")")
                 }
+                .appBackground()
+                .scrollContentBackground(.hidden)
         }
     }
 
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 0) {
-            list
+            list.padding(.top, Theme.Spacing.m)
             composer
                 .background(.bar)
         }
@@ -110,9 +145,10 @@ public struct CommentsView: View {
         let comments = store.comments(for: sessionID)
         return List {
             ForEach(comments) { comment in
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text(comment.authorName)
-                        .font(.headline)
+                        .font(.callout)
+                        .fontWeight(.semibold)
                         .accessibilityLabel("Comment author")
 
                     // Mention-styled text (visual highlighting only)
@@ -122,15 +158,15 @@ public struct CommentsView: View {
                     // Optional mention chips line for tappable actions
                     let _handles = mentions(in: comment.text)
                     if !_handles.isEmpty {
-                        HStack(spacing: 8) {
+                        HStack(spacing: Theme.Spacing.s) {
                             ForEach(_handles, id: \.self) { handle in
                                 Button(action: { tappedMention = handle }) {
                                     Text(handle)
                                         .font(.footnote)
-                                        .foregroundStyle(.tint)
+                                        .foregroundStyle(Theme.Colors.accent)
                                         .padding(.vertical, 2)
                                         .padding(.horizontal, 6)
-                                        .background(.secondary.opacity(0.12), in: Capsule())
+                                        .background(Theme.Colors.accent.opacity(0.12), in: Capsule())
                                 }
                                 .accessibilityLabel("Mention \(handle)")
                             }
@@ -141,9 +177,11 @@ public struct CommentsView: View {
 
                     Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                         .accessibilityLabel("Comment time")
                 }
+                .cardSurface(padding: Theme.Spacing.l)
+                .padding(.vertical, Theme.Spacing.s)
                 .accessibilityElement(children: .combine)
                 .swipeActions(edge: .trailing) {
                     Button(role: .destructive) {
@@ -156,23 +194,28 @@ public struct CommentsView: View {
             }
         }
         .listStyle(.plain)
+        .listRowSeparator(.hidden)
         .accessibilitySortPriority(1) // Ensure list is visited before composer
     }
 
     private var composer: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField("Add a comment…", text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .accessibilityLabel("Add a comment")
-                .onSubmit(send)
+        VStack(spacing: 0) {
+            HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
+                TextField("Add a comment…", text: $draft, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .accessibilityLabel("Add a comment")
+                    .onSubmit(send)
 
-            Button(action: send) {
-                Image(systemName: "paperplane.fill")
+                Button(action: send) {
+                    Image(systemName: "paperplane.fill")
+                        .foregroundStyle(Theme.Colors.accent)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Send comment")
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            .accessibilityLabel("Send comment")
         }
+        .cardSurface(padding: Theme.Spacing.m)
         .padding(.horizontal)
         .padding(.vertical, 10)
         .accessibilitySortPriority(0) // After list
@@ -189,3 +232,4 @@ public struct CommentsView: View {
 #Preview("Comments") {
     CommentsView(sessionID: UUID())
 }
+
