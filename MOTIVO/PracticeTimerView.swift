@@ -177,16 +177,19 @@ struct PracticeTimerView: View {
     }
     private func addEmptyTaskLine() {
         taskLines.append(TaskLine(text: ""))
+        persistTasksSnapshot()
     }
     private func toggleDone(_ id: UUID) {
         if let idx = taskLines.firstIndex(where: { $0.id == id }) {
             taskLines[idx].isDone.toggle()
+            persistTasksSnapshot()
         }
     }
     private func deleteLine(_ id: UUID) {
         taskLines.removeAll { $0.id == id }
         autoTaskTexts.removeValue(forKey: id)
         if taskLines.isEmpty { showTasksPad = false }
+        persistTasksSnapshot()
     }
     var body: some View {
         NavigationStack {
@@ -256,7 +259,7 @@ struct PracticeTimerView: View {
 
                                 ForEach($taskLines) { $line in
                                     HStack(spacing: 8) {
-                                        Button { line.isDone.toggle() } label: {
+                                        Button { line.isDone.toggle(); persistTasksSnapshot() } label: {
                                             Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
                                         }
                                         TextField("Task", text: $line.text)
@@ -272,6 +275,7 @@ struct PracticeTimerView: View {
                                                 if trimmed.isEmpty, let auto = autoTaskTexts[line.id] {
                                                     line.text = auto
                                                 }
+                                                persistTasksSnapshot()
                                             }
                                             .onChange(of: focusedTaskID) { _, newFocus in
                                                 if newFocus == line.id {
@@ -279,6 +283,7 @@ struct PracticeTimerView: View {
                                                     if let auto = autoTaskTexts[line.id], line.text == auto {
                                                         line.text = ""
                                                     }
+                                                    persistTasksSnapshot()
                                                 }
                                             }
 
@@ -301,6 +306,7 @@ struct PracticeTimerView: View {
                                 showTasksPad = true
                                 loadPracticeDefaultsIfNeeded()
                                 loadDefaultTasksIfNeeded()
+                                persistTasksSnapshot()
                             }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "plus.circle")
@@ -360,6 +366,7 @@ struct PracticeTimerView: View {
                                                     if selectedThumbnailID == att.id {
                                                         selectedThumbnailID = stagedImages.first?.id
                                                     }
+                                                    persistStagedAttachments()
                                                 } label: {
                                                     Image(systemName: "trash")
                                                         .font(.system(size: 16, weight: .semibold))
@@ -468,6 +475,7 @@ struct PracticeTimerView: View {
                                                     try? FileManager.default.removeItem(at: tmp)
                                                     stagedVideos.removeAll { $0.id == att.id }
                                                     videoThumbnails.removeValue(forKey: att.id)
+                                                    persistStagedAttachments()
                                                 } label: {
                                                     Image(systemName: "trash")
                                                         .font(.system(size: 16, weight: .semibold))
@@ -531,6 +539,7 @@ struct PracticeTimerView: View {
             .onAppear {
                 hydrateTimerFromStorage()
                 startTicker()
+                persistStagedAttachments()
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
@@ -548,7 +557,24 @@ struct PracticeTimerView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { isPresented = false }
+                    Button("Quit") {
+                        // Clear persisted and in-memory staged attachments and reset timer
+                        stopAttachmentPlayback()
+                        clearPersistedStagedAttachments()
+                        clearPersistedTasks()
+                        clearPersistedTimer()
+                        resetUIOnly()
+                        stagedAudio.removeAll()
+                        audioTitles.removeAll()
+                        audioAutoTitles.removeAll()
+                        audioDurations.removeAll()
+                        stagedImages.removeAll()
+                        stagedVideos.removeAll()
+                        videoThumbnails.removeAll()
+                        selectedThumbnailID = nil
+                        purgeStagedTempFiles()
+                        isPresented = false
+                    }
                 }
             }
             .sheet(isPresented: $showInstrumentSheet) {
@@ -615,6 +641,8 @@ struct PracticeTimerView: View {
                     onSaved: {
                         didSaveFromReview = true
                         clearPersistedTimer()
+                        clearPersistedStagedAttachments()
+                        clearPersistedTasks()
                         resetUIOnly()
                         stagedAudio.removeAll()
                         audioTitles.removeAll()
@@ -630,6 +658,8 @@ struct PracticeTimerView: View {
                 // If the review sheet was closed and no save occurred, reset timer for next opening
                 if oldValue == true && newValue == false && didSaveFromReview == false {
                     clearPersistedTimer()
+                    clearPersistedStagedAttachments()
+                    clearPersistedTasks()
                     resetUIOnly()
                     stagedAudio.removeAll()
                     audioTitles.removeAll()
@@ -977,6 +1007,8 @@ struct PracticeTimerView: View {
     private func reset() {
         pause()
         clearPersistedTimer()
+        clearPersistedStagedAttachments()
+        clearPersistedTasks()
         resetUIOnly()
     }
 
@@ -1046,6 +1078,18 @@ struct PracticeTimerView: View {
         case isRunning = "PracticeTimer.isRunning"
         case activityRaw = "PracticeTimer.activityRaw"
         case activityDetail = "PracticeTimer.activityDetail"
+
+        case stagedAudio = "PracticeTimer.stagedAudio"
+        case stagedVideo = "PracticeTimer.stagedVideo"
+        case stagedImages = "PracticeTimer.stagedImages"
+        case audioTitles = "PracticeTimer.audioTitles"
+        case audioAutoTitles = "PracticeTimer.audioAutoTitles"
+        case audioDurations = "PracticeTimer.audioDurations"
+        case selectedThumbnailID = "PracticeTimer.selectedThumbnailID"
+
+        case taskLines = "PracticeTimer.taskLines"
+        case autoTaskTexts = "PracticeTimer.autoTaskTexts"
+        case showTasksPad = "PracticeTimer.showTasksPad"
     }
 
     private func hydrateTimerFromStorage() {
@@ -1058,6 +1102,82 @@ struct PracticeTimerView: View {
         activity = SessionActivityType(rawValue: raw) ?? .practice
         activityDetail = d.string(forKey: TimerDefaultsKey.activityDetail.rawValue) ?? ""
         syncActivityChoiceFromState()
+        
+        // Restore staged attachments and related metadata
+        if let audArray = d.array(forKey: TimerDefaultsKey.stagedAudio.rawValue) as? [Data] {
+            // Each Data blob is a serialized StagedAttachment with id + kind + data; fall back to treating as raw data list if decoding fails
+            var rebuilt: [StagedAttachment] = []
+            for blob in audArray {
+                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
+                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .audio))
+                } else {
+                    // Back-compat: generate ids for raw data entries
+                    rebuilt.append(StagedAttachment(id: UUID(), data: blob, kind: .audio))
+                }
+            }
+            self.stagedAudio = rebuilt
+        }
+        if let vidArray = d.array(forKey: TimerDefaultsKey.stagedVideo.rawValue) as? [Data] {
+            var rebuilt: [StagedAttachment] = []
+            for blob in vidArray {
+                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
+                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .video))
+                    if let thumb = generateVideoThumbnail(from: obj.data, id: obj.id) {
+                        self.videoThumbnails[obj.id] = thumb
+                    }
+                } else {
+                    let id = UUID()
+                    rebuilt.append(StagedAttachment(id: id, data: blob, kind: .video))
+                    if let thumb = generateVideoThumbnail(from: blob, id: id) {
+                        self.videoThumbnails[id] = thumb
+                    }
+                }
+            }
+            self.stagedVideos = rebuilt
+        }
+        if let imgArray = d.array(forKey: TimerDefaultsKey.stagedImages.rawValue) as? [Data] {
+            var rebuilt: [StagedAttachment] = []
+            for blob in imgArray {
+                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
+                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .image))
+                } else {
+                    rebuilt.append(StagedAttachment(id: UUID(), data: blob, kind: .image))
+                }
+            }
+            self.stagedImages = rebuilt
+        }
+        if let titlesData = d.data(forKey: TimerDefaultsKey.audioTitles.rawValue),
+           let titles = try? JSONDecoder().decode([UUID:String].self, from: titlesData) {
+            self.audioTitles = titles
+        }
+        if let autoTitlesData = d.data(forKey: TimerDefaultsKey.audioAutoTitles.rawValue),
+           let autos = try? JSONDecoder().decode([UUID:String].self, from: autoTitlesData) {
+            self.audioAutoTitles = autos
+        }
+        if let durationsData = d.data(forKey: TimerDefaultsKey.audioDurations.rawValue),
+           let durs = try? JSONDecoder().decode([UUID:Int].self, from: durationsData) {
+            self.audioDurations = durs
+        }
+        if let selIDStr = d.string(forKey: TimerDefaultsKey.selectedThumbnailID.rawValue), let selID = UUID(uuidString: selIDStr) {
+            self.selectedThumbnailID = selID
+        }
+
+        // Restore task pad contents
+        if let taskData = d.data(forKey: TimerDefaultsKey.taskLines.rawValue),
+           let decoded = try? JSONDecoder().decode([SerializedTaskLine].self, from: taskData) {
+            self.taskLines = decoded.map { TaskLine(text: $0.text, isDone: $0.isDone) }
+            // Rebuild stable IDs by mapping original ids to new TaskLine ids in autoTaskTexts
+            var remappedAuto: [UUID:String] = [:]
+            if let autoData = d.data(forKey: TimerDefaultsKey.autoTaskTexts.rawValue),
+               let decodedAuto = try? JSONDecoder().decode([UUID:String].self, from: autoData) {
+                for (index, ser) in decoded.enumerated() where self.taskLines.indices.contains(index) {
+                    let newID = self.taskLines[index].id
+                    remappedAuto[newID] = decodedAuto[ser.id]
+                }
+            }
+            self.autoTaskTexts = remappedAuto
+        }
+        self.showTasksPad = d.bool(forKey: TimerDefaultsKey.showTasksPad.rawValue)
     }
 
     private func persistTimerState() {
@@ -1071,6 +1191,8 @@ struct PracticeTimerView: View {
 
     private func persistTimerSnapshot() {
         persistTimerState()
+        persistStagedAttachments()
+        persistTasksSnapshot()
     }
 
     private func clearPersistedTimer() {
@@ -1099,7 +1221,34 @@ struct PracticeTimerView: View {
             activityChoice = "custom:\(activityDetail)"
         }
     }
-    
+
+    // MARK: - Persist task pad contents
+    private struct SerializedTaskLine: Codable {
+        let id: UUID
+        let text: String
+        let isDone: Bool
+    }
+
+    private func persistTasksSnapshot() {
+        let d = UserDefaults.standard
+        let encoder = JSONEncoder()
+        let payload: [SerializedTaskLine] = taskLines.map { SerializedTaskLine(id: $0.id, text: $0.text, isDone: $0.isDone) }
+        if let data = try? encoder.encode(payload) {
+            d.set(data, forKey: TimerDefaultsKey.taskLines.rawValue)
+        }
+        if let auto = try? encoder.encode(autoTaskTexts) {
+            d.set(auto, forKey: TimerDefaultsKey.autoTaskTexts.rawValue)
+        }
+        d.set(showTasksPad, forKey: TimerDefaultsKey.showTasksPad.rawValue)
+    }
+
+    private func clearPersistedTasks() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: TimerDefaultsKey.taskLines.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.autoTaskTexts.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.showTasksPad.rawValue)
+    }
+
     // Best-effort purge for surrogate temp files created for staged items
     private func purgeStagedTempFiles() {
         let fm = FileManager.default
@@ -1152,6 +1301,52 @@ struct PracticeTimerView: View {
         return warnings.isEmpty ? nil : warnings.joined(separator: "\n")
     }
 
+    // MARK: - Persist staged attachments (unsaved session resilience)
+    private struct SerializedAttachment: Codable {
+        let id: UUID
+        let data: Data
+    }
+
+    private func persistStagedAttachments() {
+        let d = UserDefaults.standard
+        // Encode attachments with stable IDs
+        let enc = JSONEncoder()
+        let audioPayload: [Data] = stagedAudio.compactMap { att in
+            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
+        }
+        let videoPayload: [Data] = stagedVideos.compactMap { att in
+            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
+        }
+        let imagePayload: [Data] = stagedImages.compactMap { att in
+            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
+        }
+        d.set(audioPayload, forKey: TimerDefaultsKey.stagedAudio.rawValue)
+        d.set(videoPayload, forKey: TimerDefaultsKey.stagedVideo.rawValue)
+        d.set(imagePayload, forKey: TimerDefaultsKey.stagedImages.rawValue)
+        // Encode dictionaries keyed by UUID
+        if let titles = try? JSONEncoder().encode(audioTitles) {
+            d.set(titles, forKey: TimerDefaultsKey.audioTitles.rawValue)
+        }
+        if let autos = try? JSONEncoder().encode(audioAutoTitles) {
+            d.set(autos, forKey: TimerDefaultsKey.audioAutoTitles.rawValue)
+        }
+        if let durs = try? JSONEncoder().encode(audioDurations) {
+            d.set(durs, forKey: TimerDefaultsKey.audioDurations.rawValue)
+        }
+        d.set(selectedThumbnailID?.uuidString, forKey: TimerDefaultsKey.selectedThumbnailID.rawValue)
+    }
+
+    private func clearPersistedStagedAttachments() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: TimerDefaultsKey.stagedAudio.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedVideo.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedImages.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.audioTitles.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.audioAutoTitles.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.audioDurations.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.selectedThumbnailID.rawValue)
+    }
+
     // MARK: - Audio attachment helpers
 
     private func stageAudioURL(_ url: URL) {
@@ -1180,6 +1375,7 @@ struct PracticeTimerView: View {
             audioDurations[id] = durationSeconds
 
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
+            persistStagedAttachments()
         } catch {
             print("Failed to stage audio: \(error)")
         }
@@ -1198,6 +1394,7 @@ struct PracticeTimerView: View {
             }
 
             stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
+            persistStagedAttachments()
         } catch {
             print("Failed to stage video: \(error)")
         }
@@ -1312,6 +1509,9 @@ struct PracticeTimerView: View {
         try? FileManager.default.removeItem(at: tmp)
         stagedAudio.removeAll { $0.id == id }
         audioTitles.removeValue(forKey: id)
+        audioAutoTitles.removeValue(forKey: id)
+        audioDurations.removeValue(forKey: id)
+        persistStagedAttachments()
     }
 
     private func stopAttachmentPlayback() {
@@ -1430,6 +1630,7 @@ struct PracticeTimerView: View {
             // Auto-select first image as thumbnail
             let imageCount = stagedImages.count
             if imageCount == 1 { selectedThumbnailID = id }
+            persistStagedAttachments()
         }
     }
 
