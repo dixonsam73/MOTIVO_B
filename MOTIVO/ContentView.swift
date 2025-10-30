@@ -584,6 +584,33 @@ fileprivate struct SessionRow: View {
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
 
+    private var subtitleParts: [String] {
+        // Split the existing subtitle by commas, trimming whitespace
+        feedSubtitle
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var dateTimeLine: String? {
+        // Expect last two parts to be time then date; produce 'DATE at TIME'
+        let parts = subtitleParts
+        guard parts.count >= 2 else { return nil }
+        let time = parts[parts.count - 2]
+        let date = parts[parts.count - 1]
+        return "\(date) at \(time)"
+    }
+
+    private var instrumentActivityLine: String {
+        // Everything except the last two parts (time/date)
+        let parts = subtitleParts
+        if parts.count <= 2 {
+            return parts.dropLast(max(0, parts.count - 2)).joined(separator: ", ")
+        } else {
+            return parts.dropLast(2).joined(separator: ", ")
+        }
+    }
+
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
 
@@ -725,20 +752,32 @@ fileprivate struct SessionRow: View {
                     .padding(.bottom, 2) // minimal spacing to title
                 }
 
+                if let dt = dateTimeLine {
+                    Text(dt)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                        .padding(.bottom, 2)
+                        .accessibilityLabel("Date and time")
+                        .accessibilityIdentifier("row.datetime")
+                }
+
                 // Title only (paperclip removed)
                 Text(feedTitle)
                     .font(.headline)
                     .lineLimit(2)
                     .accessibilityIdentifier("row.title")
 
-                // Subtitle (metadata)
-                Text(feedSubtitle)
-                    .font(.caption)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(2)
-                    .padding(.top, 3)
-                    .accessibilityLabel("Instrument and activity")
-                    .accessibilityIdentifier("row.subtitle")
+                // Instrument / Activity subtitle (metadata)
+                if !instrumentActivityLine.isEmpty {
+                    Text(instrumentActivityLine)
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(2)
+                        .padding(.top, 3)
+                        .accessibilityLabel("Instrument and activity")
+                        .accessibilityIdentifier("row.subtitle")
+                }
 
                 // Single favorite attachment preview (only one allowed/displayed)
                 if let fav = favoriteAttachment {
@@ -1331,6 +1370,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 
