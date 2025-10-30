@@ -1,3 +1,6 @@
+// CHANGE-ID: v710H-TopButtonsSafeInset-20251030-1205
+// SCOPE: ContentView — replace .toolbar with .safeAreaInset for avatar/record/plus (visual-only); remove toolbar capsule
+// UNIQUE-TOKEN: v710H-TopButtonsSafeInset-20251030-1205
 //
 //  ContentView.swift
 //  MOTIVO
@@ -223,9 +226,10 @@ fileprivate struct SessionsRootView: View {
             .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xl)
             // No big nav title
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button { showProfile = true } label: {
+            
+.safeAreaInset(edge: .top) {
+    HStack {
+        Button { showProfile = true } label: {
                         #if canImport(UIKit)
                         if let uiImage = ProfileStore.avatarImage(for: userID) {
                             Image(uiImage: uiImage)
@@ -270,16 +274,20 @@ fileprivate struct SessionsRootView: View {
                             .imageScale(.large)
                         #endif
                     }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { showTimer = true } label: {
-                        Image(systemName: "record.circle.fill").foregroundColor(.red).opacity(0.78)
-                    }
-                    Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill").opacity(0.78)
-                    }
-                }
+        Spacer()
+        HStack(spacing: Theme.Spacing.m) {
+            Button { showTimer = true } label: {
+                Image(systemName: "record.circle.fill").foregroundColor(.red)
             }
+            Button { showAdd = true } label: {
+                Image(systemName: "plus.circle.fill")
+            }
+        }
+    }
+    .padding(.horizontal, Theme.Spacing.l)
+    .padding(.top, Theme.Spacing.m)
+}
+
             // Sheets
             .sheet(isPresented: $showTimer) {
                 PracticeTimerView(isPresented: $showTimer)
@@ -531,50 +539,10 @@ fileprivate struct SessionRow: View {
     @ObservedObject private var commentsStore = CommentsStore.shared
 
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
-    // private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) } // replaced below
+    private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
 
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
-
-    private var instrumentActivityLine: String {
-        // Use existing title/subtitle logic inputs: instrument name and activity type, only show activity if not in title
-        let title = feedTitle.lowercased()
-        let instrumentName = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        var parts: [String] = []
-        if !instrumentName.isEmpty { parts.append(instrumentName) }
-        // Determine activity label from stored activity type if present
-        if let raw = session.value(forKey: "activityType") as? Int16, let act = ActivityType(rawValue: raw) {
-            let label = act.label
-            // Only include activity if not already present in the title text (case-insensitive)
-            if !title.contains(label.lowercased()) {
-                parts.append(label)
-            }
-        } else if let custom = (session.value(forKey: "userActivityLabel") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
-            // For custom activities, also respect the title exclusion
-            if !title.contains(custom.lowercased()) {
-                parts.append(custom)
-            }
-        }
-        return parts.joined(separator: " • ")
-    }
-
-    private var dateTimeLine: String {
-        // Expect a timestamp/date on the session; format as 'DATE at TIME'
-        let date: Date = {
-            if let d = session.value(forKey: "timestamp") as? Date { return d }
-            if let d = session.value(forKey: "date") as? Date { return d }
-            return Date(timeIntervalSince1970: 0)
-        }()
-        let df = DateFormatter()
-        df.locale = .current
-        df.setLocalizedDateFormatFromTemplate("d MMM yyyy")
-        let tf = DateFormatter()
-        tf.locale = .current
-        tf.setLocalizedDateFormatFromTemplate("HH:mm")
-        let dateStr = df.string(from: date)
-        let timeStr = tf.string(from: date)
-        return "\(dateStr) at \(timeStr)"
-    }
 
     private var sessionIDForComments: UUID? {
         if let real = sessionUUID { return real }
@@ -714,13 +682,6 @@ fileprivate struct SessionRow: View {
                     .padding(.bottom, 2) // minimal spacing to title
                 }
 
-                Text(dateTimeLine)
-                    .font(.caption2)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(1)
-                    .padding(.top, 2)
-                    .accessibilityLabel("Date and time")
-
                 // Title only (paperclip removed)
                 Text(feedTitle)
                     .font(.headline)
@@ -728,15 +689,13 @@ fileprivate struct SessionRow: View {
                     .accessibilityIdentifier("row.title")
 
                 // Subtitle (metadata)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(instrumentActivityLine)
-                        .font(.caption)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .lineLimit(1)
-                        .accessibilityLabel("Instrument and activity")
-                }
-                .padding(.top, 3)
-                .accessibilityIdentifier("row.subtitle")
+                Text(feedSubtitle)
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(2)
+                    .padding(.top, 3)
+                    .accessibilityLabel("Instrument and activity")
+                    .accessibilityIdentifier("row.subtitle")
 
                 // Single favorite attachment preview (only one allowed/displayed)
                 if let fav = favoriteAttachment {
@@ -1329,11 +1288,6 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
-
-
-
-
-
 
 
 
