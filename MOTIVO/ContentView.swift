@@ -273,10 +273,10 @@ fileprivate struct SessionsRootView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { showTimer = true } label: {
-                        Image(systemName: "record.circle.fill").foregroundColor(.red)
+                        Image(systemName: "record.circle.fill").foregroundColor(.red).opacity(0.78)
                     }
                     Button { showAdd = true } label: {
-                        Image(systemName: "plus.circle.fill")
+                        Image(systemName: "plus.circle.fill").opacity(0.78)
                     }
                 }
             }
@@ -1329,6 +1329,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 
