@@ -23,6 +23,16 @@ private let FEED_IMAGE_VIDEO_THUMB: CGFloat = 88
 private let FEED_AUDIO_THUMB: CGFloat = 56
 private let FEED_THUMB_CORNER: CGFloat = 10
 
+// MARK: - Top buttons UI constants (visual only)
+private enum TopButtonsUI {
+    static let size: CGFloat = 40       // was 44
+    static let iconRecord: CGFloat = 19 // was 21
+    static let iconPlus: CGFloat = 17   // was 19
+    static let spacing: CGFloat = Theme.Spacing.l  // increase a notch
+    static let fillOpacityLight: CGFloat = 0.96
+    static let fillOpacityDark: CGFloat = 0.88
+}
+
 // MARK: - Local helper enums
 
 fileprivate enum ActivityType: Int16, CaseIterable, Identifiable {
@@ -86,6 +96,7 @@ struct ContentView: View {
 
 fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.colorScheme) private var colorScheme
 
     let userID: String?
 
@@ -227,15 +238,15 @@ fileprivate struct SessionsRootView: View {
             .padding(.bottom, Theme.Spacing.xl)
             // No big nav title
             
-.safeAreaInset(edge: .top) {
-    HStack {
-        Button { showProfile = true } label: {
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Button { showProfile = true } label: {
                         #if canImport(UIKit)
                         if let uiImage = ProfileStore.avatarImage(for: userID) {
                             Image(uiImage: uiImage)
                                 .resizable()
                                 .scaledToFill()
-                                .frame(width: 28, height: 28)
+                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                                 .clipShape(Circle())
                                 .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
                                 .padding(8)
@@ -259,34 +270,66 @@ fileprivate struct SessionsRootView: View {
                             }()
 
                             ZStack {
-                                Circle().fill(Color.gray.opacity(0.2))
+                                Circle().fill(.thinMaterial)
                                 Text(initials)
                                     .font(.system(size: 16, weight: .bold))
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            .frame(width: 28, height: 28)
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                             .clipShape(Circle())
                             .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
                             .padding(8)
                         }
                         #else
-                        Image(systemName: "person.fill")
-                            .imageScale(.large)
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 22, weight: .regular))
+                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                        }
+                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                         #endif
                     }
-        Spacer()
-        HStack(spacing: Theme.Spacing.m) {
-            Button { showTimer = true } label: {
-                Image(systemName: "record.circle.fill").foregroundColor(.red)
+                    Spacer()
+                    HStack(spacing: TopButtonsUI.spacing) {
+                        Button { showTimer = true } label: {
+                            ZStack {
+                              Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+
+                              Image(systemName: "record.circle.fill")
+                                .font(.system(size: TopButtonsUI.iconRecord, weight: .regular))
+                                .foregroundStyle(.red)
+                            }
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                            .contentShape(Circle())
+                            .buttonStyle(.plain)
+                        }
+                        Button { showAdd = true } label: {
+                            ZStack {
+                              Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+
+                              Image(systemName: "plus")
+                                .font(.system(size: TopButtonsUI.iconPlus, weight: .semibold))
+                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            }
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                            .contentShape(Circle())
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
             }
-            Button { showAdd = true } label: {
-                Image(systemName: "plus.circle.fill")
-            }
-        }
-    }
-    .padding(.horizontal, Theme.Spacing.l)
-    .padding(.top, Theme.Spacing.m)
-}
 
             // Sheets
             .sheet(isPresented: $showTimer) {
@@ -1288,6 +1331,13 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
+
+
+
+
+
 
 
 
