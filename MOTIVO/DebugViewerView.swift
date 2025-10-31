@@ -6,6 +6,43 @@ import SwiftUI
 #if canImport(UIKit)
 import UIKit
 #endif
+import Foundation
+
+struct FollowContextDump: Encodable {
+    let viewerID: String
+    let sessionOwnerID: String?
+    let approvedIDs: [String]
+    let pendingTargets: [String]
+    let relationToOwner: String?   // "approved" | "pending" | "blocked" | "none"
+}
+
+extension DebugDump {
+
+    @MainActor static func followContext(for viewerID: String, sessionOwnerID: String?) -> FollowContextDump {
+        // These APIs are expected to exist in DEBUG builds per guardrails/instructions
+        let store = FollowStore.shared
+        let approved = store.approvedIDs(for: viewerID)
+        let pending = store.pendingTargets(for: viewerID)
+
+        var relation: String? = nil
+        if let owner = sessionOwnerID {
+            if let status = store.status(ownerID: viewerID, targetID: owner) {
+                // assume status exposes rawValue like "approved" | "pending" | "blocked"
+                relation = status.rawValue
+            } else {
+                relation = "none"
+            }
+        }
+
+        return FollowContextDump(
+            viewerID: viewerID,
+            sessionOwnerID: sessionOwnerID,
+            approvedIDs: approved,
+            pendingTargets: pending,
+            relationToOwner: relation
+        )
+    }
+}
 
 public struct DebugViewerView: View {
     private let title: String
@@ -130,7 +167,7 @@ public enum DebugDump {
         let fileURL: String?
     }
 
-    public static func dump(session: Any) -> String {
+    @MainActor public static func dump(session: Any) -> String {
         // Best-effort reflection to avoid importing Core Data types here.
         // Expecting fields accessed via KVC-style lookups.
         // If anything fails, return an error stub.
@@ -190,6 +227,56 @@ public enum DebugDump {
             attachmentCount: count,
             attachmentIDs: attachmentIDs.sorted()
         )
+
+        #if DEBUG
+        // Build a wrapper payload that includes followContext without altering existing fields
+        struct SessionDumpWrapper: Encodable {
+            let session: SessionSnapshot
+            let attachments: [AttachmentSnapshot]
+            let followContext: FollowContextDump?
+        }
+
+        // Attempt to collect attachments if present and encodable via our AttachmentSnapshot logic
+        var attachSnaps: [AttachmentSnapshot] = []
+        if let set = valueForKey("attachments") as? Set<AnyHashable> {
+            for any in set {
+                if let anyObj = any as AnyObject? {
+                    let idString: String? = (anyObj.value(forKey: "id") as? UUID)?.uuidString
+                    let kind = anyObj.value(forKey: "kind") as? String
+                    let isThumb = (anyObj.value(forKey: "isThumbnail") as? Bool) ?? false
+                    let createdAt = anyObj.value(forKey: "createdAt") as? Date
+                    let fileURL = anyObj.value(forKey: "fileURL") as? String
+                    let fileName = fileURL.flatMap { URL(fileURLWithPath: $0).lastPathComponent }
+                    attachSnaps.append(AttachmentSnapshot(id: idString, kind: kind, isThumbnail: isThumb, createdAt: createdAt, fileName: fileName, fileURL: fileURL))
+                }
+            }
+        }
+
+        // Determine viewer ID using whatever is available in DEBUG; prefer auth if present, else persistence fallback
+        var viewerIDResolved: String? = nil
+        // Try an Auth-like singleton if present
+        if let authClass = NSClassFromString("AuthManager") as? NSObject.Type,
+           let auth = authClass.value(forKey: "shared") as? NSObject,
+           let currentUserID = auth.value(forKey: "currentUserID") as? String {
+            viewerIDResolved = currentUserID
+        }
+        if viewerIDResolved == nil,
+           let pcClass = NSClassFromString("PersistenceController") as? NSObject.Type,
+           let pcShared = pcClass.value(forKey: "shared") as? NSObject,
+           let currentUserID = pcShared.value(forKey: "currentUserID") as? String {
+            viewerIDResolved = currentUserID
+        }
+
+        let followCtx = viewerIDResolved.map { DebugDump.followContext(for: $0, sessionOwnerID: ownerUserID) }
+
+        let payload = SessionDumpWrapper(
+            session: snap,
+            attachments: attachSnaps,
+            followContext: followCtx
+        )
+        return encodeJSON(payload)
+        #endif
+
         return encodeJSON(snap)
     }
 
@@ -245,3 +332,4 @@ public enum DebugDump {
 }
 
 #endif
+
