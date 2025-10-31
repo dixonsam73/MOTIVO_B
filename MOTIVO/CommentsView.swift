@@ -110,6 +110,12 @@ public struct CommentsView: View {
         return "\(name) • \(dateStr)"
     }
 
+    // MARK: - Header likes count
+    private func headerLikesCount() -> Int {
+        // Use the stable session id directly
+        return FeedInteractionStore.likeCount(sessionID)
+    }
+
     @ViewBuilder
     private func mentionStyledText(_ s: String, onTap: @escaping (String) -> Void) -> some View {
         // Render inline mentions with accent text and a subtle rounded background for better contrast in dark mode
@@ -195,6 +201,14 @@ public struct CommentsView: View {
                             if let sub = headerSubtitleForSession() {
                                 Text(sub)
                                     .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            HStack(spacing: 6) {
+                                Image(systemName: "heart")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                Text("\(headerLikesCount())")
+                                    .font(.footnote.monospacedDigit())
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
