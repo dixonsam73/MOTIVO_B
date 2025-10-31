@@ -142,7 +142,8 @@ public struct CommentsView: View {
     }
 
     private var list: some View {
-        let comments = store.comments(for: sessionID)
+        let commentsRaw = store.comments(for: sessionID)
+        let comments = commentsRaw.sorted { $0.timestamp < $1.timestamp }
         return List {
             ForEach(comments) { comment in
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
