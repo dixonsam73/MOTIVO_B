@@ -78,6 +78,38 @@ public struct CommentsView: View {
         return "Comments"
     }
 
+    // MARK: - Header subtitle (owner name • session date)
+    private func headerSubtitleForSession() -> String? {
+        let req: NSFetchRequest<Session> = Session.fetchRequest()
+        req.fetchLimit = 1
+        req.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        guard let session = try? viewContext.fetch(req).first else { return nil }
+
+        // Resolve display name similar to SessionIdentityHeader/SessionRow
+        let ownerID = session.ownerUserID ?? (try? PersistenceController.shared.currentUserID) ?? nil
+        let name: String = {
+            if let owner = ownerID, let imgName = ProfileStore.location(for: owner) as String? { _ = imgName } // no-op to keep parity
+            if let owner = ownerID, owner == ((try? PersistenceController.shared.currentUserID) ?? nil) {
+                // Current user: fetch Profile.name
+                let preq: NSFetchRequest<Profile> = Profile.fetchRequest()
+                preq.fetchLimit = 1
+                if let profile = try? viewContext.fetch(preq).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return n
+                }
+                return "You"
+            } else {
+                return "User"
+            }
+        }()
+
+        let df = DateFormatter()
+        df.doesRelativeDateFormatting = false
+        df.dateStyle = .medium
+        df.timeStyle = .none
+        let dateStr = df.string(from: session.timestamp ?? Date())
+        return "\(name) • \(dateStr)"
+    }
+
     @ViewBuilder
     private func mentionStyledText(_ s: String, onTap: @escaping (String) -> Void) -> some View {
         // Render inline mentions with accent text and a subtle rounded background for better contrast in dark mode
@@ -157,8 +189,15 @@ public struct CommentsView: View {
             content
                 .safeAreaInset(edge: .top) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text(headerTitleForSession())
-                            .sectionHeader()
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(headerTitleForSession())
+                                .sectionHeader()
+                            if let sub = headerSubtitleForSession() {
+                                Text(sub)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        }
                         Spacer()
                     }
                     .padding(.horizontal, Theme.Spacing.m)
@@ -306,6 +345,7 @@ public struct CommentsView: View {
                     Rectangle().fill(Color.clear).frame(height: Theme.Spacing.m)
                 }
             }
+            .dynamicTypeSize(.small)
             .cardSurface(padding: Theme.Spacing.l)
         }
         .listStyle(.plain)
