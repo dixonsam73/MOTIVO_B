@@ -102,6 +102,43 @@ public struct CommentsView: View {
         .accessibilityLabel(accessibleLabel(for: s))
     }
 
+    // MARK: - Relative time formatting
+    private func relativeTimestamp(from date: Date, now: Date = Date()) -> String {
+        let calendar = Calendar.current
+        let startOfNow = calendar.startOfDay(for: now)
+        let startOfDate = calendar.startOfDay(for: date)
+
+        // Day difference (whole days)
+        guard let dayDiff = calendar.dateComponents([.day], from: startOfDate, to: startOfNow).day else {
+            // Fallback — default to full date
+            let df = DateFormatter()
+            df.dateFormat = "d MMM yyyy"
+            return df.string(from: date)
+        }
+
+        if dayDiff == 0 {
+            // Today → show "Today at HH:mm"
+            let tf = DateFormatter()
+            tf.dateFormat = "HH:mm"
+            return "Today at \(tf.string(from: date))"
+        }
+        if dayDiff == 1 {
+            return "Yesterday"
+        }
+        if dayDiff < 7 {
+            return "\(dayDiff) days ago"
+        }
+        if dayDiff < 30 {
+            // Weeks (rounded down)
+            let weeks = max(1, dayDiff / 7)
+            return weeks == 1 ? "A week ago" : "\(weeks) weeks ago"
+        }
+        // 30+ days → absolute date like "14 Sep 2025"
+        let df = DateFormatter()
+        df.dateFormat = "d MMM yyyy"
+        return df.string(from: date)
+    }
+
     public var body: some View {
         NavigationStack {
             content
@@ -202,7 +239,7 @@ public struct CommentsView: View {
                             }()
                             Text(displayName).font(.subheadline.weight(.semibold))
                             Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                            Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
+                            Text(relativeTimestamp(from: comment.timestamp))
                                 .font(.footnote)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
