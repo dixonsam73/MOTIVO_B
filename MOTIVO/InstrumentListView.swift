@@ -70,6 +70,22 @@ struct InstrumentListView: View {
         inst.id = UUID()
         inst.name = name
         inst.profile = profile
+
+        // Mirror into owner-scoped UserInstrument so Profile/ProfilePeek can display chips
+        if let name = inst.name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            do {
+                _ = try PersistenceController.shared.fetchOrCreateUserInstrument(
+                    named: name,
+                    mapTo: inst,
+                    visibleOnProfile: true,
+                    in: moc
+                )
+            } catch {
+                // Non-fatal: the profile list still updates; peek chips may lag
+                print("UserInstrument mirror failed: \(error)")
+            }
+        }
+
         try? moc.save()
         newInstrument = ""
     }
@@ -77,7 +93,22 @@ struct InstrumentListView: View {
     private func delete(at offsets: IndexSet) {
         let list = instrumentsForProfile()
         for index in offsets {
-            moc.delete(list[index])
+            let inst = list[index]
+            // Capture name before delete to resolve the corresponding UserInstrument
+            let name = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            moc.delete(inst)
+            // Attempt to delete the mirrored UserInstrument for the current owner by normalized name
+            if !name.isEmpty {
+                let norm = PersistenceController.normalized(name)
+                let fr: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
+                var predicates: [NSPredicate] = []
+                if let owner = PersistenceController.shared.ownerIDForCustoms { predicates.append(NSPredicate(format: "ownerUserID == %@", owner)) }
+                predicates.append(NSPredicate(format: "normalizedName == %@", norm))
+                fr.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+                if let matches = try? moc.fetch(fr) {
+                    for ui in matches { moc.delete(ui) }
+                }
+            }
         }
         try? moc.save()
     }

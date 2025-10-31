@@ -167,12 +167,57 @@ extension PersistenceController {
 // MARK: - Backfill shim (async variant)
 extension PersistenceController {
     /// Called once after migration to backfill data for a specific user ID.
-    /// Currently a no-op so the app compiles and runs.
     @MainActor
     func runOneTimeBackfillIfNeeded(for userID: String) async {
-        // TODO: add real backfill logic if required
-        return
+        // Use a persistent flag so we only run once per user on this device
+        let key = "backfill_userInstruments_done_\(userID)"
+        if UserDefaults.standard.bool(forKey: key) { return }
+
+        let ctx = container.viewContext
+
+        // Verify owner context is configured for customs (mirrors write path expectations)
+        self.currentUserID = self.currentUserID ?? userID
+
+        // Fetch local Profile (single) and its Instruments
+        let pReq: NSFetchRequest<Profile> = Profile.fetchRequest()
+        pReq.fetchLimit = 1
+
+        let iReq: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+        iReq.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+
+        do {
+            let profile = try ctx.fetch(pReq).first
+            let instruments = try ctx.fetch(iReq)
+            // Map only instruments that belong to the local Profile if available
+            let filtered: [Instrument]
+            if let profile {
+                filtered = instruments.filter { $0.profile == profile }
+            } else {
+                filtered = instruments
+            }
+
+            for inst in filtered {
+                let raw = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !raw.isEmpty else { continue }
+                do {
+                    _ = try fetchOrCreateUserInstrument(
+                        named: raw,
+                        mapTo: inst,
+                        visibleOnProfile: true,
+                        in: ctx
+                    )
+                } catch {
+                    // Continue; best-effort backfill
+                    print("Backfill UserInstrument failed for \(raw): \(error)")
+                }
+            }
+            try ctx.save()
+            UserDefaults.standard.set(true, forKey: key)
+        } catch {
+            print("Backfill error: \(error)")
+        }
     }
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Maintenance — post-context-niceties (viewContext named; undo disabled)
+
