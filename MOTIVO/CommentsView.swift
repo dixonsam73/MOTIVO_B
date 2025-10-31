@@ -156,38 +156,44 @@ public struct CommentsView: View {
     // MARK: - Relative time formatting
     private func relativeTimestamp(from date: Date, now: Date = Date()) -> String {
         let calendar = Calendar.current
-        let startOfNow = calendar.startOfDay(for: now)
-        let startOfDate = calendar.startOfDay(for: date)
+        let tzAwareNow = now
+        let tzAwareDate = date
 
-        // Day difference (whole days)
-        guard let dayDiff = calendar.dateComponents([.day], from: startOfDate, to: startOfNow).day else {
-            // Fallback — default to full date
-            let df = DateFormatter()
-            df.dateFormat = "d MMM yyyy"
-            return df.string(from: date)
-        }
-
-        if dayDiff == 0 {
-            // Today → show "Today at HH:mm"
+        // Today / Yesterday using calendar semantics (DST-safe)
+        if calendar.isDateInToday(tzAwareDate) {
             let tf = DateFormatter()
+            tf.locale = Locale.autoupdatingCurrent
+            tf.timeZone = TimeZone.autoupdatingCurrent
             tf.dateFormat = "HH:mm"
-            return "Today at \(tf.string(from: date))"
+            return "Today at \(tf.string(from: tzAwareDate))"
         }
-        if dayDiff == 1 {
+        if calendar.isDateInYesterday(tzAwareDate) {
             return "Yesterday"
         }
+
+        // Compare day boundaries to avoid 24h-delta pitfalls (DST/clock changes)
+        let startOfNow = calendar.startOfDay(for: tzAwareNow)
+        let startOfDate = calendar.startOfDay(for: tzAwareDate)
+        guard let dayDiff = calendar.dateComponents([.day], from: startOfDate, to: startOfNow).day else {
+            let df = DateFormatter()
+            df.locale = Locale.autoupdatingCurrent
+            df.timeZone = TimeZone.autoupdatingCurrent
+            df.dateFormat = "d MMM yyyy"
+            return df.string(from: tzAwareDate)
+        }
+
         if dayDiff < 7 {
             return "\(dayDiff) days ago"
         }
         if dayDiff < 30 {
-            // Weeks (rounded down)
             let weeks = max(1, dayDiff / 7)
             return weeks == 1 ? "A week ago" : "\(weeks) weeks ago"
         }
-        // 30+ days → absolute date like "14 Sep 2025"
         let df = DateFormatter()
+        df.locale = Locale.autoupdatingCurrent
+        df.timeZone = TimeZone.autoupdatingCurrent
         df.dateFormat = "d MMM yyyy"
-        return df.string(from: date)
+        return df.string(from: tzAwareDate)
     }
 
     public var body: some View {
