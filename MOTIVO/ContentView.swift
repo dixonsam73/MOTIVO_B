@@ -571,11 +571,16 @@ fileprivate struct StatsBannerView: View {
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
     let scope: FeedScope
+
+    @Environment(\.managedObjectContext) private var ctx
+    @EnvironmentObject private var auth: AuthManager
+
     // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
     @State private var _refreshTick: Int = 0
 
     //@State private var showDetailFromComment: Bool = false // replaced per instructions
     @State private var isCommentsPresented: Bool = false
+    @State private var showPeek: Bool = false
     @State private var isLikedLocal: Bool = false
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
@@ -677,49 +682,52 @@ fileprivate struct SessionRow: View {
                 if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
                     HStack(alignment: .center, spacing: 8) {
                         // Avatar 32pt circle
-                        Group {
-                            #if canImport(UIKit)
-                            if let img = ProfileStore.avatarImage(for: ownerID) {
-                                Image(uiImage: img)
-                                    .resizable()
-                                    .scaledToFill()
-                            } else {
-                                // If viewer is owner, derive initials from Profile.name; else show a neutral 'U'
-                                let initials: String = {
-                                    if viewerIsOwner {
-                                        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                                        req.fetchLimit = 1
-                                        if let ctx = session.managedObjectContext,
-                                           let p = try? ctx.fetch(req).first,
-                                           let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                            let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
-                                            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-                                            let first = words.first?.first.map { String($0).uppercased() } ?? ""
-                                            let last = words.last?.first.map { String($0).uppercased() } ?? ""
-                                            return first + last
+                        Button(action: { showPeek = true }) {
+                            Group {
+                                #if canImport(UIKit)
+                                if let img = ProfileStore.avatarImage(for: ownerID) {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    // If viewer is owner, derive initials from Profile.name; else show a neutral 'U'
+                                    let initials: String = {
+                                        if viewerIsOwner {
+                                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                            req.fetchLimit = 1
+                                            if let ctx = session.managedObjectContext,
+                                               let p = try? ctx.fetch(req).first,
+                                               let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                                                if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                                let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                                let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                                return first + last
+                                            }
+                                            return "Y"
+                                        } else {
+                                            return "U"
                                         }
-                                        return "Y"
-                                    } else {
-                                        return "U"
+                                    }()
+                                    ZStack {
+                                        Circle().fill(Color.gray.opacity(0.2))
+                                        Text(initials)
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
                                     }
-                                }()
+                                }
+                                #else
                                 ZStack {
                                     Circle().fill(Color.gray.opacity(0.2))
-                                    Text(initials)
-                                        .font(.system(size: 16, weight: .bold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                    Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
                                 }
+                                #endif
                             }
-                            #else
-                            ZStack {
-                                Circle().fill(Color.gray.opacity(0.2))
-                                Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                            }
-                            #endif
+                            .frame(width: 32, height: 32)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
                         }
-                        .frame(width: 32, height: 32)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+                        .buttonStyle(.plain)
 
                         // Name and optional location on one line
                         let realName: String = {
@@ -832,6 +840,11 @@ fileprivate struct SessionRow: View {
             } else {
                 Text("Comments unavailable for this item.").padding()
             }
+        }
+        .sheet(isPresented: $showPeek) {
+            ProfilePeekView(ownerID: session.ownerUserID ?? ((try? PersistenceController.shared.currentUserID) ?? ""))
+                .environment(\.managedObjectContext, ctx)
+                .environmentObject(auth)
         }
     }
 
@@ -1370,6 +1383,7 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
 
 
 
