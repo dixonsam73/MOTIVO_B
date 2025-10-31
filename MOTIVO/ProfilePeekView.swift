@@ -100,7 +100,7 @@ struct ProfilePeekView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(ownerInstruments, id: \.objectID) { inst in
                                     Text((inst.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
-                                        .font(.body)
+                                        .font(Theme.Text.body)
                                         .lineLimit(1)
                                         .foregroundStyle(.primary)
                                 }
@@ -125,7 +125,7 @@ struct ProfilePeekView: View {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
             }
-            .padding(Theme.Spacing.l)
+            .padding(16)
             .cardSurface()
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
@@ -148,16 +148,24 @@ struct ProfilePeekView: View {
 }
 
 private struct StatChip: View {
+    @Environment(\.colorScheme) private var colorScheme
     let title: String
     let value: String
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(Theme.Colors.secondaryText)
-            Text(value).font(.headline)
+            Text(title)
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+            Text(value)
+                .font(.title3.weight(.semibold))
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.control)
+                .stroke(Theme.Colors.stroke(colorScheme).opacity(0.3), lineWidth: 0.5)
+        )
     }
 }
 

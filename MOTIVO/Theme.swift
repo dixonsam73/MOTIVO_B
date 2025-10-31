@@ -18,10 +18,16 @@ enum Theme {
         static let l:  CGFloat = 16
         static let xl: CGFloat = 24
         static let xxl: CGFloat = 32
+
+        static let card: CGFloat = 16     // standard card padding
+        static let section: CGFloat = 16  // vertical spacing between sections
+        static let inline: CGFloat = 8    // inline spacing between elements
     }
 
     enum Radius {
+        // standard card corner radius
         static let card: CGFloat = 16
+        // control corner radius
         static let control: CGFloat = 12
     }
 
@@ -44,6 +50,10 @@ enum Theme {
             ? Color.white.opacity(0.08)
             : Color.black.opacity(0.08)
         }
+        // Subtle 1pt divider for cards
+        static func cardStroke(_ scheme: ColorScheme) -> Color {
+            stroke(scheme)
+        }
         // Evergreen accent (can be tailored later)
         static var accent: Color {
             Color(red: 0.16, green: 0.38, blue: 0.29)            // deep green
@@ -51,6 +61,17 @@ enum Theme {
         static var secondaryText: Color {
             Color.primary.opacity(0.55)
         }
+    }
+
+    enum Text {
+        // Page title style
+        static var pageTitle: Font { .title3.weight(.semibold) }
+        // Section header style (with subtle letter spacing ~0.2)
+        static var sectionHeader: Font { .subheadline.weight(.semibold) }
+        // Body copy (~15 pt)
+        static var body: Font { .subheadline }
+        // Meta text (uses secondary color via modifier; font size only here)
+        static var meta: Font { .footnote }
     }
 }
 
@@ -60,11 +81,12 @@ private struct SectionHeader: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
         content
-            .font(.footnote.weight(.semibold))
+            .font(Theme.Text.sectionHeader)
+            .kerning(0.2)
             .foregroundStyle(Theme.Colors.secondaryText)
             .textCase(nil)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, Theme.Spacing.xs)
+            .padding(.vertical, Theme.Spacing.inline)
     }
 }
 
@@ -73,14 +95,13 @@ private struct CardSurface: ViewModifier {
     var padding: CGFloat? = nil
     func body(content: Content) -> some View {
         content
-            .padding(padding ?? Theme.Spacing.l)
+            .padding(padding ?? Theme.Spacing.card)
             .background(Theme.Colors.surface(scheme))
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .stroke(Theme.Colors.stroke(scheme), lineWidth: 1)
+                    .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
             )
-            .shadow(color: scheme == .dark ? .clear : Color.black.opacity(0.06), radius: 8, x: 0, y: 2)
     }
 }
 
@@ -104,8 +125,8 @@ struct Theme_Previews: PreviewProvider {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("Section").sectionHeader()
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                Text("Card Title").font(.headline)
-                Text("Body copy").foregroundStyle(Theme.Colors.secondaryText)
+                Text("Card Title").font(Theme.Text.pageTitle)
+                Text("Body copy").font(Theme.Text.body).foregroundStyle(Theme.Colors.secondaryText)
             }
             .cardSurface()
         }
@@ -116,3 +137,5 @@ struct Theme_Previews: PreviewProvider {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+

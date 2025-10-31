@@ -198,7 +198,7 @@ struct PostRecordDetailsView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
                     // ---------- Instrument ----------
                     if hasNoInstruments {
@@ -217,6 +217,7 @@ struct PostRecordDetailsView: View {
                             } label: {
                                 HStack {
                                     Text(instrument?.name ?? "Select instrument…")
+                                        .font(Theme.Text.body)
                                     Spacer()
                                     Image(systemName: "chevron.right")
                                         .font(.footnote.weight(.semibold))
@@ -225,6 +226,7 @@ struct PostRecordDetailsView: View {
                                         .foregroundStyle(Theme.Colors.secondaryText)
                                 }
                                 .contentShape(Rectangle())
+                                .padding(.vertical, 12)
                             }
                             .buttonStyle(.plain)
                         }
@@ -242,6 +244,7 @@ struct PostRecordDetailsView: View {
                             HStack {
                                 let display = selectedCustomName.isEmpty ? activity.label : selectedCustomName
                                 Text(display)
+                                    .font(Theme.Text.body)
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
@@ -250,6 +253,7 @@ struct PostRecordDetailsView: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                             .contentShape(Rectangle())
+                            .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
                     }
@@ -261,6 +265,7 @@ struct PostRecordDetailsView: View {
                         TextField("Activity description", text: $activityDetail, axis: .vertical)
                             .lineLimit(1...3)
                             .textInputAutocapitalization(.never)
+                            .font(Theme.Text.body)
                     }
                     .cardSurface()
 
@@ -273,6 +278,7 @@ struct PostRecordDetailsView: View {
                         } label: {
                             HStack {
                                 Text(formattedDate(timestamp))
+                                    .font(Theme.Text.body)
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
@@ -281,6 +287,7 @@ struct PostRecordDetailsView: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                             .contentShape(Rectangle())
+                            .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
                     }
@@ -297,6 +304,7 @@ struct PostRecordDetailsView: View {
                         } label: {
                             HStack {
                                 Text(formattedDuration(durationSeconds))
+                                    .font(Theme.Text.body)
                                 Spacer()
                                 Image(systemName: "chevron.right")
                                     .font(.footnote.weight(.semibold))
@@ -305,6 +313,7 @@ struct PostRecordDetailsView: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                             .contentShape(Rectangle())
+                            .padding(.vertical, 12)
                         }
                         .buttonStyle(.plain)
 
@@ -320,6 +329,7 @@ struct PostRecordDetailsView: View {
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Visibility").sectionHeader()
                         Toggle("Public", isOn: $isPublic)
+                            .font(Theme.Text.body)
                     }
                     .cardSurface()
 
@@ -328,6 +338,7 @@ struct PostRecordDetailsView: View {
                         Text("Notes").sectionHeader()
                         TextEditor(text: $notes)
                             .frame(minHeight: 120)
+                            .font(Theme.Text.body)
                     }
                     .cardSurface()
 
@@ -387,19 +398,34 @@ struct PostRecordDetailsView: View {
                 .padding(.top, Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.xl)
             }
-            .navigationTitle("Session Review")
+            .navigationTitle("")
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Session Review").font(Theme.Text.pageTitle)
+                }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") {
+                    Button(action: {
                         isPresented = false
                         dismissToRoot()
                         purgeStagedTempFiles()
+                    }) {
+                        Text("Cancel")
+                            .font(Theme.Text.body)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") {
+                    Button(action: {
                         saveToCoreData()
                         DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
+                    }) {
+                        Text("Save")
+                            .font(Theme.Text.body)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
                     }
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }

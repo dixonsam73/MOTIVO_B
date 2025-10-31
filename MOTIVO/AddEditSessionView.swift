@@ -228,6 +228,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         } label: {
             HStack {
                 Text(instrument?.name ?? "Select instrument…")
+                    .font(Theme.Text.body)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
@@ -235,6 +236,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .background(.ultraThinMaterial, in: Circle())
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
+            .padding(.vertical, 12)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Instrument")
@@ -260,6 +262,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         let display = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : selectedCustomName
                         HStack {
                             Text(display)
+                                .font(Theme.Text.body)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
@@ -267,6 +270,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                 .background(.ultraThinMaterial, in: Circle())
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .padding(.vertical, 12)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Activity")
@@ -279,6 +283,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Description").sectionHeader()
                     TextField("Activity description", text: $activityDetail, axis: .vertical)
                         .lineLimit(1...3)
+                        .font(Theme.Text.body)
                         .onChange(of: activityDetail) { _, new in handleActivityDetailChange_v2(new) }
                 }
                 .cardSurface()
@@ -292,6 +297,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     } label: {
                         HStack {
                             Text(formattedDate(timestamp))
+                                .font(Theme.Text.body)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
@@ -299,6 +305,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                 .background(.ultraThinMaterial, in: Circle())
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .padding(.vertical, 12)
                     }
                     .buttonStyle(.plain)
                 }
@@ -314,6 +321,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     } label: {
                         HStack {
                             Text(formattedDuration(durationSeconds))
+                                .font(Theme.Text.body)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
@@ -321,10 +329,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                 .background(.ultraThinMaterial, in: Circle())
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        .padding(.vertical, 12)
+                        .padding(.bottom, 4)
                     }
                     .buttonStyle(.plain)
                     if durationSeconds == 0 {
-                        Text("Duration must be greater than 0").font(.footnote).foregroundColor(.red)
+                        Text("Duration must be greater than 0")
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                            .padding(.top, 4)
                     }
                 }
                 .cardSurface()
@@ -332,6 +345,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 // Privacy
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Toggle("Public", isOn: $isPublic)
+                        .font(Theme.Text.body)
                 }
                 .cardSurface()
 
@@ -339,7 +353,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Notes").sectionHeader()
                     ZStack(alignment: .topLeading) {
-                        TextEditor(text: $notes).frame(minHeight: 100)
+                        TextEditor(text: $notes)
+                            .font(Theme.Text.body)
+                            .frame(minHeight: 100)
                             .accessibilityLabel("Notes")
                     }
                 }
@@ -418,7 +434,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                     if att.kind == .image || att.kind == .audio || att.kind == .video {
                                         Button("Set as Thumbnail") { selectedThumbnailID = att.id }
                                     }
-                                    Button(role: .destructive) { 
+                                    Button(role: .destructive) {
                                         if existingAttachmentIDs.contains(att.id), let s = session {
                                             let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
                                             req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
@@ -466,16 +482,32 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             .padding(.top, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
-        .navigationTitle(isEdit ? "Edit Session" : "New Session")
+        .navigationTitle("")
         .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(isEdit ? "Edit Session" : "New Session")
+                    .font(Theme.Text.pageTitle)
+            }
             ToolbarItem(placement: .cancellationAction) {
-                Button("Cancel") { dismiss() }
+                Button(action: { dismiss() }) {
+                    Text("Cancel")
+                        .font(Theme.Text.body)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
+                }
             }
             ToolbarItem(placement: .confirmationAction) {
-                Button("Save") { save() }
-                    .disabled(durationSeconds == 0 || instrument == nil)
-                    .accessibilityLabel("Save session")
-                    .accessibilityIdentifier("button.saveSession")
+                Button(action: { save() }) {
+                    Text("Save")
+                        .font(Theme.Text.body)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
+                }
+                .disabled(durationSeconds == 0 || instrument == nil)
+                .accessibilityLabel("Save session")
+                .accessibilityIdentifier("button.saveSession")
             }
         }
         .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
@@ -1456,5 +1488,6 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 

@@ -136,7 +136,6 @@ public struct CommentsView: View {
                 // A simple approach: convert spans to a single Text by concatenation, but apply background only to mentions using overlay.
                 spans.reduce(Text("")) { acc, span in
                     let base = Text(span.text)
-                        .font(.body)
                     if span.isMention {
                         let mentionText = base
                             .foregroundStyle(Theme.Colors.accent)
@@ -148,6 +147,7 @@ public struct CommentsView: View {
                     }
                 }
             }
+            .font(Theme.Text.body)
             .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityLabel(accessibleLabel(for: s))
@@ -203,7 +203,7 @@ public struct CommentsView: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(headerTitleForSession())
-                                .sectionHeader()
+                                .font(Theme.Text.pageTitle)
                             if let sub = headerSubtitleForSession() {
                                 Text(sub)
                                     .font(.footnote)
@@ -257,9 +257,9 @@ public struct CommentsView: View {
         let commentsRaw = store.comments(for: sessionID)
         let comments = commentsRaw.sorted { $0.timestamp < $1.timestamp }
         return List {
-            VStack(alignment: .leading, spacing: 0) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
                 ForEach(comments) { comment in
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
 
                         HStack(alignment: .center, spacing: 8) {
                             // Avatar (32pt circle) — try to use current user's avatar when author is "You"; else show initials
@@ -312,11 +312,14 @@ public struct CommentsView: View {
                                         return comment.authorName
                                     }
                                 }()
-                                Text(displayName).font(.subheadline.weight(.semibold))
-                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                                Text(relativeTimestamp(from: comment.timestamp))
-                                    .font(.footnote)
+                                Text(displayName)
+                                    .font(Theme.Text.meta.weight(.semibold))
+                                Text("•")
+                                    .font(Theme.Text.meta)
                                     .foregroundStyle(Theme.Colors.secondaryText)
+                                Text(relativeTimestamp(from: comment.timestamp))
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                             }
 
                             Spacer(minLength: 0)
@@ -353,7 +356,7 @@ public struct CommentsView: View {
 //                            .foregroundStyle(Theme.Colors.secondaryText)
 //                            .accessibilityLabel("Comment time")
                     }
-                    .padding(.vertical, Theme.Spacing.s)
+                    .padding(.vertical, Theme.Spacing.inline)
                     .accessibilityElement(children: .combine)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
@@ -364,10 +367,9 @@ public struct CommentsView: View {
                         .accessibilityLabel("Delete comment")
                     }
                     // Spacer between comments (no visible divider)
-                    Rectangle().fill(Color.clear).frame(height: Theme.Spacing.m)
+                    Rectangle().fill(Color.clear).frame(height: Theme.Spacing.inline)
                 }
             }
-            .dynamicTypeSize(.small)
             .cardSurface(padding: Theme.Spacing.l)
         }
         .listStyle(.plain)

@@ -200,14 +200,14 @@ struct PracticeTimerView: View {
 
                     // ---------- Recording helpers (moved below timer) ----------
                     VStack(spacing: 12) {
-                        HStack(spacing: 24) {
+                        HStack(spacing: Theme.Spacing.m) {
                             Button {
                                 stopAttachmentPlayback()
                                 showAudioRecorder = true
                             } label: {
                                 Image(systemName: "mic.fill")
                                     .font(.system(size: 22, weight: .semibold))
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: 48, height: 48)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
@@ -221,7 +221,7 @@ struct PracticeTimerView: View {
                                 } label: {
                                     Image(systemName: "camera.fill")
                                         .font(.system(size: 22, weight: .semibold))
-                                        .frame(width: 44, height: 44)
+                                        .frame(width: 48, height: 48)
                                         .contentShape(Circle())
                                 }
                                 .buttonStyle(.bordered)
@@ -235,7 +235,7 @@ struct PracticeTimerView: View {
                             } label: {
                                 Image(systemName: "video.fill")
                                     .font(.system(size: 22, weight: .semibold))
-                                    .frame(width: 44, height: 44)
+                                    .frame(width: 48, height: 48)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
@@ -310,7 +310,7 @@ struct PracticeTimerView: View {
                             }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "plus.circle")
-                                    Text("Notes / Tasks")
+                                    Text("Notes / Tasks").sectionHeader()
                                 }
                                 .frame(maxWidth: .infinity, alignment: .center)
                             }
@@ -816,7 +816,7 @@ struct PracticeTimerView: View {
     private func timerCard() -> some View {
         VStack(alignment: .center, spacing: Theme.Spacing.m) {
             Text(formattedElapsed(elapsedSeconds))
-                .font(.system(size: 56, weight: .bold, design: .rounded))
+                .font(.system(size: 50, weight: .bold, design: .rounded))
                 .monospacedDigit()
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -824,23 +824,33 @@ struct PracticeTimerView: View {
                 Button(isRunning ? "Pause" : "Start") {
                     isRunning ? pause() : start()
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.borderedProminent)
                 .tint(Theme.Colors.accent)
                 .disabled(hasNoInstruments || instrument == nil)
+                .frame(height: 44)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Reset") { reset() }
                     .buttonStyle(.bordered)
+                    .tint(.secondary)
                     .disabled((elapsedSeconds == 0) && !isRunning)
+                    .frame(height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 if isRunning {
                     Button("Finish") { finish() }
                         .buttonStyle(.bordered)
-                        .tint(.red)
+                        .tint(.secondary)
                         .disabled((elapsedSeconds == 0) || instrument == nil)
+                        .frame(height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 } else {
                     Button("Finish") { finish() }
                         .buttonStyle(.bordered)
+                        .tint(.secondary)
                         .disabled((elapsedSeconds == 0) || instrument == nil)
+                        .frame(height: 44)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)

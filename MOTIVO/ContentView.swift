@@ -224,6 +224,8 @@ fileprivate struct SessionsRootView: View {
                                     SessionRow(session: session, scope: selectedScope)
                                         .contentShape(Rectangle())
                                         .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
+                                        .cardSurface()
+                                        .padding(.bottom, Theme.Spacing.section)
                                 }
                                 .buttonStyle(.plain)
                             }
@@ -779,8 +781,7 @@ fileprivate struct SessionRow: View {
                 // Instrument / Activity subtitle (metadata)
                 if !instrumentActivityLine.isEmpty {
                     Text(instrumentActivityLine)
-                        .font(.caption)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .font(Theme.Text.meta)
                         .lineLimit(2)
                         .padding(.top, 3)
                         .accessibilityLabel("Instrument and activity")
@@ -864,6 +865,7 @@ fileprivate struct SessionRow: View {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
                         .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
                 }
+                .font(.system(size: 18, weight: .semibold))
             }
             .buttonStyle(.plain)
             .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
@@ -881,6 +883,7 @@ fileprivate struct SessionRow: View {
                         .font(.caption2.monospacedDigit())
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
+                .font(.system(size: 18, weight: .semibold))
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Comments")
@@ -901,6 +904,7 @@ fileprivate struct SessionRow: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .contentShape(Rectangle())
+                        .font(.system(size: 18, weight: .semibold))
                     }
                     .buttonStyle(.plain)
                 }
@@ -1383,6 +1387,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 

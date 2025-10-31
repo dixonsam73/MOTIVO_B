@@ -57,7 +57,7 @@ struct MeView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 rangePickerHeader
                 // Full-width Time card with date range header
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range))
@@ -73,7 +73,12 @@ struct MeView: View {
             }
             .padding()
         }
-        .navigationTitle("Dashboard")
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text("Dashboard").font(Theme.Text.pageTitle)
+            }
+        }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .onChange(of: range) { _, _ in reload() }
@@ -287,6 +292,30 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
     }
 }
 
+// MARK: - Shared StatTile
+
+fileprivate struct StatTile: View {
+    let title: String
+    let value: String
+    @Environment(\.colorScheme) private var colorScheme
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+            Text(value)
+                .font(.title3.weight(.semibold))
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Theme.Colors.stroke(colorScheme).opacity(0.3), lineWidth: 0.5)
+        )
+    }
+}
+
 // MARK: - Cards
 
 fileprivate struct TimeCard: View {
@@ -305,29 +334,28 @@ fileprivate struct TimeCard: View {
     }
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Picker("Range", selection: $range) {
-                    ForEach(StatsRange.allCases) { r in Text(labelForRange(r)).tag(r) }
-                }
-                .pickerStyle(.segmented)
-                .padding(4)
-                .background(.regularMaterial.opacity(0.6))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                
-                if let dateRange {
-                    Text(dateRange)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-                Text(StatsHelper.formatDuration(seconds)).font(.system(size: 34, weight: .bold, design: .rounded))
-                Text("\(count) sessions").font(.subheadline).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Time").sectionHeader()
+            Picker("Range", selection: $range) {
+                ForEach(StatsRange.allCases) { r in Text(labelForRange(r)).tag(r) }
             }
-            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .pickerStyle(.segmented)
+            .padding(4)
+            .background(.regularMaterial.opacity(0.6))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            
+            if let dateRange {
+                Text(dateRange)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            Text(StatsHelper.formatDuration(seconds)).font(.system(size: 34, weight: .bold, design: .rounded))
+            Text("\(count) sessions").font(.subheadline).foregroundStyle(.secondary)
         }
+        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("Time trained: \(StatsHelper.formatDuration(seconds)), \(count) sessions")
+        .padding(16)
+        .cardSurface()
     }
 }
 
@@ -336,17 +364,17 @@ fileprivate struct StreaksCard: View {
 
     let current: Int; let best: Int
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Streaks").font(.headline)
-                HStack {
-                    VStack(alignment: .leading) { Text("Current").font(.caption).foregroundStyle(.secondary); Text("\(current) days").font(.title3).bold() }
-                    Spacer()
-                    VStack(alignment: .leading) { Text("Best").font(.caption).foregroundStyle(.secondary); Text("\(best) days").font(.title3).bold() }
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Streaks").sectionHeader()
+            HStack {
+                StatTile(title: "Current", value: "\(current) days")
+                Spacer()
+                StatTile(title: "Best", value: "\(best) days")
             }
-            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
+        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
+        .padding(16)
+        .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Streaks: current \(current) days, best \(best) days")
     }
@@ -357,23 +385,23 @@ fileprivate struct FocusCard: View {
 
     let average: Double?
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Focus").font(.headline)
-                if let avg = average {
-                    Text("Average").font(.caption).foregroundStyle(.secondary)
-                    // Round to nearest dot index 0...11
-                    let index = Int(round(avg))
-                    FocusDots(value: avg, highlightedIndex: index)
-                        .padding(.top, 6)
-                        .accessibilityHidden(true)
-                } else {
-                    Text("No focus data in this period.").font(.subheadline).foregroundStyle(.secondary)
-                }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Focus").sectionHeader()
+            if let avg = average {
+                Text("Average").font(.caption).foregroundStyle(.secondary)
+                // Round to nearest dot index 0...11
+                let index = Int(round(avg))
+                FocusDots(value: avg, highlightedIndex: index)
+                    .padding(.top, 6)
+                    .accessibilityHidden(true)
+            } else {
+                Text("No focus data in this period.").font(.subheadline).foregroundStyle(.secondary)
             }
-            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .cardSurface()
         .accessibilityLabel(average != nil ? "Focus average" : "No focus data")
     }
 }
@@ -444,28 +472,28 @@ fileprivate struct TopWinnerCard: View {
     let totalCount: Int
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(title).font(.headline)
-                if let w = winner {
-                    HStack {
-                        Text(w.name).font(.title3).bold().lineLimit(1).truncationMode(.tail)
-                        Spacer()
-                        Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    if totalCount > 0 {
-                        Text("\(Int(round((Double(w.count) / Double(totalCount)) * 100)))% of sessions")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
-                } else {
-                    Text("No data in this period.")
-                        .font(.subheadline)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).sectionHeader()
+            if let w = winner {
+                HStack {
+                    Text(w.name).font(.title3).bold().lineLimit(1).truncationMode(.tail)
+                    Spacer()
+                    Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
+                }
+                if totalCount > 0 {
+                    Text("\(Int(round((Double(w.count) / Double(totalCount)) * 100)))% of sessions")
+                        .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
+            } else {
+                Text("No data in this period.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
+        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
+        .padding(16)
+        .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
@@ -481,16 +509,6 @@ fileprivate struct TopWinnerCard: View {
         } else {
             return "\(title): no data"
         }
-    }
-}
-
-fileprivate struct Card<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) { content() }
-            .padding(16)
-            .background(.thinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -513,62 +531,62 @@ fileprivate struct TimeDistributionCard: View {
     }
 
     var body: some View {
-        Card {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Time distribution").font(.headline)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Time distribution").sectionHeader()
 
-                if slices.isEmpty {
-                    Text("No time logged this period.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                } else {
-                    // --- stacked bar (100% width) ---
-                    GeometryReader { geo in
-                        let total = slices.reduce(0) { $0 + $1.seconds }
-                        ZStack {
-                            // background track for clarity
-                            Capsule().fill(.secondary.opacity(0.15))
-                            // segments
-                            HStack(spacing: 0) {
-                                ForEach(0..<slices.count, id: \.self) { i in
-                                    let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
-                                    Rectangle()
-                                        .foregroundStyle(.primary)     // system adaptive
-                                        .opacity(opacityForIndex(i))    // rank shade
-                                        .frame(width: max(1, w), height: 12) // ensure visible slivers
-                                }
-                            }
-                            .clipShape(Capsule())
-                        }
-                    }
-                    .frame(height: 12)
-
-                    // --- legend (dots share the same shade as segments) ---
+            if slices.isEmpty {
+                Text("No time logged this period.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                // --- stacked bar (100% width) ---
+                GeometryReader { geo in
                     let total = slices.reduce(0) { $0 + $1.seconds }
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(0..<slices.count, id: \.self) { i in
-                            HStack(alignment: .firstTextBaseline) {
-                                HStack(spacing: 8) {
-                                    Circle()
-                                        .frame(width: 8, height: 8)
-                                        .foregroundStyle(.primary)
-                                        .opacity(opacityForIndex(i))
-                                    Text(slices[i].name)
-                                        .lineLimit(1)
-                                        .truncationMode(.tail)
-                                }
-                                Spacer()
-                                Text("\(percent(slices[i].seconds, of: total))%")
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                    ZStack {
+                        // background track for clarity
+                        Capsule().fill(.secondary.opacity(0.15))
+                        // segments
+                        HStack(spacing: 0) {
+                            ForEach(0..<slices.count, id: \.self) { i in
+                                let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
+                                Rectangle()
+                                    .foregroundStyle(.primary)     // system adaptive
+                                    .opacity(opacityForIndex(i))    // rank shade
+                                    .frame(width: max(1, w), height: 12) // ensure visible slivers
                             }
-                            .font(.title3)
                         }
+                        .clipShape(Capsule())
+                    }
+                }
+                .frame(height: 12)
+
+                // --- legend (dots share the same shade as segments) ---
+                let total = slices.reduce(0) { $0 + $1.seconds }
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(0..<slices.count, id: \.self) { i in
+                        HStack(alignment: .firstTextBaseline) {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .frame(width: 8, height: 8)
+                                    .foregroundStyle(.primary)
+                                    .opacity(opacityForIndex(i))
+                                Text(slices[i].name)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                            Spacer()
+                            Text("\(percent(slices[i].seconds, of: total))%")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .font(.title3)
                     }
                 }
             }
-            .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
         }
+        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
+        .padding(16)
+        .cardSurface()
         .accessibilityElement(children: .combine)
         .accessibilityLabel(a11yText)
     }
