@@ -182,7 +182,7 @@ public struct CommentsView: View {
                         .clipShape(Circle())
                         .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
 
-                        // Name and optional location on one line
+                        // Name and inline timestamp on one line
                         HStack(spacing: 6) {
                             let displayName: String = {
                                 if comment.authorName == "You" {
@@ -201,12 +201,10 @@ public struct CommentsView: View {
                                 }
                             }()
                             Text(displayName).font(.subheadline.weight(.semibold))
-                            let ownerID = (try? PersistenceController.shared.currentUserID) ?? nil
-                            let location = ProfileStore.location(for: ownerID)
-                            if comment.authorName == "You", !location.isEmpty {
-                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                                Text(location).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
-                            }
+                            Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                            Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
+                                .font(.footnote)
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
 
                         Spacer(minLength: 0)
@@ -238,10 +236,10 @@ public struct CommentsView: View {
                         .accessibilitySortPriority(1)
                     }
 
-                    Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Comment time")
+//                    Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
+//                        .font(.footnote)
+//                        .foregroundStyle(Theme.Colors.secondaryText)
+//                        .accessibilityLabel("Comment time")
                 }
                 .cardSurface(padding: Theme.Spacing.l)
                 .padding(.vertical, Theme.Spacing.s)
