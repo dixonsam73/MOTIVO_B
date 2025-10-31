@@ -8,6 +8,7 @@ public struct CommentsView: View {
     @State private var draft: String = ""
     @State private var tappedMention: String? = nil
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.managedObjectContext) private var viewContext
 
     private let sessionID: UUID
     private let placeholderAuthor: String
@@ -63,6 +64,18 @@ public struct CommentsView: View {
     private func accessibleLabel(for s: String) -> String {
         // Keep existing text as the accessible label
         return s
+    }
+
+    // MARK: - Header title (match feed title used in ContentView)
+    private func headerTitleForSession() -> String {
+        // Fetch Session by id and derive feed title; fallback to "Comments"
+        let req: NSFetchRequest<Session> = Session.fetchRequest()
+        req.fetchLimit = 1
+        req.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        if let session = try? viewContext.fetch(req).first {
+            return SessionActivity.feedTitle(for: session)
+        }
+        return "Comments"
     }
 
     @ViewBuilder
@@ -144,7 +157,7 @@ public struct CommentsView: View {
             content
                 .safeAreaInset(edge: .top) {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("Comments")
+                        Text(headerTitleForSession())
                             .sectionHeader()
                         Spacer()
                     }
@@ -334,3 +347,4 @@ public struct CommentsView: View {
 #Preview("Comments") {
     CommentsView(sessionID: UUID())
 }
+
