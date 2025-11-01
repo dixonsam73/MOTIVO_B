@@ -364,7 +364,21 @@ fileprivate struct SettingRow: View {
  
      @ToolbarContentBuilder
      private var toolbarContent: some ToolbarContent {
-         ToolbarItem(placement: .cancellationAction) { Button("Close") { onClose?() } }
+         ToolbarItem(placement: .cancellationAction) {
+             Button(action: { onClose?() }) {
+                 Text("Close")
+                     .font(Theme.Text.body)
+                     .foregroundStyle(.primary)
+                     .padding(.horizontal, 12)
+                     .padding(.vertical, 8)
+                     .background(
+                         Capsule()
+                             .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
+                     )
+                     .contentShape(Capsule())
+                     .frame(minWidth: 44, minHeight: 44)
+             }
+         }
          ToolbarItem(placement: .confirmationAction) { saveButton }
      }
  
@@ -375,7 +389,19 @@ fileprivate struct SettingRow: View {
              save()
              ProfileStore.setLocation(locationText, for: auth.currentUserID)
              isSaving = false
-         } label: { Text("Save") }
+         } label: {
+             Text("Save")
+                 .font(Theme.Text.body)
+                 .foregroundStyle(.primary)
+                 .padding(.horizontal, 12)
+                 .padding(.vertical, 8)
+                 .background(
+                     Capsule()
+                         .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
+                 )
+                 .contentShape(Capsule())
+                 .frame(minWidth: 44, minHeight: 44)
+         }
          .disabled(profile == nil)
      }
  
@@ -671,6 +697,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
