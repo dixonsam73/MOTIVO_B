@@ -280,6 +280,7 @@ fileprivate struct SettingRow: View {
      @ViewBuilder
      private var instrumentsSection: some View {
          Section {
+             Text("Instruments").sectionHeader()
              Button { showInstrumentManager = true } label: { manageRow(title: "Manage Instruments") }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -301,6 +302,7 @@ fileprivate struct SettingRow: View {
      @ViewBuilder
      private var activitiesSection: some View {
          Section {
+             Text("Activities").sectionHeader()
              Button { showActivityManager = true } label: { manageRow(title: "Manage Activities") }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -328,6 +330,7 @@ fileprivate struct SettingRow: View {
      @ViewBuilder
      private var tasksSection: some View {
          Section {
+             Text("Tasks").sectionHeader()
              Button { showTasksManager = true } label: { manageRow(title: "Manage Tasks") }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -345,9 +348,9 @@ fileprivate struct SettingRow: View {
              if auth.isSignedIn {
                  VStack(alignment: .leading, spacing: 6) {
                      Text(auth.displayName ?? "Signed in")
-                         .font(.headline)
+                         .font(Theme.Text.body)
                      Text("User ID: \(auth.currentUserID ?? "--")")
-                         .font(.footnote)
+                         .font(Theme.Text.meta)
                          .foregroundStyle(Theme.Colors.secondaryText)
                      Button(role: .destructive) { auth.signOut() } label: {
                          Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
@@ -705,6 +708,8 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
+
 
 
 
