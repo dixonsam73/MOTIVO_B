@@ -293,6 +293,8 @@ fileprivate struct SettingRow: View {
                  }
              }
          }
+         .cardSurface()
+         .padding(.top, Theme.Spacing.section)
          .listRowSeparator(.hidden)
      }
  
@@ -318,6 +320,8 @@ fileprivate struct SettingRow: View {
                  }
              }
          }
+         .cardSurface()
+         .padding(.top, Theme.Spacing.section)
          .listRowSeparator(.hidden)
      }
  
@@ -329,6 +333,8 @@ fileprivate struct SettingRow: View {
                  .contentShape(Rectangle())
                  .accessibilityAddTraits(.isButton)
          }
+         .cardSurface()
+         .padding(.top, Theme.Spacing.section)
          .listRowSeparator(.hidden)
      }
  
@@ -359,6 +365,8 @@ fileprivate struct SettingRow: View {
                  .accessibilityLabel(Text("Sign in with Apple"))
              }
          }
+         .cardSurface()
+         .padding(.top, Theme.Spacing.section)
          .listRowSeparator(.hidden)
      }
  
@@ -697,6 +705,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
