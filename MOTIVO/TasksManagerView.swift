@@ -12,6 +12,7 @@ import CoreData
 struct TasksManagerView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.editMode) private var editMode
 
     // MARK: - User-scoped keys
     private var ownerScope: String {
@@ -34,61 +35,96 @@ struct TasksManagerView: View {
         NavigationStack {
             List {
                 Section {
-                    HStack {
-                        TextField("Add task", text: $newItem)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled(true)
-                            .focused($newItemFocused)
-                        Button("Add") { addNew() }
-                            .disabled(newItem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                        HStack {
+                            TextField("Add task", text: $newItem)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled(true)
+                                .focused($newItemFocused)
+                                .font(Theme.Text.body)
+                            Button("Add") { addNew() }
+                                .disabled(newItem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        .padding(.vertical, 0)
                     }
+                    .cardSurface()
                 } header: {
-                    Text("Add Task")
+                    Text("Add Task").sectionHeader()
                 }
 
                 Section {
-                    Toggle(isOn: Binding(get: {
-                        autofillEnabled
-                    }, set: { v in
-                        autofillEnabled = v
-                        saveToggle()
-                    })) {
-                        Text("Auto-fill on Practice")
+                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                        Toggle(isOn: Binding(get: {
+                            autofillEnabled
+                        }, set: { v in
+                            autofillEnabled = v
+                            saveToggle()
+                        })) {
+                            Text("Auto-fill on Practice")
+                                .font(Theme.Text.body)
+                        }
                     }
+                    .cardSurface()
                 } footer: {
                     Text("If enabled, the Practice Timer will pre-populate your Notes/Tasks pad with this list when you open it and it's currently empty.")
                 }
 
                 Section {
-                    if items.isEmpty {
-                        Text("No tasks yet").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(items.indices, id: \.self) { idx in
-                            TaskRow(
-                                text: Binding(
-                                    get: { items[idx] },
-                                    set: { items[idx] = $0; saveItems() }
-                                ),
-                                onDelete: { delete(at: IndexSet(integer: idx)) }
-                            )
+                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                        if items.isEmpty {
+                            Text("No tasks yet").foregroundStyle(.secondary)
+                                .font(Theme.Text.body)
+                        } else {
+                            ForEach(items.indices, id: \.self) { idx in
+                                TaskRow(
+                                    text: Binding(
+                                        get: { items[idx] },
+                                        set: { items[idx] = $0; saveItems() }
+                                    ),
+                                    onDelete: { delete(at: IndexSet(integer: idx)) }
+                                )
+                                .padding(.vertical, Theme.Spacing.inline)
+                            }
+                            .onMove(perform: move)
+                            .onDelete(perform: delete)
                         }
-                        .onMove(perform: move)
-                        .onDelete(perform: delete)
                     }
+                    .cardSurface()
                 } header: {
-                    Text("Your Tasks")
+                    Text("Your Tasks").sectionHeader()
                 }
             }
-            .navigationTitle("Manage Tasks")
+            .listStyle(.plain)
+            .padding(.horizontal, Theme.Spacing.l)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text("Manage Tasks")
+                        .font(Theme.Text.pageTitle)
+                }
                 ToolbarItem(placement: .navigationBarLeading) {
-                    EditButton()
+                    Button(action: {
+                        let isEditing = (editMode?.wrappedValue == .active)
+                        editMode?.wrappedValue = isEditing ? .inactive : .active
+                    }) {
+                        Text((editMode?.wrappedValue == .active) ? "Done" : "Edit")
+                            .font(Theme.Text.body)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
+                    Button(action: { dismiss() }) {
+                        Text("Done")
+                            .font(Theme.Text.body)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
+                    }
                 }
             }
             .onAppear { loadAll() }
+            .appBackground()
         }
     }
 
@@ -143,19 +179,21 @@ private struct TaskRow: View {
     var onDelete: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: Theme.Spacing.inline) {
             Image(systemName: "line.3.horizontal")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             TextField("Task", text: $text)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
-            Spacer(minLength: 8)
+                .font(Theme.Text.body)
+            Spacer(minLength: Theme.Spacing.inline)
             Button(role: .destructive, action: onDelete) {
                 Image(systemName: "trash")
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Delete task")
         }
+        .padding(.vertical, Theme.Spacing.inline)
     }
 }
