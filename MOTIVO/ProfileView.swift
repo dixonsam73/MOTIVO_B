@@ -65,15 +65,15 @@ fileprivate struct SettingRow: View {
         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
             Text(title)
                 .font(.callout)
-                .foregroundStyle(.primary)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Spacer(minLength: Theme.Spacing.l)
 
             Text(value)
-                .font(.callout)
-                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
+                .font(Theme.Text.body)
+                .foregroundStyle(.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.9)
                 .truncationMode(.tail)
@@ -705,6 +705,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
