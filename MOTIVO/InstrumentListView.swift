@@ -27,27 +27,50 @@ struct InstrumentListView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Add Instrument") {
+                Section(header: Text("Add Instrument").sectionHeader()) {
                     HStack {
                         TextField("e.g. Bass, Piano", text: $newInstrument)
+                            .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
-                        Button("Add") { add() }
+                        Button(action: { add() }) { Text("Add").font(Theme.Text.body) }
                             .disabled(newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
 
-                Section("Your Instruments") {
+                Section(header: Text("Your Instruments").sectionHeader()) {
                     ForEach(instrumentsForProfile(), id: \.objectID) { inst in
-                        Text(inst.name ?? "")
+                        Text(inst.name ?? "").font(Theme.Text.body)
                     }
                     .onDelete(perform: delete)
                 }
             }
             .navigationTitle("Instruments")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                ToolbarItem(placement: .principal) {
+                    Text("Instruments").font(Theme.Text.pageTitle).foregroundStyle(.primary)
                 }
+            }
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Text("Close")
+                            .font(Theme.Text.body)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .center)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 16)
+                .padding(.top, 6)
             }
         }
     }
@@ -123,4 +146,3 @@ struct InstrumentListView: View {
         return p
     }
 }
-
