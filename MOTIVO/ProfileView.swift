@@ -157,9 +157,13 @@ fileprivate struct SettingRow: View {
                      }
                  }
                  .font(.callout)
-                 .navigationTitle("Profile")
-                 .navigationBarTitleDisplayMode(.inline)
-                 .toolbar { toolbarContent }
+                 .navigationTitle("")
+                 .toolbar {
+                     ToolbarItem(placement: .principal) {
+                         Text("Profile").font(Theme.Text.pageTitle)
+                     }
+                     toolbarContent
+                 }
                  .appBackground()
              }
          )
@@ -667,6 +671,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
