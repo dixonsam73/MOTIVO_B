@@ -10,6 +10,8 @@
 //  v7.8 Stage 2 — Fix AddEditSessionView initializer call
 //  - Replace outdated initializer that passed isPresented / onSaved with current form.
 //
+// CHANGE-ID: 20251101_090203_adbc25
+// SCOPE: v7.10H Visual unify — SessionDetailView meta text uses Theme.Text.meta; no logic changes.
 import SwiftUI
 import CoreData
 import UIKit
@@ -172,7 +174,7 @@ struct SessionDetailView: View {
                         Spacer()
                     }
                     Text(metaLine)
-                        .font(.subheadline)
+                        .font(Theme.Text.meta)
                         .foregroundStyle(.secondary)
                         .accessibilitySortPriority(1)
                 }
@@ -325,9 +327,9 @@ struct SessionDetailView: View {
     .toolbar {
         ToolbarItem(placement: .topBarTrailing) {
             HStack(spacing: 12) {
-                Button("Edit") { 
+                Button("Edit") {
                     editWasPresented = true
-                    showEdit = true 
+                    showEdit = true
                 }
                 Button(role: .destructive) { showDeleteConfirm = true } label: {
                     Image(systemName: "trash")
