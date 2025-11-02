@@ -35,38 +35,70 @@ struct ActivityListView: View {
 
     var body: some View {
         let isSignedIn = (PersistenceController.shared.currentUserID != nil)
-        NavigationView {
-            List {
-                Section(header: Text("Add Activity")) {
+        NavigationStack {
+            Form {
+                Section(header: Text("Add Activity").sectionHeader()) {
                     if !isSignedIn {
                         Text("Sign in to add custom activities.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .font(Theme.Text.body)
                     }
                     HStack {
                         TextField("e.g., Sight-reading", text: $newActivity)
-                        Button("Add") { if isSignedIn { add() } }
-                            .disabled(newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .font(Theme.Text.body)
+                            .textInputAutocapitalization(.words)
+                        Button(action: { if isSignedIn { add() } }) {
+                            Text("Add").font(Theme.Text.body)
+                        }
+                        .disabled(newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
-                Section(header: Text("Your Activities")) {
+                Section(header: Text("Your Activities").sectionHeader()) {
                     let items = Array(activities)
                     if items.isEmpty {
                         Text("No custom activities yet.")
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .font(Theme.Text.body)
                     } else {
                         ForEach(items, id: \.objectID) { a in
                             Text(a.displayName ?? "-")
+                                .font(Theme.Text.body)
                         }
                         .onDelete(perform: delete)
                     }
                 }
             }
-            .navigationTitle("Activities")
+            .navigationTitle("")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { dismiss() }
+                ToolbarItem(placement: .principal) {
+                    Text("Activities")
+                        .font(Theme.Text.pageTitle)
+                        .foregroundStyle(.primary)
                 }
             }
+            .safeAreaInset(edge: .top) {
+                HStack {
+                    Button(action: { dismiss() }) {
+                        Text("Close")
+                            .font(Theme.Text.body)
+                    }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .center)
+                    Spacer(minLength: 0)
+                }
+                .padding(.leading, 16)
+                .padding(.top, 6)
+            }
+            .appBackground()
         }
     }
 
