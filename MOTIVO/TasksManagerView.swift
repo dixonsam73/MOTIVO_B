@@ -101,27 +101,28 @@ struct TasksManagerView: View {
                     Text("Manage Tasks")
                         .font(Theme.Text.pageTitle)
                 }
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button(action: {
-                        let isEditing = (editMode?.wrappedValue == .active)
-                        editMode?.wrappedValue = isEditing ? .inactive : .active
-                    }) {
-                        Text((editMode?.wrappedValue == .active) ? "Done" : "Edit")
-                            .font(Theme.Text.body)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
-                    }
-                }
-                ToolbarItem(placement: .confirmationAction) {
+            }
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .top) {
+                HStack {
                     Button(action: { dismiss() }) {
-                        Text("Done")
+                        Text("Close")
                             .font(Theme.Text.body)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
                     }
+                    .foregroundStyle(.primary)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 22)
+                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
+                    )
+                    .contentShape(Capsule())
+                    .buttonStyle(.plain)
+                    .frame(minWidth: 44, minHeight: 44, alignment: .center)
+                    Spacer(minLength: 0)
                 }
+                .padding(.leading, 16)
+                .padding(.top, 6)
             }
             .onAppear { loadAll() }
             .appBackground()
@@ -197,3 +198,4 @@ private struct TaskRow: View {
         .padding(.vertical, Theme.Spacing.inline)
     }
 }
+
