@@ -228,12 +228,15 @@ fileprivate struct SessionsRootView: View {
                                         .padding(.bottom, Theme.Spacing.section)
                                 }
                                 .buttonStyle(.plain)
+                                .listRowSeparator(.hidden)
                             }
                             .onDelete(perform: deleteSessions)
                         }
                     }
+                    .listSectionSeparator(.hidden, edges: .all)
                 }
                 .listStyle(.plain)
+                .listRowSeparator(.hidden)
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
@@ -1387,6 +1390,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 
