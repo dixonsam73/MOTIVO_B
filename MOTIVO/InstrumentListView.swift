@@ -72,6 +72,7 @@ struct InstrumentListView: View {
                 .padding(.leading, 16)
                 .padding(.top, 6)
             }
+            .appBackground()
         }
     }
 
@@ -146,3 +147,4 @@ struct InstrumentListView: View {
         return p
     }
 }
+
