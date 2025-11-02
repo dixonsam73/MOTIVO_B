@@ -492,18 +492,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Button(action: { dismiss() }) {
                     Text("Cancel")
                         .font(Theme.Text.body)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
                 }
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(action: { save() }) {
                     Text("Save")
                         .font(Theme.Text.body)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 8)
-                        .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
                 }
                 .disabled(durationSeconds == 0 || instrument == nil)
                 .accessibilityLabel("Save session")

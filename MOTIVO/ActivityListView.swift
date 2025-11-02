@@ -80,14 +80,6 @@ struct ActivityListView: View {
                         Text("Close")
                             .font(Theme.Text.body)
                             .foregroundStyle(.primary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule()
-                                    .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
-                            )
-                            .contentShape(Capsule())
-                            .frame(minWidth: 44, minHeight: 44)
                     }
                 }
             }

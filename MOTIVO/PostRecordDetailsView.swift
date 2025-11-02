@@ -411,9 +411,6 @@ struct PostRecordDetailsView: View {
                     }) {
                         Text("Cancel")
                             .font(Theme.Text.body)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Theme.Colors.secondaryText.opacity(0.12), in: Capsule())
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
@@ -423,9 +420,6 @@ struct PostRecordDetailsView: View {
                     }) {
                         Text("Save")
                             .font(Theme.Text.body)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(Theme.Colors.accent.opacity(0.18), in: Capsule())
                     }
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }

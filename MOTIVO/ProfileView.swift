@@ -417,14 +417,6 @@ fileprivate struct SettingRow: View {
                  Text("Close")
                      .font(Theme.Text.body)
                      .foregroundStyle(.primary)
-                     .padding(.horizontal, 12)
-                     .padding(.vertical, 8)
-                     .background(
-                         Capsule()
-                             .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
-                     )
-                     .contentShape(Capsule())
-                     .frame(minWidth: 44, minHeight: 44)
              }
          }
          ToolbarItem(placement: .confirmationAction) { saveButton }
@@ -441,14 +433,6 @@ fileprivate struct SettingRow: View {
              Text("Save")
                  .font(Theme.Text.body)
                  .foregroundStyle(.primary)
-                 .padding(.horizontal, 12)
-                 .padding(.vertical, 8)
-                 .background(
-                     Capsule()
-                         .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
-                 )
-                 .contentShape(Capsule())
-                 .frame(minWidth: 44, minHeight: 44)
          }
          .disabled(profile == nil)
      }
@@ -745,6 +729,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
