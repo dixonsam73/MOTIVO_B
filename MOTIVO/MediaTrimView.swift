@@ -57,6 +57,21 @@ public struct MediaTrimView: View {
         // 6) Buttons match primary/secondary styles; spacing feels calmer.
         // 7) Light/dark mode parity OK; a11y labels intact.
 
+        // Visual hierarchy constants
+        let accent = Theme.Colors.accent
+        let secondaryText = Theme.Colors.secondaryText
+        let stroke = Color.secondary.opacity(0.25)
+        let playFillOpacity: Double = (colorScheme == .dark) ? 0.22 : 0.18
+        let handleStrokeOpacity: Double = 0.60
+        let playheadOpacity: Double = 0.95
+
+        // QA (tone & hierarchy):
+        // 1) Primary button now reads “Save as new”; calls Save-as-New.
+        // 2) Play button reads as the primary interactive element (translucent accent bg).
+        // 3) Moving playhead is brighter than handles and clearly visible while looping.
+        // 4) Handles are lighter; active handle gets full opacity while dragging.
+        // 5) Light/dark parity OK; Theme tokens used where available. No logic changed.
+
         VStack(spacing: Theme.Spacing.m) {
             // Title Row
             HStack {
@@ -65,17 +80,18 @@ public struct MediaTrimView: View {
                 Spacer()
                 Text(model.selectedDurationFormatted)
                     .font(.callout)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .foregroundStyle(secondaryText)
             }
 
             Button(action: { onCancel() }) {
                 Text("Cancel")
                     .font(.body.weight(.medium))
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .foregroundStyle(secondaryText)
             }
             .accessibilityLabel("Cancel")
             .accessibilityHint("Close without trimming")
             .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 4)
 
             // Card Surface
             VStack(spacing: Theme.Spacing.m) {
@@ -132,25 +148,22 @@ public struct MediaTrimView: View {
             // 3) No label truncation in compact width; buttons wrap within a max-width container if needed.
             // 4) Light/Dark parity OK; Theme colors only; no logic changed.
 
-            let accent = Theme.Colors.accent
-            let primaryFillOpacity: Double = (colorScheme == .dark) ? 0.22 : 0.18
-
             HStack { Spacer() }
             .frame(height: 0) // spacer to separate card and buttons visually
 
             HStack {
                 HStack(spacing: Theme.Spacing.m) {
                     Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
-                        Text("Save copy")
+                        Text("Save as new")
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(accent)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(accent.opacity(primaryFillOpacity))
+                                    .fill(accent.opacity(playFillOpacity))
                                     .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
                             )
                     }
-                    .accessibilityLabel("Save copy")
+                    .accessibilityLabel("Save as new")
                     .accessibilityHint("Export a trimmed duplicate and keep the original")
 
                     Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
@@ -206,6 +219,7 @@ private struct VideoPreview: View {
 
 private struct PlaybackControls: View {
     @ObservedObject var model: MediaTrimView.Model
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
@@ -215,7 +229,7 @@ private struct PlaybackControls: View {
                     .font(.title2)
                     .foregroundStyle(Theme.Colors.accent)
                     .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.regularMaterial))
+                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.Colors.accent.opacity((scheme == .dark) ? 0.22 : 0.18)))
                     .shadow(radius: 1)
             }
             .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
@@ -301,6 +315,8 @@ private struct WaveformRenderer: View {
     var onHandleEnd: (MediaTrimView.Model.DragFocus) -> Void
 
     @State private var dragTarget: DragTarget? = nil
+    @State private var isDraggingStart: Bool = false
+    @State private var isDraggingEnd: Bool = false
 
     private enum DragTarget { case start, end }
 
@@ -350,6 +366,7 @@ private struct WaveformRenderer: View {
                 // 4) Export still works (Save as New / Replace Original).
                 // 5) Light/Dark parity OK; no slider present.
                 PlayheadLine(xPosition: x(for: min(max(currentTime, startTime), endTime), width: width), height: height)
+                    .opacity(0.95)
                     .accessibilityHidden(true)
 
                 // Time ruler
@@ -358,12 +375,12 @@ private struct WaveformRenderer: View {
                     .offset(y: height)
 
                 // Handles
-                HandleView()
+                HandleView(isActive: isDraggingStart)
                     .position(x: selectedStartX, y: yCenter)
                     .gesture(handleDragGesture(for: .start, width: width))
                     .accessibilityLabel("Start Handle")
                     .accessibilityHint("Drag to adjust the start of the selection")
-                HandleView()
+                HandleView(isActive: isDraggingEnd)
                     .position(x: selectedEndX, y: yCenter)
                     .gesture(handleDragGesture(for: .end, width: width))
                     .accessibilityLabel("End Handle")
@@ -377,6 +394,13 @@ private struct WaveformRenderer: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 dragTarget = target
+                if target == .start {
+                    isDraggingStart = true
+                    isDraggingEnd = false
+                } else {
+                    isDraggingEnd = true
+                    isDraggingStart = false
+                }
                 let t = time(forX: max(0, min(width, value.location.x)), width: width)
                 switch target {
                 case .start:
@@ -391,6 +415,8 @@ private struct WaveformRenderer: View {
                 guard let currentTarget = dragTarget else { return }
                 onHandleEnd(currentTarget == .start ? .start : .end)
                 self.dragTarget = nil
+                isDraggingStart = false
+                isDraggingEnd = false
             }
     }
 
@@ -412,19 +438,21 @@ private struct PlayheadLine: View {
             p.move(to: CGPoint(x: xPosition, y: 0))
             p.addLine(to: CGPoint(x: xPosition, y: height))
         }
-        .stroke(Theme.Colors.accent.opacity(0.9), lineWidth: 1)
+        .stroke(Theme.Colors.accent.opacity(0.95), lineWidth: 1)
     }
 }
 
 private struct HandleView: View {
+    let isActive: Bool
+
     var body: some View {
         ZStack {
             Capsule(style: .circular)
-                .stroke(Theme.Colors.accent, lineWidth: 2)
+                .stroke(Theme.Colors.accent.opacity(isActive ? 1.0 : 0.60), lineWidth: 2)
                 .frame(width: 12, height: 32)
                 .overlay(
                     Capsule(style: .circular)
-                        .stroke(Color.primary.opacity(0.75), lineWidth: 1)
+                        .stroke(Color.primary.opacity(isActive ? 0.85 : 0.75), lineWidth: 1)
                         .padding(1)
                 )
         }
@@ -523,6 +551,8 @@ private struct VideoRangeSelector: View {
     var onEnd: (MediaTrimView.Model.DragFocus) -> Void
 
     @State private var dragTarget: DragTarget? = nil
+    @State private var isDraggingStart: Bool = false
+    @State private var isDraggingEnd: Bool = false
 
     private enum DragTarget { case start, end }
 
@@ -556,16 +586,17 @@ private struct VideoRangeSelector: View {
                     // 4) Export still works (Save as New / Replace Original).
                     // 5) Light/Dark parity OK; no slider present.
                     PlayheadLine(xPosition: x(for: min(max(currentTime, startTime), endTime), width: width), height: 8)
+                        .opacity(0.95)
                         .accessibilityHidden(true)
 
                     // Handles
-                    HandleView()
+                    HandleView(isActive: isDraggingStart)
                         .position(x: startX, y: yCenter)
                         .gesture(handleDragGesture(for: .start, width: width))
                         .accessibilityLabel("Start Handle")
                         .accessibilityHint("Drag to adjust the start of the selection")
 
-                    HandleView()
+                    HandleView(isActive: isDraggingEnd)
                         .position(x: endX, y: yCenter)
                         .gesture(handleDragGesture(for: .end, width: width))
                         .accessibilityLabel("End Handle")
@@ -583,6 +614,13 @@ private struct VideoRangeSelector: View {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 dragTarget = target
+                if target == .start {
+                    isDraggingStart = true
+                    isDraggingEnd = false
+                } else {
+                    isDraggingEnd = true
+                    isDraggingStart = false
+                }
                 let t = time(forX: max(0, min(width, value.location.x)), width: width)
                 switch target {
                 case .start:
@@ -597,6 +635,8 @@ private struct VideoRangeSelector: View {
                 guard let currentTarget = dragTarget else { return }
                 onEnd(currentTarget == .start ? .start : .end)
                 self.dragTarget = nil
+                isDraggingStart = false
+                isDraggingEnd = false
             }
     }
 
