@@ -110,7 +110,7 @@ private struct AppBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
             .scrollContentBackground(.hidden)
-            .background(Theme.Colors.background(scheme))
+            .background(Theme.Colors.background(scheme).ignoresSafeArea())
     }
 }
 
@@ -137,5 +137,6 @@ struct Theme_Previews: PreviewProvider {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 

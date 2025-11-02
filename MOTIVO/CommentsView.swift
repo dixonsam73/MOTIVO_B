@@ -9,6 +9,7 @@ public struct CommentsView: View {
     @State private var tappedMention: String? = nil
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.colorScheme) private var scheme
 
     private let sessionID: UUID
     private let placeholderAuthor: String
@@ -242,6 +243,7 @@ public struct CommentsView: View {
                 .appBackground()
                 .scrollContentBackground(.hidden)
         }
+        .appBackground()
     }
 
     @ViewBuilder
@@ -249,8 +251,9 @@ public struct CommentsView: View {
         VStack(spacing: 0) {
             list.padding(.top, Theme.Spacing.m)
             composer
-                .background(.bar)
+                .background(Theme.Colors.background(scheme))
         }
+        .background(Theme.Colors.background(scheme))
     }
 
     private var list: some View {
@@ -370,10 +373,23 @@ public struct CommentsView: View {
                     Rectangle().fill(Color.clear).frame(height: Theme.Spacing.inline)
                 }
             }
-            .cardSurface(padding: Theme.Spacing.l)
+            .padding(Theme.Spacing.l)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
         }
         .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
+        .background(Theme.Colors.surface(scheme))
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
+        )
+        .padding(.horizontal)
+        .padding(.top, Theme.Spacing.m)
         .accessibilitySortPriority(1) // Ensure list is visited before composer
     }
 
@@ -411,4 +427,3 @@ public struct CommentsView: View {
 #Preview("Comments") {
     CommentsView(sessionID: UUID())
 }
-
