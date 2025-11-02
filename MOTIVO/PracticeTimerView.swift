@@ -22,6 +22,9 @@ import CoreData
 import AVFoundation
 import AVKit
 
+private let recorderIcon = Color(red: 0.44, green: 0.50, blue: 0.57) // slate blue-grey ~ #6F7F91
+private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neutral  ~ #A88B73
+
 // SessionActivityType moved to SessionActivityType.swift
 
 struct PracticeTimerView: View {
@@ -206,7 +209,9 @@ struct PracticeTimerView: View {
                                 showAudioRecorder = true
                             } label: {
                                 Image(systemName: "mic.fill")
+                                    .symbolRenderingMode(.monochrome)
                                     .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(recorderIcon)
                                     .frame(width: 48, height: 48)
                                     .contentShape(Circle())
                             }
@@ -220,7 +225,9 @@ struct PracticeTimerView: View {
                                     ensureCameraAuthorized { showCamera = true }
                                 } label: {
                                     Image(systemName: "camera.fill")
+                                        .symbolRenderingMode(.monochrome)
                                         .font(.system(size: 22, weight: .semibold))
+                                        .foregroundStyle(recorderIcon)
                                         .frame(width: 48, height: 48)
                                         .contentShape(Circle())
                                 }
@@ -234,7 +241,9 @@ struct PracticeTimerView: View {
                                 showVideoRecorder = true
                             } label: {
                                 Image(systemName: "video.fill")
+                                    .symbolRenderingMode(.monochrome)
                                     .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(recorderIcon)
                                     .frame(width: 48, height: 48)
                                     .contentShape(Circle())
                             }
@@ -308,12 +317,14 @@ struct PracticeTimerView: View {
 
                                         Button(role: .destructive) { deleteLine(line.id) } label: {
                                             Image(systemName: "trash")
+                                                .foregroundStyle(.primary.opacity(0.8))
                                         }
                                         .buttonStyle(.plain)
                                     }
                                 }
                                 Button(action: { addEmptyTaskLine() }) {
                                     HStack { Image(systemName: "plus"); Text("Add line") }
+                                        .foregroundStyle(tasksAccent)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -329,6 +340,7 @@ struct PracticeTimerView: View {
                                     Image(systemName: "plus.circle")
                                     Text("Notes / Tasks").sectionHeader()
                                 }
+                                .foregroundStyle(tasksAccent)
                                 .frame(maxWidth: .infinity, alignment: .center)
                             }
                             .buttonStyle(.plain)
