@@ -71,8 +71,8 @@ public struct MediaTrimView: View {
                     VideoRangeSelector(startTime: $model.startTime,
                                        endTime: $model.endTime,
                                        duration: model.duration,
-                                       onChange: { model.handleDragChanged() },
-                                       onEnd: { model.handleDragEnded() })
+                                       onChange: { focus in model.handleDragChanged(focus: focus) },
+                                       onEnd: { focus in model.handleDragEnded(focus: focus) })
                         .frame(height: 56)
                 }
 
@@ -185,8 +185,8 @@ private struct WaveformSection: View {
                                  startTime: $model.startTime,
                                  endTime: $model.endTime,
                                  duration: model.duration,
-                                 onHandleChange: { model.handleDragChanged() },
-                                 onHandleEnd: { model.handleDragEnded() })
+                                 onHandleChange: { focus in model.handleDragChanged(focus: focus) },
+                                 onHandleEnd: { focus in model.handleDragEnded(focus: focus) })
             } else if model.waveformFailed {
                 UnavailableWaveformView()
             } else {
@@ -240,8 +240,8 @@ private struct WaveformRenderer: View {
     @Binding var startTime: Double
     @Binding var endTime: Double
     let duration: Double
-    var onHandleChange: () -> Void
-    var onHandleEnd: () -> Void
+    var onHandleChange: (MediaTrimView.Model.DragFocus) -> Void
+    var onHandleEnd: (MediaTrimView.Model.DragFocus) -> Void
 
     @State private var dragTarget: DragTarget? = nil
 
@@ -315,14 +315,16 @@ private struct WaveformRenderer: View {
                 switch target {
                 case .start:
                     startTime = min(max(0, t), endTime - 0.1)
+                    onHandleChange(.start)
                 case .end:
                     endTime = max(min(duration, t), startTime + 0.1)
+                    onHandleChange(.end)
                 }
-                onHandleChange()
             }
             .onEnded { _ in
-                dragTarget = nil
-                onHandleEnd()
+                guard let currentTarget = dragTarget else { return }
+                onHandleEnd(currentTarget == .start ? .start : .end)
+                self.dragTarget = nil
             }
     }
 
@@ -427,8 +429,8 @@ private struct VideoRangeSelector: View {
     @Binding var startTime: Double
     @Binding var endTime: Double
     let duration: Double
-    var onChange: () -> Void
-    var onEnd: () -> Void
+    var onChange: (MediaTrimView.Model.DragFocus) -> Void
+    var onEnd: (MediaTrimView.Model.DragFocus) -> Void
 
     @State private var dragTarget: DragTarget? = nil
 
@@ -486,14 +488,16 @@ private struct VideoRangeSelector: View {
                 switch target {
                 case .start:
                     startTime = min(max(0, t), endTime - 0.1)
+                    onChange(.start)
                 case .end:
                     endTime = max(min(duration, t), startTime + 0.1)
+                    onChange(.end)
                 }
-                onChange()
             }
             .onEnded { _ in
-                dragTarget = nil
-                onEnd()
+                guard let currentTarget = dragTarget else { return }
+                onEnd(currentTarget == .start ? .start : .end)
+                self.dragTarget = nil
             }
     }
 
@@ -534,6 +538,7 @@ extension MediaTrimView {
 
         private var timeObserver: Any?
         private var loopObserver: Any?
+        private var suppressLoopWhileAdjustingEnd: Bool = false
 
         private var lastSeekTime: Date = .distantPast
         private let seekDebounce: TimeInterval = 0.15
@@ -626,15 +631,21 @@ extension MediaTrimView {
                 let t = CMTimeGetSeconds(time)
                 self.scrubPosition = t
                 // Looping within selection
-                if t >= self.endTime - 0.02 {
-                    self.seek(self.startTime) { [weak self] in
-                        self?.player?.play()
+                if !self.suppressLoopWhileAdjustingEnd && t >= self.endTime - 0.02 {
+                    self.seek(self.startTime) {
+                        if self.isPlaying {
+                            self.player?.play()
+                        }
                     }
                 }
             }
             loopObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: nil, queue: .main) { [weak self] _ in
                 guard let self else { return }
-                self.seek(self.startTime) { [weak self] in self?.player?.play() }
+                self.seek(self.startTime) {
+                    if self.isPlaying {
+                        self.player?.play()
+                    }
+                }
             }
         }
 
@@ -663,17 +674,67 @@ extension MediaTrimView {
             }
         }
 
+        // MARK: Drag handling with focus
+
+        enum DragFocus {
+            case start
+            case end
+        }
+
+        // Existing signatures preserved for compatibility
+
         func handleDragChanged() {
-            // Debounced seek to new start when adjusting handles
-            let now = Date()
-            if now.timeIntervalSince(lastSeekTime) > seekDebounce {
-                lastSeekTime = now
-                seek(min(max(scrubPosition, startTime), endTime))
-            }
+            handleDragChanged(focus: nil)
         }
 
         func handleDragEnded() {
-            seek(max(min(scrubPosition, endTime), startTime))
+            handleDragEnded(focus: nil)
+        }
+
+        // New with focus parameter
+
+        func handleDragChanged(focus: DragFocus?) {
+            let now = Date()
+            if now.timeIntervalSince(lastSeekTime) > seekDebounce {
+                lastSeekTime = now
+                if let focus = focus {
+                    // Suppress looping when adjusting the end handle so seeks to end are visible
+                    self.suppressLoopWhileAdjustingEnd = (focus == .end)
+                    if isPlaying {
+                        player?.pause()
+                        isPlaying = false
+                    }
+                    let seekTime: Double
+                    switch focus {
+                    case .start:
+                        seekTime = startTime
+                    case .end:
+                        seekTime = endTime
+                    }
+                    seek(seekTime, completion: nil)
+                } else {
+                    // fallback to previous behavior
+                    seek(min(max(scrubPosition, startTime), endTime), completion: nil)
+                }
+            }
+        }
+
+        func handleDragEnded(focus: DragFocus?) {
+            self.suppressLoopWhileAdjustingEnd = false
+            if let focus = focus {
+                let seekTime: Double
+                switch focus {
+                case .start:
+                    seekTime = startTime
+                case .end:
+                    seekTime = endTime
+                }
+                // Precise seek without auto play
+                seek(seekTime, completion: nil)
+            } else {
+                // fallback to previous behavior
+                seek(max(min(scrubPosition, endTime), startTime), completion: nil)
+            }
         }
 
         private func seek(_ seconds: Double, completion: (() -> Void)? = nil) {
@@ -850,3 +911,4 @@ struct MediaTrimView_Previews: PreviewProvider {
         .padding()
     }
 }
+
