@@ -237,6 +237,14 @@ fileprivate struct SessionsRootView: View {
                 }
                 .listStyle(.plain)
                 .listRowSeparator(.hidden)
+                .scrollContentBackground(.hidden)
+                .listRowBackground(Color.clear)
+                .background(Theme.Colors.surface(colorScheme))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+                )
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
@@ -1390,6 +1398,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 
