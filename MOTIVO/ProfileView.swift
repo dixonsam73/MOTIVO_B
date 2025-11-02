@@ -199,6 +199,7 @@ fileprivate struct SettingRow: View {
      @ViewBuilder
     private var privacySection: some View {
         Section {
+            Text("Privacy").sectionHeader()
             Toggle("Default to Private Posts", isOn: $defaultPrivacy)
 
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -265,9 +266,10 @@ fileprivate struct SettingRow: View {
 
             }
             .padding(.vertical, Theme.Spacing.s)
-            .padding(.top, Theme.Spacing.m)
+            .padding(.top, Theme.Spacing.s)
             .padding(.bottom, Theme.Spacing.m)
             .cardSurface(padding: Theme.Spacing.m)
+
             .listRowSeparator(.hidden)
 
             Text("Motivo is private by default. Control profile visibility, follow approvals, and how others can find you.")
@@ -743,6 +745,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
