@@ -824,32 +824,36 @@ struct PracticeTimerView: View {
                 Button(isRunning ? "Pause" : "Start") {
                     isRunning ? pause() : start()
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.Colors.accent)
-                .disabled(hasNoInstruments || instrument == nil)
+                .buttonStyle(.bordered)
+                .tint(.clear)
                 .frame(height: 44)
+                .background(Theme.Colors.accent.opacity(0.18))
+                .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Reset") { reset() }
                     .buttonStyle(.bordered)
-                    .tint(.secondary)
-                    .disabled((elapsedSeconds == 0) && !isRunning)
+                    .tint(.clear)
                     .frame(height: 44)
+                    .background((isRunning ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)))
+                    .foregroundStyle(.primary)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 if isRunning {
                     Button("Finish") { finish() }
                         .buttonStyle(.bordered)
-                        .tint(.secondary)
-                        .disabled((elapsedSeconds == 0) || instrument == nil)
+                        .tint(.clear)
                         .frame(height: 44)
+                        .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
+                        .foregroundStyle(.primary)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 } else {
                     Button("Finish") { finish() }
                         .buttonStyle(.bordered)
-                        .tint(.secondary)
-                        .disabled((elapsedSeconds == 0) || instrument == nil)
+                        .tint(.clear)
                         .frame(height: 44)
+                        .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
+                        .foregroundStyle(.primary)
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
             }
