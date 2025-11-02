@@ -116,33 +116,78 @@ public struct MediaTrimView: View {
             .padding(.bottom, Theme.Spacing.xl)
             .cardSurface()
 
-            // Actions
-            HStack(spacing: Theme.Spacing.m) {
-                Button(action: { onCancel() }) {
-                    Text("Cancel")
-                }
-                .foregroundStyle(Theme.Colors.secondaryText)
-                .accessibilityLabel("Cancel")
-                .accessibilityHint("Dismiss without saving changes")
+            // Actions (adaptive)
+            // QA (UI only):
+            // 1) Buttons never truncate; "Cancel" left, "Save copy" + "Replace" right (wraps on compact).
+            // 2) For very short clips (<12s), ruler shows no labels; nothing clips.
+            // 3) For medium clips, shows start/mid/end only.
+            // 4) For long clips, max 5 labels; none at extreme edges.
+            // 5) Light/dark parity OK; a11y labels intact.
+            Group {
+                if hSizeClass == .compact {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                        Button(action: { onCancel() }) {
+                            Text("Cancel")
+                        }
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Cancel")
+                        .accessibilityHint("Dismiss without saving changes")
 
-                Spacer()
+                        HStack(spacing: Theme.Spacing.m) {
+                            Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
+                                Text("Save copy")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.Colors.accent)
+                            .accessibilityLabel("Save copy")
+                            .accessibilityHint("Export the selected range as a new file")
 
-                Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
-                    Text("Save as New")
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.Colors.accent)
-                .frame(height: 44)
-                .accessibilityLabel("Save as New")
-                .accessibilityHint("Export the selected range as a new file")
+                            Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
+                                Text("Replace")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Replace original")
+                            .accessibilityHint("Export and replace the original clip with the trimmed version")
+                        }
+                    }
+                } else {
+                    HStack(spacing: Theme.Spacing.m) {
+                        Button(action: { onCancel() }) {
+                            Text("Cancel")
+                        }
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityLabel("Cancel")
+                        .accessibilityHint("Dismiss without saving changes")
 
-                Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
-                    Text("Replace Original")
+                        Spacer()
+
+                        HStack(spacing: Theme.Spacing.m) {
+                            Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
+                                Text("Save copy")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.Colors.accent)
+                            .accessibilityLabel("Save copy")
+                            .accessibilityHint("Export the selected range as a new file")
+
+                            Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
+                                Text("Replace")
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 44)
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel("Replace original")
+                            .accessibilityHint("Export and replace the original clip with the trimmed version")
+                        }
+                        .frame(maxWidth: 420)
+                    }
                 }
-                .buttonStyle(.bordered)
-                .frame(height: 44)
-                .accessibilityLabel("Replace Original")
-                .accessibilityHint("Export and replace the original clip with the trimmed version")
             }
         }
         .padding(Theme.Spacing.l)
@@ -154,6 +199,7 @@ public struct MediaTrimView: View {
     }
 
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var hSizeClass
 }
 
 // MARK: - Subviews
@@ -422,28 +468,38 @@ private struct TimeRuler: View {
                 ctx.stroke(baselinePath, with: .color(Color.secondary.opacity(0.25)), lineWidth: 1)
 
                 guard duration > 0 else { return }
-                let startT: Double = 0
-                let midT: Double = duration / 2
-                let endT: Double = duration
                 func x(for t: Double) -> CGFloat { CGFloat(t / max(duration, 0.0001)) * size.width }
 
-                let ticks: [(Double, String)] = [
-                    (startT, formatTime(startT)),
-                    (midT, formatTime(midT)),
-                    (endT, formatTime(endT))
-                ]
+                // Determine labels adaptively
+                var labelTimes: [Double] = []
+                if duration <= 12 {
+                    labelTimes = [] // no labels
+                } else if duration <= 60 {
+                    labelTimes = [0, duration / 2, duration]
+                } else {
+                    // Start, end, and evenly spaced majors capped at 5 total
+                    let maxLabels = 5
+                    let segments = maxLabels - 1
+                    labelTimes = (0...segments).map { i in duration * Double(i) / Double(segments) }
+                }
 
-                for (t, label) in ticks {
-                    let xPos = x(for: t)
-                    var p = Path()
-                    p.move(to: CGPoint(x: xPos, y: baselineY - height))
-                    p.addLine(to: CGPoint(x: xPos, y: baselineY))
-                    ctx.stroke(p, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1)
+                // Avoid labels at extreme edges and under handles: inset by handle width + 8
+                let handleWidth: CGFloat = 12
+                let edgeInset: CGFloat = handleWidth + 8
 
-                    // Labels above the baseline
+                for t in labelTimes {
+                    let label = formatTime(t)
+                    let rawX = x(for: t)
+                    let clampedX = min(max(rawX, edgeInset), size.width - edgeInset)
+
+                    // Tick
+                    var tick = Path()
+                    tick.move(to: CGPoint(x: clampedX, y: baselineY - height))
+                    tick.addLine(to: CGPoint(x: clampedX, y: baselineY))
+                    ctx.stroke(tick, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1)
+
+                    // Label above baseline
                     let text = Text(label).font(.caption2).foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                    let inset: CGFloat = 8
-                    let clampedX = min(max(xPos, inset), size.width - inset)
                     ctx.draw(text, at: CGPoint(x: clampedX, y: 2), anchor: .top)
                 }
             }
@@ -972,3 +1028,4 @@ struct MediaTrimView_Previews: PreviewProvider {
         .padding()
     }
 }
+
