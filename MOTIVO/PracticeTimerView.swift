@@ -253,9 +253,26 @@ struct PracticeTimerView: View {
                         if showTasksPad {
                             VStack(alignment: .leading, spacing: 8) {
                                 // Centered header to align with rest of page
-                                Text("Notes / Tasks")
-                                    .sectionHeader()
-                                    .frame(maxWidth: .infinity, alignment: .center)
+                                HStack(alignment: .firstTextBaseline) {
+                                    Spacer(minLength: 0)
+                                    Text("Notes / Tasks")
+                                        .sectionHeader()
+                                    Spacer(minLength: 0)
+                                    Button(action: { showTasksPad = false }) {
+                                        Text("Close")
+                                            .font(Theme.Text.body)
+                                            .foregroundStyle(.primary)
+                                            .padding(.horizontal, 10)
+                                            .padding(.vertical, 6)
+                                            .background(
+                                                Capsule()
+                                                    .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
+                                            )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contentShape(Capsule())
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
 
                                 ForEach($taskLines) { $line in
                                     HStack(spacing: 8) {
