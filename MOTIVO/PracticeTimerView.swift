@@ -287,6 +287,7 @@ struct PracticeTimerView: View {
                                     HStack(spacing: 8) {
                                         Button { line.isDone.toggle(); persistTasksSnapshot() } label: {
                                             Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
+                                                .foregroundStyle(tasksAccent)
                                         }
                                         TextField("Task", text: $line.text)
                                             .textFieldStyle(.plain)
