@@ -685,6 +685,8 @@ extension MediaTrimView {
         private var currentURL: URL?
         private var currentType: MediaTrimView.MediaType = .audio
 
+        private var loadGeneration: UUID = UUID()
+
         struct ModelAlert: Identifiable { let id = UUID(); let title: String; let message: String }
 
         var selectedDurationFormatted: String {
@@ -707,32 +709,13 @@ extension MediaTrimView {
             currentURL = url
             currentType = mediaType
 
+            let generation = UUID()
+            self.loadGeneration = generation
+
             let asset = AVURLAsset(url: url)
             self.asset = asset
 
-            // Load duration asynchronously
-            asset.loadValuesAsynchronously(forKeys: ["duration"]) { [weak self] in
-                guard let self else { return }
-                var error: NSError?
-                let status = asset.statusOfValue(forKey: "duration", error: &error)
-                DispatchQueue.main.async {
-                    switch status {
-                    case .loaded:
-                        let seconds = CMTimeGetSeconds(asset.duration)
-                        self.duration = max(0, seconds)
-                        self.startTime = 0
-                        self.endTime = self.duration
-                        self.scrubPosition = 0
-                    default:
-                        self.duration = 0
-                        self.startTime = 0
-                        self.endTime = 0
-                        self.alert = ModelAlert(title: "Unable to load media", message: error?.localizedDescription ?? "Unknown error")
-                    }
-                }
-            }
-
-            // Player
+            // Player (immediate setup to preserve original behavior)
             let item = AVPlayerItem(asset: asset)
             self.playerItem = item
             let player = AVPlayer(playerItem: item)
@@ -741,6 +724,50 @@ extension MediaTrimView {
 
             if mediaType == .audio {
                 decodeWaveform(for: asset)
+            }
+
+            // Load duration asynchronously (tolerant: single retry before alert)
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    let dur = try await asset.load(.duration)
+                    var seconds = CMTimeGetSeconds(dur)
+                    // If first read yields near-zero, retry once after a short delay
+                    if seconds <= 0.01 {
+                        try? await Task.sleep(nanoseconds: 250_000_000) // 0.25s
+                        let dur2 = try await asset.load(.duration)
+                        seconds = CMTimeGetSeconds(dur2)
+                    }
+                    await MainActor.run {
+                        guard self.loadGeneration == generation else { return }
+                        self.duration = max(0, seconds)
+                        self.startTime = 0
+                        self.endTime = self.duration
+                        self.scrubPosition = 0
+                    }
+                } catch {
+                    // Retry once before alerting
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    do {
+                        let dur2 = try await asset.load(.duration)
+                        let seconds2 = CMTimeGetSeconds(dur2)
+                        await MainActor.run {
+                            guard self.loadGeneration == generation else { return }
+                            self.duration = max(0, seconds2)
+                            self.startTime = 0
+                            self.endTime = self.duration
+                            self.scrubPosition = 0
+                        }
+                    } catch {
+                        await MainActor.run {
+                            guard self.loadGeneration == generation else { return }
+                            self.duration = 0
+                            self.startTime = 0
+                            self.endTime = 0
+                            self.alert = ModelAlert(title: "Unable to load media", message: error.localizedDescription)
+                        }
+                    }
+                }
             }
         }
 
