@@ -71,14 +71,17 @@ public struct MediaTrimView: View {
                     VideoRangeSelector(startTime: $model.startTime,
                                        endTime: $model.endTime,
                                        duration: model.duration,
+                                       currentTime: model.scrubPosition,
                                        onChange: { focus in model.handleDragChanged(focus: focus) },
                                        onEnd: { focus in model.handleDragEnded(focus: focus) })
                         .frame(height: 56)
+                        .padding(.bottom, 8)
                 }
 
                 if mediaType == .audio {
-                    WaveformSection(model: model)
+                    WaveformSection(model: model, currentTime: model.scrubPosition)
                         .frame(height: 180)
+                        .padding(.bottom, 8)
                 }
 
                 // Minimal scrubber + play/pause
@@ -148,7 +151,7 @@ private struct PlaybackControls: View {
     @ObservedObject var model: MediaTrimView.Model
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.s) {
+        VStack(spacing: Theme.Spacing.m) {
             HStack(spacing: Theme.Spacing.m) {
                 Button(action: { model.togglePlayPause() }) {
                     Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
@@ -156,11 +159,6 @@ private struct PlaybackControls: View {
                 }
                 .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
                 .accessibilityHint("Toggles playback")
-
-                Slider(value: $model.scrubPosition, in: 0...max(model.duration, 0.1), onEditingChanged: { editing in
-                    model.scrubEditingChanged(isEditing: editing)
-                })
-                .accessibilityLabel("Playback Position")
             }
             HStack {
                 Text(model.formatTime(0))
@@ -177,6 +175,7 @@ private struct PlaybackControls: View {
 
 private struct WaveformSection: View {
     @ObservedObject var model: MediaTrimView.Model
+    let currentTime: Double
 
     var body: some View {
         ZStack(alignment: .bottom) {
@@ -185,6 +184,7 @@ private struct WaveformSection: View {
                                  startTime: $model.startTime,
                                  endTime: $model.endTime,
                                  duration: model.duration,
+                                 currentTime: currentTime,
                                  onHandleChange: { focus in model.handleDragChanged(focus: focus) },
                                  onHandleEnd: { focus in model.handleDragEnded(focus: focus) })
             } else if model.waveformFailed {
@@ -240,6 +240,7 @@ private struct WaveformRenderer: View {
     @Binding var startTime: Double
     @Binding var endTime: Double
     let duration: Double
+    let currentTime: Double
     var onHandleChange: (MediaTrimView.Model.DragFocus) -> Void
     var onHandleEnd: (MediaTrimView.Model.DragFocus) -> Void
 
@@ -284,6 +285,15 @@ private struct WaveformRenderer: View {
                     .fill(Theme.Colors.accent.opacity(0.12))
                     .frame(width: max(selectedEndX - selectedStartX, 0), height: height)
                     .offset(x: selectedStartX)
+                    .accessibilityHidden(true)
+
+                // QA:
+                // 1) Drag handles → preview seeks; playhead snaps and loops within range.
+                // 2) Play → thin line moves within [start, end]; at end it loops to start.
+                // 3) Pause → line freezes; handles still scrub preview.
+                // 4) Export still works (Save as New / Replace Original).
+                // 5) Light/Dark parity OK; no slider present.
+                PlayheadLine(xPosition: x(for: min(max(currentTime, startTime), endTime), width: width), height: height)
                     .accessibilityHidden(true)
 
                 // Time ruler
@@ -338,6 +348,18 @@ private struct WaveformRenderer: View {
     }
 }
 
+private struct PlayheadLine: View {
+    let xPosition: CGFloat
+    let height: CGFloat
+    var body: some View {
+        Path { p in
+            p.move(to: CGPoint(x: xPosition, y: 0))
+            p.addLine(to: CGPoint(x: xPosition, y: height))
+        }
+        .stroke(Theme.Colors.accent.opacity(0.9), lineWidth: 1)
+    }
+}
+
 private struct HandleView: View {
     var body: some View {
         ZStack {
@@ -357,7 +379,7 @@ private struct TimeRuler: View {
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let majorInterval: Double = 10
+            let majorInterval: Double = 5
             let minorInterval: Double = 1
 
             Canvas { ctx, size in
@@ -367,18 +389,18 @@ private struct TimeRuler: View {
 
                 func x(for t: Double) -> CGFloat { CGFloat(t / max(duration, 0.0001)) * width }
 
-                // Minor ticks
-                if duration > 0 {
-                    var t: Double = 0
-                    while t <= duration {
-                        let xPos = x(for: t)
-                        var p = Path()
-                        p.move(to: CGPoint(x: xPos, y: height - minorTickHeight))
-                        p.addLine(to: CGPoint(x: xPos, y: height))
-                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.3)), lineWidth: 0.5)
-                        t += minorInterval
-                    }
-                }
+                // Minor ticks suppressed to reduce clutter
+//                if duration > 0 {
+//                    var t: Double = 0
+//                    while t <= duration {
+//                        let xPos = x(for: t)
+//                        var p = Path()
+//                        p.move(to: CGPoint(x: xPos, y: height - minorTickHeight))
+//                        p.addLine(to: CGPoint(x: xPos, y: height))
+//                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.3)), lineWidth: 0.5)
+//                        t += minorInterval
+//                    }
+//                }
                 // Major ticks + labels
                 if duration > 0 {
                     var t: Double = 0
@@ -387,7 +409,7 @@ private struct TimeRuler: View {
                         var p = Path()
                         p.move(to: CGPoint(x: xPos, y: height - majorTickHeight))
                         p.addLine(to: CGPoint(x: xPos, y: height))
-                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.3)), lineWidth: 1)
+                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1)
 
                         let label = formatTime(t)
                         let text = Text(label).font(.caption2)
@@ -429,6 +451,7 @@ private struct VideoRangeSelector: View {
     @Binding var startTime: Double
     @Binding var endTime: Double
     let duration: Double
+    let currentTime: Double
     var onChange: (MediaTrimView.Model.DragFocus) -> Void
     var onEnd: (MediaTrimView.Model.DragFocus) -> Void
 
@@ -458,6 +481,15 @@ private struct VideoRangeSelector: View {
                         .fill(Theme.Colors.accent.opacity(0.12))
                         .frame(width: max(endX - startX, 0), height: 8)
                         .offset(x: startX)
+
+                    // QA:
+                    // 1) Drag handles → preview seeks; playhead snaps and loops within range.
+                    // 2) Play → thin line moves within [start, end]; at end it loops to start.
+                    // 3) Pause → line freezes; handles still scrub preview.
+                    // 4) Export still works (Save as New / Replace Original).
+                    // 5) Light/Dark parity OK; no slider present.
+                    PlayheadLine(xPosition: x(for: min(max(currentTime, startTime), endTime), width: width), height: 8)
+                        .accessibilityHidden(true)
 
                     // Handles
                     HandleView()
