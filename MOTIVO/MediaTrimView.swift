@@ -67,6 +67,13 @@ public struct MediaTrimView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.Colors.cardStroke(colorScheme)))
                         .accessibilityHidden(true)
+
+                    VideoRangeSelector(startTime: $model.startTime,
+                                       endTime: $model.endTime,
+                                       duration: model.duration,
+                                       onChange: { model.handleDragChanged() },
+                                       onEnd: { model.handleDragEnded() })
+                        .frame(height: 56)
                 }
 
                 if mediaType == .audio {
@@ -411,6 +418,93 @@ private struct ExportOverlay: View {
             .padding(16)
             .background(RoundedRectangle(cornerRadius: 12).fill(.regularMaterial))
         }
+    }
+}
+
+// MARK: - VideoRangeSelector (New)
+
+private struct VideoRangeSelector: View {
+    @Binding var startTime: Double
+    @Binding var endTime: Double
+    let duration: Double
+    var onChange: () -> Void
+    var onEnd: () -> Void
+
+    @State private var dragTarget: DragTarget? = nil
+
+    private enum DragTarget { case start, end }
+
+    var body: some View {
+        GeometryReader { geo in
+            let width = max(geo.size.width, 1)
+            let height = geo.size.height - 24
+            let yCenter = height / 2
+
+            let startX = x(for: startTime, width: width)
+            let endX = x(for: endTime, width: width)
+
+            VStack(spacing: 0) {
+                ZStack(alignment: .topLeading) {
+                    // Baseline bar
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                        .frame(height: 8)
+                        .position(x: width / 2, y: yCenter)
+
+                    // Selection overlay
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Theme.Colors.accent.opacity(0.12))
+                        .frame(width: max(endX - startX, 0), height: 8)
+                        .offset(x: startX)
+
+                    // Handles
+                    HandleView()
+                        .position(x: startX, y: yCenter)
+                        .gesture(handleDragGesture(for: .start, width: width))
+                        .accessibilityLabel("Start Handle")
+                        .accessibilityHint("Drag to adjust the start of the selection")
+
+                    HandleView()
+                        .position(x: endX, y: yCenter)
+                        .gesture(handleDragGesture(for: .end, width: width))
+                        .accessibilityLabel("End Handle")
+                        .accessibilityHint("Drag to adjust the end of the selection")
+                }
+                .frame(height: height)
+
+                TimeRuler(duration: duration)
+                    .frame(height: 24)
+            }
+        }
+    }
+
+    private func handleDragGesture(for target: DragTarget, width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                dragTarget = target
+                let t = time(forX: max(0, min(width, value.location.x)), width: width)
+                switch target {
+                case .start:
+                    startTime = min(max(0, t), endTime - 0.1)
+                case .end:
+                    endTime = max(min(duration, t), startTime + 0.1)
+                }
+                onChange()
+            }
+            .onEnded { _ in
+                dragTarget = nil
+                onEnd()
+            }
+    }
+
+    private func x(for time: Double, width: CGFloat) -> CGFloat {
+        guard duration > 0 else { return 0 }
+        return CGFloat(time / duration) * width
+    }
+
+    private func time(forX x: CGFloat, width: CGFloat) -> Double {
+        guard width > 0 else { return 0 }
+        return Double(x / width) * duration
     }
 }
 

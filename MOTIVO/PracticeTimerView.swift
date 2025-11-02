@@ -107,6 +107,10 @@ struct PracticeTimerView: View {
     @State private var showVideoPlayer: Bool = false
     @State private var videoPlayerItem: AVPlayer? = nil
 
+    // Add trimming state for audio/video clips
+    @State private var trimItem: StagedAttachment? = nil
+    @State private var isTrimPresented: Bool = false
+
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
@@ -448,10 +452,36 @@ struct PracticeTimerView: View {
 
                                     Spacer(minLength: 8)
 
+                                    // Inline Trim Button
+                                    Button(action: {
+                                        if let url = surrogateURL(for: att) {
+                                            try? att.data.write(to: url, options: .atomic)
+                                            trimItem = att
+                                            isTrimPresented = true
+                                        }
+                                    }) {
+                                        Image(systemName: "scissors")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .padding(8)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Trim audio")
+                                    .accessibilityHint("Open the trim editor for this audio clip")
+
                                     Button(role: .destructive, action: { deleteAudio(att.id) }) {
                                         Image(systemName: "trash")
                                     }
                                     .buttonStyle(.plain)
+                                }
+                                .contextMenu {
+                                    Button("Trim", systemImage: "scissors") {
+                                        if let url = surrogateURL(for: att) {
+                                            try? att.data.write(to: url, options: .atomic)
+                                            trimItem = att
+                                            isTrimPresented = true
+                                        }
+                                    }
                                 }
                             }
                             
@@ -497,8 +527,33 @@ struct PracticeTimerView: View {
                                                         .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                                                 )
                                             }
-                                            // Delete button remains in the top-right
+                                            .contextMenu {
+                                                Button("Trim", systemImage: "scissors") {
+                                                    if let url = surrogateURL(for: att) {
+                                                        try? att.data.write(to: url, options: .atomic)
+                                                        trimItem = att
+                                                        isTrimPresented = true
+                                                    }
+                                                }
+                                            }
+                                            // Trim button above delete
                                             VStack(spacing: 6) {
+                                                Button {
+                                                    if let url = surrogateURL(for: att) {
+                                                        try? att.data.write(to: url, options: .atomic)
+                                                        trimItem = att
+                                                        isTrimPresented = true
+                                                    }
+                                                } label: {
+                                                    Image(systemName: "scissors")
+                                                        .font(.system(size: 16, weight: .semibold))
+                                                        .padding(8)
+                                                        .background(.ultraThinMaterial, in: Circle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .accessibilityLabel("Trim video")
+                                                .accessibilityHint("Open the trim editor for this video clip")
+
                                                 Button {
                                                     // Remove surrogate temp file best-effort
                                                     let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension("mov")
@@ -778,6 +833,70 @@ struct PracticeTimerView: View {
                        }
                    },
                    message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+            // QA:
+            // - Long-press context menu "Trim" and inline trim buttons with scissors icon present on audio rows and video tiles
+            // - Trim buttons have ultraThinMaterial background and padding for visibility
+            // - Trim sheet opens with correct media type and URL
+            // - Trim save actions correctly add or replace staged attachments with updated metadata
+            // - No regressions in other UI or logic due to trim additions
+            .sheet(isPresented: $isTrimPresented, onDismiss: { trimItem = nil }) {
+                if let item = trimItem, let url = surrogateURL(for: item) {
+                    MediaTrimView(assetURL: url, mediaType: (item.kind == .audio ? .audio : .video),
+                                  onCancel: {
+                                      isTrimPresented = false
+                                      trimItem = nil
+                                  },
+                                  onSaveAsNew: { newURL in
+                                      if let data = try? Data(contentsOf: newURL) {
+                                          let newID = UUID()
+                                          let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
+                                          if item.kind == .audio {
+                                              stagedAudio.append(newItem)
+                                              if let player = try? AVAudioPlayer(data: data) {
+                                                  audioDurations[newID] = max(0, Int(player.duration.rounded()))
+                                              }
+                                              let title = formattedAutoTitle(from: Date())
+                                              audioAutoTitles[newID] = title
+                                              audioTitles[newID] = title
+                                          } else {
+                                              stagedVideos.append(newItem)
+                                              if let thumb = generateVideoThumbnail(from: data, id: newID) {
+                                                  videoThumbnails[newID] = thumb
+                                              }
+                                          }
+                                          persistStagedAttachments()
+                                      }
+                                      isTrimPresented = false
+                                      trimItem = nil
+                                  },
+                                  onReplaceOriginal: { newURL in
+                                      if let data = try? Data(contentsOf: newURL) {
+                                          if item.kind == .audio {
+                                              if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
+                                                  stagedAudio[idx] = StagedAttachment(id: item.id, data: data, kind: .audio)
+                                                  if let player = try? AVAudioPlayer(data: data) {
+                                                      audioDurations[item.id] = max(0, Int(player.duration.rounded()))
+                                                  }
+                                              }
+                                          } else {
+                                              if let idx = stagedVideos.firstIndex(where: { $0.id == item.id }) {
+                                                  stagedVideos[idx] = StagedAttachment(id: item.id, data: data, kind: .video)
+                                                  if let thumb = generateVideoThumbnail(from: data, id: item.id) {
+                                                      videoThumbnails[item.id] = thumb
+                                                  }
+                                              }
+                                          }
+                                          persistStagedAttachments()
+                                      }
+                                      isTrimPresented = false
+                                      trimItem = nil
+                                  })
+                    .accessibilityLabel("Trim media")
+                    .accessibilityHint("Edit start and end of the clip")
+                } else {
+                    Text("Unable to open trimmer").padding()
+                }
+            }
         }
     }
 
@@ -1690,6 +1809,12 @@ struct PracticeTimerView: View {
         default:
             self.showCameraDeniedAlert = true
         }
+    }
+
+    // Helper to get temporary surrogate URL for a staged attachment
+    private func surrogateURL(for att: StagedAttachment) -> URL? {
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        return FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension(ext)
     }
 }
 
