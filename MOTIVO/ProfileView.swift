@@ -281,96 +281,131 @@ fileprivate struct SettingRow: View {
      private var instrumentsSection: some View {
          Section {
              Text("Instruments").sectionHeader()
-             Button { showInstrumentManager = true } label: { manageRow(title: "Manage Instruments") }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
- 
-             VStack(spacing: Theme.Spacing.s) {
-                 Picker("Primary Instrument", selection: $primaryInstrumentName) {
-                     ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
-                         Text(n).tag(n)
+             VStack(spacing: 0) {
+                 Button { showInstrumentManager = true } label: { manageRow(title: "Manage Instruments") }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .accessibilityAddTraits(.isButton)
+                     .frame(minHeight: 44, alignment: .center)
+                     .font(Theme.Text.body)
+                 Divider().padding(.leading, 16)
+                 VStack(spacing: Theme.Spacing.s) {
+                     Picker("Primary Instrument", selection: $primaryInstrumentName) {
+                         ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
+                             Text(n).tag(n)
+                         }
                      }
+                     .font(Theme.Text.body)
                  }
+                 .frame(minHeight: 44, alignment: .center)
              }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 12)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
+             .padding(.bottom, Theme.Spacing.m)
          }
-         .cardSurface()
          .padding(.top, Theme.Spacing.section)
-         .listRowSeparator(.hidden)
      }
  
      @ViewBuilder
      private var activitiesSection: some View {
          Section {
              Text("Activities").sectionHeader()
-             Button { showActivityManager = true } label: { manageRow(title: "Manage Activities") }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
- 
-             VStack(spacing: Theme.Spacing.s) {
-                 Picker("Primary Activity", selection: $primaryActivityChoice) {
-                     ForEach(SessionActivityType.allCases) { type in
-                         Text(type.label).tag("core:\(type.rawValue)")
+             VStack(spacing: 0) {
+                 Button { showActivityManager = true } label: { manageRow(title: "Manage Activities") }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .accessibilityAddTraits(.isButton)
+                     .frame(minHeight: 44)
+                     .font(Theme.Text.body)
+                 Divider().padding(.leading, 16)
+                 VStack(spacing: Theme.Spacing.s) {
+                     Picker("Primary Activity", selection: $primaryActivityChoice) {
+                         ForEach(SessionActivityType.allCases) { type in
+                             Text(type.label).tag("core:\(type.rawValue)")
+                         }
+                         ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
+                             Text(name).tag("custom:\(name)")
+                         }
                      }
-                     ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                         Text(name).tag("custom:\(name)")
+                     .onChange(of: primaryActivityChoice) { _, newValue in
+                         writePrimaryActivityRef(newValue)
                      }
+                     .font(Theme.Text.body)
                  }
-                 .onChange(of: primaryActivityChoice) { _, newValue in
-                     writePrimaryActivityRef(newValue)
-                 }
+                 .frame(minHeight: 44)
              }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 12)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
+             .padding(.bottom, Theme.Spacing.m)
          }
-         .cardSurface()
-         .padding(.top, Theme.Spacing.section)
-         .listRowSeparator(.hidden)
      }
  
      @ViewBuilder
      private var tasksSection: some View {
          Section {
              Text("Tasks").sectionHeader()
-             Button { showTasksManager = true } label: { manageRow(title: "Manage Tasks") }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
+             VStack(spacing: 0) {
+                 Button { showTasksManager = true } label: { manageRow(title: "Manage Tasks") }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .accessibilityAddTraits(.isButton)
+                     .frame(minHeight: 44)
+                     .font(Theme.Text.body)
+             }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 12)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
+             .padding(.bottom, Theme.Spacing.m)
          }
-         .cardSurface()
-         .padding(.top, Theme.Spacing.section)
-         .listRowSeparator(.hidden)
      }
  
      @ViewBuilder
      private var accountSection: some View {
          Section {
              Text("Account").sectionHeader()
-             if auth.isSignedIn {
-                 VStack(alignment: .leading, spacing: 6) {
-                     Text(auth.displayName ?? "Signed in")
-                         .font(Theme.Text.body)
-                     Text("User ID: \(auth.currentUserID ?? "--")")
-                         .font(Theme.Text.meta)
-                         .foregroundStyle(Theme.Colors.secondaryText)
-                     Button(role: .destructive) { auth.signOut() } label: {
-                         Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+             VStack(alignment: .leading, spacing: 0) {
+                 VStack(alignment: .leading, spacing: 4) {
+                     if auth.isSignedIn {
+                         Text(auth.displayName ?? "Signed in")
+                             .font(Theme.Text.body)
+                             .frame(minHeight: 44, alignment: .center)
+                         Text("User ID: \(auth.currentUserID ?? "--")")
+                             .font(.footnote)
+                             .foregroundStyle(.secondary)
+                             .lineLimit(3)
+                             .truncationMode(.tail)
+                             .padding(.bottom, 8)
+                         Divider().padding(.leading, 16)
+                         HStack {
+                             Spacer()
+                             Button(role: .destructive) { auth.signOut() } label: {
+                                 Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                             }
+                             .font(Theme.Text.body)
+                             .frame(minHeight: 44)
+                         }
+                     } else {
+                         SignInWithAppleButton(.signIn) { request in
+                             auth.configure(request)
+                         } onCompletion: { result in
+                             auth.handle(result)
+                         }
+                         .signInWithAppleButtonStyle(.black)
+                         .frame(height: 44)
+                         .accessibilityLabel(Text("Sign in with Apple"))
                      }
-                     .padding(.top, 6)
                  }
-             } else {
-                 SignInWithAppleButton(.signIn) { request in
-                     auth.configure(request)
-                 } onCompletion: { result in
-                     auth.handle(result)
-                 }
-                 .signInWithAppleButtonStyle(.black)
-                 .frame(height: 44)
-                 .accessibilityLabel(Text("Sign in with Apple"))
              }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 12)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
          }
-         .cardSurface()
-         .padding(.top, Theme.Spacing.section)
-         .listRowSeparator(.hidden)
      }
  
      @ToolbarContentBuilder
@@ -708,6 +743,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 
