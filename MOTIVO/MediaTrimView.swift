@@ -48,6 +48,15 @@ public struct MediaTrimView: View {
 
     @ViewBuilder
     private var content: some View {
+        // QA (visual only):
+        // 1) Video sits in rounded card; pillar bars feel subdued.
+        // 2) Handles are outline-only, readable over video.
+        // 3) Timeline shows start/mid/end ticks with labels above; no overflow.
+        // 4) Thin playhead line moves and loops within range.
+        // 5) Single centered “current • total” time readout updates.
+        // 6) Buttons match primary/secondary styles; spacing feels calmer.
+        // 7) Light/dark mode parity OK; a11y labels intact.
+
         VStack(spacing: Theme.Spacing.m) {
             // Title Row
             HStack {
@@ -62,11 +71,27 @@ public struct MediaTrimView: View {
             // Card Surface
             VStack(spacing: Theme.Spacing.m) {
                 if mediaType == .video {
-                    VideoPreview(player: model.player)
-                        .frame(minHeight: 220)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Theme.Colors.cardStroke(colorScheme)))
-                        .accessibilityHidden(true)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(.regularMaterial)
+                            .cardSurface()
+                        if let player = model.player {
+                            VideoPlayer(player: player)
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .padding(Theme.Spacing.m)
+                                .onDisappear { player.pause() }
+                        } else {
+                            ZStack {
+                                Color(UIColor.secondarySystemBackground)
+                                ProgressView()
+                            }
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .padding(Theme.Spacing.m)
+                        }
+                    }
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.Colors.cardStroke(colorScheme)))
+                    .accessibilityHidden(true)
 
                     VideoRangeSelector(startTime: $model.startTime,
                                        endTime: $model.endTime,
@@ -75,19 +100,20 @@ public struct MediaTrimView: View {
                                        onChange: { focus in model.handleDragChanged(focus: focus) },
                                        onEnd: { focus in model.handleDragEnded(focus: focus) })
                         .frame(height: 56)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, Theme.Spacing.m)
                 }
 
                 if mediaType == .audio {
                     WaveformSection(model: model, currentTime: model.scrubPosition)
                         .frame(height: 180)
-                        .padding(.bottom, 8)
+                        .padding(.bottom, Theme.Spacing.m)
                 }
 
                 // Minimal scrubber + play/pause
                 PlaybackControls(model: model)
             }
             .padding(Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.xl)
             .cardSurface()
 
             // Actions
@@ -95,6 +121,7 @@ public struct MediaTrimView: View {
                 Button(action: { onCancel() }) {
                     Text("Cancel")
                 }
+                .foregroundStyle(Theme.Colors.secondaryText)
                 .accessibilityLabel("Cancel")
                 .accessibilityHint("Dismiss without saving changes")
 
@@ -105,6 +132,7 @@ public struct MediaTrimView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.Colors.accent)
+                .frame(height: 44)
                 .accessibilityLabel("Save as New")
                 .accessibilityHint("Export the selected range as a new file")
 
@@ -112,6 +140,7 @@ public struct MediaTrimView: View {
                     Text("Replace Original")
                 }
                 .buttonStyle(.bordered)
+                .frame(height: 44)
                 .accessibilityLabel("Replace Original")
                 .accessibilityHint("Export and replace the original clip with the trimmed version")
             }
@@ -152,23 +181,22 @@ private struct PlaybackControls: View {
 
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
-            HStack(spacing: Theme.Spacing.m) {
-                Button(action: { model.togglePlayPause() }) {
-                    Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
-                }
-                .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
-                .accessibilityHint("Toggles playback")
+            // Play button
+            Button(action: { model.togglePlayPause() }) {
+                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                    .font(.title2)
+                    .foregroundStyle(Theme.Colors.accent)
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(.regularMaterial))
+                    .shadow(radius: 1)
             }
-            HStack {
-                Text(model.formatTime(0))
-                    .font(.caption)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                Spacer()
-                Text(model.formatTime(model.duration))
-                    .font(.caption)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
+            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+            .accessibilityHint("Toggles playback")
+
+            // Consolidated time readout
+            Text("\(model.formatTime(model.scrubPosition))  •  \(model.formatTime(model.duration))")
+                .font(.caption)
+                .foregroundStyle(Theme.Colors.secondaryText)
         }
     }
 }
@@ -363,10 +391,14 @@ private struct PlayheadLine: View {
 private struct HandleView: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Theme.Colors.accent)
-                .frame(width: 28, height: 44)
-                .shadow(radius: 1)
+            Capsule(style: .circular)
+                .stroke(Theme.Colors.accent, lineWidth: 2)
+                .frame(width: 12, height: 32)
+                .overlay(
+                    Capsule(style: .circular)
+                        .stroke(Color.primary.opacity(0.75), lineWidth: 1)
+                        .padding(1)
+                )
         }
         .contentShape(Rectangle())
         .accessibilityElement()
@@ -379,43 +411,40 @@ private struct TimeRuler: View {
     var body: some View {
         GeometryReader { geo in
             let width = geo.size.width
-            let majorInterval: Double = 5
-            let minorInterval: Double = 1
 
             Canvas { ctx, size in
                 let height = size.height
-                let majorTickHeight: CGFloat = height
-                let minorTickHeight: CGFloat = height * 0.4
+                let baselineY = height
+                let baselinePath = Path { p in
+                    p.move(to: CGPoint(x: 0, y: baselineY))
+                    p.addLine(to: CGPoint(x: size.width, y: baselineY))
+                }
+                ctx.stroke(baselinePath, with: .color(Color.secondary.opacity(0.25)), lineWidth: 1)
 
-                func x(for t: Double) -> CGFloat { CGFloat(t / max(duration, 0.0001)) * width }
+                guard duration > 0 else { return }
+                let startT: Double = 0
+                let midT: Double = duration / 2
+                let endT: Double = duration
+                func x(for t: Double) -> CGFloat { CGFloat(t / max(duration, 0.0001)) * size.width }
 
-                // Minor ticks suppressed to reduce clutter
-//                if duration > 0 {
-//                    var t: Double = 0
-//                    while t <= duration {
-//                        let xPos = x(for: t)
-//                        var p = Path()
-//                        p.move(to: CGPoint(x: xPos, y: height - minorTickHeight))
-//                        p.addLine(to: CGPoint(x: xPos, y: height))
-//                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.3)), lineWidth: 0.5)
-//                        t += minorInterval
-//                    }
-//                }
-                // Major ticks + labels
-                if duration > 0 {
-                    var t: Double = 0
-                    while t <= duration + 0.001 {
-                        let xPos = x(for: t)
-                        var p = Path()
-                        p.move(to: CGPoint(x: xPos, y: height - majorTickHeight))
-                        p.addLine(to: CGPoint(x: xPos, y: height))
-                        ctx.stroke(p, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1)
+                let ticks: [(Double, String)] = [
+                    (startT, formatTime(startT)),
+                    (midT, formatTime(midT)),
+                    (endT, formatTime(endT))
+                ]
 
-                        let label = formatTime(t)
-                        let text = Text(label).font(.caption2)
-                        ctx.draw(text, at: CGPoint(x: xPos + 2, y: 2), anchor: .topLeading)
-                        t += majorInterval
-                    }
+                for (t, label) in ticks {
+                    let xPos = x(for: t)
+                    var p = Path()
+                    p.move(to: CGPoint(x: xPos, y: baselineY - height))
+                    p.addLine(to: CGPoint(x: xPos, y: baselineY))
+                    ctx.stroke(p, with: .color(Color.secondary.opacity(0.4)), lineWidth: 1)
+
+                    // Labels above the baseline
+                    let text = Text(label).font(.caption2).foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                    let inset: CGFloat = 8
+                    let clampedX = min(max(xPos, inset), size.width - inset)
+                    ctx.draw(text, at: CGPoint(x: clampedX, y: 2), anchor: .top)
                 }
             }
         }
@@ -943,4 +972,3 @@ struct MediaTrimView_Previews: PreviewProvider {
         .padding()
     }
 }
-
