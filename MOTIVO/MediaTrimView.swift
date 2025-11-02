@@ -68,6 +68,15 @@ public struct MediaTrimView: View {
                     .foregroundStyle(Theme.Colors.secondaryText)
             }
 
+            Button(action: { onCancel() }) {
+                Text("Cancel")
+                    .font(.body.weight(.medium))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .accessibilityLabel("Cancel")
+            .accessibilityHint("Close without trimming")
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             // Card Surface
             VStack(spacing: Theme.Spacing.m) {
                 if mediaType == .video {
@@ -116,79 +125,52 @@ public struct MediaTrimView: View {
             .padding(.bottom, Theme.Spacing.xl)
             .cardSurface()
 
-            // Actions (adaptive)
-            // QA (UI only):
-            // 1) Buttons never truncate; "Cancel" left, "Save copy" + "Replace" right (wraps on compact).
-            // 2) For very short clips (<12s), ruler shows no labels; nothing clips.
-            // 3) For medium clips, shows start/mid/end only.
-            // 4) For long clips, max 5 labels; none at extreme edges.
-            // 5) Light/dark parity OK; a11y labels intact.
-            Group {
-                if hSizeClass == .compact {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                        Button(action: { onCancel() }) {
-                            Text("Cancel")
-                        }
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Cancel")
-                        .accessibilityHint("Dismiss without saving changes")
+            // Actions (PracticeTimer-style soft accent)
+            // QA (buttons):
+            // 1) "Cancel" appears as a plain link under the title and dismisses the sheet.
+            // 2) Bottom row shows "Save copy" (soft translucent) and "Replace" (outlined), equal height/width.
+            // 3) No label truncation in compact width; buttons wrap within a max-width container if needed.
+            // 4) Light/Dark parity OK; Theme colors only; no logic changed.
 
-                        HStack(spacing: Theme.Spacing.m) {
-                            Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
-                                Text("Save copy")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.Colors.accent)
-                            .accessibilityLabel("Save copy")
-                            .accessibilityHint("Export the selected range as a new file")
+            let accent = Theme.Colors.accent
+            let primaryFillOpacity: Double = (colorScheme == .dark) ? 0.22 : 0.18
 
-                            Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
-                                Text("Replace")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Replace original")
-                            .accessibilityHint("Export and replace the original clip with the trimmed version")
-                        }
+            HStack { Spacer() }
+            .frame(height: 0) // spacer to separate card and buttons visually
+
+            HStack {
+                HStack(spacing: Theme.Spacing.m) {
+                    Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
+                        Text("Save copy")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(accent)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(accent.opacity(primaryFillOpacity))
+                                    .shadow(color: Color.black.opacity(0.08), radius: 8, y: 2)
+                            )
                     }
-                } else {
-                    HStack(spacing: Theme.Spacing.m) {
-                        Button(action: { onCancel() }) {
-                            Text("Cancel")
-                        }
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Cancel")
-                        .accessibilityHint("Dismiss without saving changes")
+                    .accessibilityLabel("Save copy")
+                    .accessibilityHint("Export a trimmed duplicate and keep the original")
 
-                        Spacer()
-
-                        HStack(spacing: Theme.Spacing.m) {
-                            Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
-                                Text("Save copy")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.Colors.accent)
-                            .accessibilityLabel("Save copy")
-                            .accessibilityHint("Export the selected range as a new file")
-
-                            Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
-                                Text("Replace")
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 44)
-                            }
-                            .buttonStyle(.bordered)
-                            .accessibilityLabel("Replace original")
-                            .accessibilityHint("Export and replace the original clip with the trimmed version")
-                        }
-                        .frame(maxWidth: 420)
+                    Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
+                        Text("Replace")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .foregroundStyle(accent)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(accent.opacity(0.55), lineWidth: 1)
+                            )
                     }
+                    .accessibilityLabel("Replace original")
+                    .accessibilityHint("Overwrite the original with the trimmed version")
                 }
+                .frame(maxWidth: 480)
             }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.xl)
         }
         .padding(Theme.Spacing.l)
         .overlay(alignment: .topLeading) {
