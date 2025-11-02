@@ -74,29 +74,22 @@ struct ActivityListView: View {
                 ToolbarItem(placement: .principal) {
                     Text("Activities")
                         .font(Theme.Text.pageTitle)
-                        .foregroundStyle(.primary)
                 }
-            }
-            .safeAreaInset(edge: .top) {
-                HStack {
+                ToolbarItem(placement: .cancellationAction) {
                     Button(action: { dismiss() }) {
                         Text("Close")
                             .font(Theme.Text.body)
+                            .foregroundStyle(.primary)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule()
+                                    .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
+                            )
+                            .contentShape(Capsule())
+                            .frame(minWidth: 44, minHeight: 44)
                     }
-                    .foregroundStyle(.primary)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 22)
-                            .stroke(Color.primary.opacity(0.12), lineWidth: 1)
-                    )
-                    .contentShape(Capsule())
-                    .buttonStyle(.plain)
-                    .frame(minWidth: 44, minHeight: 44, alignment: .center)
-                    Spacer(minLength: 0)
                 }
-                .padding(.leading, 16)
-                .padding(.top, 6)
             }
             .appBackground()
         }
