@@ -1251,9 +1251,9 @@ struct PracticeTimerView: View {
         case activityRaw = "PracticeTimer.activityRaw"
         case activityDetail = "PracticeTimer.activityDetail"
 
-        case stagedAudio = "PracticeTimer.stagedAudio"
-        case stagedVideo = "PracticeTimer.stagedVideo"
-        case stagedImages = "PracticeTimer.stagedImages"
+        case stagedAudioIDs = "PracticeTimer.stagedAudioIDs"
+        case stagedVideoIDs = "PracticeTimer.stagedVideoIDs"
+        case stagedImageIDs = "PracticeTimer.stagedImageIDs"
         case audioTitles = "PracticeTimer.audioTitles"
         case audioAutoTitles = "PracticeTimer.audioAutoTitles"
         case audioDurations = "PracticeTimer.audioDurations"
@@ -1274,65 +1274,48 @@ struct PracticeTimerView: View {
         activity = SessionActivityType(rawValue: raw) ?? .practice
         activityDetail = d.string(forKey: TimerDefaultsKey.activityDetail.rawValue) ?? ""
         syncActivityChoiceFromState()
-        
-        // Restore staged attachments and related metadata
-        if let audArray = d.array(forKey: TimerDefaultsKey.stagedAudio.rawValue) as? [Data] {
-            // Each Data blob is a serialized StagedAttachment with id + kind + data; fall back to treating as raw data list if decoding fails
-            var rebuilt: [StagedAttachment] = []
-            for blob in audArray {
-                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
-                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .audio))
-                } else {
-                    // Back-compat: generate ids for raw data entries
-                    rebuilt.append(StagedAttachment(id: UUID(), data: blob, kind: .audio))
-                }
+
+        // Restore staged attachments by IDs via StagingStore (no raw bytes in defaults)
+        let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
+        let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
+        let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
+        let audioIDs = audioIDStrings.compactMap(UUID.init)
+        let videoIDs = videoIDStrings.compactMap(UUID.init)
+        let imageIDs = imageIDStrings.compactMap(UUID.init)
+
+        let refs = StagingStore.list()
+        var rebuiltAudio: [StagedAttachment] = []
+        var rebuiltVideo: [StagedAttachment] = []
+        var rebuiltImages: [StagedAttachment] = []
+        var rebuiltThumbs: [UUID: UIImage] = [:]
+
+        func loadData(for id: UUID) -> (Data, StagedAttachmentRef.Kind)? {
+            guard let ref = refs.first(where: { $0.id == id }) else { return nil }
+            let url = StagingStore.absoluteURL(for: ref)
+            if let data = try? Data(contentsOf: url) { return (data, ref.kind) }
+            return nil
+        }
+
+        for id in audioIDs {
+            if let (data, kind) = loadData(for: id), kind == .audio {
+                rebuiltAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
             }
-            self.stagedAudio = rebuilt
         }
-        if let vidArray = d.array(forKey: TimerDefaultsKey.stagedVideo.rawValue) as? [Data] {
-            var rebuilt: [StagedAttachment] = []
-            for blob in vidArray {
-                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
-                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .video))
-                    if let thumb = generateVideoThumbnail(from: obj.data, id: obj.id) {
-                        self.videoThumbnails[obj.id] = thumb
-                    }
-                } else {
-                    let id = UUID()
-                    rebuilt.append(StagedAttachment(id: id, data: blob, kind: .video))
-                    if let thumb = generateVideoThumbnail(from: blob, id: id) {
-                        self.videoThumbnails[id] = thumb
-                    }
-                }
+        for id in videoIDs {
+            if let (data, kind) = loadData(for: id), kind == .video {
+                rebuiltVideo.append(StagedAttachment(id: id, data: data, kind: .video))
+                if let thumb = generateVideoThumbnail(from: data, id: id) { rebuiltThumbs[id] = thumb }
             }
-            self.stagedVideos = rebuilt
         }
-        if let imgArray = d.array(forKey: TimerDefaultsKey.stagedImages.rawValue) as? [Data] {
-            var rebuilt: [StagedAttachment] = []
-            for blob in imgArray {
-                if let obj = try? JSONDecoder().decode(SerializedAttachment.self, from: blob) {
-                    rebuilt.append(StagedAttachment(id: obj.id, data: obj.data, kind: .image))
-                } else {
-                    rebuilt.append(StagedAttachment(id: UUID(), data: blob, kind: .image))
-                }
+        for id in imageIDs {
+            if let (data, kind) = loadData(for: id), kind == .image {
+                rebuiltImages.append(StagedAttachment(id: id, data: data, kind: .image))
             }
-            self.stagedImages = rebuilt
         }
-        if let titlesData = d.data(forKey: TimerDefaultsKey.audioTitles.rawValue),
-           let titles = try? JSONDecoder().decode([UUID:String].self, from: titlesData) {
-            self.audioTitles = titles
-        }
-        if let autoTitlesData = d.data(forKey: TimerDefaultsKey.audioAutoTitles.rawValue),
-           let autos = try? JSONDecoder().decode([UUID:String].self, from: autoTitlesData) {
-            self.audioAutoTitles = autos
-        }
-        if let durationsData = d.data(forKey: TimerDefaultsKey.audioDurations.rawValue),
-           let durs = try? JSONDecoder().decode([UUID:Int].self, from: durationsData) {
-            self.audioDurations = durs
-        }
-        if let selIDStr = d.string(forKey: TimerDefaultsKey.selectedThumbnailID.rawValue), let selID = UUID(uuidString: selIDStr) {
-            self.selectedThumbnailID = selID
-        }
+        self.stagedAudio = rebuiltAudio
+        self.stagedVideos = rebuiltVideo
+        self.stagedImages = rebuiltImages
+        self.videoThumbnails = rebuiltThumbs
 
         // Restore task pad contents
         if let taskData = d.data(forKey: TimerDefaultsKey.taskLines.rawValue),
@@ -1474,27 +1457,23 @@ struct PracticeTimerView: View {
     }
 
     // MARK: - Persist staged attachments (unsaved session resilience)
+    /*
     private struct SerializedAttachment: Codable {
         let id: UUID
         let data: Data
     }
+    */
+    // Removed SerializedAttachment struct as it's no longer used
 
     private func persistStagedAttachments() {
         let d = UserDefaults.standard
-        // Encode attachments with stable IDs
-        let enc = JSONEncoder()
-        let audioPayload: [Data] = stagedAudio.compactMap { att in
-            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
-        }
-        let videoPayload: [Data] = stagedVideos.compactMap { att in
-            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
-        }
-        let imagePayload: [Data] = stagedImages.compactMap { att in
-            try? enc.encode(SerializedAttachment(id: att.id, data: att.data))
-        }
-        d.set(audioPayload, forKey: TimerDefaultsKey.stagedAudio.rawValue)
-        d.set(videoPayload, forKey: TimerDefaultsKey.stagedVideo.rawValue)
-        d.set(imagePayload, forKey: TimerDefaultsKey.stagedImages.rawValue)
+        // Persist arrays of IDs instead of raw Data blobs
+        let audioIDs = stagedAudio.map { $0.id.uuidString }
+        let videoIDs = stagedVideos.map { $0.id.uuidString }
+        let imageIDs = stagedImages.map { $0.id.uuidString }
+        d.set(audioIDs, forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
+        d.set(videoIDs, forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
+        d.set(imageIDs, forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
         // Encode dictionaries keyed by UUID
         if let titles = try? JSONEncoder().encode(audioTitles) {
             d.set(titles, forKey: TimerDefaultsKey.audioTitles.rawValue)
@@ -1555,9 +1534,9 @@ struct PracticeTimerView: View {
 
     private func clearPersistedStagedAttachments() {
         let d = UserDefaults.standard
-        d.removeObject(forKey: TimerDefaultsKey.stagedAudio.rawValue)
-        d.removeObject(forKey: TimerDefaultsKey.stagedVideo.rawValue)
-        d.removeObject(forKey: TimerDefaultsKey.stagedImages.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.audioTitles.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.audioAutoTitles.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.audioDurations.rawValue)
