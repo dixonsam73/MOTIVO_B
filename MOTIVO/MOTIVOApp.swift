@@ -37,6 +37,7 @@ struct MOTIVOApp: App {
             ContentView()
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
+                .onAppear { LegacyDefaultsPurge.runOnce() } // CHANGE-ID: 20251103_094600-legacy-defaults-purge-v1
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     persistenceController.currentUserID = uid
                     if let id = uid {
