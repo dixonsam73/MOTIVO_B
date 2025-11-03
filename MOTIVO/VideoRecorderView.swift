@@ -2,6 +2,23 @@ import SwiftUI
 import AVFoundation
 import AVKit
 
+@MainActor
+final class StagingStoreObject: ObservableObject {
+    func bootstrap() async throws { try StagingStore.bootstrap() }
+    func list() -> [StagedAttachmentRef] { StagingStore.list() }
+    func update(_ ref: StagedAttachmentRef) { StagingStore.update(ref) }
+    func remove(_ ref: StagedAttachmentRef) { StagingStore.remove(ref) }
+    func absoluteURL(for ref: StagedAttachmentRef) -> URL { StagingStore.absoluteURL(for: ref) }
+    func absoluteURL(forRelative path: String) -> URL { StagingStore.absoluteURL(forRelative: path) }
+    func saveNew(from sourceURL: URL,
+                 kind: StagedAttachmentRef.Kind,
+                 suggestedName: String? = nil,
+                 duration: Double? = nil,
+                 poster: URL? = nil) async throws -> StagedAttachmentRef {
+        try await StagingStore.saveNew(from: sourceURL, kind: kind, suggestedName: suggestedName, duration: duration, poster: poster)
+    }
+}
+
 public struct VideoRecorderView: View {
     public init(onSave: @escaping (URL) -> Void) {
         _controller = StateObject(wrappedValue: VideoRecorderController(onSave: onSave))
@@ -9,6 +26,7 @@ public struct VideoRecorderView: View {
 
     @StateObject private var controller: VideoRecorderController
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var stagingStore: StagingStoreObject
 
     public var body: some View {
         ZStack {
@@ -113,7 +131,12 @@ public struct VideoRecorderView: View {
             controller.isShowingLivePreview = true
             controller.startCaptureSession()
         }
-        .onDisappear { controller.onDisappear() }
+        .onDisappear {
+            controller.onDisappear()
+            Task {
+                try? await StagingStore.bootstrap()
+            }
+        }
         .toolbar(.hidden, for: .navigationBar)
     }
 
@@ -306,6 +329,19 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
         onSave(url)
+        // Mirror save to StagingStore (video) on main actor
+        Task {
+            try? await StagingStore.bootstrap()
+            let vidURL = url
+            let duration = getVideoDuration(url: vidURL)
+            var posterURL: URL? = nil
+            if let image = previewImage, let jpg = image.jpegData(compressionQuality: 0.85) {
+                let p = documentsDirectory().appendingPathComponent("\(UUID().uuidString)_poster").appendingPathExtension("jpg")
+                try? jpg.write(to: p, options: .atomic)
+                posterURL = p
+            }
+            _ = try? await StagingStore.saveNew(from: vidURL, kind: .video, suggestedName: vidURL.deletingPathExtension().lastPathComponent, duration: duration.isFinite ? duration : nil, poster: posterURL)
+        }
         resetState()
     }
 
@@ -736,6 +772,10 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
             self.isReadyToSave = true
             self.state = .idle
             self.isShowingLivePreview = false
+            
+            Task {
+                try? await StagingStore.bootstrap()
+            }
         }
     }
 }
@@ -810,4 +850,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-

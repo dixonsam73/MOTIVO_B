@@ -320,7 +320,9 @@ struct PracticeTimerView: View {
 
                                         Spacer(minLength: 8)
 
-                                        Button(role: .destructive) { deleteLine(line.id) } label: {
+                                        Button(role: .destructive) {
+                                            deleteLine(line.id)
+                                        } label: {
                                             Image(systemName: "trash")
                                                 .foregroundStyle(.primary.opacity(0.8))
                                         }
@@ -401,6 +403,8 @@ struct PracticeTimerView: View {
                                                         selectedThumbnailID = stagedImages.first?.id
                                                     }
                                                     persistStagedAttachments()
+                                                    // Mirror delete to staging store
+                                                    if let ref = StagingStore.list().first(where: { $0.id == att.id }) { StagingStore.remove(ref) }
                                                 } label: {
                                                     Image(systemName: "trash")
                                                         .font(.system(size: 16, weight: .semibold))
@@ -561,6 +565,8 @@ struct PracticeTimerView: View {
                                                     stagedVideos.removeAll { $0.id == att.id }
                                                     videoThumbnails.removeValue(forKey: att.id)
                                                     persistStagedAttachments()
+                                                    // Mirror delete to staging store
+                                                    if let ref = StagingStore.list().first(where: { $0.id == att.id }) { StagingStore.remove(ref) }
                                                 } label: {
                                                     Image(systemName: "trash")
                                                         .font(.system(size: 16, weight: .semibold))
@@ -622,6 +628,8 @@ struct PracticeTimerView: View {
                 syncActivityChoiceFromState()
             }
             .onAppear {
+                do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                mirrorFromStagingStore()
                 hydrateTimerFromStorage()
                 startTicker()
                 persistStagedAttachments()
@@ -636,6 +644,7 @@ struct PracticeTimerView: View {
                     persistTimerSnapshot()
                     removeAudioObserversIfNeeded()
                     purgeStagedTempFiles()
+                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
                 @unknown default:
                     break
                 }
@@ -1499,6 +1508,51 @@ struct PracticeTimerView: View {
         d.set(selectedThumbnailID?.uuidString, forKey: TimerDefaultsKey.selectedThumbnailID.rawValue)
     }
 
+    private func mirrorFromStagingStore() {
+        // Read lightweight refs from the staging store and populate local staged arrays (non-destructive to other state)
+        let refs = StagingStore.list()
+        var images: [StagedAttachment] = []
+        var audios: [StagedAttachment] = []
+        var videos: [StagedAttachment] = []
+        var thumbs: [UUID: UIImage] = [:]
+
+        for ref in refs {
+            let abs = StagingStore.absoluteURL(for: ref)
+            if let data = try? Data(contentsOf: abs) {
+                switch ref.kind {
+                case .image:
+                    images.append(StagedAttachment(id: ref.id, data: data, kind: .image))
+                case .audio:
+                    audios.append(StagedAttachment(id: ref.id, data: data, kind: .audio))
+                case .video:
+                    videos.append(StagedAttachment(id: ref.id, data: data, kind: .video))
+                    // If a posterPath exists, try to load and cache it as thumbnail; else generate from data as current behavior
+                    if let posterRel = ref.posterPath {
+                        let posterURL = StagingStore.absoluteURL(forRelative: posterRel)
+                        if let imgData = try? Data(contentsOf: posterURL), let ui = UIImage(data: imgData) {
+                            thumbs[ref.id] = ui
+                        }
+                    } else {
+                        if let thumb = generateVideoThumbnail(from: data, id: ref.id) { thumbs[ref.id] = thumb }
+                    }
+                }
+            }
+        }
+        // Update local state
+        self.stagedImages = images
+        self.stagedAudio = audios
+        self.stagedVideos = videos
+        self.videoThumbnails = thumbs
+        // Preserve existing selectedThumbnailID if still present; otherwise set to first image id
+        if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) {
+            self.selectedThumbnailID = sel
+        } else {
+            self.selectedThumbnailID = images.first?.id
+        }
+        // Persist snapshot so timer resume remains consistent
+        persistStagedAttachments()
+    }
+
     private func clearPersistedStagedAttachments() {
         let d = UserDefaults.standard
         d.removeObject(forKey: TimerDefaultsKey.stagedAudio.rawValue)
@@ -1539,6 +1593,11 @@ struct PracticeTimerView: View {
 
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
             persistStagedAttachments()
+
+            // Double-write to staging store
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
+            try? data.write(to: tmp, options: .atomic)
+            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .audio, suggestedName: title, duration: Double(durationSeconds), poster: nil) }
         } catch {
             print("Failed to stage audio: \(error)")
         }
@@ -1558,6 +1617,18 @@ struct PracticeTimerView: View {
 
             stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
             persistStagedAttachments()
+
+            // Double-write to staging store (with poster if generated)
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
+            try? data.write(to: tmp, options: .atomic)
+            var posterURL: URL? = nil
+            if let thumb = videoThumbnails[id], let jpg = thumb.jpegData(compressionQuality: 0.85) {
+                let p = FileManager.default.temporaryDirectory.appendingPathComponent("\(id.uuidString)_poster").appendingPathExtension("jpg")
+                try? jpg.write(to: p, options: .atomic)
+                posterURL = p
+            }
+            let duration = AVAsset(url: tmp).duration.seconds
+            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .video, suggestedName: id.uuidString, duration: duration.isFinite ? duration : nil, poster: posterURL) }
         } catch {
             print("Failed to stage video: \(error)")
         }
@@ -1675,6 +1746,10 @@ struct PracticeTimerView: View {
         audioAutoTitles.removeValue(forKey: id)
         audioDurations.removeValue(forKey: id)
         persistStagedAttachments()
+        // Mirror delete to staging store
+        if let ref = StagingStore.list().first(where: { $0.id == id }) {
+            StagingStore.remove(ref)
+        }
     }
 
     private func stopAttachmentPlayback() {
@@ -1794,6 +1869,11 @@ struct PracticeTimerView: View {
             let imageCount = stagedImages.count
             if imageCount == 1 { selectedThumbnailID = id }
             persistStagedAttachments()
+
+            // Double-write to staging store
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("jpg")
+            try? data.write(to: tmp, options: .atomic)
+            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .image, suggestedName: id.uuidString, duration: nil, poster: nil) }
         }
     }
 
@@ -1856,4 +1936,5 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
+
 
