@@ -11,8 +11,10 @@ struct StagedAttachmentRef: Codable, Hashable, Identifiable {
     let createdAt: Date
     var duration: Double?      // seconds, optional
     var posterPath: String?    // relative path to generated thumbnail/poster if any
-    var audioTitle: String?
-    var audioAutoTitle: String?
+    // Audio naming: store both auto and user-entered; display prefers user when non-empty
+    var audioUserTitle: String?    // set when user edits the title; if empty or nil, fall back to auto
+    var audioAutoTitle: String?    // seeded from filename at creation; never overwritten by user edits
+    var audioDisplayTitle: String? // denormalized convenience: user if present, else auto (kept in sync on updates)
 }
 
 /// StagingStore manages persistence of large staged media outside of UserDefaults.
@@ -95,7 +97,19 @@ enum StagingStore {
                     }
 
                     let rel = relativePath(for: targetURL)
-                    let newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioTitle: nil, audioAutoTitle: nil)
+                    #if DEBUG
+                    print("[StagingStore] Saved new item id=\(id) kind=\(kind) target=\(targetURL.path) rel=\(rel)")
+                    #endif
+                    var newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioUserTitle: nil, audioAutoTitle: nil, audioDisplayTitle: nil)
+                    if kind == .audio {
+                        // Seed auto title from the file stem or suggested name; userTitle starts empty
+                        let stem = (targetURL.deletingPathExtension().lastPathComponent)
+                        let auto = (suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? suggestedName! : stem
+                        newRef.audioAutoTitle = auto
+                        newRef.audioUserTitle = nil
+                        newRef.audioDisplayTitle = auto
+                    }
+
                     // Append to JSON file
                     var list = loadRefs()
                     list.append(newRef)
@@ -164,9 +178,29 @@ enum StagingStore {
         var list = loadRefs()
         if let idx = list.firstIndex(where: { $0.id == id }) {
             var r = list[idx]
-            r.audioTitle = title ?? r.audioTitle
-            r.audioAutoTitle = autoTitle ?? r.audioAutoTitle
+            // Update duration if provided
             if let duration { r.duration = duration }
+
+            // Update auto title only if a non-empty new value is provided (we never clear auto)
+            if let at = autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !at.isEmpty {
+                r.audioAutoTitle = at
+            }
+
+            // Update user title: allow nil/empty to mean "clear" (fall back to auto)
+            if let t = title {
+                let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                r.audioUserTitle = trimmed.isEmpty ? nil : trimmed
+            }
+
+            // Recompute display title: user if present, else auto
+            if let user = r.audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                r.audioDisplayTitle = user
+            } else if let auto = r.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                r.audioDisplayTitle = auto
+            } else {
+                r.audioDisplayTitle = nil
+            }
+
             list[idx] = r
             saveRefs(list)
         }
@@ -253,7 +287,7 @@ enum StagingStore {
 
     /// Replace helper: update only the path of a ref without changing its id.
     private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
-        StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioTitle: ref.audioTitle, audioAutoTitle: ref.audioAutoTitle)
+        StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioUserTitle: ref.audioUserTitle, audioAutoTitle: ref.audioAutoTitle, audioDisplayTitle: ref.audioDisplayTitle)
     }
 
     // MARK: - File-backed JSON storage
@@ -276,7 +310,17 @@ enum StagingStore {
             do {
                 let data = try Data(contentsOf: url)
                 let refs = try JSONDecoder().decode([StagedAttachmentRef].self, from: data)
-                return refs
+                var normalized = refs
+                for i in normalized.indices {
+                    if normalized[i].audioDisplayTitle == nil {
+                        if let user = normalized[i].audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            normalized[i].audioDisplayTitle = user
+                        } else if let auto = normalized[i].audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            normalized[i].audioDisplayTitle = auto
+                        }
+                    }
+                }
+                return normalized
             } catch {
                 // ignore read/decoding errors, fallback to empty
                 return []
@@ -294,7 +338,17 @@ enum StagingStore {
                     #if DEBUG
                     print("[StagingStore] Migrated refs from UserDefaults to file (count: \(refs.count))")
                     #endif
-                    return refs
+                    var normalized = refs
+                    for i in normalized.indices {
+                        if normalized[i].audioDisplayTitle == nil {
+                            if let user = normalized[i].audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                normalized[i].audioDisplayTitle = user
+                            } else if let auto = normalized[i].audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                normalized[i].audioDisplayTitle = auto
+                            }
+                        }
+                    }
+                    return normalized
                 } catch {
                     // Migration failed, ignore
                     return []
