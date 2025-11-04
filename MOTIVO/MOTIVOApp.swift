@@ -7,6 +7,7 @@
 
 import SwiftUI
 import CoreData
+import Foundation
 
 @main
 struct MOTIVOApp: App {
@@ -30,7 +31,27 @@ struct MOTIVOApp: App {
                 }
             }
         }
+
+        LegacyDefaultsPurge.runOnce()
+
+        // Migrate oversized PracticeTimer.stagedVideo from UserDefaults to file store (no-op if already migrated)
+        _ = PracticeTimerStore.loadStagedVideo()
+
+        #if DEBUG
+        logBigDefaults()
+        #endif
     }
+
+    #if DEBUG
+    private func logBigDefaults(threshold: Int = 3_000_000) {
+        let d = UserDefaults.standard.dictionaryRepresentation()
+        for (key, value) in d {
+            if let data = try? PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0), data.count >= threshold {
+                print("[App] Large UserDefaults key: \(key) size: \(data.count) bytes")
+            }
+        }
+    }
+    #endif
 
     var body: some Scene {
         WindowGroup {
@@ -40,9 +61,7 @@ struct MOTIVOApp: App {
                 .onAppear {
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
-                    // One-time purge of legacy large defaults keys
-                    LegacyDefaultsPurge.runOnce()
-                } // CHANGE-ID: 20251103_094600-legacy-defaults-purge-v1
+                }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     persistenceController.currentUserID = uid
                     if let id = uid {

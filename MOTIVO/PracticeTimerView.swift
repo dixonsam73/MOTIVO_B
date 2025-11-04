@@ -91,6 +91,8 @@ struct PracticeTimerView: View {
     @FocusState private var focusedAudioTitleID: UUID?
     // Editing buffer for audio title while focused to prevent premature auto-fill
     @State private var audioTitleEditingBuffer: [UUID: String] = [:]
+    @State private var audioTitleDebounceWork: [UUID: DispatchWorkItem] = [:]
+    @State private var audioTitleDidImmediatePersist: Set<UUID> = []
 
     // Audio observer and interruption flags
     @State private var audioObserversInstalled: Bool = false
@@ -451,6 +453,15 @@ struct PracticeTimerView: View {
                                             // Only mutate the editing buffer while focused; do not write to audioTitles yet
                                             if isFocused {
                                                 audioTitleEditingBuffer[att.id] = newValue
+                                                let nonEmpty = !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                                if nonEmpty && !audioTitleDidImmediatePersist.contains(att.id) {
+                                                    // First meaningful keystroke — persist immediately
+                                                    audioTitleDidImmediatePersist.insert(att.id)
+                                                    persistAudioTitleImmediately(for: att.id, bufferValue: newValue)
+                                                } else {
+                                                    // Subsequent edits — debounce to reduce churn
+                                                    scheduleDebouncedAudioTitlePersist(for: att.id, bufferValue: newValue)
+                                                }
                                             }
                                         }
                                     ))
@@ -477,6 +488,8 @@ struct PracticeTimerView: View {
                                                 }
                                                 // Clean up buffer
                                                 audioTitleEditingBuffer.removeValue(forKey: att.id)
+                                                // Persist immediately to StagingStore
+                                                persistCommittedAudioTitle(for: att.id)
                                                 // Persist after any change (debounced to survive rapid navigation)
                                                 DispatchQueue.main.async {
                                                     persistStagedAttachments()
@@ -494,6 +507,7 @@ struct PracticeTimerView: View {
                                             audioTitles[att.id] = buffer
                                         }
                                         audioTitleEditingBuffer.removeValue(forKey: att.id)
+                                        persistCommittedAudioTitle(for: att.id)
                                         DispatchQueue.main.async {
                                             persistStagedAttachments()
                                         }
@@ -683,10 +697,21 @@ struct PracticeTimerView: View {
                 // Always bootstrap the staging store before any hydration that depends on it
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
 
+                // Install willResignActive observer to commit title buffers immediately on app transition
+                NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+                    commitAllAudioTitleBuffersAndPersist()
+                }
+
                 // If last session was explicitly discarded, ensure staging store is empty before hydrating
                 if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
                     clearAllStagingStoreRefs()
                     UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
+                }
+
+                // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
+                if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
+                    persistAudioTitleImmediately(for: fid, bufferValue: buffer)
+                    audioTitleEditingBuffer.removeValue(forKey: fid)
                 }
 
                 // Ensure any pending title edits are committed before hydration
@@ -726,6 +751,9 @@ struct PracticeTimerView: View {
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
                 case .active:
+                    // Ensure any leaked/debounced title edits are committed before hydration
+                    commitAllAudioTitleBuffersAndPersist()
+
                     hydrateTimerFromStorage()
                     startTicker()
                     // Reconcile with StagingStore on resume to repopulate UI if needed
@@ -744,14 +772,30 @@ struct PracticeTimerView: View {
                         mirrorFromStagingStore()
                     }
                 case .inactive, .background:
+                    // Commit all buffered title edits before persisting snapshot
+                    commitAllAudioTitleBuffersAndPersist()
+
                     do { try StagingStore.bootstrap() } catch { /* ignore */ }
                     stopTicker()
-                    persistTimerSnapshot()
+                    persistTimerSnapshotSafely(context: "scenePhase.background")
                     UserDefaults.standard.synchronize()
                     removeAudioObserversIfNeeded()
                     purgeStagedTempFiles()
                 @unknown default:
                     break
+                }
+            }
+            .onDisappear {
+                // Remove willResignActive observer to avoid leaks
+                NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+
+                // Commit any in-progress audio title edit when leaving the view (covers in-app navigation without backgrounding)
+                if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
+                    // Cancel pending debounce and persist immediately
+                    if let w = audioTitleDebounceWork[fid] { w.cancel() }
+                    audioTitleDebounceWork[fid] = nil
+                    persistAudioTitleImmediately(for: fid, bufferValue: buffer)
+                    audioTitleEditingBuffer.removeValue(forKey: fid)
                 }
             }
             .toolbar {
@@ -1509,6 +1553,16 @@ struct PracticeTimerView: View {
         persistTasksSnapshot()
     }
 
+    // Small safe persist wrapper for timer snapshot
+    private func persistTimerSnapshotSafely(context: String) {
+        persistTimerSnapshot()
+        // Best-effort sync and log if it fails or if the system warns about large writes elsewhere
+        let ok = UserDefaults.standard.synchronize()
+        if !ok {
+            print("[PracticeTimer] UserDefaults synchronize returned false during \(context)")
+        }
+    }
+
     private func clearPersistedTimer() {
         let d = UserDefaults.standard
         d.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
@@ -1721,8 +1775,13 @@ struct PracticeTimerView: View {
         for a in audios {
             if let ref = refsList.first(where: { $0.id == a.id }) {
                 if let auto = ref.audioAutoTitle { newAutos[a.id] = auto }
-                if let t = ref.audioTitle, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    newTitles[a.id] = t
+                let existing = (newTitles[a.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if existing.isEmpty {
+                    if let t = ref.audioTitle, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        newTitles[a.id] = t
+                    } else if let auto = ref.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        newTitles[a.id] = auto
+                    }
                 }
                 if let d = ref.duration, d.isFinite { newDurs[a.id] = max(0, Int(d.rounded())) }
             }
@@ -2139,6 +2198,79 @@ struct PracticeTimerView: View {
             }
         }
         audioTitleEditingBuffer.removeAll()
+    }
+
+    // New helper to persist a single committed audio title to StagingStore
+    private func persistCommittedAudioTitle(for id: UUID) {
+        let title = (audioTitles[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let auto = audioAutoTitles[id]
+        let dur = audioDurations[id].map { Double($0) }
+        StagingStore.updateAudioMetadata(id: id, title: title.isEmpty ? nil : title, autoTitle: auto, duration: dur)
+    }
+    
+    private func persistAudioTitleImmediately(for id: UUID, bufferValue: String) {
+        let trimmed = bufferValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Update in-memory title immediately so it survives quick navigation before focus loss
+        if trimmed.isEmpty {
+            audioTitles[id] = audioAutoTitles[id] ?? ""
+        } else {
+            audioTitles[id] = bufferValue
+        }
+        // Cancel any pending debounce for this id to avoid out-of-order writes
+        if let w = audioTitleDebounceWork[id] { w.cancel() }
+        audioTitleDebounceWork[id] = nil
+        // Persist to StagingStore synchronously
+        let dur = audioDurations[id].map { Double($0) }
+        StagingStore.updateAudioMetadata(id: id, title: trimmed.isEmpty ? nil : bufferValue, autoTitle: audioAutoTitles[id], duration: dur)
+        // Snapshot IDs/metadata for resilience
+        persistStagedAttachments()
+    }
+
+    private func scheduleDebouncedAudioTitlePersist(for id: UUID, bufferValue: String) {
+        // Cancel any existing work for this id
+        if let w = audioTitleDebounceWork[id] { w.cancel() }
+        let work = DispatchWorkItem {
+            let trimmed = bufferValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Update in-memory title immediately so it survives quick navigation before focus loss
+            if trimmed.isEmpty {
+                self.audioTitles[id] = self.audioAutoTitles[id] ?? ""
+            } else {
+                self.audioTitles[id] = bufferValue
+            }
+            // Persist to StagingStore (source of truth)
+            let dur = self.audioDurations[id].map { Double($0) }
+            StagingStore.updateAudioMetadata(id: id, title: trimmed.isEmpty ? nil : bufferValue, autoTitle: self.audioAutoTitles[id], duration: dur)
+            // Also persist staged IDs snapshot for resilience
+            self.persistStagedAttachments()
+        }
+        audioTitleDebounceWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    // New helper method as per instructions
+    private func commitAllAudioTitleBuffersAndPersist() {
+        // Cancel all pending debounced work
+        for (_, work) in audioTitleDebounceWork { work.cancel() }
+        audioTitleDebounceWork.removeAll()
+        // If there is a focused field, ensure its buffer is committed first
+        if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
+            let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                audioTitles[fid] = audioAutoTitles[fid] ?? ""
+            } else {
+                audioTitles[fid] = buffer
+            }
+            audioTitleEditingBuffer.removeValue(forKey: fid)
+            persistCommittedAudioTitle(for: fid)
+        }
+        // Commit all remaining buffered titles
+        if !audioTitleEditingBuffer.isEmpty {
+            let ids = Array(audioTitleEditingBuffer.keys)
+            commitAudioTitleEditingBuffers()
+            for id in ids { persistCommittedAudioTitle(for: id) }
+        }
+        // Persist after any change so state survives suspension
+        persistStagedAttachments()
     }
 }
 

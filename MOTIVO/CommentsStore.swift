@@ -24,7 +24,23 @@ public final class CommentsStore: ObservableObject {
         return decoder
     }
 
+    private static func applicationSupportDirectory() throws -> URL {
+        let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+        guard let appSupportURL = urls.first else {
+            throw NSError(domain: "CommentsStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unable to locate Application Support directory"])
+        }
+        // Ensure directory exists
+        try FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true, attributes: nil)
+        return appSupportURL
+    }
+
+    private static var fileURL: URL {
+        // Use a subdirectory or just the app support root; here we use root
+        (try? applicationSupportDirectory().appendingPathComponent("CommentsStore.json")) ?? URL(fileURLWithPath: "/dev/null")
+    }
+
     public init() {
+        LegacyDefaultsPurge.runOnce()
         load()
     }
 
@@ -70,26 +86,46 @@ public final class CommentsStore: ObservableObject {
     private func save() {
         do {
             let data = try Self.makeEncoder().encode(commentsBySessionID)
-            UserDefaults.standard.set(data, forKey: defaultsKey)
+            try data.write(to: Self.fileURL, options: .atomic)
         } catch {
             // Intentionally silent to remain release-safe; consider logging if you have a logging facility.
         }
     }
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: defaultsKey) else {
-            commentsBySessionID = [:]
-            return
-        }
-        do {
-            let decoded = try Self.makeDecoder().decode([UUID: [Comment]].self, from: data)
-            // Normalize ordering to newest → oldest per session
-            var normalized: [UUID: [Comment]] = [:]
-            for (key, list) in decoded {
-                normalized[key] = list.sorted { $0.timestamp > $1.timestamp }
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: Self.fileURL.path) {
+            do {
+                let data = try Data(contentsOf: Self.fileURL)
+                let decoded = try Self.makeDecoder().decode([UUID: [Comment]].self, from: data)
+                // Normalize ordering to newest → oldest per session
+                var normalized: [UUID: [Comment]] = [:]
+                for (key, list) in decoded {
+                    normalized[key] = list.sorted { $0.timestamp > $1.timestamp }
+                }
+                commentsBySessionID = normalized
+                return
+            } catch {
+                commentsBySessionID = [:]
+                return
             }
-            commentsBySessionID = normalized
-        } catch {
+        } else if let legacyData = UserDefaults.standard.data(forKey: defaultsKey) {
+            do {
+                let decoded = try Self.makeDecoder().decode([UUID: [Comment]].self, from: legacyData)
+                // Normalize ordering to newest → oldest per session
+                var normalized: [UUID: [Comment]] = [:]
+                for (key, list) in decoded {
+                    normalized[key] = list.sorted { $0.timestamp > $1.timestamp }
+                }
+                commentsBySessionID = normalized
+                save()
+                UserDefaults.standard.removeObject(forKey: defaultsKey)
+                return
+            } catch {
+                commentsBySessionID = [:]
+                return
+            }
+        } else {
             commentsBySessionID = [:]
         }
     }

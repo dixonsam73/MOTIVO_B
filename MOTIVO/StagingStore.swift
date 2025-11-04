@@ -2,7 +2,7 @@ import Foundation
 import UniformTypeIdentifiers
 
 /// Lightweight reference to a staged media file stored under Application Support/MOTIVO/Staging.
-/// Only small metadata is stored in UserDefaults; raw media bytes are kept on disk.
+/// Only small metadata is stored in a JSON file under Application Support; raw media bytes are kept on disk.
 struct StagedAttachmentRef: Codable, Hashable, Identifiable {
     enum Kind: String, Codable { case audio, video, image }
     let id: UUID
@@ -20,7 +20,7 @@ struct StagedAttachmentRef: Codable, Hashable, Identifiable {
 /// - Stores media under Application Support/MOTIVO/Staging
 /// - Marks the Staging directory as excluded from iCloud/iTunes backup
 /// - Performs file I/O on a background queue
-/// - Stores only lightweight references (StagedAttachmentRef) in UserDefaults under key "stagedAttachments_v2"
+/// - Stores lightweight references (StagedAttachmentRef) in a JSON file "staged.json" under Application Support
 @MainActor
 enum StagingStore {
     // MARK: - Public API
@@ -53,7 +53,7 @@ enum StagingStore {
     ///   - suggestedName: Optional base name (without extension). If nil, a UUID is used.
     ///   - duration: Optional duration in seconds.
     ///   - poster: Optional poster/thumbnail URL to copy alongside the media.
-    /// - Returns: Newly created StagedAttachmentRef stored in UserDefaults.
+    /// - Returns: Newly created StagedAttachmentRef stored in JSON file.
     static func saveNew(from sourceURL: URL,
                         kind: StagedAttachmentRef.Kind,
                         suggestedName: String? = nil,
@@ -96,7 +96,7 @@ enum StagingStore {
 
                     let rel = relativePath(for: targetURL)
                     let newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioTitle: nil, audioAutoTitle: nil)
-                    // Append to UserDefaults
+                    // Append to JSON file
                     var list = loadRefs()
                     list.append(newRef)
                     saveRefs(list)
@@ -149,10 +149,10 @@ enum StagingStore {
         return updated
     }
 
-    /// Return all staged refs from UserDefaults.
+    /// Return all staged refs from JSON file.
     static func list() -> [StagedAttachmentRef] { loadRefs() }
 
-    /// Update a ref in UserDefaults by id.
+    /// Update a ref in JSON file by id.
     static func update(_ ref: StagedAttachmentRef) {
         var list = loadRefs()
         if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = ref }
@@ -256,25 +256,63 @@ enum StagingStore {
         StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioTitle: ref.audioTitle, audioAutoTitle: ref.audioAutoTitle)
     }
 
-    // MARK: - UserDefaults storage
+    // MARK: - File-backed JSON storage
 
-    private static let defaultsKey = "stagedAttachments_v2"
-
-    private static func loadRefs() -> [StagedAttachmentRef] {
-        let d = UserDefaults.standard
-        guard let data = d.data(forKey: defaultsKey) else { return [] }
-        do { return try JSONDecoder().decode([StagedAttachmentRef].self, from: data) }
-        catch { return [] }
+    /// File URL for refs JSON file.
+    private static func refsFileURL() -> URL {
+        do {
+            try bootstrap()
+        } catch {
+            // Ignore bootstrap errors; fallback to baseURL anyway
+        }
+        return baseURL.appendingPathComponent("staged.json")
     }
 
+    /// Load refs from JSON file; if missing, migrate from UserDefaults.
+    private static func loadRefs() -> [StagedAttachmentRef] {
+        let url = refsFileURL()
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            do {
+                let data = try Data(contentsOf: url)
+                let refs = try JSONDecoder().decode([StagedAttachmentRef].self, from: data)
+                return refs
+            } catch {
+                // ignore read/decoding errors, fallback to empty
+                return []
+            }
+        } else {
+            // Attempt migration from UserDefaults
+            let defaultsKey = "stagedAttachments_v2"
+            let d = UserDefaults.standard
+            if let data = d.data(forKey: defaultsKey) {
+                do {
+                    let refs = try JSONDecoder().decode([StagedAttachmentRef].self, from: data)
+                    // Save to file
+                    saveRefs(refs)
+                    d.removeObject(forKey: defaultsKey)
+                    #if DEBUG
+                    print("[StagingStore] Migrated refs from UserDefaults to file (count: \(refs.count))")
+                    #endif
+                    return refs
+                } catch {
+                    // Migration failed, ignore
+                    return []
+                }
+            } else {
+                return []
+            }
+        }
+    }
+
+    /// Save refs to JSON file atomically.
     private static func saveRefs(_ refs: [StagedAttachmentRef]) {
-        let d = UserDefaults.standard
+        let url = refsFileURL()
         do {
             let data = try JSONEncoder().encode(refs)
-            d.set(data, forKey: defaultsKey)
-            d.synchronize()
+            try data.write(to: url, options: [.atomic])
         } catch {
-            // On encoding failure, do not crash; drop the write.
+            // On encoding or write failure, do not crash; drop the write.
         }
     }
 }
