@@ -21,6 +21,7 @@ import Combine
 import CoreData
 import AVFoundation
 import AVKit
+import Darwin
 
 private let recorderIcon = Color(red: 0.44, green: 0.50, blue: 0.57) // slate blue-grey ~ #6F7F91
 private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neutral  ~ #A88B73
@@ -133,6 +134,12 @@ struct PracticeTimerView: View {
     @FocusState private var focusedTaskID: UUID?
     private let tasksDefaultsKey: String = "practiceTasks_v1"
     private let sessionDiscardedKey = "PracticeTimer.sessionDiscarded"
+    // sessionActiveKey: true while a timer session is in-progress (even if paused). Used to distinguish fresh launch vs resume. We clear staging only when false.
+    private let sessionActiveKey = "PracticeTimer.sessionActive"
+
+    // Unique per-process boot identifier to detect cold launches (force quit / crash relaunch)
+    private let sessionBootIDKey = "PracticeTimer.bootID"
+    private var currentBootID: String { String(getpid()) }
 
     private func loadDefaultTasksIfNeeded() {
         guard activity == .practice, taskLines.isEmpty else { return }
@@ -670,6 +677,50 @@ struct PracticeTimerView: View {
                 guard !didPrefetch else { return }
                 didPrefetch = true
 
+                // Detect cold launch by boot ID
+                let lastBootID = UserDefaults.standard.string(forKey: sessionBootIDKey)
+                if lastBootID != currentBootID {
+                    // Fresh process launch (cold start), force clean state
+                    stopAttachmentPlayback()
+                    clearPersistedStagedAttachments()
+                    clearAllStagingStoreRefs()
+                    clearPersistedTasks()
+                    purgeStagedTempFiles()
+                    stagedAudio.removeAll()
+                    audioTitles.removeAll()
+                    audioAutoTitles.removeAll()
+                    audioDurations.removeAll()
+                    stagedImages.removeAll()
+                    stagedVideos.removeAll()
+                    videoThumbnails.removeAll()
+                    selectedThumbnailID = nil
+                    clearPersistedTimer()
+                    resetUIOnly()
+                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                    UserDefaults.standard.set(currentBootID, forKey: sessionBootIDKey)
+                }
+
+                // New sessionActiveKey logic: clear staging etc if no active session, to ensure clean state on fresh launch.
+                let isActive = UserDefaults.standard.bool(forKey: sessionActiveKey)
+                if !isActive {
+                    stopAttachmentPlayback()
+                    clearPersistedStagedAttachments()
+                    clearAllStagingStoreRefs()
+                    clearPersistedTasks()
+                    purgeStagedTempFiles()
+                    stagedAudio.removeAll()
+                    audioTitles.removeAll()
+                    audioAutoTitles.removeAll()
+                    audioDurations.removeAll()
+                    stagedImages.removeAll()
+                    stagedVideos.removeAll()
+                    videoThumbnails.removeAll()
+                    selectedThumbnailID = nil
+                    clearPersistedTimer()
+                    resetUIOnly()
+                    UserDefaults.standard.set(true, forKey: sessionActiveKey)
+                }
+
                 instruments = fetchInstruments()
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
@@ -706,6 +757,7 @@ struct PracticeTimerView: View {
                 if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
                     clearAllStagingStoreRefs()
                     UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
+                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
                 }
 
                 // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
@@ -806,6 +858,7 @@ struct PracticeTimerView: View {
                         clearPersistedStagedAttachments()
                         clearAllStagingStoreRefs()
                         UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
                         clearPersistedTasks()
                         clearPersistedTimer()
                         resetUIOnly()
@@ -895,6 +948,7 @@ struct PracticeTimerView: View {
                         stagedVideos.removeAll()
                         videoThumbnails.removeAll()
                         selectedThumbnailID = nil
+                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
                         isPresented = false
                     }
                 )
@@ -906,6 +960,7 @@ struct PracticeTimerView: View {
                     clearPersistedStagedAttachments()
                     clearAllStagingStoreRefs()
                     UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
                     clearPersistedTasks()
                     resetUIOnly()
                     stagedAudio.removeAll()
@@ -1305,6 +1360,7 @@ struct PracticeTimerView: View {
 
     // MARK: - Background-safe timer controls
     private func start() {
+        UserDefaults.standard.set(true, forKey: sessionActiveKey)
         guard instrument != nil else { return }
         if !isRunning {
             if startDate == nil { startDate = Date() }
