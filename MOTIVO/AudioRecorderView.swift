@@ -4,12 +4,14 @@
 
 import SwiftUI
 import AVFoundation
+import AVKit
 
 /// A lightweight, self-contained audio recorder view using AVAudioRecorder.
 /// Stores audio files in the app's Documents directory and returns the saved URL via `onSave`.
 struct AudioRecorderView: View {
     // MARK: - Public API
     var onSave: (URL) -> Void
+    @EnvironmentObject private var stagingStore: StagingStoreObject
 
     // MARK: - State
     @State private var recorder: AVAudioRecorder?
@@ -20,6 +22,8 @@ struct AudioRecorderView: View {
 
     @State private var state: RecordingState = .idle
     @State private var errorMessage: String?
+    
+    @State private var stagedID: UUID? = nil
 
     // Timer for elapsed recording time
     @State private var startTime: Date?
@@ -133,6 +137,7 @@ struct AudioRecorderView: View {
         .onDisappear {
             removeObserversIfNeeded()
             cleanup()
+            Task { try? await StagingStore.bootstrap() }
         }
         .task { await configureSessionIfNeeded() }
         #if DEBUG
@@ -531,6 +536,31 @@ private extension AudioRecorderView {
             return
         }
         onSave(url)
+        // Mirror VideoRecorderView staging flow - additive only
+        Task {
+            try? await StagingStore.bootstrap()
+            let computedDuration: TimeInterval = await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).async {
+                    var duration: TimeInterval = 0
+                    if finalRecordedTime > 0 {
+                        duration = finalRecordedTime
+                    } else if let player = try? AVAudioPlayer(contentsOf: url) {
+                        duration = player.duration
+                    }
+                    continuation.resume(returning: duration)
+                }
+            }
+            let ref = try? await StagingStore.saveNew(
+                from: url,
+                kind: .audio,
+                suggestedName: url.deletingPathExtension().lastPathComponent,
+                duration: computedDuration,
+                poster: nil
+            )
+            if let ref {
+                await MainActor.run { self.stagedID = ref.id }
+            }
+        }
     }
 
     func setError(_ message: String) {
@@ -628,4 +658,3 @@ private struct ControlButton: View {
     }
     .padding()
 }
-
