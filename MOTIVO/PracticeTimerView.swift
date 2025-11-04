@@ -89,6 +89,8 @@ struct PracticeTimerView: View {
     @State private var audioAutoTitles: [UUID: String] = [:]
     @State private var audioDurations: [UUID: Int] = [:]
     @FocusState private var focusedAudioTitleID: UUID?
+    // Editing buffer for audio title while focused to prevent premature auto-fill
+    @State private var audioTitleEditingBuffer: [UUID: String] = [:]
 
     // Audio observer and interruption flags
     @State private var audioObserversInstalled: Bool = false
@@ -128,6 +130,7 @@ struct PracticeTimerView: View {
     @State private var autoTaskTexts: [UUID: String] = [:]
     @FocusState private var focusedTaskID: UUID?
     private let tasksDefaultsKey: String = "practiceTasks_v1"
+    private let sessionDiscardedKey = "PracticeTimer.sessionDiscarded"
 
     private func loadDefaultTasksIfNeeded() {
         guard activity == .practice, taskLines.isEmpty else { return }
@@ -428,23 +431,71 @@ struct PracticeTimerView: View {
                                     }
                                     .buttonStyle(.bordered)
 
+                                    // Use a per-item editing buffer so auto-title doesn't repopulate while typing
+                                    let isFocused = (focusedAudioTitleID == att.id)
                                     TextField("Title", text: Binding(
-                                        get: { audioTitles[att.id] ?? "" },
-                                        set: { audioTitles[att.id] = $0 }
+                                        get: {
+                                            if isFocused {
+                                                // While focused, show the editing buffer (which we control)
+                                                return audioTitleEditingBuffer[att.id] ?? ""
+                                            } else {
+                                                // When not focused, show the persisted title (falls back to auto-title if empty)
+                                                let t = (audioTitles[att.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if t.isEmpty {
+                                                    return audioAutoTitles[att.id] ?? ""
+                                                }
+                                                return audioTitles[att.id] ?? ""
+                                            }
+                                        },
+                                        set: { newValue in
+                                            // Only mutate the editing buffer while focused; do not write to audioTitles yet
+                                            if isFocused {
+                                                audioTitleEditingBuffer[att.id] = newValue
+                                            }
+                                        }
                                     ))
                                     .textFieldStyle(.plain)
                                     .disableAutocorrection(true)
                                     .focused($focusedAudioTitleID, equals: att.id)
-                                    .onTapGesture { focusedAudioTitleID = att.id }
-                                    .onSubmit {
-                                        let current = (audioTitles[att.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if current.isEmpty { audioTitles[att.id] = audioAutoTitles[att.id] ?? "" }
+                                    .onTapGesture {
+                                        // Enter focus and initialize an empty buffer so the field clears for fresh input
+                                        focusedAudioTitleID = att.id
                                     }
                                     .onChange(of: focusedAudioTitleID) { _, newFocus in
                                         if newFocus == att.id {
-                                            if (audioTitles[att.id] ?? "") == (audioAutoTitles[att.id] ?? "") {
-                                                audioTitles[att.id] = ""
+                                            // Gained focus: clear the editing buffer so user starts from empty
+                                            audioTitleEditingBuffer[att.id] = ""
+                                        } else if newFocus == nil || newFocus != att.id {
+                                            // Lost focus from this field: commit buffer to stored titles
+                                            if let buffer = audioTitleEditingBuffer[att.id] {
+                                                let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if trimmed.isEmpty {
+                                                    // Restore auto-title if user left it empty
+                                                    audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
+                                                } else {
+                                                    audioTitles[att.id] = buffer
+                                                }
+                                                // Clean up buffer
+                                                audioTitleEditingBuffer.removeValue(forKey: att.id)
+                                                // Persist after any change (debounced to survive rapid navigation)
+                                                DispatchQueue.main.async {
+                                                    persistStagedAttachments()
+                                                }
                                             }
+                                        }
+                                    }
+                                    .onSubmit {
+                                        // Commit on submit as well (Enter/Return key)
+                                        let buffer = audioTitleEditingBuffer[att.id] ?? ""
+                                        let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        if trimmed.isEmpty {
+                                            audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
+                                        } else {
+                                            audioTitles[att.id] = buffer
+                                        }
+                                        audioTitleEditingBuffer.removeValue(forKey: att.id)
+                                        DispatchQueue.main.async {
+                                            persistStagedAttachments()
                                         }
                                     }
 
@@ -626,25 +677,79 @@ struct PracticeTimerView: View {
                 loadUserActivities()
                 applyPrimaryActivityRef()
                 syncActivityChoiceFromState()
+                do { try StagingStore.bootstrap() } catch { /* ignore */ }
             }
             .onAppear {
+                // Always bootstrap the staging store before any hydration that depends on it
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
-                mirrorFromStagingStore()
+
+                // If last session was explicitly discarded, ensure staging store is empty before hydrating
+                if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
+                    clearAllStagingStoreRefs()
+                    UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
+                }
+
+                // Ensure any pending title edits are committed before hydration
+                commitAudioTitleEditingBuffers()
+                // Hydrate timer and staged attachments from storage (UserDefaults + StagingStore)
                 hydrateTimerFromStorage()
+
+                // Determine persisted state after hydration
+                let d = UserDefaults.standard
+                let hasPersistedTimer = d.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue) > 0 || d.integer(forKey: TimerDefaultsKey.accumulated.rawValue) > 0 || d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
+                let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
+                let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
+                let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
+                let hasPersistedStagedIDs = (!audioIDStrings.isEmpty || !videoIDStrings.isEmpty || !imageIDStrings.isEmpty)
+
+                // Also check the staging store to avoid clearing attachments that exist on disk
+
                 startTicker()
-                persistStagedAttachments()
+
+                // Deterministic reconciliation with StagingStore to avoid visual disappearance
+                do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                let storeRefs = StagingStore.list()
+                let storeHas = !storeRefs.isEmpty
+                let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
+                // Build ID sets per kind for comparison
+                let localAudioIDs = Set(stagedAudio.map { $0.id })
+                let localVideoIDs = Set(stagedVideos.map { $0.id })
+                let localImageIDs = Set(stagedImages.map { $0.id })
+                let storeAudioIDs = Set(storeRefs.filter { $0.kind == .audio }.map { $0.id })
+                let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
+                let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
+                let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
+                if (localEmpty && storeHas) || idsDiffer {
+                    mirrorFromStagingStore()
+                }
             }
             .onChange(of: scenePhase) { _, newPhase in
                 switch newPhase {
                 case .active:
                     hydrateTimerFromStorage()
                     startTicker()
+                    // Reconcile with StagingStore on resume to repopulate UI if needed
+                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                    let storeRefs = StagingStore.list()
+                    let storeHas = !storeRefs.isEmpty
+                    let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
+                    let localAudioIDs = Set(stagedAudio.map { $0.id })
+                    let localVideoIDs = Set(stagedVideos.map { $0.id })
+                    let localImageIDs = Set(stagedImages.map { $0.id })
+                    let storeAudioIDs = Set(storeRefs.filter { $0.kind == .audio }.map { $0.id })
+                    let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
+                    let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
+                    let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
+                    if (localEmpty && storeHas) || idsDiffer {
+                        mirrorFromStagingStore()
+                    }
                 case .inactive, .background:
+                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
                     stopTicker()
                     persistTimerSnapshot()
+                    UserDefaults.standard.synchronize()
                     removeAudioObserversIfNeeded()
                     purgeStagedTempFiles()
-                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
                 @unknown default:
                     break
                 }
@@ -655,6 +760,8 @@ struct PracticeTimerView: View {
                         // Clear persisted and in-memory staged attachments and reset timer
                         stopAttachmentPlayback()
                         clearPersistedStagedAttachments()
+                        clearAllStagingStoreRefs()
+                        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
                         clearPersistedTasks()
                         clearPersistedTimer()
                         resetUIOnly()
@@ -753,6 +860,8 @@ struct PracticeTimerView: View {
                 if oldValue == true && newValue == false && didSaveFromReview == false {
                     clearPersistedTimer()
                     clearPersistedStagedAttachments()
+                    clearAllStagingStoreRefs()
+                    UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
                     clearPersistedTasks()
                     resetUIOnly()
                     stagedAudio.removeAll()
@@ -794,7 +903,7 @@ struct PracticeTimerView: View {
             // Audio recorder sheet
             .sheet(isPresented: $showAudioRecorder) {
                 AudioRecorderView { url in
-                    stageAudioURL(url)
+                    Task { await stageAudioURL(url) }
                     showAudioRecorder = false
                 }
                 .presentationDetents([.medium])
@@ -1254,9 +1363,10 @@ struct PracticeTimerView: View {
         case stagedAudioIDs = "PracticeTimer.stagedAudioIDs"
         case stagedVideoIDs = "PracticeTimer.stagedVideoIDs"
         case stagedImageIDs = "PracticeTimer.stagedImageIDs"
-        case audioTitles = "PracticeTimer.audioTitles"
-        case audioAutoTitles = "PracticeTimer.audioAutoTitles"
-        case audioDurations = "PracticeTimer.audioDurations"
+        // Commented out to move audio metadata persistence to StagingStore
+        // case audioTitles = "PracticeTimer.audioTitles"
+        // case audioAutoTitles = "PracticeTimer.audioAutoTitles"
+        // case audioDurations = "PracticeTimer.audioDurations"
         case selectedThumbnailID = "PracticeTimer.selectedThumbnailID"
 
         case taskLines = "PracticeTimer.taskLines"
@@ -1316,6 +1426,55 @@ struct PracticeTimerView: View {
         self.stagedVideos = rebuiltVideo
         self.stagedImages = rebuiltImages
         self.videoThumbnails = rebuiltThumbs
+        if rebuiltAudio.isEmpty && rebuiltVideo.isEmpty && rebuiltImages.isEmpty {
+            self.selectedThumbnailID = nil
+        }
+
+        // Pull audio metadata from StagingStore (source of truth)
+        do { try StagingStore.bootstrap() } catch { /* ignore */ }
+        let refsList = StagingStore.list()
+        for att in self.stagedAudio {
+            if let ref = refsList.first(where: { $0.id == att.id }) {
+                if let t = ref.audioTitle, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.audioTitles[att.id] = t
+                } else if let auto = ref.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    self.audioTitles[att.id] = auto
+                }
+                if let auto = ref.audioAutoTitle { self.audioAutoTitles[att.id] = auto }
+                if let d = ref.duration, d.isFinite { self.audioDurations[att.id] = max(0, Int(d.rounded())) }
+            }
+            // Backfill duration if missing by probing the data
+            if self.audioDurations[att.id] == nil, let player = try? AVAudioPlayer(data: att.data) {
+                let secs = max(0, Int(player.duration.rounded()))
+                self.audioDurations[att.id] = secs
+                StagingStore.updateAudioMetadata(id: att.id, title: nil, autoTitle: nil, duration: Double(secs))
+            }
+        }
+
+        // Commented out to stop reading audio metadata from UserDefaults (large write avoidance)
+        /*
+        do {
+            if let titlesData = d.data(forKey: TimerDefaultsKey.audioTitles.rawValue),
+               let decoded = try? JSONDecoder().decode([UUID:String].self, from: titlesData) {
+                self.audioTitles = decoded
+            }
+            if let autosData = d.data(forKey: TimerDefaultsKey.audioAutoTitles.rawValue),
+               let decoded = try? JSONDecoder().decode([UUID:String].self, from: autosData) {
+                self.audioAutoTitles = decoded
+            }
+            if let dursData = d.data(forKey: TimerDefaultsKey.audioDurations.rawValue),
+               let decoded = try? JSONDecoder().decode([UUID:Int].self, from: dursData) {
+                self.audioDurations = decoded
+            }
+            let stagedIDs = Set(self.stagedAudio.map { $0.id })
+            for id in stagedIDs {
+                let current = (self.audioTitles[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if current.isEmpty, let auto = self.audioAutoTitles[id] {
+                    self.audioTitles[id] = auto
+                }
+            }
+        }
+        */
 
         // Restore task pad contents
         if let taskData = d.data(forKey: TimerDefaultsKey.taskLines.rawValue),
@@ -1465,7 +1624,26 @@ struct PracticeTimerView: View {
     */
     // Removed SerializedAttachment struct as it's no longer used
 
+    // -- Added per instructions: prune audio metadata to staged IDs --
+    private func pruneAudioMetadataToStaged() {
+        let valid = Set(stagedAudio.map { $0.id })
+        audioTitles = audioTitles.filter { valid.contains($0.key) }
+        audioAutoTitles = audioAutoTitles.filter { valid.contains($0.key) }
+        audioDurations = audioDurations.filter { valid.contains($0.key) }
+    }
+
     private func persistStagedAttachments() {
+        pruneAudioMetadataToStaged()
+        
+        // Coalesce empty titles to auto-titles to preserve intended fallback
+        let validAudioIDs = Set(stagedAudio.map { $0.id })
+        for id in validAudioIDs {
+            let current = (audioTitles[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if current.isEmpty, let auto = audioAutoTitles[id] {
+                audioTitles[id] = auto
+            }
+        }
+        
         let d = UserDefaults.standard
         // Persist arrays of IDs instead of raw Data blobs
         let audioIDs = stagedAudio.map { $0.id.uuidString }
@@ -1474,7 +1652,15 @@ struct PracticeTimerView: View {
         d.set(audioIDs, forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.set(videoIDs, forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.set(imageIDs, forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
-        // Encode dictionaries keyed by UUID
+        // Persist audio metadata to StagingStore, not UserDefaults
+        for id in validAudioIDs {
+            let title = (audioTitles[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let auto = audioAutoTitles[id]
+            let dur = audioDurations[id].map { Double($0) }
+            StagingStore.updateAudioMetadata(id: id, title: title.isEmpty ? nil : title, autoTitle: auto, duration: dur)
+        }
+        // Commented out: removed writing large audio metadata dicts to UserDefaults
+        /*
         if let titles = try? JSONEncoder().encode(audioTitles) {
             d.set(titles, forKey: TimerDefaultsKey.audioTitles.rawValue)
         }
@@ -1484,6 +1670,7 @@ struct PracticeTimerView: View {
         if let durs = try? JSONEncoder().encode(audioDurations) {
             d.set(durs, forKey: TimerDefaultsKey.audioDurations.rawValue)
         }
+        */
         d.set(selectedThumbnailID?.uuidString, forKey: TimerDefaultsKey.selectedThumbnailID.rawValue)
     }
 
@@ -1517,6 +1704,44 @@ struct PracticeTimerView: View {
                 }
             }
         }
+        
+        // Ensure a stable auto-title exists for each audio item using its createdAt if missing
+        for ref in refs where ref.kind == .audio {
+            let id = ref.id
+            if self.audioAutoTitles[id] == nil {
+                self.audioAutoTitles[id] = formattedAutoTitle(from: ref.createdAt)
+            }
+        }
+
+        // Non-destructive merge of audio metadata from StagingStore
+        let refsList = StagingStore.list()
+        var newTitles: [UUID:String] = self.audioTitles
+        var newAutos: [UUID:String] = self.audioAutoTitles
+        var newDurs: [UUID:Int] = self.audioDurations
+        for a in audios {
+            if let ref = refsList.first(where: { $0.id == a.id }) {
+                if let auto = ref.audioAutoTitle { newAutos[a.id] = auto }
+                if let t = ref.audioTitle, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    newTitles[a.id] = t
+                }
+                if let d = ref.duration, d.isFinite { newDurs[a.id] = max(0, Int(d.rounded())) }
+            }
+            // Backfill duration if still missing
+            if newDurs[a.id] == nil, let player = try? AVAudioPlayer(data: a.data) {
+                let secs = max(0, Int(player.duration.rounded()))
+                newDurs[a.id] = secs
+                StagingStore.updateAudioMetadata(id: a.id, title: nil, autoTitle: nil, duration: Double(secs))
+            }
+            // Non-destructive coalescing: only fall back to auto if title truly absent
+            let currentTitle = (newTitles[a.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if currentTitle.isEmpty, let auto = newAutos[a.id], !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                newTitles[a.id] = auto
+            }
+        }
+        self.audioTitles = newTitles
+        self.audioAutoTitles = newAutos
+        self.audioDurations = newDurs
+
         // Update local state
         self.stagedImages = images
         self.stagedAudio = audios
@@ -1528,6 +1753,17 @@ struct PracticeTimerView: View {
         } else {
             self.selectedThumbnailID = images.first?.id
         }
+        // Prune audio metadata to mirrored staged audio IDs to avoid losing titles on resume
+        let validAudioIDs = Set(audios.map { $0.id })
+        self.audioTitles = self.audioTitles.filter { validAudioIDs.contains($0.key) }
+        self.audioAutoTitles = self.audioAutoTitles.filter { validAudioIDs.contains($0.key) }
+        self.audioDurations = self.audioDurations.filter { validAudioIDs.contains($0.key) }
+        for id in validAudioIDs {
+            let current = (self.audioTitles[id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if current.isEmpty, let auto = self.audioAutoTitles[id] {
+                self.audioTitles[id] = auto
+            }
+        }
         // Persist snapshot so timer resume remains consistent
         persistStagedAttachments()
     }
@@ -1537,15 +1773,24 @@ struct PracticeTimerView: View {
         d.removeObject(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
+        // Commented out removing audio metadata from UserDefaults since persistence moved to StagingStore
+        /*
         d.removeObject(forKey: TimerDefaultsKey.audioTitles.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.audioAutoTitles.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.audioDurations.rawValue)
+        */
         d.removeObject(forKey: TimerDefaultsKey.selectedThumbnailID.rawValue)
+    }
+
+    // Remove ALL staged refs and files from the StagingStore (session discard)
+    private func clearAllStagingStoreRefs() {
+        let refs = StagingStore.list()
+        for ref in refs { StagingStore.remove(ref) }
     }
 
     // MARK: - Audio attachment helpers
 
-    private func stageAudioURL(_ url: URL) {
+    private func stageAudioURL(_ url: URL) async {
         do {
             let data = try Data(contentsOf: url)
             // Clean up original file to avoid duplicates taking space
@@ -1576,7 +1821,12 @@ struct PracticeTimerView: View {
             // Double-write to staging store
             let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
             try? data.write(to: tmp, options: .atomic)
-            Task { _ = try? await StagingStore.saveNew(from: tmp, kind: .audio, suggestedName: title, duration: Double(durationSeconds), poster: nil) }
+            do {
+                let ref = try await StagingStore.saveNew(from: tmp, kind: .audio, suggestedName: title, duration: Double(durationSeconds), poster: nil)
+                StagingStore.updateAudioMetadata(id: ref.id, title: title, autoTitle: title, duration: Double(durationSeconds))
+            } catch {
+                print("StagingStore saveNew (audio) failed: \(error)")
+            }
         } catch {
             print("Failed to stage audio: \(error)")
         }
@@ -1729,6 +1979,8 @@ struct PracticeTimerView: View {
         if let ref = StagingStore.list().first(where: { $0.id == id }) {
             StagingStore.remove(ref)
         }
+        // Clear audio metadata in StagingStore for this id
+        StagingStore.updateAudioMetadata(id: id, title: "", autoTitle: "", duration: nil)
     }
 
     private func stopAttachmentPlayback() {
@@ -1875,6 +2127,19 @@ struct PracticeTimerView: View {
         let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
         return FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension(ext)
     }
+    
+    private func commitAudioTitleEditingBuffers() {
+        // For all buffered audio titles, commit them to audioTitles dictionary
+        for (id, buffer) in audioTitleEditingBuffer {
+            let trimmed = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                audioTitles[id] = audioAutoTitles[id] ?? ""
+            } else {
+                audioTitles[id] = buffer
+            }
+        }
+        audioTitleEditingBuffer.removeAll()
+    }
 }
 
 // MARK: - Local InfoSheetView (minimal)
@@ -1915,5 +2180,4 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
-
 

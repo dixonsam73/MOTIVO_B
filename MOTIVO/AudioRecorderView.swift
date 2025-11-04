@@ -617,6 +617,14 @@ private extension AudioRecorderView {
         elapsed = 0
         displayTime = 0
     }
+    
+    func clearAllStagedAudio() {
+        Task {
+            try? await StagingStore.bootstrap()
+            let refs = StagingStore.list().filter { $0.kind == .audio }
+            for ref in refs { StagingStore.remove(ref) }
+        }
+    }
 }
 
 // MARK: - Minimal AVAudioPlayer delegate bridge
@@ -658,3 +666,4 @@ private struct ControlButton: View {
     }
     .padding()
 }
+

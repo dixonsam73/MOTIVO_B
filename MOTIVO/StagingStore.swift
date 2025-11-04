@@ -11,6 +11,8 @@ struct StagedAttachmentRef: Codable, Hashable, Identifiable {
     let createdAt: Date
     var duration: Double?      // seconds, optional
     var posterPath: String?    // relative path to generated thumbnail/poster if any
+    var audioTitle: String?
+    var audioAutoTitle: String?
 }
 
 /// StagingStore manages persistence of large staged media outside of UserDefaults.
@@ -93,7 +95,7 @@ enum StagingStore {
                     }
 
                     let rel = relativePath(for: targetURL)
-                    let newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath)
+                    let newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioTitle: nil, audioAutoTitle: nil)
                     // Append to UserDefaults
                     var list = loadRefs()
                     list.append(newRef)
@@ -155,6 +157,24 @@ enum StagingStore {
         var list = loadRefs()
         if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = ref }
         saveRefs(list)
+    }
+
+    /// Update audio-specific metadata (title, autoTitle, duration) for a ref by id.
+    static func updateAudioMetadata(id: UUID, title: String?, autoTitle: String?, duration: Double?) {
+        var list = loadRefs()
+        if let idx = list.firstIndex(where: { $0.id == id }) {
+            var r = list[idx]
+            r.audioTitle = title ?? r.audioTitle
+            r.audioAutoTitle = autoTitle ?? r.audioAutoTitle
+            if let duration { r.duration = duration }
+            list[idx] = r
+            saveRefs(list)
+        }
+    }
+
+    /// Convenience accessor to fetch a ref by id.
+    static func ref(withId id: UUID) -> StagedAttachmentRef? {
+        loadRefs().first(where: { $0.id == id })
     }
 
     /// Remove ref and delete associated files (media + poster if any).
@@ -233,7 +253,7 @@ enum StagingStore {
 
     /// Replace helper: update only the path of a ref without changing its id.
     private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
-        StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath)
+        StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioTitle: ref.audioTitle, audioAutoTitle: ref.audioAutoTitle)
     }
 
     // MARK: - UserDefaults storage
@@ -252,6 +272,7 @@ enum StagingStore {
         do {
             let data = try JSONEncoder().encode(refs)
             d.set(data, forKey: defaultsKey)
+            d.synchronize()
         } catch {
             // On encoding failure, do not crash; drop the write.
         }
