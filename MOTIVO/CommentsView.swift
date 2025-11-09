@@ -1,4 +1,4 @@
-// CHANGE-ID: v711A-CommentsDarkFix-20251109_114946
+// CHANGE-ID: v711A-Comments-MentionBoldDarkPreserved-20251109_124837
 // SCOPE: CommentsView dark-mode fix — replace hard-coded white/black with Theme tokens (wrappers only)
 import SwiftUI
 import CoreData
@@ -139,7 +139,8 @@ public struct CommentsView: View {
                     let base = Text(span.text)
                     if span.isMention {
                         let mentionText = base
-                            .foregroundStyle(Theme.Colors.accent)
+                            .foregroundStyle(Color.primary)
+                            .fontWeight(.bold)
                         // Add thin spaces around mention to create breathing room without breaking Text concatenation type
                         let padded = Text("\u{2009}") + mentionText + Text("\u{2009}")
                         return acc + padded
@@ -342,10 +343,10 @@ public struct CommentsView: View {
                                     Button(action: { tappedMention = handle }) {
                                         Text(handle)
                                             .font(.footnote)
-                                            .foregroundStyle(Theme.Colors.accent)
+                                            .foregroundStyle(Color.primary).fontWeight(.bold)
                                             .padding(.vertical, 2)
                                             .padding(.horizontal, 6)
-                                            .background(Theme.Colors.accent.opacity(0.12), in: Capsule())
+                                            .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
                                     }
                                     .accessibilityLabel("Mention \(handle)")
                                 }
@@ -403,7 +404,7 @@ public struct CommentsView: View {
 
                 Button(action: send) {
                     Image(systemName: "paperplane.fill")
-                        .foregroundStyle(Theme.Colors.accent)
+                        .foregroundStyle(Color.primary).fontWeight(.bold)
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
