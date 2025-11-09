@@ -439,7 +439,7 @@ struct PracticeTimerView: View {
                                         Image(systemName: (currentlyPlayingID == att.id && isAudioPlaying) ? "pause.fill" : "play.fill")
                                     }
                                     .buttonStyle(.bordered)
-
+                                    .tint(recorderIcon)
                                     // Use a per-item editing buffer so auto-title doesn't repopulate while typing
                                     let isFocused = (focusedAudioTitleID == att.id)
                                     TextField("Title", text: Binding(
