@@ -1,5 +1,5 @@
-// CHANGE-ID: v710H-CommentsPolish-20251029-0001
-// SCOPE: CommentsView visual polish (wrappers only) — align with Theme.swift
+// CHANGE-ID: v711A-CommentsDarkFix-20251109_114946
+// SCOPE: CommentsView dark-mode fix — replace hard-coded white/black with Theme tokens (wrappers only)
 import SwiftUI
 import CoreData
 
@@ -295,7 +295,7 @@ public struct CommentsView: View {
                             }
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
-                            .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+                            .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
 
                             // Name and inline timestamp on one line
                             HStack(spacing: 6) {
@@ -374,7 +374,7 @@ public struct CommentsView: View {
                 }
             }
             .padding(Theme.Spacing.l)
-            .background(Color.white)
+            .background(Theme.Colors.surface(scheme))
             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
         }
