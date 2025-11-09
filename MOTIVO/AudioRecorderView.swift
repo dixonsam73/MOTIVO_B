@@ -33,6 +33,14 @@ struct AudioRecorderView: View {
     @State private var finalRecordedTime: TimeInterval = 0
     @State private var timer: Timer?
     @State private var playbackTimer: Timer?
+
+    // Waveform metering
+    @State private var waveformTimer: Timer?
+    @State private var waveformSamples: [CGFloat] = []
+    @State private var waveformWriteIndex: Int = 0
+    @State private var waveformHasWrapped: Bool = false
+    private let waveformSampleRate: TimeInterval = 1.0 / 30.0 // ~30 Hz
+    private let waveformDuration: TimeInterval = 8.0 // seconds of history
     
     @State private var wasRecordingBeforeInterruption: Bool = false
     @State private var wasPlayingBeforeInterruption: Bool = false
@@ -106,6 +114,18 @@ struct AudioRecorderView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
             .cardSurface(padding: 12)
+
+            // Decorative waveform indicator
+            WaveformIndicatorView(
+                samples: waveformSamples,
+                color: Color(red: 0.36, green: 0.60, blue: 0.52), // align with media accents
+                background: Theme.Colors.surface(colorScheme),
+                writeIndex: waveformWriteIndex,
+                hasWrapped: waveformHasWrapped
+            )
+            .frame(height: 44)
+            .opacity(state == .recording ? 1 : (waveformSamples.isEmpty ? 0 : 0.85))
+            .accessibilityHidden(true)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -218,141 +238,31 @@ private extension AudioRecorderView {
         }
     }
 
-    func installObserversIfNeeded() {
-        guard !observersInstalled else { return }
-        let nc = NotificationCenter.default
-        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
-            handleInterruption(note)
-        }
-        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
-            handleRouteChange(note)
-        }
-        #if canImport(UIKit)
-        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
-            handleAppWillResignActive()
-        }
-        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            handleAppDidBecomeActive()
-        }
-        #endif
-        observersInstalled = true
-    }
-
-    func removeObserversIfNeeded() {
-        guard observersInstalled else { return }
-        let nc = NotificationCenter.default
-        nc.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        nc.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
-        #if canImport(UIKit)
-        nc.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
-        nc.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
-        #endif
-        observersInstalled = false
-    }
-
-    func handleInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        switch type {
-        case .began:
-            // Pause recording or playback and mark flags
-            wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
-            wasPlayingBeforeInterruption = (state == .playing)
-            if state == .recording { pauseRecording() }
-            if state == .playing {
-                playbackPosition = player?.currentTime ?? playbackPosition
-                displayTime = playbackPosition
-                player?.pause()
-                state = .paused
-                stopPlaybackTimer()
-            }
-        case .ended:
-            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            // Try to resume if system suggests
-            if options.contains(.shouldResume) {
-                if wasRecordingBeforeInterruption {
-                    Task { await resumeRecording() }
-                } else if wasPlayingBeforeInterruption {
-                    // Only resume playback if not recording
-                    if state != .recording && state != .pausedRecording {
-                        player?.play()
-                        state = .playing
-                        startPlaybackTimer()
-                    }
+    func ensureRecordPermission() async -> Bool {
+        await withCheckedContinuation { continuation in
+            switch AVAudioSession.sharedInstance().recordPermission {
+            case .granted:
+                continuation.resume(returning: true)
+            case .denied:
+                continuation.resume(returning: false)
+            case .undetermined:
+                AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                    continuation.resume(returning: granted)
                 }
+            @unknown default:
+                continuation.resume(returning: false)
             }
-            wasRecordingBeforeInterruption = false
-            wasPlayingBeforeInterruption = false
-        @unknown default:
-            break
         }
-    }
-
-    func handleRouteChange(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        switch reason {
-        case .oldDeviceUnavailable:
-            // Headphones unplugged or BT lost
-            if state == .recording { pauseRecording() }
-            if state == .playing {
-                playbackPosition = player?.currentTime ?? playbackPosition
-                displayTime = playbackPosition
-                player?.pause()
-                state = .paused
-                stopPlaybackTimer()
-            }
-        case .newDeviceAvailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange, .unknown:
-            // Do not auto-resume recording; optionally resume playback if it was playing before
-            if wasPlayingBeforeInterruption && state != .recording && state != .pausedRecording {
-                // Validate there is at least one output route
-                let outputs = AVAudioSession.sharedInstance().currentRoute.outputs
-                if let _ = outputs.first {
-                    player?.play()
-                    state = .playing
-                    startPlaybackTimer()
-                }
-                wasPlayingBeforeInterruption = false
-            }
-        @unknown default:
-            break
-        }
-    }
-
-    func handleAppWillResignActive() {
-        // Mirror interruption began
-        wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
-        wasPlayingBeforeInterruption = (state == .playing)
-        if state == .recording { pauseRecording() }
-        if state == .playing {
-            playbackPosition = player?.currentTime ?? playbackPosition
-            displayTime = playbackPosition
-            player?.pause()
-            state = .paused
-            stopPlaybackTimer()
-        }
-    }
-
-    func handleAppDidBecomeActive() {
-        // Mirror interruption ended: do not force resume unless we had been playing and not recording
-        if wasRecordingBeforeInterruption {
-            // Allow user to resume manually; if system indicates shouldResume we'd handle in interruption handler
-        }
-        if wasPlayingBeforeInterruption && state != .recording && state != .pausedRecording {
-            player?.play()
-            state = .playing
-            startPlaybackTimer()
-        }
-        wasRecordingBeforeInterruption = false
-        wasPlayingBeforeInterruption = false
     }
 
     func startRecording() async {
         // Start a new recording (fresh). Only allowed when not currently recording or pausedRecording.
         guard state != .recording && state != .pausedRecording else { return }
+        let hasPermission = await ensureRecordPermission()
+        guard hasPermission else {
+            setError("Microphone permission is required to record.")
+            return
+        }
         await configureSessionIfNeeded()
         
         let fileURL = newRecordingURL() // ensure .m4a extension
@@ -377,6 +287,7 @@ private extension AudioRecorderView {
                 finalRecordedTime = 0
                 displayTime = 0
                 startElapsedTimer()
+                startWaveform()
                 state = .recording
                 errorMessage = nil
             } else {
@@ -397,6 +308,7 @@ private extension AudioRecorderView {
         elapsed = 0
         displayTime = accumulatedRecordedTime
         state = .pausedRecording
+        stopWaveformTimer()
     }
 
     func resumeRecording() async {
@@ -405,7 +317,9 @@ private extension AudioRecorderView {
             // Ensure session is active
             await configureSessionIfNeeded()
             if recorder?.record() == true {
+                recorder?.isMeteringEnabled = true
                 startElapsedTimer()
+                startWaveform()
                 state = .recording
             } else {
                 setError("Failed to resume recording.")
@@ -426,6 +340,8 @@ private extension AudioRecorderView {
         playbackPosition = 0
         stopElapsedTimer()
         stopPlaybackTimer()
+        stopWaveformTimer()
+        clearWaveform()
         // Do not change accumulatedRecordedTime here; let finalization compute total
     }
 
@@ -448,7 +364,6 @@ private extension AudioRecorderView {
                 recorder?.deleteRecording()
                 try? FileManager.default.removeItem(at: fileURL)
                 recorder = nil
-                print("Discarded junk recording (<0.5s)")
                 // Reset state for a clean slate
                 recordingURL = nil
                 playbackPosition = 0
@@ -460,7 +375,6 @@ private extension AudioRecorderView {
                 return
             } else {
                 // Optional: confirm format consistency
-                print("Saved audio: 44.1kHz AAC Mono, duration: \(duration)s")
             }
         }
 
@@ -530,6 +444,8 @@ private extension AudioRecorderView {
             elapsed = 0
             displayTime = 0
             stopPlaybackTimer()
+            stopWaveformTimer()
+            clearWaveform()
             state = .idle
         } catch {
             setError("Delete failed: \(error.localizedDescription)")
@@ -579,9 +495,11 @@ private extension AudioRecorderView {
         elapsed = 0
         timer?.invalidate()
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            if let start = startTime {
-                elapsed = Date().timeIntervalSince(start)
-                displayTime = accumulatedRecordedTime + elapsed
+            DispatchQueue.main.async {
+                if let start = startTime {
+                    elapsed = Date().timeIntervalSince(start)
+                    displayTime = accumulatedRecordedTime + elapsed
+                }
             }
         }
         RunLoop.main.add(timer!, forMode: .common)
@@ -597,10 +515,12 @@ private extension AudioRecorderView {
         // Avoid duplicating timers
         if playbackTimer != nil { return }
         playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            if state == .playing {
-                let current = player?.currentTime ?? playbackPosition
-                playbackPosition = current
-                displayTime = current
+            DispatchQueue.main.async {
+                if state == .playing {
+                    let current = player?.currentTime ?? playbackPosition
+                    playbackPosition = current
+                    displayTime = current
+                }
             }
         }
         if let t = playbackTimer {
@@ -617,6 +537,8 @@ private extension AudioRecorderView {
         stopAll()
         removeObserversIfNeeded()
         stopPlaybackTimer()
+        stopWaveformTimer()
+        clearWaveform()
         recorder = nil
         player = nil
         accumulatedRecordedTime = 0
@@ -630,6 +552,128 @@ private extension AudioRecorderView {
             try? await StagingStore.bootstrap()
             let refs = StagingStore.list().filter { $0.kind == .audio }
             for ref in refs { StagingStore.remove(ref) }
+        }
+    }
+    
+    // MARK: - Waveform metering
+    func startWaveform() {
+        if waveformTimer != nil { return }
+        // Prepare buffer size based on duration and sample rate
+        let capacity = max(1, Int((waveformDuration / waveformSampleRate).rounded()))
+        if waveformSamples.count != capacity {
+            waveformSamples = Array(repeating: 0, count: capacity)
+            waveformWriteIndex = 0
+            waveformHasWrapped = false
+        }
+        stopWaveformTimer()
+        waveformTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
+            DispatchQueue.main.async {
+                guard state == .recording else { return }
+                recorder?.updateMeters()
+                let db = recorder?.averagePower(forChannel: 0) ?? -160
+                // Convert dBFS to linear 0...1 and ensure a minimum visible amplitude
+                let linear = max(0, min(1, pow(10.0, 0.06 * CGFloat(db))))
+                let visible = max(linear, 0.01)
+                // Less damping so early frames move more
+                let count = waveformSamples.count
+                let prevIndex = count > 0 ? (waveformWriteIndex - 1 + count) % count : 0
+                let previous = count > 0 ? waveformSamples[prevIndex] : 0
+                let smoothedRaw = previous * 0.5 + visible * 0.5
+                // Ensure a very small but visible baseline for quiet rooms
+                let smoothed = max(smoothedRaw, 0.015)
+                writeWaveformSample(smoothed)
+            }
+        }
+        if let t = waveformTimer {
+            RunLoop.main.add(t, forMode: .common)
+        }
+    }
+
+    func stopWaveformTimer() {
+        waveformTimer?.invalidate()
+        waveformTimer = nil
+    }
+
+    func writeWaveformSample(_ value: CGFloat) {
+        if waveformSamples.isEmpty { return }
+        waveformSamples[waveformWriteIndex] = value
+        let nextIndex = (waveformWriteIndex + 1) % waveformSamples.count
+        // If next index wraps to 0, we've completed at least one full window
+        if nextIndex == 0 { waveformHasWrapped = true }
+        waveformWriteIndex = nextIndex
+    }
+
+    func clearWaveform() {
+        waveformSamples.removeAll(keepingCapacity: false)
+        waveformWriteIndex = 0
+        waveformHasWrapped = false
+    }
+    
+    // MARK: - Audio session observers
+    func installObserversIfNeeded() {
+        guard !observersInstalled else { return }
+        observersInstalled = true
+        let nc = NotificationCenter.default
+        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
+            handleAudioInterruption(note)
+        }
+        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
+            handleRouteChange(note)
+        }
+    }
+
+    func removeObserversIfNeeded() {
+        guard observersInstalled else { return }
+        observersInstalled = false
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+    }
+
+    func handleAudioInterruption(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+
+        switch type {
+        case .began:
+            // Remember what we were doing
+            wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
+            wasPlayingBeforeInterruption = (state == .playing)
+            // Pause ongoing work
+            if state == .recording { pauseRecording() }
+            if state == .playing { togglePlayback() } // will transition to .paused
+        case .ended:
+            // Optionally resume if the system allows
+            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt
+            let shouldResume = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0).contains(.shouldResume) } ?? false
+            if shouldResume {
+                Task { @MainActor in
+                    if wasRecordingBeforeInterruption && state == .pausedRecording {
+                        await resumeRecording()
+                    } else if wasPlayingBeforeInterruption && state == .paused {
+                        togglePlayback()
+                    }
+                    wasRecordingBeforeInterruption = false
+                    wasPlayingBeforeInterruption = false
+                }
+            }
+        @unknown default:
+            break
+        }
+    }
+
+    func handleRouteChange(_ notification: Notification) {
+        guard let info = notification.userInfo,
+              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        switch reason {
+        case .oldDeviceUnavailable:
+            // Headphones unplugged etc. Pause playback to avoid blasting speaker unexpectedly
+            if state == .playing {
+                togglePlayback()
+            }
+        default:
+            break
         }
     }
 }
@@ -666,10 +710,89 @@ private struct ControlButton: View {
     }
 }
 
+// MARK: - WaveformIndicatorView
+private struct WaveformIndicatorView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var samples: [CGFloat]
+    var color: Color
+    var background: Color
+    var writeIndex: Int = 0
+    var hasWrapped: Bool = false
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack {
+                background
+                Canvas { context, size in
+                    guard !samples.isEmpty else { return }
+                    let barCount = samples.count
+                    let barSpacing: CGFloat = 2
+                    let availableWidth = size.width
+                    // Compute bar width with spacing; keep slim bars
+                    let barWidth = max(3, (availableWidth - CGFloat(barCount - 1) * barSpacing) / CGFloat(barCount))
+                    let midY = size.height / 2
+                    let maxHeight = size.height
+
+                    // Determine how many samples to draw. Before wrap, draw only writtenCount right-aligned; after wrap, draw full window.
+                    let writtenCount: Int = {
+                        if samples.isEmpty { return 0 }
+                        if hasWrapped { return barCount }
+                        return min(barCount, max(writeIndex, 0))
+                    }()
+                    guard writtenCount > 0 else { return }
+
+                    let newestIndex = (writeIndex - 1 + barCount) % barCount
+
+                    if hasWrapped {
+                        // Full rolling window: draw barCount samples mapped from circular buffer, oldest->newest across full width.
+                        for i in 0..<barCount {
+                            let idx = (newestIndex - (barCount - 1 - i) + barCount) % barCount
+                            let v = samples[idx]
+                            let clamped = max(0, min(1, v))
+                            let h = clamped * maxHeight
+                            let x = CGFloat(i) * (barWidth + barSpacing)
+                            let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
+                            context.fill(Path(roundedRect: rect, cornerRadius: barWidth/2), with: .color(color.opacity(0.95)))
+                        }
+                    } else {
+                        // Progressive full-width before wrap: spread writtenCount bars across the width so motion is visible immediately.
+                        let step = (availableWidth - barWidth) / CGFloat(max(writtenCount - 1, 1))
+                        for i in 0..<writtenCount {
+                            let idx = (newestIndex - (writtenCount - 1 - i) + barCount) % barCount
+                            let v = samples[idx]
+                            let clamped = max(0, min(1, v))
+                            let h = clamped * maxHeight
+                            let x = CGFloat(i) * step
+                            let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
+                            context.fill(Path(roundedRect: rect, cornerRadius: barWidth/2), with: .color(color.opacity(0.95)))
+                        }
+                    }
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    // Compute the logical start index so the newest sample appears at the end
+    private var samplesStartIndex: Int {
+        guard !samples.isEmpty else { return 0 }
+        // The next write will happen at writeIndex, so the newest written sample is at writeIndex - 1.
+        // We want to start drawing from the oldest sample, which is writeIndex in a circular buffer.
+        return writeIndex % samples.count
+    }
+}
+
 // MARK: - Preview
 #Preview("Audio Recorder") {
     AudioRecorderView { url in
-        print("Saved to: \(url)")
     }
     .padding()
 }
