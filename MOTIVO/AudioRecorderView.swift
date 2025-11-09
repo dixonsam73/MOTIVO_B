@@ -12,6 +12,7 @@ struct AudioRecorderView: View {
     // MARK: - Public API
     var onSave: (URL) -> Void
     @EnvironmentObject private var stagingStore: StagingStoreObject
+    @Environment(\.colorScheme) private var colorScheme
 
     // MARK: - State
     @State private var recorder: AVAudioRecorder?
@@ -54,9 +55,14 @@ struct AudioRecorderView: View {
             .frame(maxWidth: .infinity)
 
             // Controls
+            let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
+            let tintStopDelete = Color(red: 0.72, green: 0.42, blue: 0.40)   // muted clay / gray-red
+            let tintPlay = Color(red: 0.36, green: 0.60, blue: 0.52)         // desaturated mint / slate green
+            let tintConfirm = Color(red: 0.38, green: 0.48, blue: 0.62)      // slate blue-gray
+
             HStack(spacing: 20) {
                 // Delete
-                ControlButton(systemName: "trash", tint: .red, role: .destructive, isEnabled: recordingURL != nil && state.isIdleLike) {
+                ControlButton(systemName: "trash", tint: tintStopDelete, role: .destructive, isEnabled: recordingURL != nil && state.isIdleLike) {
                     deleteRecording()
                 }
                 .accessibilityLabel("Delete recording")
@@ -64,7 +70,7 @@ struct AudioRecorderView: View {
                 // Record / Pause (recording)
                 ControlButton(
                     systemName: (state == .recording) ? "pause.circle.fill" : "record.circle.fill",
-                    tint: .red,
+                    tint: tintRecord,
                     isEnabled: state.canRecord || state == .recording
                 ) {
                     Task {
@@ -80,29 +86,26 @@ struct AudioRecorderView: View {
                 .accessibilityLabel(state == .recording ? "Pause recording" : (state == .pausedRecording ? "Resume recording" : "Start recording"))
 
                 // Stop
-                ControlButton(systemName: "stop.fill", tint: .red, isEnabled: state.canStop) {
+                ControlButton(systemName: "stop.fill", tint: tintStopDelete, isEnabled: state.canStop) {
                     stopAllAndFinalizeRecording()
                 }
                 .accessibilityLabel("Stop")
 
                 // Play / Pause
-                ControlButton(systemName: (state == .playing) ? "pause.fill" : "play.fill", tint: .green, isEnabled: recordingURL != nil && state.canPlayToggle) {
+                ControlButton(systemName: (state == .playing) ? "pause.fill" : "play.fill", tint: tintPlay, isEnabled: recordingURL != nil && state.canPlayToggle) {
                     togglePlayback()
                 }
                 .accessibilityLabel(state == .playing ? "Pause" : "Play")
 
                 // Save
-                ControlButton(systemName: "checkmark.circle.fill", tint: .blue, isEnabled: recordingURL != nil && state.isIdleLike) {
+                ControlButton(systemName: "checkmark.circle.fill", tint: tintConfirm, isEnabled: recordingURL != nil && state.isIdleLike) {
                     saveRecording()
                 }
                 .accessibilityLabel("Save recording")
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
+            .cardSurface(padding: 12)
 
             if let errorMessage {
                 Text(errorMessage)
@@ -117,8 +120,12 @@ struct AudioRecorderView: View {
         }
         .padding(24)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(.secondarySystemBackground))
+            Theme.Colors.surface(colorScheme)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
         )
         .onAppear {
             installObserversIfNeeded()
