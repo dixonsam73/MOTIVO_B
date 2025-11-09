@@ -336,29 +336,31 @@ public struct CommentsView: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         // Optional mention chips line for tappable actions
-                        let _handles = mentions(in: comment.text)
-                        if !_handles.isEmpty {
-                            HStack(spacing: Theme.Spacing.s) {
-                                ForEach(_handles, id: \.self) { handle in
-                                    Button(action: { tappedMention = handle }) {
-                                        Text(handle)
-                                            .font(.footnote)
-                                            .foregroundStyle(Color.primary).fontWeight(.bold)
-                                            .padding(.vertical, 2)
-                                            .padding(.horizontal, 6)
-                                            .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
+                        if false { // HIDE (feature gated): mention chips row disabled for now; keep code for future use
+                            let _handles = mentions(in: comment.text)
+                            if !_handles.isEmpty {
+                                HStack(spacing: Theme.Spacing.s) {
+                                    ForEach(_handles, id: \.self) { handle in
+                                        Button(action: { tappedMention = handle }) {
+                                            Text(handle)
+                                                .font(.footnote)
+                                                .foregroundStyle(Color.primary).fontWeight(.bold)
+                                                .padding(.vertical, 2)
+                                                .padding(.horizontal, 6)
+                                                .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
+                                        }
+                                        .accessibilityLabel("Mention \(handle)")
                                     }
-                                    .accessibilityLabel("Mention \(handle)")
+                                    Spacer(minLength: 0)
                                 }
-                                Spacer(minLength: 0)
+                                .accessibilitySortPriority(1)
                             }
-                            .accessibilitySortPriority(1)
                         }
 
-//                        Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
-//                            .font(.footnote)
-//                            .foregroundStyle(Theme.Colors.secondaryText)
-//                            .accessibilityLabel("Comment time")
+                        //                        Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
+                        //                            .font(.footnote)
+                        //                            .foregroundStyle(Theme.Colors.secondaryText)
+                        //                            .accessibilityLabel("Comment time")
                     }
                     .padding(.vertical, Theme.Spacing.inline)
                     .accessibilityElement(children: .combine)
