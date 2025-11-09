@@ -27,6 +27,7 @@ public struct VideoRecorderView: View {
     @StateObject private var controller: VideoRecorderController
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var stagingStore: StagingStoreObject
+    @Environment(\.colorScheme) private var colorScheme
 
     public var body: some View {
         ZStack {
@@ -103,21 +104,26 @@ public struct VideoRecorderView: View {
                             .monospacedDigit()
                             .accessibilityIdentifier("VideoRecorderView_Clock")
                             .lineLimit(1)
+
+                        let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
+                        let tintStopDelete = Color(red: 0.72, green: 0.42, blue: 0.40)   // muted clay / gray-red
+                        let tintPlay = Color(red: 0.36, green: 0.60, blue: 0.52)         // desaturated mint / slate green
+                        let tintConfirm = Color(red: 0.38, green: 0.48, blue: 0.62)      // slate blue-gray
+
                         HStack(spacing: 20) {
-                            ControlButton(systemName: "trash", color: .red, accessibilityLabel: "Delete", action: { controller.deleteTapped() }, isDisabled: controller.recordingURL == nil)
-                            ControlButton(systemName: controller.recordingButtonSystemName, color: controller.recordingButtonColor, accessibilityLabel: controller.recordingButtonAccessibilityLabel, action: { controller.recordPauseResumeTapped() }, isDisabled: controller.recordingButtonDisabled)
-                            ControlButton(systemName: "stop.fill", color: .red, accessibilityLabel: "Stop", action: { controller.stopTapped() }, isDisabled: !(controller.state == .recording || controller.state == .pausedRecording))
-                            ControlButton(systemName: controller.playPauseButtonSystemName, color: .green, accessibilityLabel: controller.playPauseButtonAccessibilityLabel, action: { controller.playPauseTapped() }, isDisabled: controller.recordingURL == nil)
-                            ControlButton(systemName: "checkmark.circle.fill", color: .blue, accessibilityLabel: "Save", action: { controller.saveTapped() }, isDisabled: !controller.isReadyToSave)
+                            ControlButton(systemName: "trash", color: tintStopDelete, accessibilityLabel: "Delete", action: { controller.deleteTapped() }, isDisabled: controller.recordingURL == nil)
+                            ControlButton(systemName: controller.recordingButtonSystemName, color: tintRecord, accessibilityLabel: controller.recordingButtonAccessibilityLabel, action: { controller.recordPauseResumeTapped() }, isDisabled: controller.recordingButtonDisabled)
+                            ControlButton(systemName: "stop.fill", color: tintStopDelete, accessibilityLabel: "Stop", action: { controller.stopTapped() }, isDisabled: !(controller.state == .recording || controller.state == .pausedRecording))
+                            ControlButton(systemName: controller.playPauseButtonSystemName, color: tintPlay, accessibilityLabel: controller.playPauseButtonAccessibilityLabel, action: { controller.playPauseTapped() }, isDisabled: controller.recordingURL == nil)
+                            ControlButton(systemName: "checkmark.circle.fill", color: tintConfirm, accessibilityLabel: "Save", action: { controller.saveTapped() }, isDisabled: !controller.isReadyToSave)
                         }
                         .accessibilityIdentifier("VideoRecorderView_Controls")
                         .layoutPriority(1)
                         .minimumScaleFactor(0.8)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 12)
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(.horizontal, 6)
+                    .padding(.bottom, 0)
+                    .cardSurface(padding: 12)
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
                     .scaleEffect(scale, anchor: .bottom)
