@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251110_141500-trim-sheet-item
+// SCOPE: Switch trim presentation to .sheet(item:) to remove first-attempt race; no UI/logic changes elsewhere
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
 // SCOPE: Fix tasks pad placement; proper state; pass notesPrefill
 
@@ -114,8 +116,7 @@ struct PracticeTimerView: View {
 
     // Add trimming state for audio/video clips
     @State private var trimItem: StagedAttachment? = nil
-    @State private var isTrimPresented: Bool = false
-
+    
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasOneInstrument: Bool { instruments.count == 1 }
@@ -553,7 +554,7 @@ struct PracticeTimerView: View {
                                         if let url = surrogateURL(for: att) {
                                             try? att.data.write(to: url, options: .atomic)
                                             trimItem = att
-                                            isTrimPresented = true
+                                            
                                         }
                                     }) {
                                         Image(systemName: "scissors")
@@ -575,7 +576,7 @@ struct PracticeTimerView: View {
                                         if let url = surrogateURL(for: att) {
                                             try? att.data.write(to: url, options: .atomic)
                                             trimItem = att
-                                            isTrimPresented = true
+                                            
                                         }
                                     }
                                 }
@@ -628,7 +629,7 @@ struct PracticeTimerView: View {
                                                     if let url = surrogateURL(for: att) {
                                                         try? att.data.write(to: url, options: .atomic)
                                                         trimItem = att
-                                                        isTrimPresented = true
+                                                        
                                                     }
                                                 }
                                             }
@@ -638,7 +639,7 @@ struct PracticeTimerView: View {
                                                     if let url = surrogateURL(for: att) {
                                                         try? att.data.write(to: url, options: .atomic)
                                                         trimItem = att
-                                                        isTrimPresented = true
+                                                        
                                                     }
                                                 } label: {
                                                     Image(systemName: "scissors")
@@ -1082,12 +1083,11 @@ struct PracticeTimerView: View {
             // - Trim sheet opens with correct media type and URL
             // - Trim save actions correctly add or replace staged attachments with updated metadata
             // - No regressions in other UI or logic due to trim additions
-            .sheet(isPresented: $isTrimPresented, onDismiss: { trimItem = nil }) {
-                if let item = trimItem, let url = surrogateURL(for: item) {
+            .sheet(item: $trimItem, onDismiss: { trimItem = nil }) { item in
+                if let url = surrogateURL(for: item) {
                     MediaTrimView(assetURL: url, mediaType: (item.kind == .audio ? .audio : .video),
                                   onCancel: {
-                                      isTrimPresented = false
-                                      trimItem = nil
+                                                                            trimItem = nil
                                   },
                                   onSaveAsNew: { newURL in
                                       if let data = try? Data(contentsOf: newURL) {
@@ -1109,8 +1109,7 @@ struct PracticeTimerView: View {
                                           }
                                           persistStagedAttachments()
                                       }
-                                      isTrimPresented = false
-                                      trimItem = nil
+                                                                            trimItem = nil
                                   },
                                   onReplaceOriginal: { newURL in
                                       if let data = try? Data(contentsOf: newURL) {
@@ -1131,8 +1130,7 @@ struct PracticeTimerView: View {
                                           }
                                           persistStagedAttachments()
                                       }
-                                      isTrimPresented = false
-                                      trimItem = nil
+                                                                            trimItem = nil
                                   })
                     .accessibilityLabel("Trim media")
                     .accessibilityHint("Edit start and end of the clip")
