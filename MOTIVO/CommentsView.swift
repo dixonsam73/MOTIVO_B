@@ -405,10 +405,22 @@ public struct CommentsView: View {
                     .onSubmit(send)
 
                 Button(action: send) {
-                    Image(systemName: "paperplane.fill")
-                        .foregroundStyle(Color.primary).fontWeight(.bold)
+                    let isEnabled = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    if isEnabled {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Theme.Colors.accent.opacity((scheme == .dark) ? 0.22 : 0.18))
+                                .frame(width: 32, height: 32)
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(Theme.Colors.accent)
+                        }
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                            .foregroundStyle(Color.primary).fontWeight(.bold)
+                    }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
                 .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Send comment")
             }
@@ -430,3 +442,4 @@ public struct CommentsView: View {
 #Preview("Comments") {
     CommentsView(sessionID: UUID())
 }
+
