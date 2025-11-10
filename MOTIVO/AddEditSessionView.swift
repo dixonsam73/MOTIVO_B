@@ -919,6 +919,11 @@ private var instrumentPicker: some View {
 
         do {
             try viewContext.save()
+            // ===== v7.12A • Publish hook after successful save =====
+            PublishService.shared.publishIfNeeded(
+                objectID: s.objectID,
+                shouldPublish: isPublic
+            )
             viewContext.processPendingChanges()
             dismiss()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
@@ -1482,6 +1487,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

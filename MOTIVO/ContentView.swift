@@ -400,7 +400,16 @@ fileprivate struct SessionsRootView: View {
                 out = []
             }
         case .all:
-            break
+            if let me = userID {
+                out = out.filter { s in
+                    let isMine = (s.ownerUserID == me)
+                    if isMine { return true }
+                    return PublishService.shared.isPublished(objectID: s.objectID)
+                }
+            } else {
+                // No user — nothing should be visible
+                out = []
+            }
         }
 
         // Instrument (core)
@@ -1398,6 +1407,7 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
 
 
 

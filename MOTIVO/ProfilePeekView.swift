@@ -1,5 +1,6 @@
 import SwiftUI
 import CoreData
+import Combine
 
 struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
@@ -14,7 +15,7 @@ struct ProfilePeekView: View {
         auth.currentUserID ?? (try? PersistenceController.shared.currentUserID) ?? "localUser"
     }
     private var canSee: Bool {
-        FollowStore.shared.canSee(ownerID: viewerID, targetID: ownerID)
+        viewerID == ownerID || FollowStore.shared.state(for: ownerID) == .following
     }
     // Fetch a few lightweight stats locally
     @FetchRequest private var ownerSessions: FetchedResults<Session>
@@ -61,8 +62,17 @@ struct ProfilePeekView: View {
                     .buttonStyle(.plain)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(displayName(ownerID))
-                            .font(.headline)
+                        HStack(spacing: 8) {
+                            Text(displayName(ownerID))
+                                .font(.headline)
+                            let myID = (try? PersistenceController.shared.currentUserID) ?? "local-device"
+                            let isOwner = (ownerID == myID)
+                            if !isOwner {
+                                let state = (FollowStore.shared.state(for: ownerID))
+                                FollowBadge(state: state)
+                                    .accessibilityLabel("Follow state: \(state.rawValue)")
+                            }
+                        }
                         let loc = ProfileStore.location(for: ownerID)
                         if !loc.isEmpty {
                             Text(loc)
@@ -221,3 +231,20 @@ private struct ProfileAvatar: View {
     }
 }
 
+// ===== v7.12A • Follow state badge (read-only)
+private struct FollowBadge: View {
+    let state: FollowState
+    var body: some View {
+        switch state {
+        case .following:
+            Text("Following").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.green.opacity(0.15)).clipShape(Capsule())
+        case .requested:
+            Text("Requested").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.yellow.opacity(0.15)).clipShape(Capsule())
+        case .none:
+            Text("Follow").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.blue.opacity(0.15)).clipShape(Capsule())
+        }
+    }
+}

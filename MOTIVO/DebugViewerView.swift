@@ -19,19 +19,15 @@ struct FollowContextDump: Encodable {
 extension DebugDump {
 
     @MainActor static func followContext(for viewerID: String, sessionOwnerID: String?) -> FollowContextDump {
-        // These APIs are expected to exist in DEBUG builds per guardrails/instructions
         let store = FollowStore.shared
-        let approved = store.approvedIDs(for: viewerID)
-        let pending = store.pendingTargets(for: viewerID)
+        let approved = store.followingIDs()
+        let pending = Array(store.requests)
 
         var relation: String? = nil
         if let owner = sessionOwnerID {
-            if let status = store.status(ownerID: viewerID, targetID: owner) {
-                // assume status exposes rawValue like "approved" | "pending" | "blocked"
-                relation = status.rawValue
-            } else {
-                relation = "none"
-            }
+            relation = store.state(for: owner).rawValue
+        } else {
+            relation = "none"
         }
 
         return FollowContextDump(
