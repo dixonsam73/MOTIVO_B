@@ -1,4 +1,7 @@
 // AudioRecorderView.swift
+// CHANGE-ID: 20251110_161547-AudioRecorderView-freezeInitialZoom
+// SCOPE: Freeze initial progressive zoom as constant waveform density; add samplesPerSecond param; timers on .common; no other logic changes.
+
 // Motivo
 // Created by Assistant on 2025-10-20
 
@@ -121,10 +124,11 @@ struct AudioRecorderView: View {
                 color: Color(red: 0.36, green: 0.60, blue: 0.52), // align with media accents
                 background: Theme.Colors.surface(colorScheme),
                 writeIndex: waveformWriteIndex,
-                hasWrapped: waveformHasWrapped
+                hasWrapped: waveformHasWrapped,
+                samplesPerSecond: 1.0 / waveformSampleRate
             )
             .frame(height: 44)
-            .opacity(state == .recording ? 1 : (waveformSamples.isEmpty ? 0 : 0.85))
+            .opacity(state == .recording ? 1 : (waveformSamples.isEmpty ? 0 : ((state == .paused || state == .pausedRecording) ? 0.6 : 0.85)))
             .accessibilityHidden(true)
 
             if let errorMessage {
@@ -494,7 +498,7 @@ private extension AudioRecorderView {
         startTime = Date()
         elapsed = 0
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
+        let newTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
             DispatchQueue.main.async {
                 if let start = startTime {
                     elapsed = Date().timeIntervalSince(start)
@@ -502,7 +506,8 @@ private extension AudioRecorderView {
                 }
             }
         }
-        RunLoop.main.add(timer!, forMode: .common)
+        timer = newTimer
+        RunLoop.main.add(newTimer, forMode: .common)
     }
 
     func stopElapsedTimer() {
@@ -561,12 +566,14 @@ private extension AudioRecorderView {
         // Prepare buffer size based on duration and sample rate
         let capacity = max(1, Int((waveformDuration / waveformSampleRate).rounded()))
         if waveformSamples.count != capacity {
-            waveformSamples = Array(repeating: 0, count: capacity)
+            // Prefill with a small visible baseline so we render a stable window from frame 0.
+            let baseline: CGFloat = 0.02
+            waveformSamples = Array(repeating: baseline, count: capacity)
             waveformWriteIndex = 0
             waveformHasWrapped = false
         }
         stopWaveformTimer()
-        waveformTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
+        let newTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
             DispatchQueue.main.async {
                 guard state == .recording else { return }
                 recorder?.updateMeters()
@@ -584,9 +591,8 @@ private extension AudioRecorderView {
                 writeWaveformSample(smoothed)
             }
         }
-        if let t = waveformTimer {
-            RunLoop.main.add(t, forMode: .common)
-        }
+        waveformTimer = newTimer
+        RunLoop.main.add(newTimer, forMode: .common)
     }
 
     func stopWaveformTimer() {
@@ -719,54 +725,62 @@ private struct WaveformIndicatorView: View {
     var background: Color
     var writeIndex: Int = 0
     var hasWrapped: Bool = false
+    var samplesPerSecond: Double = 30.0
+
+    @State private var frozenRenderBars: Int? = nil
+    private let freezeSeconds: Double = 3.0
 
     var body: some View {
         GeometryReader { geo in
             ZStack {
                 background
                 Canvas { context, size in
+                    // Draw using a stable, locked density/stride. No state mutations here.
                     guard !samples.isEmpty else { return }
-                    let barCount = samples.count
+
+                    let barCount = samples.count              // ring buffer capacity
                     let barSpacing: CGFloat = 2
+                    let minPixel = max(1.0 / UIScreen.main.scale, 1.0)
                     let availableWidth = size.width
-                    // Compute bar width with spacing; keep slim bars
-                    let barWidth = max(3, (availableWidth - CGFloat(barCount - 1) * barSpacing) / CGFloat(barCount))
                     let midY = size.height / 2
                     let maxHeight = size.height
 
-                    // Determine how many samples to draw. Before wrap, draw only writtenCount right-aligned; after wrap, draw full window.
+                    // How many samples are actually written so far.
                     let writtenCount: Int = {
-                        if samples.isEmpty { return 0 }
                         if hasWrapped { return barCount }
-                        return min(barCount, max(writeIndex, 0))
+                        return max(0, min(barCount, writeIndex))
                     }()
                     guard writtenCount > 0 else { return }
 
-                    let newestIndex = (writeIndex - 1 + barCount) % barCount
+                    // Determine target bars from frozen value or a sensible default.
+                    let defaultTarget = max(1, Int((freezeSeconds * samplesPerSecond).rounded()))
+                    let targetBars = max(1, min(frozenRenderBars ?? defaultTarget, barCount))
+                    let renderBars = max(1, min(targetBars, writtenCount))
 
-                    if hasWrapped {
-                        // Full rolling window: draw barCount samples mapped from circular buffer, oldest->newest across full width.
-                        for i in 0..<barCount {
-                            let idx = (newestIndex - (barCount - 1 - i) + barCount) % barCount
-                            let v = samples[idx]
-                            let clamped = max(0, min(1, v))
-                            let h = clamped * maxHeight
-                            let x = CGFloat(i) * (barWidth + barSpacing)
-                            let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
-                            context.fill(Path(roundedRect: rect, cornerRadius: barWidth/2), with: .color(color.opacity(0.95)))
-                        }
-                    } else {
-                        // Progressive full-width before wrap: spread writtenCount bars across the width so motion is visible immediately.
-                        let step = (availableWidth - barWidth) / CGFloat(max(writtenCount - 1, 1))
-                        for i in 0..<writtenCount {
-                            let idx = (newestIndex - (writtenCount - 1 - i) + barCount) % barCount
-                            let v = samples[idx]
-                            let clamped = max(0, min(1, v))
-                            let h = clamped * maxHeight
-                            let x = CGFloat(i) * step
-                            let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
-                            context.fill(Path(roundedRect: rect, cornerRadius: barWidth/2), with: .color(color.opacity(0.95)))
-                        }
+                    // Lock stride based on capacity so speed/density are stable from frame 0.
+                    let stride = max(1, barCount / max(1, targetBars))
+
+                    // Bar width derived from renderBars so bars stay readable.
+                    let rawBarWidth = (availableWidth - CGFloat(renderBars - 1) * barSpacing) / CGFloat(renderBars)
+                    let barWidth = max(minPixel, floor(rawBarWidth))
+                    let step = barWidth + barSpacing
+
+                    // Index math: newest sample index in the circular buffer.
+                    let newest = (writeIndex - 1 + barCount) % barCount
+
+                    // Draw oldest -> newest across full width using downsampling with locked stride.
+                    for i in 0..<renderBars {
+                        let idxBack = (renderBars - 1 - i) * stride
+                        let srcIdx = (newest - idxBack + barCount) % barCount
+                        let v = samples[srcIdx]
+                        let clamped = max(0, min(1, v))
+                        let h = clamped * maxHeight
+                        let x = CGFloat(i) * step
+                        let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
+                        context.fill(
+                            Path(roundedRect: rect, cornerRadius: barWidth / 2),
+                            with: .color(color.opacity(0.95))
+                        )
                     }
                 }
             }
@@ -775,18 +789,30 @@ private struct WaveformIndicatorView: View {
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                     .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
             )
+            .onChange(of: writeIndex) { _ in
+                // Defensive re-freeze if needed on late rotations etc.
+                if frozenRenderBars == nil {
+                    let threshold = max(1, Int(freezeSeconds * samplesPerSecond))
+                    let written = hasWrapped ? samples.count : max(0, writeIndex)
+                    if written >= threshold {
+                        DispatchQueue.main.async {
+                            frozenRenderBars = threshold
+                        }
+                    }
+                }
+            }
+            .onAppear {
+                if frozenRenderBars == nil {
+                    let threshold = max(1, Int(freezeSeconds * samplesPerSecond))
+                    DispatchQueue.main.async {
+                        frozenRenderBars = threshold
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
-    }
-
-    // Compute the logical start index so the newest sample appears at the end
-    private var samplesStartIndex: Int {
-        guard !samples.isEmpty else { return 0 }
-        // The next write will happen at writeIndex, so the newest written sample is at writeIndex - 1.
-        // We want to start drawing from the oldest sample, which is writeIndex in a circular buffer.
-        return writeIndex % samples.count
     }
 }
 
