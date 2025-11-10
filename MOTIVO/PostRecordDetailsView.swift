@@ -884,6 +884,8 @@ struct PostRecordDetailsView: View {
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
+            // v7.12A — Social Pilot (local-only)
+            PublishService.shared.publishIfNeeded(objectID: s.objectID, shouldPublish: isPublic /* or your current flag */)
             onSaved?()
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
