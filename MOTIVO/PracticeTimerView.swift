@@ -74,6 +74,7 @@ struct PracticeTimerView: View {
     // Review sheet
     @State private var showReviewSheet = false
     @State private var didSaveFromReview: Bool = false
+    @State private var didCancelFromReview: Bool = false
 
     // Info-only recording helpers
     @State private var showAudioHelp = false
@@ -977,26 +978,32 @@ struct PracticeTimerView: View {
                         selectedThumbnailID = nil
                         UserDefaults.standard.set(false, forKey: sessionActiveKey)
                         isPresented = false
-                    }
+                    },
+                    onCancel: { didCancelFromReview = true }
                 )
             }
             .onChange(of: showReviewSheet) { oldValue, newValue in
                 // If the review sheet was closed and no save occurred, reset timer for next opening
                 if oldValue == true && newValue == false && didSaveFromReview == false {
-                    clearPersistedTimer()
-                    clearPersistedStagedAttachments()
-                    clearAllStagingStoreRefs()
-                    UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
-                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                    clearPersistedTasks()
-                    resetUIOnly()
-                    stagedAudio.removeAll()
-                    audioTitles.removeAll()
-                    stagedImages.removeAll()
-                    stagedVideos.removeAll()
-                    videoThumbnails.removeAll()
-                    selectedThumbnailID = nil
-                    purgeStagedTempFiles()
+                    if didCancelFromReview == true {
+                        // Explicit chevron cancel: do nothing (preserve state)
+                    } else {
+                        clearPersistedTimer()
+                        clearPersistedStagedAttachments()
+                        clearAllStagingStoreRefs()
+                        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                        clearPersistedTasks()
+                        resetUIOnly()
+                        stagedAudio.removeAll()
+                        audioTitles.removeAll()
+                        stagedImages.removeAll()
+                        stagedVideos.removeAll()
+                        videoThumbnails.removeAll()
+                        selectedThumbnailID = nil
+                        purgeStagedTempFiles()
+                    }
+                    didCancelFromReview = false
                 }
             }
             // Info sheets for recording help

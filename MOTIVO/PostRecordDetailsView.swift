@@ -157,6 +157,8 @@ struct PostRecordDetailsView: View {
     }
 
     var onSaved: (() -> Void)?
+    var onCancel: () -> Void = {}
+
     private let prefillAttachments: [StagedAttachment]?
     private let prefillAttachmentNames: [UUID: String]?
 
@@ -170,7 +172,8 @@ struct PostRecordDetailsView: View {
         notesPrefill: String? = nil,
         prefillAttachments: [StagedAttachment]? = nil,
         prefillAttachmentNames: [UUID: String]? = nil,
-        onSaved: (() -> Void)? = nil
+        onSaved: (() -> Void)? = nil,
+        onCancel: @escaping () -> Void = {}
     ) {
         self._isPresented = isPresented
         self.prefillTimestamp = timestamp ?? Date()
@@ -189,6 +192,7 @@ struct PostRecordDetailsView: View {
         self.prefillAttachments = prefillAttachments
         self.prefillAttachmentNames = prefillAttachmentNames
         self.onSaved = onSaved
+        self.onCancel = onCancel
     }
 
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -360,14 +364,13 @@ struct PostRecordDetailsView: View {
                     Text("Session Review").font(Theme.Text.pageTitle)
                 }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(action: {
+                    Button {
+                        onCancel()
                         isPresented = false
-                        dismissToRoot()
-                        purgeStagedTempFiles()
-                    }) {
-                        Text("Cancel")
-                            .font(Theme.Text.body)
+                    } label: {
+                        Image(systemName: "chevron.left")
                     }
+                    .accessibilityLabel("Back to Timer")
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
@@ -1296,6 +1299,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
