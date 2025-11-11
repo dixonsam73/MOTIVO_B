@@ -344,55 +344,11 @@ struct PostRecordDetailsView: View {
 
                     stateStripCard
 
-                    // ---------- Attachments ----------
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Attachments").sectionHeader()
-                        if !stagedAttachments.isEmpty {
-                            let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(stagedAttachments) { att in
-                                    AttachmentThumbCell(
-                                        att: att,
-                                        isThumbnail: selectedThumbnailID == att.id,
-                                        onMakeThumbnail: { selectedThumbnailID = att.id },
-                                        onRemove: { removeStagedAttachment(att) },
-                                        isPrivate: { id, url in
-                                            return isPrivate(id: id, url: url)
-                                        },
-                                        setPrivate: { id, url, value in
-                                            setPrivate(id: id, url: url, value)
-                                        }
-                                    )
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        if let warn = stagedSizeWarning {
-                            Text(warn)
-                                .font(.footnote)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .padding(.top, 4)
-                        }
-                    }
-                    .cardSurface()
+                    attachmentsSection
+                        .cardSurface()
 
-                    // ---------- Add Attachments Controls ----------
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Button("Add Photo") { showPhotoPicker = true }
-                            .buttonStyle(.bordered)
-                            .tint(.secondary)
-                        Button("Add File") { showFileImporter = true }
-                            .buttonStyle(.bordered)
-                            .tint(.secondary)
-                        if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                            Button("Take Photo") {
-                                ensureCameraAuthorized { showCamera = true }
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(.secondary)
-                        }
-                    }
-                    .cardSurface()
+                    addAttachmentsControlsSection
+                        .cardSurface()
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
@@ -504,6 +460,85 @@ struct PostRecordDetailsView: View {
 }
 
     // MARK: - Subviews
+
+    @ViewBuilder
+    private var attachmentsSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Attachments").sectionHeader()
+            if !stagedAttachments.isEmpty {
+                let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(stagedAttachments) { att in
+                        AttachmentThumbCell(
+                            att: att,
+                            isThumbnail: selectedThumbnailID == att.id,
+                            onMakeThumbnail: { selectedThumbnailID = att.id },
+                            onRemove: { removeStagedAttachment(att) },
+                            isPrivate: { id, url in
+                                return isPrivate(id: id, url: url)
+                            },
+                            setPrivate: { id, url, value in
+                                setPrivate(id: id, url: url, value)
+                            }
+                        )
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            if let warn = stagedSizeWarning {
+                Text(warn)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(.top, 4)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var addAttachmentsControlsSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: 32) {
+                Button(action: { showPhotoPicker = true }) {
+                    ZStack {
+                        Image(systemName: "photo.stack")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62)) // slate blue-grey
+                            .frame(width: 56, height: 56)
+                            .background(
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.18))
+                                    .frame(width: 64, height: 64)
+                            )
+                    }
+                }
+                .accessibilityLabel("Add photo or video from library")
+                .contentShape(Circle())
+                .buttonStyle(.plain)
+                .tint(.accentColor)
+
+                Button(action: { showFileImporter = true }) {
+                    ZStack {
+                        Image(systemName: "doc.badge.plus")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62)) // slate blue-grey
+                            .frame(width: 56, height: 56)
+                            .background(
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.18))
+                                    .frame(width: 64, height: 64)
+                            )
+                    }
+                }
+                .accessibilityLabel("Add file (PDF, score, etc.)")
+                .contentShape(Circle())
+                .buttonStyle(.plain)
+                .tint(.accentColor)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, 2)
+        }
+    }
 
     @ViewBuilder
     private var stateStripCard: some View {
@@ -1261,4 +1296,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
