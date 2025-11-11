@@ -455,25 +455,47 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 .cardSurface()
                 .accessibilityLabel("Attachments")
 
-                // Add buttons
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Button("Add Photo") { showPhotoPicker = true }
-                        .tint(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Add photo")
-                        .accessibilityHint("Choose a photo from your library or camera")
-                        .accessibilityIdentifier("addAttachment.photo")
-                    Button("Add File") { showFileImporter = true }
-                        .tint(Theme.Colors.secondaryText)
-                        .accessibilityLabel("Add file")
-                        .accessibilityHint("Choose a file from your library")
-                        .accessibilityIdentifier("addAttachment.file")
-                    if UIImagePickerController.isSourceTypeAvailable(.camera) {
-                        Button("Take Photo") { ensureCameraAuthorized { showCamera = true } }
-                            .tint(Theme.Colors.secondaryText)
-                            .accessibilityLabel("Add photo")
-                            .accessibilityHint("Choose a photo from your library or camera")
-                            .accessibilityIdentifier("addAttachment.photo")
+                    HStack(spacing: 32) {
+                        Button(action: { showPhotoPicker = true }) {
+                            ZStack {
+                                Image(systemName: "photo.stack")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .frame(width: 56, height: 56)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.secondary.opacity(0.18))
+                                            .frame(width: 64, height: 64)
+                                    )
+                            }
+                        }
+                        .accessibilityLabel("Add photo or video from library")
+                        .contentShape(Circle())
+                        .buttonStyle(.plain)
+                        .tint(.accentColor)
+
+                        Button(action: { showFileImporter = true }) {
+                            ZStack {
+                                Image(systemName: "doc.badge.plus")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .frame(width: 56, height: 56)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.secondary.opacity(0.18))
+                                            .frame(width: 64, height: 64)
+                                    )
+                            }
+                        }
+                        .accessibilityLabel("Add file (PDF, score, etc.)")
+                        .contentShape(Circle())
+                        .buttonStyle(.plain)
+                        .tint(.accentColor)
                     }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.vertical, 2)
                 }
                 .cardSurface()
 
@@ -1487,6 +1509,9 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
 
 
