@@ -1,3 +1,5 @@
+// CHANGE-ID: v7.12B-PublishService-DebugGlobal-20251112_133247
+// SCOPE: Add DEBUG helper to read other owners' published sets
 // PublishService.swift
 // CHANGE-ID: 20251110_190650-PublishService_v712A-MainActor
 // SCOPE: v7.12A — Social Pilot (local-only). Main-actor updates to avoid cross-thread publishes.
@@ -91,4 +93,14 @@ final class PublishService: ObservableObject {
         load()
         NSLog("[PublishService] owner scope changed → %@ | published=%d", key, publishedURIs.count)
     }
+#if DEBUG
+    /// DEBUG: Check if an objectID is published by a specific owner (reads that owner's store directly).
+    func debugIsPublishedBy(owner: String, objectID: NSManagedObjectID) -> Bool {
+        let key = "publishedSessions_v1::" + owner
+        let arr = (UserDefaults.standard.array(forKey: key) as? [String]) ?? []
+        let uri = objectID.uriRepresentation().absoluteString
+        return arr.contains(uri)
+    }
+#endif
+
 }

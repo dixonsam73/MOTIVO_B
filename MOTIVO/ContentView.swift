@@ -1,3 +1,5 @@
+// CHANGE-ID: v7.12B-ContentView-FixEffectiveUserID-20251112_135718
+// SCOPE: Add effectiveUserID in SessionsRootView + DEBUG follow/publish gating in .all
 // CHANGE-ID: v710H-TopButtonsSafeInset-20251030-1205
 // SCOPE: ContentView — replace .toolbar with .safeAreaInset for avatar/record/plus (visual-only); remove toolbar capsule
 // UNIQUE-TOKEN: v710H-TopButtonsSafeInset-20251030-1205
@@ -99,6 +101,16 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let userID: String?
+
+    #if DEBUG
+    private var effectiveUserID: String? {
+        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
+        return userID
+    }
+    #else
+    private var effectiveUserID: String? { userID }
+    #endif
+
 
     // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
     @FetchRequest(
@@ -394,17 +406,24 @@ fileprivate struct SessionsRootView: View {
         // Scope
         switch selectedScope {
         case .mine:
-            if let uid = userID {
+            if let uid = effectiveUserID {
                 out = out.filter { $0.ownerUserID == uid }
             } else {
                 out = []
             }
         case .all:
-            if let me = userID {
+            if let me = effectiveUserID {
                 out = out.filter { s in
                     let isMine = (s.ownerUserID == me)
                     if isMine { return true }
+                        #if DEBUG
+                    if let owner = s.ownerUserID, FollowStore.shared.isFollowing(owner) {
+                        if PublishService.shared.debugIsPublishedBy(owner: owner, objectID: s.objectID) { return true }
+                    }
+                    return false
+                    #else
                     return PublishService.shared.isPublished(objectID: s.objectID)
+                    #endif
                 }
             } else {
                 // No user — nothing should be visible

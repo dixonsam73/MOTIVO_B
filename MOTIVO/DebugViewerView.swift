@@ -1,4 +1,5 @@
-// CHANGE-ID: v710G-DebugViewer-20251028-1630
+// CHANGE-ID: v7.12B-DebugViewer-RestoreIdentitySim-20251112_134145
+// SCOPE: Restore Identity menu + Simulate Follows panel; use FollowStore.debugReload()
 // SCOPE: Debug Viewer Mode (DEBUG only), read-only inspector
 
 #if DEBUG
@@ -44,6 +45,13 @@ public struct DebugViewerView: View {
     private let title: String
     @Binding private var jsonString: String
     @State private var isPretty: Bool = true
+    @State private var targetID: String = "user_B"
+    @State private var acceptFromID: String = "local-device"
+
+    private var activeViewerID: String {
+        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
+        return PersistenceController.shared.currentUserID ?? "local-device"
+    }
 
     public init(title: String, jsonString: Binding<String>) {
         self.title = title
@@ -63,6 +71,21 @@ public struct DebugViewerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
         }
+                VStack(alignment: .leading, spacing: 12) {
+            Text("Simulate Follows").font(.headline)
+            HStack { Text("Viewer: \(activeViewerID)").font(.subheadline); Spacer() }
+            HStack {
+                TextField("Counterparty ID", text: $targetID).textFieldStyle(.roundedBorder)
+                Button("Request") { FollowStore.shared.simulateRequestFollow(to: targetID); FollowStore.shared.debugReload() }
+                Button("Unfollow") { FollowStore.shared.simulateUnfollow(targetID); FollowStore.shared.debugReload() }
+            }
+            HStack {
+                TextField("Accept From ID", text: $acceptFromID).textFieldStyle(.roundedBorder)
+                Button("Accept From") { FollowStore.shared.simulateAcceptFollow(from: acceptFromID); FollowStore.shared.debugReload() }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom)
         .navigationTitle(title)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -80,6 +103,29 @@ public struct DebugViewerView: View {
 
                 // Share button
                 ShareButton(content: displayText)
+                Menu("Identity") {
+                    Button("local-device") {
+                        UserDefaults.standard.set("local-device", forKey: "Debug.currentUserIDOverride")
+                        PublishService.shared.setOwnerKey("local-device")
+                        FollowStore.shared.debugReload()
+                    }
+                    Button("user_B") {
+                        UserDefaults.standard.set("user_B", forKey: "Debug.currentUserIDOverride")
+                        PublishService.shared.setOwnerKey("user_B")
+                        FollowStore.shared.debugReload()
+                    }
+                    Button("user_C") {
+                        UserDefaults.standard.set("user_C", forKey: "Debug.currentUserIDOverride")
+                        PublishService.shared.setOwnerKey("user_C")
+                        FollowStore.shared.debugReload()
+                    }
+                    Divider()
+                    Button("Clear Override") {
+                        UserDefaults.standard.removeObject(forKey: "Debug.currentUserIDOverride")
+                        PublishService.shared.setOwnerKey(PersistenceController.shared.currentUserID ?? "local-device")
+                        FollowStore.shared.debugReload()
+                    }
+                }
             }
         }
     }
@@ -328,4 +374,3 @@ public enum DebugDump {
 }
 
 #endif
-

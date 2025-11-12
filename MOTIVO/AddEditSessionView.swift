@@ -932,7 +932,13 @@ private var instrumentPicker: some View {
         }
 
         // Owner stamp
-        if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
+        #if DEBUG
+        let __dbgID = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")
+        let __effectiveUID = __dbgID ?? PersistenceController.shared.currentUserID
+#else
+        let __effectiveUID = PersistenceController.shared.currentUserID
+#endif
+        if let uid = __effectiveUID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
 

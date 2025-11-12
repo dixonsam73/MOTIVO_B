@@ -915,7 +915,13 @@ struct PostRecordDetailsView: View {
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
         s.setValue(activity.rawValue, forKey: "activityType")
-        if let uid = PersistenceController.shared.currentUserID, !uid.isEmpty {
+        #if DEBUG
+        let __dbgID = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")
+        let __effectiveUID = __dbgID ?? PersistenceController.shared.currentUserID
+#else
+        let __effectiveUID = PersistenceController.shared.currentUserID
+#endif
+        if let uid = __effectiveUID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
         commitStagedAttachments(to: s, ctx: viewContext)

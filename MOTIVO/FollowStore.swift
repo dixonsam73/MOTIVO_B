@@ -1,3 +1,5 @@
+// CHANGE-ID: v7.12B-FollowStore-DebugReload-20251112_133748
+// SCOPE: Add debugReload() + following helpers (no release impact)
 // FollowStore.swift
 // CHANGE-ID: 20251110_201947-FollowStore_v712A_LocalSim
 // SCOPE: Replace entire file; removes AuthManager.shared, adds PersistenceController-based currentUserID and local follow simulation.
@@ -157,5 +159,24 @@ extension FollowStore {
         objectWillChange.send()
         NSLog("[FollowStore] simulateUnfollow × %@", targetUserID)
         return .none
+    }
+
+#if DEBUG
+    /// DEBUG: Force-reload FollowStore for the active viewer (applies override if set) and notify observers.
+    public func debugReload() {
+        load()
+        objectWillChange.send()
+    }
+#endif
+
+    /// Returns true if the active viewer is following the given user ID.
+    public func isFollowing(_ targetUserID: String) -> Bool {
+        let set = Set(UserDefaults.standard.stringArray(forKey: _followingKey) ?? [])
+        return set.contains(targetUserID)
+    }
+
+    /// Returns the current following set for the active viewer.
+    public func followingSet() -> Set<String> {
+        return Set(UserDefaults.standard.stringArray(forKey: _followingKey) ?? [])
     }
 }
