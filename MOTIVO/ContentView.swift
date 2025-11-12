@@ -147,6 +147,11 @@ fileprivate struct SessionsRootView: View {
     @State private var showTimer = false
     @State private var showAdd = false
 
+    #if DEBUG
+    @State private var isDebugPresented: Bool = false
+    @State private var _debugJSONBuffer: String = "{}"
+    #endif
+
     // Debounce
     @State private var debounceCancellable: AnyCancellable?
 
@@ -355,6 +360,38 @@ fileprivate struct SessionsRootView: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
             }
+#if DEBUG
+.overlay(alignment: .top) {
+    // Invisible hit area over the top toolbar GAP only (between avatar and record/add cluster)
+    // Avatar is 40pt + 8pt padding each side inside the inset; right cluster has two 40pt buttons with spacing TopButtonsUI.spacing.
+    // We place a narrow transparent rectangle centered in the gap so it doesn't intercept button taps.
+    GeometryReader { geo in
+        // Compute a conservative gap: full width minus left avatar block (~56) and right cluster (~40+spacing+40) and horizontal insets
+        let horizontalInset = Theme.Spacing.l
+        let leftBlock: CGFloat = 40 + 16   // avatar size + approximate internal padding
+        let rightBlock: CGFloat = 40 + TopButtonsUI.spacing + 40
+        let totalReserved = leftBlock + rightBlock + (horizontalInset * 2)
+        let gapWidth = max(0, geo.size.width - totalReserved)
+        // Place a centered rect in the remaining space with a modest width to avoid overlap
+        let rectWidth = max(0, gapWidth - 16) // leave small margins from buttons
+        let height: CGFloat = 56 // tall enough to be easy to hit, but within the inset area
+
+        ZStack {
+            Color.clear
+                .frame(width: rectWidth, height: height)
+                .contentShape(Rectangle())
+                .onLongPressGesture(minimumDuration: 0.6) {
+                    isDebugPresented = true
+                }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, Theme.Spacing.m) // align with the inset's top padding
+        .padding(.horizontal, horizontalInset)
+    }
+    .allowsHitTesting(true)
+    .accessibilityHidden(true)
+}
+#endif
 
             // Sheets
             .sheet(isPresented: $showTimer) {
@@ -366,6 +403,17 @@ fileprivate struct SessionsRootView: View {
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
             }
+#if DEBUG
+            .sheet(isPresented: $isDebugPresented) {
+                NavigationStack {
+                    DebugViewerView(title: "Feed Debug", jsonString: $_debugJSONBuffer)
+                        .onAppear {
+                            // Provide a minimal payload; reuse environment via containment
+                            _debugJSONBuffer = #"{"feed":"root","userID":"\#(userID ?? "nil")"}"#
+                        }
+                }
+            }
+#endif
             // Debounce lifecycle
             .task {
                 setUpDebounce()
@@ -1426,6 +1474,8 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
+
 
 
 
