@@ -930,6 +930,7 @@ struct PostRecordDetailsView: View {
             viewContext.processPendingChanges()
             // v7.12A — Social Pilot (local-only)
             PublishService.shared.publishIfNeeded(objectID: s.objectID, shouldPublish: isPublic /* or your current flag */)
+            FeedInteractionStore.markForPublish(s.id ?? UUID())
             onSaved?()
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
@@ -1305,6 +1306,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

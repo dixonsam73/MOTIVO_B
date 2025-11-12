@@ -49,4 +49,19 @@ struct FeedInteractionStore {
     static func setCommentCount(_ id: UUID, _ n: Int) {
         UserDefaults.standard.set(max(0, n), forKey: commentCountKey(id))
     }
+
+    // MARK: - v7.12D additive
+    /// Enqueue a post for backend publish. No effect in Local Simulation mode.
+    @MainActor static func markForPublish(_ id: UUID) {
+        let queue = SessionSyncQueue.shared
+        queue.enqueue(postID: id)
+        Task { @MainActor in
+            if BackendEnvironment.shared.isPreview {
+                await BackendDiagnostics.shared.simulatedCall(
+                    "FeedInteractionStore.markForPublish",
+                    meta: ["postID": id.uuidString]
+                )
+            }
+        }
+    }
 }

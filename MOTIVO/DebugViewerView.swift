@@ -71,7 +71,11 @@ public struct DebugViewerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
         }
-                BackendModeSection()
+        BackendModeSection()
+
+        APIConfigView()
+        SyncQueueSection()
+
         VStack(alignment: .leading, spacing: 12) {
             Text("Simulate Follows").font(.headline)
             HStack { Text("Viewer: \(activeViewerID)").font(.subheadline); Spacer() }
@@ -375,3 +379,4 @@ public enum DebugDump {
 }
 
 #endif
+
