@@ -71,7 +71,8 @@ public struct DebugViewerView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding()
         }
-                VStack(alignment: .leading, spacing: 12) {
+                BackendModeSection()
+        VStack(alignment: .leading, spacing: 12) {
             Text("Simulate Follows").font(.headline)
             HStack { Text("Viewer: \(activeViewerID)").font(.subheadline); Spacer() }
             HStack {
