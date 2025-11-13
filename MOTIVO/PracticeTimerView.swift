@@ -234,8 +234,8 @@ struct PracticeTimerView: View {
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityLabel(Text("Record audio help"))
-                            .accessibilityHint(Text("Opens instructions for using your device’s app to capture audio."))
+                            .accessibilityLabel("Record audio")
+                            .accessibilityHint("Opens the audio recorder for this session.")
 
                             // New: Take Photo button (camera) inserted between mic and video
                             if UIImagePickerController.isSourceTypeAvailable(.camera) {
@@ -250,8 +250,8 @@ struct PracticeTimerView: View {
                                         .contentShape(Circle())
                                 }
                                 .buttonStyle(.bordered)
-                                .accessibilityLabel(Text("Take photo"))
-                                .accessibilityHint(Text("Opens the camera to take a photo."))
+                                .accessibilityLabel("Take photo")
+                                .accessibilityHint("Opens the camera to capture a still photo for this session.")
                             }
 
                             Button {
@@ -266,8 +266,8 @@ struct PracticeTimerView: View {
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
-                            .accessibilityLabel(Text("Record video"))
-                            .accessibilityHint(Text("Opens the camera to record a video."))
+                            .accessibilityLabel("Record video")
+                            .accessibilityHint("Opens the video recorder for this session.")
                         }
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
@@ -1598,31 +1598,6 @@ struct PracticeTimerView: View {
             print("[PracticeTimer] hydrate audio id=\(att.id) title=\(tDebug) auto=\(aDebug) dur=\(self.audioDurations[att.id] ?? -1)")
             #endif
         }
-
-        // Commented out to stop reading audio metadata from UserDefaults (large write avoidance)
-        /*
-        do {
-            if let titlesData = d.data(forKey: TimerDefaultsKey.audioTitles.rawValue),
-               let decoded = try? JSONDecoder().decode([UUID:String].self, from: titlesData) {
-                self.audioTitles = decoded
-            }
-            if let autosData = d.data(forKey: TimerDefaultsKey.audioAutoTitles.rawValue),
-               let decoded = try? JSONDecoder().decode([UUID:String].self, from: autosData) {
-                self.audioAutoTitles = decoded
-            }
-            if let dursData = d.data(forKey: TimerDefaultsKey.audioDurations.rawValue),
-               let decoded = try? JSONDecoder().decode([UUID:Int].self, from: dursData) {
-                self.audioDurations = decoded
-            }
-            let stagedIDs = Set(self.stagedAudio.map { $0.id })
-            for id in stagedIDs {
-                let current = (self.audioTitles[id] ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                if current.isEmpty, let auto = self.audioAutoTitles[id] {
-                    self.audioTitles[id] = auto
-                }
-            }
-        }
-        */
 
         // Restore task pad contents
         if let taskData = d.data(forKey: TimerDefaultsKey.taskLines.rawValue),

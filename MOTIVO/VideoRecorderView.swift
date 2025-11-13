@@ -62,6 +62,7 @@ public struct VideoRecorderView: View {
                             .background(.ultraThinMaterial, in: Circle())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Close")
 
                     Spacer()
 
@@ -856,3 +857,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+

@@ -61,7 +61,7 @@ struct AudioRecorderView: View {
                     .monospacedDigit()
                     .font(.system(size: 32, weight: .medium, design: .rounded))
                     .foregroundStyle(state == .recording ? .red : .secondary)
-                    .accessibilityLabel("Elapsed time")
+                    .accessibilityLabel("Elapsed time \(timeString)")
             }
             .frame(maxWidth: .infinity)
 
@@ -822,4 +822,3 @@ private struct WaveformIndicatorView: View {
     }
     .padding()
 }
-
