@@ -323,6 +323,7 @@ fileprivate struct SessionsRootView: View {
                         .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                         #endif
                     }
+                    .accessibilityLabel("Open profile")
                     Spacer()
                     HStack(spacing: TopButtonsUI.spacing) {
                         Button { showTimer = true } label: {
@@ -340,6 +341,7 @@ fileprivate struct SessionsRootView: View {
                             .contentShape(Circle())
                             .buttonStyle(.plain)
                         }
+                        .accessibilityLabel("Start session timer")
                         Button { showAdd = true } label: {
                             ZStack {
                               Circle()
@@ -355,6 +357,7 @@ fileprivate struct SessionsRootView: View {
                             .contentShape(Circle())
                             .buttonStyle(.plain)
                         }
+                        .accessibilityLabel("Add manual session")
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
