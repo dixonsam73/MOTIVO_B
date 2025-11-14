@@ -364,6 +364,7 @@ public struct CommentsView: View {
                     }
                     .padding(.vertical, Theme.Spacing.inline)
                     .accessibilityElement(children: .combine)
+                    .accessibilityHint("Comment")
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             store.delete(commentID: comment.id, in: sessionID)

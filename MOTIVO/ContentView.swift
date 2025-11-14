@@ -708,6 +708,20 @@ fileprivate struct SessionRow: View {
         }
     }
 
+
+    private var accessibilitySummary: String {
+        var parts: [String] = []
+        parts.append(feedTitle)
+        let meta = instrumentActivityLine
+        if !meta.isEmpty {
+            parts.append(meta)
+        }
+        if let dt = dateTimeLine {
+            parts.append(dt)
+        }
+        return parts.joined(separator: ". ")
+    }
+
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
 
@@ -904,7 +918,7 @@ fileprivate struct SessionRow: View {
         .padding(.vertical, !attachments.isEmpty ? 10 : 6)
         .id(_refreshTick)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Open session")
+        .accessibilityLabel(accessibilitySummary)
         .accessibilityIdentifier("row.openDetail")
         .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
             guard let updates = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject> else { return }

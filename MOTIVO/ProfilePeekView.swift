@@ -82,6 +82,7 @@ struct ProfilePeekView: View {
                     }
                     Spacer()
                 }
+                .accessibilityElement(children: .combine)
 
                 if viewerID == ownerID || canSee {
                     // Visible summary
