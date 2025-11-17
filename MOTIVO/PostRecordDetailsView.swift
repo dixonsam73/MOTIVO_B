@@ -365,6 +365,11 @@ struct PostRecordDetailsView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
+                        // Intentional discard: purge any currently staged items for this review
+                        let discardIDs: [UUID] = stagedAttachments.map { $0.id }
+                        if !discardIDs.isEmpty {
+                            StagingStore.removeMany(ids: discardIDs)
+                        }
                         onCancel()
                         isPresented = false
                     } label: {
@@ -931,6 +936,13 @@ struct PostRecordDetailsView: View {
             // v7.12A — Social Pilot (local-only)
             PublishService.shared.publishIfNeeded(objectID: s.objectID, shouldPublish: isPublic /* or your current flag */)
             FeedInteractionStore.markForPublish(s.id ?? UUID())
+
+            // Cleanup: remove staged items that were just committed successfully
+            let consumedIDs: [UUID] = stagedAttachments.map { $0.id }
+            if !consumedIDs.isEmpty {
+                StagingStore.removeMany(ids: consumedIDs)
+            }
+
             onSaved?()
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
@@ -1306,6 +1318,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

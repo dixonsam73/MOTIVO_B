@@ -333,6 +333,14 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
 
     func saveTapped() {
         guard isReadyToSave, let url = recordingURL else { return }
+        // [RecorderDebug] saveTapped
+        print("[RecorderDebug] saveTapped")
+        print("  url=\(url.path)")
+        let existsAtSave = FileManager.default.fileExists(atPath: url.path)
+        print("  exists=\(existsAtSave)")
+        let sizeAtSave = getFileSize(url: url)
+        print("  size=\(sizeAtSave) bytes")
+
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
         onSave(url)
@@ -347,7 +355,48 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
                 try? jpg.write(to: p, options: .atomic)
                 posterURL = p
             }
-            _ = try? await StagingStore.saveNew(from: vidURL, kind: .video, suggestedName: vidURL.deletingPathExtension().lastPathComponent, duration: duration.isFinite ? duration : nil, poster: posterURL)
+            do {
+                let ref = try await StagingStore.saveNew(from: vidURL, kind: .video, suggestedName: vidURL.deletingPathExtension().lastPathComponent, duration: duration.isFinite ? duration : nil, poster: posterURL)
+                // [RecorderDebug] saveNew result
+                print("[RecorderDebug] saveNew succeeded")
+                print("  id=\(ref.id)")
+                print("  relativePath=\(ref.relativePath)")
+                let stagedURL = await StagingStore.absoluteURL(forRelative: ref.relativePath)
+                let stagedSize = self.getFileSize(url: stagedURL)
+                print("  stagedSize=\(stagedSize) bytes")
+
+                // On success, best-effort delete original .mov and temp poster .jpg
+                let fm = FileManager.default
+                // Delete original video
+                if fm.fileExists(atPath: vidURL.path) {
+                    do {
+                        try fm.removeItem(at: vidURL)
+                        print("[RecorderDebug] deleted original video at \(vidURL.path)")
+                    } catch {
+                        print("[RecorderDebug] FAILED to delete original video at \(vidURL.path): \(error)")
+                    }
+                } else {
+                    print("[RecorderDebug] original video already missing at \(vidURL.path)")
+                }
+                // Delete poster if present
+                if let p = posterURL {
+                    if fm.fileExists(atPath: p.path) {
+                        do {
+                            try fm.removeItem(at: p)
+                            print("[RecorderDebug] deleted poster at \(p.path)")
+                        } catch {
+                            print("[RecorderDebug] FAILED to delete poster at \(p.path): \(error)")
+                        }
+                    } else {
+                        print("[RecorderDebug] poster already missing at \(p.path)")
+                    }
+                }
+            } catch {
+                // Staging failed — keep original files; no further action.
+                #if DEBUG
+                print("[VideoRecorder] Staging failed, keeping original: \(error)")
+                #endif
+            }
         }
         resetState()
     }
@@ -553,12 +602,24 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
     }
 
     private func cleanupRecordingFile() {
-        if let url = recordingURL {
-            try? FileManager.default.removeItem(at: url)
-            recordingURL = nil
-            isReadyToSave = false
-            previewImage = nil
+        guard let url = recordingURL else {
+            print("[RecorderDebug] cleanupRecordingFile: no recordingURL set.")
+            return
         }
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.path) {
+            do {
+                try fm.removeItem(at: url)
+                print("[RecorderDebug] cleanupRecordingFile: deleted file at \(url.path)")
+            } catch {
+                print("[RecorderDebug] cleanupRecordingFile: FAILED to delete at \(url.path): \(error)")
+            }
+        } else {
+            print("[RecorderDebug] cleanupRecordingFile: file not found at \(url.path)")
+        }
+        recordingURL = nil
+        isReadyToSave = false
+        previewImage = nil
     }
 
     private func resetState() {
@@ -760,6 +821,14 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
     // MARK: - AVCaptureFileOutputRecordingDelegate
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
         DispatchQueue.main.async { [weak self] in
+            // [RecorderDebug] didFinishRecordingTo
+            print("[RecorderDebug] didFinishRecordingTo")
+            print("  url=\(outputFileURL.path)")
+            let existsAtFinish = FileManager.default.fileExists(atPath: outputFileURL.path)
+            print("  exists=\(existsAtFinish)")
+            let sizeAtFinish = self?.getFileSize(url: outputFileURL) ?? 0
+            print("  size=\(sizeAtFinish) bytes")
+
             guard let self = self else { return }
             if let _ = error {
                 self.cleanupRecordingFile()

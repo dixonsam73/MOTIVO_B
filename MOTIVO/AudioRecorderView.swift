@@ -29,6 +29,8 @@ struct AudioRecorderView: View {
     
     @State private var stagedID: UUID? = nil
 
+    private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
+
     // Timer for elapsed recording time
     @State private var startTime: Date?
     @State private var elapsed: TimeInterval = 0
@@ -294,6 +296,10 @@ private extension AudioRecorderView {
                 startWaveform()
                 state = .recording
                 errorMessage = nil
+                UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
+                #if DEBUG
+                print("[AudioRecorder] Ephemeral flag set true (recording started)")
+                #endif
             } else {
                 setError("Failed to start recording.")
             }
@@ -376,6 +382,7 @@ private extension AudioRecorderView {
                 elapsed = 0
                 displayTime = 0
                 state = .idle
+                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
                 return
             } else {
                 // Optional: confirm format consistency
@@ -451,6 +458,10 @@ private extension AudioRecorderView {
             stopWaveformTimer()
             clearWaveform()
             state = .idle
+            UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+            #if DEBUG
+            print("[AudioRecorder] Deleted recording; ephemeral flag reset false")
+            #endif
         } catch {
             setError("Delete failed: \(error.localizedDescription)")
         }
@@ -466,26 +477,42 @@ private extension AudioRecorderView {
         // Mirror VideoRecorderView staging flow - additive only
         Task {
             try? await StagingStore.bootstrap()
+            let originalURL = url
             let computedDuration: TimeInterval = await withCheckedContinuation { continuation in
                 DispatchQueue.global(qos: .utility).async {
                     var duration: TimeInterval = 0
                     if finalRecordedTime > 0 {
                         duration = finalRecordedTime
-                    } else if let player = try? AVAudioPlayer(contentsOf: url) {
+                    } else if let player = try? AVAudioPlayer(contentsOf: originalURL) {
                         duration = player.duration
                     }
                     continuation.resume(returning: duration)
                 }
             }
-            let ref = try? await StagingStore.saveNew(
-                from: url,
-                kind: .audio,
-                suggestedName: url.deletingPathExtension().lastPathComponent,
-                duration: computedDuration,
-                poster: nil
-            )
-            if let ref {
+            do {
+                let ref = try await StagingStore.saveNew(
+                    from: originalURL,
+                    kind: .audio,
+                    suggestedName: originalURL.deletingPathExtension().lastPathComponent,
+                    duration: computedDuration,
+                    poster: nil
+                )
                 await MainActor.run { self.stagedID = ref.id }
+                // Best-effort cleanup of the original temporary audio file after successful staging
+                let fm = FileManager.default
+                if fm.fileExists(atPath: originalURL.path) {
+                    do { try fm.removeItem(at: originalURL) } catch { print("[AudioRecorder] Cleanup original audio failed: \(error)") }
+                }
+                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                #if DEBUG
+                print("[AudioRecorder] Saved and cleaned original; ephemeral flag reset false")
+                #endif
+                // If the audio recorder had any additional temp artefacts on disk for this save, delete them here (none by default)
+            } catch {
+                // Staging failed — keep original files; no further action.
+                #if DEBUG
+                print("[AudioRecorder] Staging failed, keeping original: \(error)")
+                #endif
             }
         }
     }
@@ -550,6 +577,13 @@ private extension AudioRecorderView {
         finalRecordedTime = 0
         elapsed = 0
         displayTime = 0
+        if let url = recordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+        #if DEBUG
+        print("[AudioRecorder] Cleanup on disappear; ephemeral flag reset false")
+        #endif
     }
     
     func clearAllStagedAudio() {
@@ -822,3 +856,4 @@ private struct WaveformIndicatorView: View {
     }
     .padding()
 }
+

@@ -293,6 +293,96 @@ enum StagingStore {
         }
     }
 
+    /// Remove multiple staged items by their IDs. Best-effort: missing IDs or files are ignored.
+    /// - Behavior:
+    ///   - Loads current staged refs from staged.json
+    ///   - For each matching id, deletes underlying file(s) from Staging (media + poster)
+    ///   - Removes the entry from the in-memory list
+    ///   - Persists the updated list back to staged.json
+    /// - Safety: never deletes outside the Staging baseURL; ignores missing files; tolerates unknown ids.
+    static func removeMany(ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        // Load refs once
+        var list = loadRefs()
+        if list.isEmpty { return }
+
+        // Build lookup for fast membership test
+        let toRemove = Set(ids)
+
+        // Collect refs we are going to delete to reuse existing file deletion logic
+        let doomed = list.filter { toRemove.contains($0.id) }
+
+        #if DEBUG
+        // Pre-deletion accounting
+        let fm = FileManager.default
+        var totalBytes: Int64 = 0
+        var existingFileCount = 0
+        var pathsToDelete: [String] = []
+
+        for ref in doomed {
+            let abs = absoluteURL(for: ref).standardizedFileURL
+            let path = abs.path
+            pathsToDelete.append(path)
+            var isDir: ObjCBool = false
+            if fm.fileExists(atPath: path, isDirectory: &isDir), !isDir.boolValue {
+                do {
+                    let attrs = try fm.attributesOfItem(atPath: path)
+                    if let size = attrs[.size] as? NSNumber {
+                        totalBytes += size.int64Value
+                    }
+                    existingFileCount += 1
+                } catch {
+                    print("[StagingStore] removeMany — failed to read size for: \(path). Error: \(error)")
+                }
+            } else {
+                print("[StagingStore] removeMany — missing file for id=\(ref.id) path=\(path)")
+            }
+
+            if let poster = ref.posterPath {
+                let posterURL = absoluteURL(forRelative: poster).standardizedFileURL
+                let pPath = posterURL.path
+                pathsToDelete.append(pPath)
+                var pIsDir: ObjCBool = false
+                if fm.fileExists(atPath: pPath, isDirectory: &pIsDir), !pIsDir.boolValue {
+                    do {
+                        let attrs = try fm.attributesOfItem(atPath: pPath)
+                        if let size = attrs[.size] as? NSNumber {
+                            totalBytes += size.int64Value
+                        }
+                        existingFileCount += 1
+                    } catch {
+                        print("[StagingStore] removeMany — failed to read size for poster: \(pPath). Error: \(error)")
+                    }
+                } else {
+                    // Poster missing is not an error, but note it for debugging.
+                    print("[StagingStore] removeMany — missing poster for id=\(ref.id) path=\(pPath)")
+                }
+            }
+        }
+        #endif
+
+        // Best-effort delete of files
+        deleteFiles(for: doomed)
+
+        // Remove from index
+        if !doomed.isEmpty {
+            list.removeAll { toRemove.contains($0.id) }
+            saveRefs(list)
+        }
+
+        #if DEBUG
+        // Post-deletion summary
+        let removedCount = doomed.count
+        let bytes = totalBytes
+        let mb = Double(bytes) / (1024.0 * 1024.0)
+        print("[StagingStore] removeMany — requested=\(ids.count), removed=\(removedCount), totalBytes=\(bytes) (~\(String(format: "%.2f", mb)) MB)")
+        // Optionally list the paths we attempted to delete for traceability.
+        if !pathsToDelete.isEmpty {
+            print("[StagingStore] removeMany — paths=\n\(pathsToDelete.joined(separator: "\n"))")
+        }
+        #endif
+    }
+
     // MARK: - File-backed JSON storage
 
     private static func refsFileURL() -> URL {
@@ -362,3 +452,4 @@ enum StagingStore {
         } catch {}
     }
 }
+

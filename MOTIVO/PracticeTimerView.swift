@@ -123,6 +123,8 @@ struct PracticeTimerView: View {
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
+    // Ephemeral media flag key added as per instructions
+    private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
@@ -774,6 +776,9 @@ struct PracticeTimerView: View {
                 NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
                     commitAllAudioTitleBuffersAndPersist()
                 }
+                NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                    handleAppTerminationCleanup()
+                }
 
                 // If last session was explicitly discarded, ensure staging store is empty before hydrating
                 if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
@@ -868,6 +873,7 @@ struct PracticeTimerView: View {
             .onDisappear {
                 // Remove willResignActive observer to avoid leaks
                 NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+                NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification, object: nil)
 
                 // Commit any in-progress audio title edit when leaving the view (covers in-app navigation without backgrounding)
                 if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
@@ -881,7 +887,25 @@ struct PracticeTimerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Quit") {
-                        let refsToDelete = StagingStore.list()
+                        #if DEBUG
+                        StorageInspector.logSandboxUsage(tag: "Before Quit")
+                        #endif
+                        // Intentional discard: purge staged items associated with this live session
+                        let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+                        if !__discardIDs.isEmpty {
+                            StagingStore.removeMany(ids: __discardIDs)
+                            // Delete underlying files for these refs now
+                            let refsToDelete = StagingStore.list()
+                            StagingStore.deleteFiles(for: refsToDelete)
+                            #if DEBUG
+                            print("[PracticeTimer] quit — removed \(__discardIDs.count) staged items")
+                            #endif
+                        }
+                        
+                        // Purge temp surrogates while staged arrays still have IDs
+                        purgeStagedTempFiles()
+                        removeAllSessionTempSurrogates()
+
                         // Clear persisted and in-memory staged attachments and reset timer
                         stopAttachmentPlayback()
                         clearPersistedStagedAttachments()
@@ -899,8 +923,79 @@ struct PracticeTimerView: View {
                         stagedVideos.removeAll()
                         videoThumbnails.removeAll()
                         selectedThumbnailID = nil
-                        StagingStore.deleteFiles(for: refsToDelete)
-                        purgeStagedTempFiles()
+                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                        #if DEBUG
+                        StorageInspector.logSandboxUsage(tag: "After Quit")
+                        #endif
+
+                        // Additional full cleanup of staged and temporary media (post-UI state updates)
+                        #if DEBUG
+                        print("[EphemeralCleanup] Quit cleanup triggered")
+                        #endif
+                        // 1) Remove any remaining staging refs and files (best-effort, non-destructive to saved sessions)
+                        do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                        let allRefs = StagingStore.list()
+                        var removedRefCount = 0
+                        if !allRefs.isEmpty {
+                            // Remove refs from store metadata
+                            for ref in allRefs {
+                                StagingStore.remove(ref)
+                                removedRefCount += 1
+                            }
+                            // Delete any associated files on disk
+                            StagingStore.deleteFiles(for: allRefs)
+                        }
+                        #if DEBUG
+                        print("[EphemeralCleanup] StagingStore refs removed: \(removedRefCount)")
+                        #endif
+                        // 2) Remove any temporary surrogate recorder files (audio/video/image) and posters
+                        let fm = FileManager.default
+                        var removedAudioTemps = 0
+                        var removedImageTemps = 0
+                        var removedVideoTemps = 0
+                        var removedPosterTemps = 0
+                        // Remove any temp audio surrogates
+                        for att in stagedAudio {
+                            let url = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(att.id.uuidString)
+                                .appendingPathExtension("m4a")
+                            if (try? fm.removeItem(at: url)) != nil {
+                                removedAudioTemps += 1
+                            }
+                        }
+                        // Remove any temp image surrogates
+                        for att in stagedImages {
+                            let url = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(att.id.uuidString)
+                                .appendingPathExtension("jpg")
+                            if (try? fm.removeItem(at: url)) != nil {
+                                removedImageTemps += 1
+                            }
+                        }
+                        // Remove any temp video surrogates
+                        for att in stagedVideos {
+                            let url = FileManager.default.temporaryDirectory
+                                .appendingPathComponent(att.id.uuidString)
+                                .appendingPathExtension("mov")
+                            if (try? fm.removeItem(at: url)) != nil {
+                                removedVideoTemps += 1
+                            }
+                            // Also remove any poster files generated alongside
+                            let poster = FileManager.default.temporaryDirectory
+                                .appendingPathComponent("\(att.id.uuidString)_poster")
+                                .appendingPathExtension("jpg")
+                            if (try? fm.removeItem(at: poster)) != nil {
+                                removedPosterTemps += 1
+                            }
+                        }
+                        #if DEBUG
+                        print("[EphemeralCleanup] Temp audio: \(removedAudioTemps) image: \(removedImageTemps) video: \(removedVideoTemps) posters: \(removedPosterTemps)")
+                        #endif
+                        // 3) Reset ephemeral media flag
+                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                        #if DEBUG
+                        print("[EphemeralCleanup] Quit cleanup flag reset to false")
+                        #endif
                         isPresented = false
                     }
                 }
@@ -979,6 +1074,7 @@ struct PracticeTimerView: View {
                         videoThumbnails.removeAll()
                         selectedThumbnailID = nil
                         UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
                         isPresented = false
                     },
                     onCancel: { didCancelFromReview = true }
@@ -990,6 +1086,12 @@ struct PracticeTimerView: View {
                     if didCancelFromReview == true {
                         // Explicit chevron cancel: do nothing (preserve state)
                     } else {
+                        // Intentional discard: purge staged items associated with this live session
+                        let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+                        if !__discardIDs.isEmpty {
+                            StagingStore.removeMany(ids: __discardIDs)
+                        }
+                        
                         let refsToDelete = StagingStore.list()
                         clearPersistedTimer()
                         clearPersistedStagedAttachments()
@@ -1006,6 +1108,7 @@ struct PracticeTimerView: View {
                         selectedThumbnailID = nil
                         StagingStore.deleteFiles(for: refsToDelete)
                         purgeStagedTempFiles()
+                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
                     }
                     didCancelFromReview = false
                 }
@@ -1730,6 +1833,27 @@ struct PracticeTimerView: View {
         // Clear cached video thumbnails when purging staged items
         videoThumbnails.removeAll()
     }
+
+    // Broad cleanup for any UUID-named temp surrogates created during a live session
+    private func removeAllSessionTempSurrogates() {
+        let fm = FileManager.default
+        let tmp = FileManager.default.temporaryDirectory
+        guard let items = try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) else { return }
+        // Match files like <UUID>.mov, <UUID>.m4a, <UUID>.jpg, <UUID>_poster.jpg
+        let pattern = "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(_poster)?\\.(mov|m4a|jpg)$"
+        let uuidRegex = try? NSRegularExpression(pattern: pattern)
+        var removed = 0
+        for url in items {
+            let name = url.lastPathComponent
+            let range = NSRange(location: 0, length: name.utf16.count)
+            if let re = uuidRegex, re.firstMatch(in: name, options: [], range: range) != nil {
+                if (try? fm.removeItem(at: url)) != nil { removed += 1 }
+            }
+        }
+        #if DEBUG
+        if removed > 0 { print("[PracticeTimer] removeAllSessionTempSurrogates — removed temp files: \(removed)") }
+        #endif
+    }
     
     private var totalStagedBytesImagesAudio: Int {
         let imgs = stagedImages.reduce(0) { $0 + $1.data.count }
@@ -1983,6 +2107,9 @@ struct PracticeTimerView: View {
             audioDurations[id] = durationSeconds
 
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
+            if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
+                UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
+            }
             persistStagedAttachments()
 
             // Double-write to staging store
@@ -2033,6 +2160,9 @@ struct PracticeTimerView: View {
             }
 
             stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
+            if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
+                UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
+            }
             persistStagedAttachments()
 
             // Double-write to staging store (with poster if generated)
@@ -2443,8 +2573,58 @@ struct PracticeTimerView: View {
         print("[PracticeTimer] commitAllAudioTitleBuffersAndPersist done")
         #endif
     }
-}
 
+    // MARK: - App Termination Cleanup
+    // Cleanup path for app swipe-away termination; mirrors explicit Quit when ephemeral media exists
+    private func handleAppTerminationCleanup() {
+        // Respect existing behavior: only discard if this was an unsaved, ephemeral session with media
+        let hasEphemeral = UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey)
+        guard hasEphemeral else { return }
+
+        #if DEBUG
+        StorageInspector.logSandboxUsage(tag: "Before Terminate Cleanup")
+        #endif
+
+        // Remove staged refs/files for current live session
+        let ids: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+        if !ids.isEmpty {
+            StagingStore.removeMany(ids: ids)
+            let refsToDelete = StagingStore.list()
+            StagingStore.deleteFiles(for: refsToDelete)
+            #if DEBUG
+            print("[PracticeTimer] terminate — removed \(ids.count) staged items")
+            #endif
+        }
+
+        // Purge temp surrogates before clearing arrays
+        purgeStagedTempFiles()
+        removeAllSessionTempSurrogates()
+
+        // Clear persisted IDs/state similar to Quit
+        stopAttachmentPlayback()
+        clearPersistedStagedAttachments()
+        clearAllStagingStoreRefs()
+        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+        UserDefaults.standard.set(false, forKey: sessionActiveKey)
+        clearPersistedTasks()
+        clearPersistedTimer()
+        resetUIOnly()
+        stagedAudio.removeAll()
+        audioTitles.removeAll()
+        audioAutoTitles.removeAll()
+        audioDurations.removeAll()
+        stagedImages.removeAll()
+        stagedVideos.removeAll()
+        videoThumbnails.removeAll()
+        selectedThumbnailID = nil
+        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+
+        #if DEBUG
+        StorageInspector.logSandboxUsage(tag: "After Terminate Cleanup")
+        #endif
+    }
+}
+ 
 // MARK: - Local InfoSheetView (minimal)
 // If a global InfoSheetView exists later, rename this to avoid collisions.
 fileprivate struct InfoSheetView: View {
