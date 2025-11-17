@@ -414,6 +414,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
                                                 req.fetchLimit = 1
                                                 if let match = try? viewContext.fetch(req).first {
+                                                    if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
+                                                        AttachmentStore.deleteAttachmentFile(atPath: path)
+                                                    }
                                                     viewContext.delete(match)
                                                     do { try viewContext.save() } catch { print("Delete save error: \(error)") }
                                                 }
@@ -440,6 +443,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
                                             req.fetchLimit = 1
                                             if let match = try? viewContext.fetch(req).first {
+                                                if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
+                                                    AttachmentStore.deleteAttachmentFile(atPath: path)
+                                                }
                                                 viewContext.delete(match)
                                                 do { try viewContext.save() } catch { print("Delete save error: \(error)") }
                                             }
@@ -1515,6 +1521,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

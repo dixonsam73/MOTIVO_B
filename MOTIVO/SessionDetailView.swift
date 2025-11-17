@@ -697,6 +697,16 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
     }
 
     private func deleteSession() {
+        // Delete on-disk media files for this session's attachments before deleting the Core Data object
+        let attachments = (session.attachments as? Set<Attachment>) ?? []
+        let paths: [String] = attachments.compactMap { att in
+            if let s = att.value(forKey: "fileURL") as? String, !s.isEmpty { return s }
+            return nil
+        }
+        if !paths.isEmpty {
+            AttachmentStore.deleteAttachmentFiles(atPaths: paths)
+        }
+
         viewContext.delete(session)
         do { try viewContext.save() } catch { print("Delete error: \(error)") }
         dismiss()

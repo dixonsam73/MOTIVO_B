@@ -522,7 +522,18 @@ fileprivate struct SessionsRootView: View {
         let rows = filteredSessions
         do {
             for idx in offsets {
-                viewContext.delete(rows[idx])
+                let session = rows[idx]
+                // Gather attachment file paths for this session and delete from disk before deleting the Core Data objects
+                let attachments = (session.attachments as? Set<Attachment>) ?? []
+                let paths: [String] = attachments.compactMap { att in
+                    // Access KVC-safe String attribute `fileURL` if present
+                    if let s = att.value(forKey: "fileURL") as? String, !s.isEmpty { return s }
+                    return nil
+                }
+                if !paths.isEmpty {
+                    AttachmentStore.deleteAttachmentFiles(atPaths: paths)
+                }
+                viewContext.delete(session)
             }
             try viewContext.save()
         } catch {
@@ -1491,6 +1502,7 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+
 
 
 

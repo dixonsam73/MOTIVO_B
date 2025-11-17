@@ -78,6 +78,59 @@ struct AttachmentStore {
         }
     }
 
+    /// Delete a single attachment file on disk.
+    /// - Note: Best-effort, constrained to the app's Documents directory for safety.
+    static func deleteAttachmentFile(at url: URL) {
+        let fm = FileManager.default
+
+        guard let docs = try? ensureDocumentsDir().standardizedFileURL else {
+            #if DEBUG
+            print("[AttachmentStore] deleteAttachmentFile — unable to resolve Documents directory")
+            #endif
+            return
+        }
+
+        let normalized = url.standardizedFileURL
+        let rootPath = docs.path.hasSuffix("/") ? docs.path : docs.path + "/"
+
+        // Safety guard: refuse to delete anything outside Documents.
+        guard normalized.path.hasPrefix(rootPath) else {
+            #if DEBUG
+            print("[AttachmentStore] deleteAttachmentFile — refusing to delete outside Documents: \(normalized.path)")
+            #endif
+            return
+        }
+
+        if fm.fileExists(atPath: normalized.path) {
+            do {
+                try fm.removeItem(at: normalized)
+            } catch {
+                #if DEBUG
+                print("[AttachmentStore] deleteAttachmentFile — failed to remove \(normalized.path): \(error)")
+                #endif
+            }
+        } else {
+            #if DEBUG
+            print("[AttachmentStore] deleteAttachmentFile — file not found at path: \(normalized.path)")
+            #endif
+        }
+    }
+
+    /// Convenience overload for Core Data `fileURL` String attributes.
+    static func deleteAttachmentFile(atPath path: String) {
+        deleteAttachmentFile(at: URL(fileURLWithPath: path))
+    }
+
+    /// Batch helper for URL-based deletions.
+    static func deleteAttachmentFiles(at urls: [URL]) {
+        urls.forEach { deleteAttachmentFile(at: $0) }
+    }
+
+    /// Batch helper for String path deletions.
+    static func deleteAttachmentFiles(atPaths paths: [String]) {
+        paths.forEach { deleteAttachmentFile(atPath: $0) }
+    }
+
     /// Creates and attaches a Core Data `Attachment` to a session.
     /// NOTE: We ONLY set the inverse (`att.session = session`). Core Data keeps the other side in sync.
     @MainActor
@@ -130,4 +183,3 @@ struct AttachmentStore {
         return candidate
     }
 }
-

@@ -881,6 +881,7 @@ struct PracticeTimerView: View {
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Quit") {
+                        let refsToDelete = StagingStore.list()
                         // Clear persisted and in-memory staged attachments and reset timer
                         stopAttachmentPlayback()
                         clearPersistedStagedAttachments()
@@ -898,6 +899,7 @@ struct PracticeTimerView: View {
                         stagedVideos.removeAll()
                         videoThumbnails.removeAll()
                         selectedThumbnailID = nil
+                        StagingStore.deleteFiles(for: refsToDelete)
                         purgeStagedTempFiles()
                         isPresented = false
                     }
@@ -988,6 +990,7 @@ struct PracticeTimerView: View {
                     if didCancelFromReview == true {
                         // Explicit chevron cancel: do nothing (preserve state)
                     } else {
+                        let refsToDelete = StagingStore.list()
                         clearPersistedTimer()
                         clearPersistedStagedAttachments()
                         clearAllStagingStoreRefs()
@@ -1001,6 +1004,7 @@ struct PracticeTimerView: View {
                         stagedVideos.removeAll()
                         videoThumbnails.removeAll()
                         selectedThumbnailID = nil
+                        StagingStore.deleteFiles(for: refsToDelete)
                         purgeStagedTempFiles()
                     }
                     didCancelFromReview = false

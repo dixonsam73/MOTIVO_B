@@ -49,13 +49,6 @@ enum StagingStore {
     }
 
     /// Save a new staged media by moving/copying from a source URL.
-    /// - Parameters:
-    ///   - sourceURL: Source file URL (temporary or external).
-    ///   - kind: Media kind (audio, video, image).
-    ///   - suggestedName: Optional base name (without extension). If nil, a UUID is used.
-    ///   - duration: Optional duration in seconds.
-    ///   - poster: Optional poster/thumbnail URL to copy alongside the media.
-    /// - Returns: Newly created StagedAttachmentRef stored in JSON file.
     static func saveNew(from sourceURL: URL,
                         kind: StagedAttachmentRef.Kind,
                         suggestedName: String? = nil,
@@ -102,7 +95,6 @@ enum StagingStore {
                     #endif
                     var newRef = StagedAttachmentRef(id: id, kind: kind, relativePath: rel, createdAt: Date(), duration: duration, posterPath: posterPath, audioUserTitle: nil, audioAutoTitle: nil, audioDisplayTitle: nil)
                     if kind == .audio {
-                        // Seed auto title from the file stem or suggested name; userTitle starts empty
                         let stem = (targetURL.deletingPathExtension().lastPathComponent)
                         let auto = (suggestedName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? suggestedName! : stem
                         newRef.audioAutoTitle = auto
@@ -110,7 +102,6 @@ enum StagingStore {
                         newRef.audioDisplayTitle = auto
                     }
 
-                    // Append to JSON file
                     var list = loadRefs()
                     list.append(newRef)
                     saveRefs(list)
@@ -135,21 +126,15 @@ enum StagingStore {
                     let dir = abs.deletingLastPathComponent()
                     let tmp = dir.appendingPathComponent(".tmp_\(UUID().uuidString)")
                     if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
-                    // Move/copy into tmp first
                     try moveOrCopy(sourceURL: sourceURL, to: tmp)
-                    // Atomic replace (URL-based API)
                     try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
 
-                    // Update ref (keep same id). The destination path (abs) remains the same name; only contents changed.
                     var newRef = ref
-                    // If, for any reason, the file name changed, recompute the relative path from disk.
-                    // In our flow, replaceItemAt keeps the original URL (abs), so this usually won't run.
                     let finalURL = abs
                     if finalURL.lastPathComponent != abs.lastPathComponent {
                         newRef = StagingStore.refByChangingPath(ref, to: relativePath(for: finalURL))
                     }
 
-                    // Persist update
                     var list = loadRefs()
                     if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = newRef }
                     saveRefs(list)
@@ -163,36 +148,28 @@ enum StagingStore {
         return updated
     }
 
-    /// Return all staged refs from JSON file.
     static func list() -> [StagedAttachmentRef] { loadRefs() }
 
-    /// Update a ref in JSON file by id.
     static func update(_ ref: StagedAttachmentRef) {
         var list = loadRefs()
         if let idx = list.firstIndex(where: { $0.id == ref.id }) { list[idx] = ref }
         saveRefs(list)
     }
 
-    /// Update audio-specific metadata (title, autoTitle, duration) for a ref by id.
     static func updateAudioMetadata(id: UUID, title: String?, autoTitle: String?, duration: Double?) {
         var list = loadRefs()
         if let idx = list.firstIndex(where: { $0.id == id }) {
             var r = list[idx]
-            // Update duration if provided
             if let duration { r.duration = duration }
 
-            // Update auto title only if a non-empty new value is provided (we never clear auto)
             if let at = autoTitle?.trimmingCharacters(in: .whitespacesAndNewlines), !at.isEmpty {
                 r.audioAutoTitle = at
             }
-
-            // Update user title: allow nil/empty to mean "clear" (fall back to auto)
             if let t = title {
                 let trimmed = t.trimmingCharacters(in: .whitespacesAndNewlines)
                 r.audioUserTitle = trimmed.isEmpty ? nil : trimmed
             }
 
-            // Recompute display title: user if present, else auto
             if let user = r.audioUserTitle, !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 r.audioDisplayTitle = user
             } else if let auto = r.audioAutoTitle, !auto.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -206,7 +183,6 @@ enum StagingStore {
         }
     }
 
-    /// Convenience accessor to fetch a ref by id.
     static func ref(withId id: UUID) -> StagedAttachmentRef? {
         loadRefs().first(where: { $0.id == id })
     }
@@ -225,19 +201,16 @@ enum StagingStore {
         saveRefs(list)
     }
 
-    /// Get absolute URL on disk for a ref.
     static func absoluteURL(for ref: StagedAttachmentRef) -> URL {
         absoluteURL(forRelative: ref.relativePath)
     }
 
-    /// Convert a relative path under Staging to an absolute URL.
     static func absoluteURL(forRelative relative: String) -> URL {
         baseURL.appendingPathComponent(relative)
     }
 
-    // MARK: - Helpers (nonisolated where appropriate)
+    // MARK: - Helpers
 
-    /// Pick a file extension based on source and kind.
     private static func preferredExtension(for source: URL, kind: StagedAttachmentRef.Kind) -> String {
         let ext = source.pathExtension
         if !ext.isEmpty { return ext }
@@ -248,7 +221,6 @@ enum StagingStore {
         }
     }
 
-    /// yyyy-MM-dd folder name for grouping staged items by day.
     private static func dateFolderName(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
@@ -256,7 +228,6 @@ enum StagingStore {
         return f.string(from: date)
     }
 
-    /// Convert an absolute URL under baseURL to a relative path string.
     private static func relativePath(for url: URL) -> String {
         let base = baseURL.standardizedFileURL
         let std = url.standardizedFileURL
@@ -266,12 +237,10 @@ enum StagingStore {
             let idx = path.index(path.startIndex, offsetBy: basePath.count + (path.hasSuffix("/") ? 0 : 1))
             return String(path[idx...])
         }
-        // Fallback: return lastPathComponent (still relative under day folder)
         let day = dateFolderName(Date())
         return day + "/" + url.lastPathComponent
     }
 
-    /// Move if same-volume; else copy.
     private static func moveOrCopy(sourceURL: URL, to destURL: URL) throws {
         let fm = FileManager.default
         if fm.fileExists(atPath: destURL.path) {
@@ -280,29 +249,59 @@ enum StagingStore {
         do {
             try fm.moveItem(at: sourceURL, to: destURL)
         } catch {
-            // Cross-volume move may fail; fall back to copy
             try fm.copyItem(at: sourceURL, to: destURL)
         }
     }
 
-    /// Replace helper: update only the path of a ref without changing its id.
     private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
         StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioUserTitle: ref.audioUserTitle, audioAutoTitle: ref.audioAutoTitle, audioDisplayTitle: ref.audioDisplayTitle)
     }
 
+    // MARK: - Deletion Helpers (Step 0A — no behaviour changes)
+
+    /// Delete disk files (media + poster) for a set of staged refs. Does not update refs.json.
+    static func deleteFiles(for refs: [StagedAttachmentRef]) {
+        refs.forEach { deleteFile(for: $0) }
+    }
+
+    /// Delete disk files for a single ref. Does not update refs.json.
+    static func deleteFile(for ref: StagedAttachmentRef) {
+        let fm = FileManager.default
+        let abs = absoluteURL(for: ref).standardizedFileURL
+
+        let base = baseURL.standardizedFileURL
+        let rootPath = base.path.hasSuffix("/") ? base.path : base.path + "/"
+
+        // Safety guard — never delete anything outside our staging container
+        guard abs.path.hasPrefix(rootPath) else {
+            #if DEBUG
+            print("[StagingStore] deleteFile — refusing to delete outside baseURL: \(abs.path)")
+            #endif
+            return
+        }
+
+        if fm.fileExists(atPath: abs.path) {
+            try? fm.removeItem(at: abs)
+        }
+
+        if let poster = ref.posterPath {
+            let posterURL = absoluteURL(forRelative: poster).standardizedFileURL
+            if posterURL.path.hasPrefix(rootPath),
+               fm.fileExists(atPath: posterURL.path) {
+                try? fm.removeItem(at: posterURL)
+            }
+        }
+    }
+
     // MARK: - File-backed JSON storage
 
-    /// File URL for refs JSON file.
     private static func refsFileURL() -> URL {
         do {
             try bootstrap()
-        } catch {
-            // Ignore bootstrap errors; fallback to baseURL anyway
-        }
+        } catch {}
         return baseURL.appendingPathComponent("staged.json")
     }
 
-    /// Load refs from JSON file; if missing, migrate from UserDefaults.
     private static func loadRefs() -> [StagedAttachmentRef] {
         let url = refsFileURL()
         let fm = FileManager.default
@@ -322,17 +321,14 @@ enum StagingStore {
                 }
                 return normalized
             } catch {
-                // ignore read/decoding errors, fallback to empty
                 return []
             }
         } else {
-            // Attempt migration from UserDefaults
             let defaultsKey = "stagedAttachments_v2"
             let d = UserDefaults.standard
             if let data = d.data(forKey: defaultsKey) {
                 do {
                     let refs = try JSONDecoder().decode([StagedAttachmentRef].self, from: data)
-                    // Save to file
                     saveRefs(refs)
                     d.removeObject(forKey: defaultsKey)
                     #if DEBUG
@@ -350,7 +346,6 @@ enum StagingStore {
                     }
                     return normalized
                 } catch {
-                    // Migration failed, ignore
                     return []
                 }
             } else {
@@ -359,14 +354,11 @@ enum StagingStore {
         }
     }
 
-    /// Save refs to JSON file atomically.
     private static func saveRefs(_ refs: [StagedAttachmentRef]) {
         let url = refsFileURL()
         do {
             let data = try JSONEncoder().encode(refs)
             try data.write(to: url, options: [.atomic])
-        } catch {
-            // On encoding or write failure, do not crash; drop the write.
-        }
+        } catch {}
     }
 }
