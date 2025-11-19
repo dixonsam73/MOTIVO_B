@@ -215,13 +215,13 @@ private extension AudioRecorderView {
     }
 
     func documentsDirectory() -> URL {
-        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        // Storage Safety Protocol: Recorder output should be written to a temporary location.
+        return FileManager.default.temporaryDirectory
     }
 
     func newRecordingURL() -> URL {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd_HHmmss"
-        let name = "motivo_rec_\(formatter.string(from: Date())).m4a"
+        // Use a UUID-based filename in tmp to avoid collisions and to ensure cleanup on success/cancel.
+        let name = "motivo_rec_\(UUID().uuidString).m4a"
         return documentsDirectory().appendingPathComponent(name)
     }
 
@@ -448,6 +448,9 @@ private extension AudioRecorderView {
         guard let url = recordingURL else { return }
         do {
             try FileManager.default.removeItem(at: url)
+            #if DEBUG
+            print("[AudioRecorder] Temp recording file removed on delete: \(url.lastPathComponent)")
+            #endif
             recordingURL = nil
             playbackPosition = 0
             accumulatedRecordedTime = 0
@@ -498,10 +501,19 @@ private extension AudioRecorderView {
                     poster: nil
                 )
                 await MainActor.run { self.stagedID = ref.id }
-                // Best-effort cleanup of the original temporary audio file after successful staging
+                // Remove the recorder's temp file after successful staging (no duplicates remain)
                 let fm = FileManager.default
                 if fm.fileExists(atPath: originalURL.path) {
-                    do { try fm.removeItem(at: originalURL) } catch { print("[AudioRecorder] Cleanup original audio failed: \(error)") }
+                    do {
+                        try fm.removeItem(at: originalURL)
+                        #if DEBUG
+                        print("[AudioRecorder] Removed recorder temp after staging: \(originalURL.lastPathComponent)")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("[AudioRecorder] Cleanup original audio failed: \(error)")
+                        #endif
+                    }
                 }
                 UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
                 #if DEBUG
@@ -578,7 +590,13 @@ private extension AudioRecorderView {
         elapsed = 0
         displayTime = 0
         if let url = recordingURL {
-            try? FileManager.default.removeItem(at: url)
+            let fm = FileManager.default
+            if fm.fileExists(atPath: url.path) {
+                do { try fm.removeItem(at: url) } catch { /* swallow */ }
+                #if DEBUG
+                print("[AudioRecorder] Cleanup removed recorder temp: \(url.lastPathComponent)")
+                #endif
+            }
         }
         UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
         #if DEBUG
