@@ -344,60 +344,8 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
         onSave(url)
-        // Mirror save to StagingStore (video) on main actor
-        Task {
-            try? await StagingStore.bootstrap()
-            let vidURL = url
-            let duration = getVideoDuration(url: vidURL)
-            var posterURL: URL? = nil
-            if let image = previewImage, let jpg = image.jpegData(compressionQuality: 0.85) {
-                let p = documentsDirectory().appendingPathComponent("\(UUID().uuidString)_poster").appendingPathExtension("jpg")
-                try? jpg.write(to: p, options: .atomic)
-                posterURL = p
-            }
-            do {
-                let ref = try await StagingStore.saveNew(from: vidURL, kind: .video, suggestedName: vidURL.deletingPathExtension().lastPathComponent, duration: duration.isFinite ? duration : nil, poster: posterURL)
-                // [RecorderDebug] saveNew result
-                print("[RecorderDebug] saveNew succeeded")
-                print("  id=\(ref.id)")
-                print("  relativePath=\(ref.relativePath)")
-                let stagedURL = await StagingStore.absoluteURL(forRelative: ref.relativePath)
-                let stagedSize = self.getFileSize(url: stagedURL)
-                print("  stagedSize=\(stagedSize) bytes")
+        
 
-                // On success, best-effort delete original .mov and temp poster .jpg
-                let fm = FileManager.default
-                // Delete original video
-                if fm.fileExists(atPath: vidURL.path) {
-                    do {
-                        try fm.removeItem(at: vidURL)
-                        print("[RecorderDebug] deleted original video at \(vidURL.path)")
-                    } catch {
-                        print("[RecorderDebug] FAILED to delete original video at \(vidURL.path): \(error)")
-                    }
-                } else {
-                    print("[RecorderDebug] original video already missing at \(vidURL.path)")
-                }
-                // Delete poster if present
-                if let p = posterURL {
-                    if fm.fileExists(atPath: p.path) {
-                        do {
-                            try fm.removeItem(at: p)
-                            print("[RecorderDebug] deleted poster at \(p.path)")
-                        } catch {
-                            print("[RecorderDebug] FAILED to delete poster at \(p.path): \(error)")
-                        }
-                    } else {
-                        print("[RecorderDebug] poster already missing at \(p.path)")
-                    }
-                }
-            } catch {
-                // Staging failed — keep original files; no further action.
-                #if DEBUG
-                print("[VideoRecorder] Staging failed, keeping original: \(error)")
-                #endif
-            }
-        }
         resetState()
     }
 
