@@ -470,6 +470,7 @@ private extension AudioRecorderView {
         }
     }
 
+    
     func saveRecording() {
         stopAllAndFinalizeRecording()
         guard let url = recordingURL else {
@@ -477,57 +478,8 @@ private extension AudioRecorderView {
             return
         }
         onSave(url)
-        // Mirror VideoRecorderView staging flow - additive only
-        Task {
-            try? await StagingStore.bootstrap()
-            let originalURL = url
-            let computedDuration: TimeInterval = await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .utility).async {
-                    var duration: TimeInterval = 0
-                    if finalRecordedTime > 0 {
-                        duration = finalRecordedTime
-                    } else if let player = try? AVAudioPlayer(contentsOf: originalURL) {
-                        duration = player.duration
-                    }
-                    continuation.resume(returning: duration)
-                }
-            }
-            do {
-                let ref = try await StagingStore.saveNew(
-                    from: originalURL,
-                    kind: .audio,
-                    suggestedName: originalURL.deletingPathExtension().lastPathComponent,
-                    duration: computedDuration,
-                    poster: nil
-                )
-                await MainActor.run { self.stagedID = ref.id }
-                // Remove the recorder's temp file after successful staging (no duplicates remain)
-                let fm = FileManager.default
-                if fm.fileExists(atPath: originalURL.path) {
-                    do {
-                        try fm.removeItem(at: originalURL)
-                        #if DEBUG
-                        print("[AudioRecorder] Removed recorder temp after staging: \(originalURL.lastPathComponent)")
-                        #endif
-                    } catch {
-                        #if DEBUG
-                        print("[AudioRecorder] Cleanup original audio failed: \(error)")
-                        #endif
-                    }
-                }
-                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                #if DEBUG
-                print("[AudioRecorder] Saved and cleaned original; ephemeral flag reset false")
-                #endif
-                // If the audio recorder had any additional temp artefacts on disk for this save, delete them here (none by default)
-            } catch {
-                // Staging failed — keep original files; no further action.
-                #if DEBUG
-                print("[AudioRecorder] Staging failed, keeping original: \(error)")
-                #endif
-            }
-        }
     }
+
 
     func setError(_ message: String) {
         errorMessage = message
