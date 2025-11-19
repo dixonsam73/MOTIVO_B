@@ -1008,21 +1008,20 @@ extension MediaTrimView {
             let end = CMTime(seconds: endTime, preferredTimescale: 600)
             let range = CMTimeRange(start: start, end: end)
 
-            let fileManager = FileManager.default
-            let tmp = fileManager.temporaryDirectory
-            let timestamp = Int(Date().timeIntervalSince1970)
+            let fm = FileManager.default
+            let tmpDir = fm.temporaryDirectory
             let ext = (currentType == .audio) ? "m4a" : "mp4"
-            let outURL = tmp.appendingPathComponent("trimmed-\(timestamp).\(ext)")
-            try? fileManager.removeItem(at: outURL)
+            let tempURL = tmpDir.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
+            // Clean any pre-existing (unlikely)
+            try? fm.removeItem(at: tempURL)
 
-            // Choose preset
+            // Choose preset (unchanged logic)
             var preset = AVAssetExportPresetPassthrough
             if currentType == .audio {
                 if !AVAssetExportSession.exportPresets(compatibleWith: asset).contains(preset) {
                     preset = AVAssetExportPresetAppleM4A
                 }
             } else {
-                // video
                 if !AVAssetExportSession.exportPresets(compatibleWith: asset).contains(preset) {
                     preset = AVAssetExportPresetHighestQuality
                 }
@@ -1034,9 +1033,15 @@ extension MediaTrimView {
                 return
             }
             exporter.timeRange = range
-            exporter.outputURL = outURL
+            exporter.outputURL = tempURL
             exporter.shouldOptimizeForNetworkUse = true
             exporter.outputFileType = currentType == .audio ? .m4a : .mp4
+
+            // Debug
+            if let inputURL = currentURL {
+                print("[Trim] inputURL=\(inputURL.path) size=\(fileSize(at: inputURL))")
+            }
+            print("[Trim] export tempURL=\(tempURL.path)")
 
             let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] t in
                 guard let self else { return }
@@ -1050,15 +1055,62 @@ extension MediaTrimView {
                     guard let self else { return }
                     self.isExporting = false
                     timer.invalidate()
+
+                    func finishWithCleanup(_ urlToReturn: URL?) {
+                        // If returning nil (failure), remove temp
+                        if urlToReturn == nil {
+                            self.removeIfExists(tempURL)
+                        }
+                    }
+
                     switch exporter.status {
                     case .completed:
-                        completion(outURL)
+                        let exportedSize = self.fileSize(at: tempURL)
+                        print("[Trim] export completed tempURL size=\(exportedSize)")
+
+                        switch mode {
+                        case .saveAsNew:
+                            // Caller is expected to move this file into permanent storage and then delete the temp.
+                            completion(tempURL)
+                            // Do not delete temp here; caller owns it now.
+
+                        case .replaceOriginal:
+                            // Replace original path atomically via caller; we will return the tempURL for the caller to adopt/move.
+                            // Log before returning; also ensure that if caller fails, our temp is still cleaned by their path or Step-0A sweep.
+                            let originalURL = self.currentURL
+                            let originalSize = originalURL.map { self.fileSize(at: $0) } ?? 0
+                            print("[Trim] replaceOriginal originalURL=\(originalURL?.path ?? "nil") size=\(originalSize)")
+
+                            completion(tempURL)
+                            // The caller (AttachmentStore.replace) should move tempURL into place and delete the old file and any posters.
+                            // We do not delete tempURL here because it must be moved by the caller. If they move it, the path no longer exists.
+                        }
+
                     case .failed, .cancelled:
+                        print("[Trim] export \(exporter.status == .failed ? "failed" : "cancelled") error=\(exporter.error?.localizedDescription ?? "none")")
                         self.alert = ModelAlert(title: "Export failed", message: exporter.error?.localizedDescription ?? "Unknown error")
+                        finishWithCleanup(nil)
+
                     default:
-                        break
+                        // Unknown state; cleanup temp to be safe
+                        finishWithCleanup(nil)
                     }
                 }
+            }
+        }
+
+        private func fileSize(at url: URL) -> Int64 {
+            let fm = FileManager.default
+            if let attrs = try? fm.attributesOfItem(atPath: url.path), let size = attrs[.size] as? NSNumber {
+                return size.int64Value
+            }
+            return 0
+        }
+
+        private func removeIfExists(_ url: URL) {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: url.path) {
+                try? fm.removeItem(at: url)
             }
         }
     }

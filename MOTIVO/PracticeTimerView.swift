@@ -1201,51 +1201,15 @@ struct PracticeTimerView: View {
                 if let url = surrogateURL(for: item) {
                     MediaTrimView(assetURL: url, mediaType: (item.kind == .audio ? .audio : .video),
                                   onCancel: {
-                                                                            trimItem = nil
+                                      trimItem = nil
                                   },
                                   onSaveAsNew: { newURL in
-                                      if let data = try? Data(contentsOf: newURL) {
-                                          let newID = UUID()
-                                          let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
-                                          if item.kind == .audio {
-                                              stagedAudio.append(newItem)
-                                              if let player = try? AVAudioPlayer(data: data) {
-                                                  audioDurations[newID] = max(0, Int(player.duration.rounded()))
-                                              }
-                                              let title = formattedAutoTitle(from: Date())
-                                              audioAutoTitles[newID] = title
-                                              audioTitles[newID] = title
-                                          } else {
-                                              stagedVideos.append(newItem)
-                                              if let thumb = generateVideoThumbnail(from: data, id: newID) {
-                                                  videoThumbnails[newID] = thumb
-                                              }
-                                          }
-                                          persistStagedAttachments()
-                                      }
-                                                                            trimItem = nil
-                                  },
-                                  onReplaceOriginal: { newURL in
-                                      if let data = try? Data(contentsOf: newURL) {
-                                          if item.kind == .audio {
-                                              if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
-                                                  stagedAudio[idx] = StagedAttachment(id: item.id, data: data, kind: .audio)
-                                                  if let player = try? AVAudioPlayer(data: data) {
-                                                      audioDurations[item.id] = max(0, Int(player.duration.rounded()))
-                                                  }
-                                              }
-                                          } else {
-                                              if let idx = stagedVideos.firstIndex(where: { $0.id == item.id }) {
-                                                  stagedVideos[idx] = StagedAttachment(id: item.id, data: data, kind: .video)
-                                                  if let thumb = generateVideoThumbnail(from: data, id: item.id) {
-                                                      videoThumbnails[item.id] = thumb
-                                                  }
-                                              }
-                                          }
-                                          persistStagedAttachments()
-                                      }
-                                                                            trimItem = nil
-                                  })
+                                      handleTrimSaveAsNew(from: newURL, basedOn: item)
+                                  }
+                                  , onReplaceOriginal: { newURL in
+                                      handleTrimReplaceOriginal(from: newURL, for: item)
+                                  }
+                    )
                     .accessibilityLabel("Trim media")
                     .accessibilityHint("Edit start and end of the clip")
                 } else {
@@ -2574,6 +2538,93 @@ struct PracticeTimerView: View {
         #endif
     }
 
+    // MARK: - Trim helpers (extracted to reduce type-checking complexity)
+    private func handleTrimSaveAsNew(from newURL: URL, basedOn item: StagedAttachment) {
+        if let data = try? Data(contentsOf: newURL) {
+            let newID = UUID()
+            let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
+            if item.kind == .audio {
+                stagedAudio.append(newItem)
+                if let player = try? AVAudioPlayer(data: data) {
+                    audioDurations[newID] = max(0, Int(player.duration.rounded()))
+                }
+                let title = formattedAutoTitle(from: Date())
+                audioAutoTitles[newID] = title
+                audioTitles[newID] = title
+            } else {
+                stagedVideos.append(newItem)
+                if let thumb = generateVideoThumbnail(from: data, id: newID) {
+                    videoThumbnails[newID] = thumb
+                }
+            }
+            persistStagedAttachments()
+            do {
+                try FileManager.default.removeItem(at: newURL)
+                #if DEBUG
+                print("[Trim] onSaveAsNew cleaned temp at \(newURL.path)")
+                #endif
+            } catch {
+                #if DEBUG
+                print("[Trim] onSaveAsNew temp cleanup failed: \(error)")
+                #endif
+            }
+        }
+        trimItem = nil
+    }
+
+    private func handleTrimReplaceOriginal(from newURL: URL, for item: StagedAttachment) {
+        let refs = StagingStore.list()
+        guard let ref = refs.first(where: { $0.id == item.id }) else {
+            try? FileManager.default.removeItem(at: newURL)
+            #if DEBUG
+            print("[Trim] replaceOriginal aborted — missing staging ref; cleaned temp at \(newURL.path)")
+            #endif
+            return
+        }
+        let existingAbsURL = StagingStore.absoluteURL(for: ref)
+        let existingPath = existingAbsURL.path
+        #if DEBUG
+        let origSize = AttachmentStore.fileSize(atPath: existingPath)
+        let tmpSize = AttachmentStore.fileSize(atURL: newURL)
+        print("[Trim] replaceOriginal begin\n  original=\(existingPath) size=\(origSize)\n  temp=\(newURL.path) size=\(tmpSize)")
+        #endif
+        let kind: AttachmentKind = (item.kind == .audio ? .audio : .video)
+        do {
+            let finalPath = try AttachmentStore.replaceAttachmentFile(withTempURL: newURL, forExistingPath: existingPath, kind: kind)
+            let finalURL = URL(fileURLWithPath: finalPath)
+            if let newData = try? Data(contentsOf: finalURL) {
+                if item.kind == .audio {
+                    if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
+                        stagedAudio[idx] = StagedAttachment(id: item.id, data: newData, kind: .audio)
+                    }
+                    if let player = try? AVAudioPlayer(data: newData) {
+                        let secs = max(0, Int(player.duration.rounded()))
+                        audioDurations[item.id] = secs
+                        StagingStore.updateAudioMetadata(id: item.id, title: nil, autoTitle: nil, duration: Double(secs))
+                    }
+                } else {
+                    if let idx = stagedVideos.firstIndex(where: { $0.id == item.id }) {
+                        stagedVideos[idx] = StagedAttachment(id: item.id, data: newData, kind: .video)
+                    }
+                    if let thumb = generateVideoThumbnail(from: newData, id: item.id) {
+                        videoThumbnails[item.id] = thumb
+                    }
+                }
+            }
+            persistStagedAttachments()
+            trimItem = nil
+            #if DEBUG
+            let finalSize = AttachmentStore.fileSize(atPath: finalPath)
+            print("[Trim] replaceOriginal done\n  final=\(finalPath) size=\(finalSize)")
+            #endif
+        } catch {
+            try? FileManager.default.removeItem(at: newURL)
+            #if DEBUG
+            print("[Trim] replaceOriginal failed: \(error). Cleaned temp at \(newURL.path)")
+            #endif
+        }
+    }
+
     // MARK: - App Termination Cleanup
     // Cleanup path for app swipe-away termination; mirrors explicit Quit when ephemeral media exists
     private func handleAppTerminationCleanup() {
@@ -2663,4 +2714,5 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
+
 

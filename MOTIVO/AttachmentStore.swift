@@ -78,6 +78,19 @@ struct AttachmentStore {
         }
     }
 
+    #if DEBUG
+    static func fileSize(atURL url: URL) -> Int64 {
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path), let size = attrs[.size] as? NSNumber {
+            return size.int64Value
+        }
+        return 0
+    }
+
+    static func fileSize(atPath path: String) -> Int64 {
+        return fileSize(atURL: URL(fileURLWithPath: path))
+    }
+    #endif
+
     /// Delete a single attachment file on disk.
     /// - Note: Best-effort, constrained to the app's Documents directory for safety.
     static func deleteAttachmentFile(at url: URL) {
@@ -161,6 +174,84 @@ struct AttachmentStore {
         // (If neither branch applies, PersistenceController's WillSave observer/backfill will still cover it.)
 
         return att
+    }
+
+    // MARK: - Replace / Adopt Temp Export
+
+    /// Atomically replace an existing attachment file with a new exported temp file.
+    /// - Parameters:
+    ///   - tempURL: A file URL in a temporary location (e.g., /tmp) returned by the trimmer/exporter.
+    ///   - existingPath: The current attachment's file path (Documents) to be replaced.
+    ///   - kind: The attachment kind (used to choose extension and poster regeneration for video).
+    /// - Returns: The final path (String) of the adopted file inside Documents.
+    /// - Behavior:
+    ///   1. Moves the temp file into Documents atomically (unique filename if needed).
+    ///   2. Deletes the old/original file.
+    ///   3. Clears any cached poster for the old path and regenerates for the new path (video only).
+    ///   4. Returns the new file path.
+    /// - Notes:
+    ///   - This method is constrained to Documents for safety.
+    static func replaceAttachmentFile(withTempURL tempURL: URL, forExistingPath existingPath: String, kind: AttachmentKind) throws -> String {
+        let fm = FileManager.default
+        let docs = try ensureDocumentsDir()
+
+        // Determine extension from kind, but preserve incoming extension if present.
+        let incomingExt = tempURL.pathExtension
+        let defaultExt: String
+        switch kind {
+        case .audio: defaultExt = incomingExt.isEmpty ? "m4a" : incomingExt
+        case .video: defaultExt = incomingExt.isEmpty ? "mp4" : incomingExt
+        case .image: defaultExt = incomingExt.isEmpty ? "jpg" : incomingExt
+        case .file:  defaultExt = incomingExt.isEmpty ? (tempURL.pathExtension.isEmpty ? "dat" : tempURL.pathExtension) : incomingExt
+        }
+
+        // Target filename: reuse base name from existingPath when possible to avoid churn.
+        let existingURL = URL(fileURLWithPath: existingPath)
+        let base = existingURL.deletingPathExtension().lastPathComponent
+        let candidateName = base.isEmpty ? UUID().uuidString : base
+        let finalFilename = uniqueFilename(base: candidateName, ext: defaultExt, in: docs)
+        let finalURL = docs.appendingPathComponent(finalFilename, isDirectory: false)
+
+        #if DEBUG
+        let originalSize = fileSize(atPath: existingPath)
+        let tempSize = fileSize(atURL: tempURL)
+        print("[AttachmentStore] replace begin\n  original=\(existingPath) size=\(originalSize)\n  temp=\(tempURL.path) size=\(tempSize)\n  final=\(finalURL.path)")
+        #endif
+
+        // Move temp into Documents (atomic move removes tempURL path on success).
+        try fm.moveItem(at: tempURL, to: finalURL)
+
+        // Delete old/original file (best-effort, restricted to Documents).
+        deleteAttachmentFile(atPath: existingPath)
+
+        // Invalidate poster cache for old path and prewarm for new video path.
+        #if canImport(UIKit)
+        if kind == .video {
+            _PosterCache.shared.cache.removeObject(forKey: existingURL.path as NSString)
+            _ = generateVideoPoster(url: finalURL)
+        }
+        #endif
+
+        #if DEBUG
+        let finalSize = fileSize(atURL: finalURL)
+        print("[AttachmentStore] replace done\n  final=\(finalURL.path) size=\(finalSize)")
+        #endif
+
+        return finalURL.path
+    }
+
+    /// Adopt a temp export as a new file in Documents (used for Save-as-New flows).
+    /// - Returns: Final path in Documents.
+    static func adoptTempExport(_ tempURL: URL, suggestedName: String, kind: AttachmentKind) throws -> String {
+        let docs = try ensureDocumentsDir()
+        let ext = tempURL.pathExtension.isEmpty ? (kind == .audio ? "m4a" : kind == .video ? "mp4" : "dat") : tempURL.pathExtension
+        let filename = uniqueFilename(base: suggestedName, ext: ext, in: docs)
+        let finalURL = docs.appendingPathComponent(filename, isDirectory: false)
+        try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        #if canImport(UIKit)
+        if kind == .video { _ = generateVideoPoster(url: finalURL) }
+        #endif
+        return finalURL.path
     }
 
     // MARK: - Helpers
