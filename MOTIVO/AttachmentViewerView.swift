@@ -24,6 +24,28 @@ struct AttachmentViewerView: View {
     @State private var cachedURL: URL? = nil
     @State private var isAnyPlayerActive = false
     @State private var stopAllPlayersToggle = false
+
+    // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
+    @State private var tempFilesToCleanup: Set<URL> = []
+
+    private func registerTemp(_ url: URL?) {
+        guard let url else { return }
+        if url.isFileURL { tempFilesToCleanup.insert(url) }
+    }
+
+    private func cleanupTempFiles() {
+        let fm = FileManager.default
+        for url in tempFilesToCleanup {
+            if fm.fileExists(atPath: url.path) {
+                do { try fm.removeItem(at: url) } catch { /* idempotent: ignore */ }
+                #if DEBUG
+                print("[AttachmentViewer] Removed temp surrogate: \(url.lastPathComponent)")
+                #endif
+            }
+        }
+        tempFilesToCleanup.removeAll()
+    }
+
     var onDelete: ((URL) -> Void)? = nil
     var onFavourite: ((URL) -> Void)? = nil
     var isFavourite: ((URL) -> Bool)? = nil
@@ -204,6 +226,13 @@ struct AttachmentViewerView: View {
                         }
                         .buttonStyle(.plain)
                         .contentShape(Rectangle())
+                        .onAppear {
+                            // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
+                            let tmp = FileManager.default.temporaryDirectory
+                            if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
+                                registerTemp(currentURL)
+                            }
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -226,6 +255,8 @@ struct AttachmentViewerView: View {
             do {
                 try AVAudioSession.sharedInstance().setActive(false, options: [.notifyOthersOnDeactivation])
             } catch { }
+            // Storage Safety: Ensure any temp surrogates created by the viewer are removed on dismiss
+            cleanupTempFiles()
         }
     }
     
