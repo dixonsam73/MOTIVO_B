@@ -658,6 +658,15 @@ struct PracticeTimerView: View {
                                                     // Remove surrogate temp file best-effort
                                                     let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension("mov")
                                                     try? FileManager.default.removeItem(at: tmp)
+
+                                                    // Also remove any stray copies created in Documents by older replace paths
+                                                    if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                                                        let docMov = docs.appendingPathComponent(att.id.uuidString).appendingPathExtension("mov")
+                                                        let docMp4 = docs.appendingPathComponent(att.id.uuidString).appendingPathExtension("mp4")
+                                                        try? FileManager.default.removeItem(at: docMov)
+                                                        try? FileManager.default.removeItem(at: docMp4)
+                                                    }
+
                                                     stagedVideos.removeAll { $0.id == att.id }
                                                     videoThumbnails.removeValue(forKey: att.id)
                                                     persistStagedAttachments()
@@ -2588,10 +2597,17 @@ struct PracticeTimerView: View {
         let tmpSize = AttachmentStore.fileSize(atURL: newURL)
         print("[Trim] replaceOriginal begin\n  original=\(existingPath) size=\(origSize)\n  temp=\(newURL.path) size=\(tmpSize)")
         #endif
-        let kind: AttachmentKind = (item.kind == .audio ? .audio : .video)
-        do {
-            let finalPath = try AttachmentStore.replaceAttachmentFile(withTempURL: newURL, forExistingPath: existingPath, kind: kind)
-            let finalURL = URL(fileURLWithPath: finalPath)
+
+        // Replace in-place at the Staging path to avoid extra copies in Documents
+        let fm = FileManager.default
+        let finalURL = existingAbsURL
+
+        // Remove existing file first (best-effort)
+        _ = try? fm.removeItem(at: finalURL)
+
+        // Move the trimmed temp over the original path atomically
+         do {
+            try fm.moveItem(at: newURL, to: finalURL)
             if let newData = try? Data(contentsOf: finalURL) {
                 if item.kind == .audio {
                     if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
@@ -2614,15 +2630,15 @@ struct PracticeTimerView: View {
             persistStagedAttachments()
             trimItem = nil
             #if DEBUG
-            let finalSize = AttachmentStore.fileSize(atPath: finalPath)
-            print("[Trim] replaceOriginal done\n  final=\(finalPath) size=\(finalSize)")
+            let finalSize = AttachmentStore.fileSize(atPath: finalURL.path)
+            print("[Trim] replaceOriginal done (in-place)\n  final=\(finalURL.path) size=\(finalSize)")
             #endif
-        } catch {
+         } catch {
             try? FileManager.default.removeItem(at: newURL)
             #if DEBUG
-            print("[Trim] replaceOriginal failed: \(error). Cleaned temp at \(newURL.path)")
+            print("[Trim] replaceOriginal failed (in-place): \(error). Cleaned temp at \(newURL.path)")
             #endif
-        }
+         }
     }
 
     // MARK: - App Termination Cleanup
@@ -2714,5 +2730,4 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
-
 

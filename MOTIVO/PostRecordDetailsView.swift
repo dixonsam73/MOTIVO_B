@@ -370,6 +370,8 @@ struct PostRecordDetailsView: View {
                         if !discardIDs.isEmpty {
                             StagingStore.removeMany(ids: discardIDs)
                         }
+                        // Also purge any surrogate temp files created for staged items
+                        purgeStagedTempFiles()
                         onCancel()
                         isPresented = false
                     } label: {
@@ -464,6 +466,9 @@ struct PostRecordDetailsView: View {
                 purgeStagedTempFiles()
             }
             .appBackground()
+            .onDisappear {
+                purgeStagedTempFiles()
+            }
         }
 }
 
@@ -942,6 +947,8 @@ struct PostRecordDetailsView: View {
             if !consumedIDs.isEmpty {
                 StagingStore.removeMany(ids: consumedIDs)
             }
+            // Also purge any surrogate temp files created for staged items
+            purgeStagedTempFiles()
 
             onSaved?()
         } catch {
@@ -1318,6 +1325,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
