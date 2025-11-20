@@ -59,6 +59,10 @@ public struct AvatarEditorView: View {
     @State private var showPhotoPicker = false
     @State private var item: PhotosPickerItem?
     #endif
+
+    #if canImport(UIKit)
+    @State private var showCamera = false
+    #endif
     
     private let onSave: (UIImage) -> Void
     private let onDelete: () -> Void
@@ -137,23 +141,36 @@ public struct AvatarEditorView: View {
             .navigationTitle("Edit Avatar")
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel", action: onCancel)
-                        .accessibilityLabel("Cancel avatar editing")
+                    Button(action: onCancel) {
+                        Image(systemName: "chevron.left")
+                    }
+                    .accessibilityLabel("Back")
                 }
                 ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    // Overflow menu with Replace Photo and Delete
-                    Menu {
-                        #if canImport(PhotosUI)
-                        Button("Replace Photo") { showPhotoPicker = true }
-                        #endif
-                        Button("Delete", role: .destructive) { onDelete() }
+                    #if canImport(UIKit)
+                    Button {
+                        showCamera = true
                     } label: {
-                        Image(systemName: "ellipsis.circle")
+                        Image(systemName: "camera")
                             .imageScale(.large)
-                            .accessibilityLabel("More options")
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.primary)
                     }
+                    .accessibilityLabel("Take photo with camera")
+                    #endif
 
-                    // Primary Save action remains as a button
+                    #if canImport(PhotosUI)
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
+                        Image(systemName: "photo.on.rectangle")
+                            .imageScale(.large)
+                            .symbolRenderingMode(.hierarchical)
+                            .foregroundStyle(.primary)
+                    }
+                    .accessibilityLabel("Choose photo from library")
+                    #endif
+                    
                     Button("Save") {
                         guard let image = workingImage else { return }
                         let effectiveScale = min(max(baseScale, minScale), maxScale)
@@ -180,6 +197,16 @@ public struct AvatarEditorView: View {
                     baseScale = 1.0
                     offset = .zero
                     onReplaceOriginal?(uiImage)
+                }
+            }
+            #endif
+            #if canImport(UIKit)
+            .sheet(isPresented: $showCamera) {
+                CameraCaptureView { image in
+                    workingImage = image
+                    baseScale = 1.0
+                    offset = .zero
+                    onReplaceOriginal?(image)
                 }
             }
             #endif
@@ -236,4 +263,3 @@ private extension Comparable {
         min(max(self, limits.lowerBound), limits.upperBound)
     }
 }
-
