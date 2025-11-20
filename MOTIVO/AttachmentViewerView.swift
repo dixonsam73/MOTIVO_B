@@ -418,6 +418,12 @@ private struct VideoPage: View {
     @State private var isMuted: Bool = false
     @State private var poster: UIImage? = nil
     @State private var playRequested: Bool = false
+
+    // Added state and observers tracking
+    @State private var isPlayingState: Bool = false
+    @State private var rateObserver: NSKeyValueObservation? = nil
+    @State private var endObserver: Any? = nil
+
     var body: some View {
         ZStack {
             ZStack {
@@ -440,7 +446,7 @@ private struct VideoPage: View {
                 }
             }
             .buttonStyle(.plain)
-            .opacity((player?.rate ?? 0) == 0 ? 1 : 0)
+            .opacity(isPlayingState ? 0 : 1)
             .accessibilityLabel("Play video")
 
             // Bottom transport bar (unified)
@@ -493,7 +499,7 @@ private struct VideoPage: View {
                             Circle()
                                 .fill(.thinMaterial)
                                 .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                            Image(systemName: (player?.rate ?? 0) == 0 ? "play.fill" : "pause.fill")
+                            Image(systemName: isPlayingState ? "pause.fill" : "play.fill")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
@@ -538,12 +544,14 @@ private struct VideoPage: View {
             if let player {
                 player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             }
+            stopObservingPlayer()
         }
     }
     private func requestPlay() {
         onRequestStopAll.toggle()
         if player == nil { player = AVPlayer(url: url) }
         guard let player else { return }
+        startObservingPlayerIfNeeded()
         player.isMuted = isMuted
         // Ensure we start/resume playback from the current position consistently
         let current = player.currentTime()
@@ -551,8 +559,15 @@ private struct VideoPage: View {
         player.play()
         isAnyPlayerActive = true
     }
-    private func stop() { player?.pause(); isAnyPlayerActive = false }
-    private func toggleMute() { isMuted.toggle(); player?.isMuted = isMuted }
+    private func stop() {
+        player?.pause()
+        isAnyPlayerActive = false
+        isPlayingState = false
+    }
+    private func toggleMute() {
+        isMuted.toggle()
+        player?.isMuted = isMuted
+    }
     private func generatePoster() async {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -564,8 +579,16 @@ private struct VideoPage: View {
 
     private func togglePlayPause() {
         if player == nil { player = AVPlayer(url: url) }
-        if (player?.rate ?? 0) == 0 { player?.play(); isAnyPlayerActive = true } else { player?.pause(); isAnyPlayerActive = false }
+        startObservingPlayerIfNeeded()
+        if (player?.rate ?? 0) == 0 {
+            player?.play()
+            isAnyPlayerActive = true
+        } else {
+            player?.pause()
+            isAnyPlayerActive = false
+        }
         player?.isMuted = isMuted
+        isPlayingState = ((player?.rate ?? 0) > 0)
     }
     private func seek(by seconds: Double) {
         guard let player else { return }
@@ -577,7 +600,30 @@ private struct VideoPage: View {
 
     private func togglePlayPauseFromBackgroundTap() {
         if player == nil { player = AVPlayer(url: url) }
+        startObservingPlayerIfNeeded()
         togglePlayPause()
+    }
+
+    // Added helper methods for KVO and notifications
+    private func startObservingPlayerIfNeeded() {
+        guard let player else { return }
+        // Observe rate changes to reflect playing/paused state
+        rateObserver = player.observe(\.rate, options: [.initial, .new]) { _, _ in
+            DispatchQueue.main.async {
+                self.isPlayingState = (player.rate > 0)
+            }
+        }
+        // Observe end of item to set state to paused
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
+            self.isPlayingState = false
+        }
+    }
+
+    private func stopObservingPlayer() {
+        rateObserver?.invalidate()
+        rateObserver = nil
+        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        endObserver = nil
     }
 }
 
