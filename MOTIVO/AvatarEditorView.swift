@@ -71,6 +71,7 @@ public struct AvatarEditorView: View {
     public var body: some View {
         NavigationStack {
             VStack {
+                Spacer(minLength: 0)
                 GeometryReader { proxy in
                     let diameter = min(proxy.size.width, proxy.size.height, 280)
                     
@@ -135,8 +136,9 @@ public struct AvatarEditorView: View {
                     }
                 }
                 .frame(height: 320)
-                Spacer()
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
             .safeAreaInset(edge: .top) {
                 HStack {
                     Button(action: onCancel) {
@@ -147,7 +149,7 @@ public struct AvatarEditorView: View {
                                 .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                                .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
                         }
                         .frame(width: 40, height: 40)
                         .contentShape(Circle())
@@ -166,7 +168,7 @@ public struct AvatarEditorView: View {
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "camera")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
                             }
                             .frame(width: 40, height: 40)
                             .contentShape(Circle())
@@ -183,7 +185,7 @@ public struct AvatarEditorView: View {
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "photo.on.rectangle")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
                             }
                             .frame(width: 40, height: 40)
                             .contentShape(Circle())
@@ -211,7 +213,7 @@ public struct AvatarEditorView: View {
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
                             }
                             .frame(width: 40, height: 40)
                             .contentShape(Circle())
@@ -246,6 +248,8 @@ public struct AvatarEditorView: View {
                 }
             }
             #endif
+            .appBackground()
+            .background(Theme.Colors.background(colorScheme).ignoresSafeArea())
         }
     }
     
