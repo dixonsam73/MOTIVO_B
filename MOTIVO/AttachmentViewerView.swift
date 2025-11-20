@@ -424,6 +424,10 @@ private struct VideoPage: View {
     @State private var rateObserver: NSKeyValueObservation? = nil
     @State private var endObserver: Any? = nil
 
+    @State private var overlayTapGuard: Bool = false
+    
+    @State private var ignoreStopBroadcastUntil: Date? = nil
+
     var body: some View {
         ZStack {
             ZStack {
@@ -436,10 +440,20 @@ private struct VideoPage: View {
                 if let player { PlayerContainerView(player: player).onDisappear { player.pause() } }
             }
             .contentShape(Rectangle())
-            .onTapGesture { togglePlayPauseFromBackgroundTap() }
+            .onTapGesture {
+                if overlayTapGuard { return }
+                togglePlayPauseFromBackgroundTap()
+            }
 
             // Play overlay
-            Button(action: { requestPlay() }) {
+            Button(action: {
+                // Guard against simultaneous background tap handling
+                overlayTapGuard = true
+                defer {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { overlayTapGuard = false }
+                }
+                requestPlay()
+            }) {
                 ZStack {
                     Circle().fill(.ultraThinMaterial).frame(width: 56, height: 56)
                     Image(systemName: "play.fill").font(.system(size: 20, weight: .semibold))
@@ -537,7 +551,13 @@ private struct VideoPage: View {
                 )
             }
         }
-        .onChange(of: onRequestStopAll) { _, _ in stop() }
+        .onChange(of: onRequestStopAll) { _, _ in
+            if let until = ignoreStopBroadcastUntil, Date() < until {
+                // Ignore self-originated broadcast
+                return
+            }
+            stop()
+        }
         .onDisappear {
             // Stop playback and reset to start so revisiting begins from the beginning
             stop()
@@ -549,6 +569,7 @@ private struct VideoPage: View {
     }
     private func requestPlay() {
         onRequestStopAll.toggle()
+        ignoreStopBroadcastUntil = Date().addingTimeInterval(0.15)
         if player == nil { player = AVPlayer(url: url) }
         guard let player else { return }
         startObservingPlayerIfNeeded()
@@ -600,8 +621,17 @@ private struct VideoPage: View {
 
     private func togglePlayPauseFromBackgroundTap() {
         if player == nil { player = AVPlayer(url: url) }
-        startObservingPlayerIfNeeded()
-        togglePlayPause()
+        // If currently playing, pause immediately
+        if isPlayingState {
+            togglePlayPause()
+            return
+        }
+        // If paused, defer slightly; if the overlay button handled play, isPlayingState will be true and we won't double-trigger
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+            if !isPlayingState {
+                requestPlay()
+            }
+        }
     }
 
     // Added helper methods for KVO and notifications
@@ -784,4 +814,5 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+
 
