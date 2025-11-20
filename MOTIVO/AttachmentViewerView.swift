@@ -479,6 +479,11 @@ private struct VideoPage: View {
                             get: { min(max(currentTime, 0), duration > 0 ? duration : 0) },
                             set: { newValue in
                                 currentTime = newValue
+                                // Realtime scrubbing: seek player as the slider moves
+                                if let player {
+                                    let cm = CMTime(seconds: max(0, min(newValue, duration)), preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+                                    player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
+                                }
                             }
                         ),
                         in: 0...(duration > 0 ? duration : 1),
