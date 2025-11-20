@@ -101,8 +101,7 @@ struct AttachmentViewerView: View {
                 }
                 .frame(width: proxy.size.width, height: proxy.size.height) // <-- key
                 .contentShape(Rectangle()) // full-area swipe target
-                .tabViewStyle(.page(indexDisplayMode: .automatic))
-                .indexViewStyle(.page(backgroundDisplayMode: .automatic))
+                .tabViewStyle(.page(indexDisplayMode: .never))
                 .allowsHitTesting(isPagerInteractable)
                 .onChange(of: currentIndex) { oldValue, newValue in
                     guard !media.isEmpty else {
@@ -427,7 +426,10 @@ private struct VideoPage: View {
             }
             .task(id: url) { await generatePoster() }
 
-            if let player { VideoPlayer(player: player).onDisappear { player.pause() } }
+            if let player {
+                PlayerContainerView(player: player)
+                    .onDisappear { player.pause() }
+            }
 
             // Play overlay
             Button(action: { requestPlay() }) {
@@ -440,15 +442,65 @@ private struct VideoPage: View {
             .opacity((player?.rate ?? 0) == 0 ? 1 : 0)
             .accessibilityLabel("Play video")
 
-            // Mute toggle (top-right)
-            VStack { HStack { Spacer(); Button(action: { toggleMute() }) { Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle()) }
-                    .buttonStyle(.plain)
+            // Bottom transport bar (unified)
+            VStack(spacing: 8) {
+                Spacer()
+                // Slider row
+                VStack(spacing: 8) {
+                    // Progress slider (visual only; does not alter existing logic)
+                    ProgressView(value: player?.currentItem?.currentTime().seconds ?? 0,
+                                 total: player?.currentItem?.duration.seconds.isFinite == true ? player?.currentItem?.duration.seconds ?? 1 : 1)
+                        .tint(Theme.Colors.accent)
                 }
-                Spacer() }
-            .padding(12)
+                // Transport controls row
+                HStack(spacing: 16) {
+                    // Speaker (mute/unmute)
+                    Button(action: { toggleMute() }) {
+                        Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    // Back 10s
+                    Button(action: { seek(by: -10) }) {
+                        Image(systemName: "gobackward.10")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Play/Pause
+                    Button(action: { togglePlayPause() }) {
+                        Image(systemName: (player?.rate ?? 0) == 0 ? "play.fill" : "pause.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+
+                    // Forward 10s
+                    Button(action: { seek(by: 10) }) {
+                        Image(systemName: "goforward.10")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    // AirPlay
+                    RoutePickerView()
+                        .frame(width: 28, height: 28)
+                }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.m)
+                .background(
+                    Color.clear.cardSurface()
+                        .ignoresSafeArea(edges: .bottom)
+                )
+            }
         }
         .onChange(of: onRequestStopAll) { _, _ in stop() }
         .onDisappear { stop() }
@@ -468,6 +520,74 @@ private struct VideoPage: View {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 DispatchQueue.main.async { self.poster = img; cont.resume() }
             }
+        }
+    }
+
+    private func togglePlayPause() {
+        if player == nil { player = AVPlayer(url: url) }
+        if (player?.rate ?? 0) == 0 { player?.play(); isAnyPlayerActive = true } else { player?.pause(); isAnyPlayerActive = false }
+        player?.isMuted = isMuted
+    }
+    private func seek(by seconds: Double) {
+        guard let player else { return }
+        let current = player.currentTime()
+        let target = CMTimeGetSeconds(current) + seconds
+        let newTime = CMTime(seconds: max(0, target), preferredTimescale: current.timescale)
+        player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+}
+
+private struct RoutePickerView: UIViewRepresentable {
+    func makeUIView(context: Context) -> AVRoutePickerView {
+        let view = AVRoutePickerView()
+        view.prioritizesVideoDevices = true
+        view.tintColor = UIColor.label
+        view.activeTintColor = UIColor.label
+        return view
+    }
+    func updateUIView(_ uiView: AVRoutePickerView, context: Context) {}
+}
+
+private struct PlayerContainerView: UIViewRepresentable {
+    let player: AVPlayer
+
+    func makeUIView(context: Context) -> PlayerView {
+        let v = PlayerView()
+        v.player = player
+        return v
+    }
+
+    func updateUIView(_ uiView: PlayerView, context: Context) {
+        if uiView.player !== player {
+            uiView.player = player
+        }
+    }
+
+    final class PlayerView: UIView {
+        override static var layerClass: AnyClass { AVPlayerLayer.self }
+
+        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+
+        var player: AVPlayer? {
+            get { playerLayer.player }
+            set { playerLayer.player = newValue }
+        }
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            commonInit()
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            commonInit()
+        }
+
+        private func commonInit() {
+            // Match SwiftUI's scaledToFit behavior
+            playerLayer.videoGravity = .resizeAspect
+            // No controls are added here; AVPlayerLayer draws video only
+            backgroundColor = .clear
         }
     }
 }
