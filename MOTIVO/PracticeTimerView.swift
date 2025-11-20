@@ -591,42 +591,40 @@ struct PracticeTimerView: View {
                                 LazyVGrid(columns: columns, spacing: 12) {
                                     ForEach(stagedVideos, id: \.id) { att in
                                         ZStack(alignment: .topTrailing) {
-                                            GeometryReader { geo in
-                                                let side = geo.size.width
-                                                ZStack {
-                                                    if let thumb = videoThumbnails[att.id] {
-                                                        Image(uiImage: thumb)
-                                                            .resizable()
-                                                            .scaledToFill()
-                                                            .frame(width: side, height: side)
-                                                            .clipped()
-                                                    } else {
-                                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                            .fill(Color.secondary.opacity(0.08))
-                                                        Image(systemName: "film")
-                                                            .imageScale(.large)
-                                                            .foregroundStyle(.secondary)
-                                                    }
-                                                    // Center play overlay button
-                                                    Button(action: { playVideo(att.id) }) {
-                                                        ZStack {
-                                                            Circle()
-                                                                .fill(.ultraThinMaterial)
-                                                                .frame(width: 44, height: 44)
-                                                            Image(systemName: "play.fill")
-                                                                .font(.system(size: 18, weight: .semibold))
-                                                                .foregroundStyle(.primary)
-                                                        }
+                                            ZStack {
+                                                if let thumb = videoThumbnails[att.id] {
+                                                    Image(uiImage: thumb)
+                                                        .resizable()
+                                                        .scaledToFill()
+                                                        .frame(width: 128, height: 128)
+                                                        .clipped()
+                                                } else {
+                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                        .fill(Color.secondary.opacity(0.08))
+                                                        .frame(width: 128, height: 128)
+                                                    Image(systemName: "film")
+                                                        .imageScale(.large)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                // Center play overlay button
+                                                Button(action: { playVideo(att.id) }) {
+                                                    ZStack {
+                                                        Circle()
+                                                            .fill(.ultraThinMaterial)
+                                                            .frame(width: 44, height: 44)
+                                                        Image(systemName: "play.fill")
+                                                            .font(.system(size: 18, weight: .semibold))
+                                                            .foregroundStyle(.primary)
                                                     }
                                                 }
-                                                .frame(width: side, height: side)
-                                                .background(Color.secondary.opacity(0.08))
-                                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-                                                )
                                             }
+                                            .frame(width: 128, height: 128)
+                                            .background(Color.secondary.opacity(0.08))
+                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                            )
                                             .contextMenu {
                                                 Button("Trim", systemImage: "scissors") {
                                                     if let url = surrogateURL(for: att) {
@@ -682,7 +680,6 @@ struct PracticeTimerView: View {
                                             }
                                             .padding(6)
                                         }
-                                        .aspectRatio(1, contentMode: .fit)
                                     }
                                 }
                                 .padding(.vertical, 4)

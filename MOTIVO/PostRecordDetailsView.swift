@@ -1307,6 +1307,10 @@ fileprivate struct AttachmentThumbCell: View {
                     placeholder(system: "film")
                         .task(id: resolvedURL) {
                             guard let url = resolvedURL else { return }
+                            // Ensure a temp surrogate exists for the staged video so we can generate a poster
+                            if !FileManager.default.fileExists(atPath: url.path) {
+                                try? att.data.write(to: url, options: .atomic)
+                            }
                             await generatePosterIfNeeded(for: url)
                         }
                 }
@@ -1364,6 +1368,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
