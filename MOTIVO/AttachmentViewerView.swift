@@ -428,6 +428,12 @@ private struct VideoPage: View {
     
     @State private var ignoreStopBroadcastUntil: Date? = nil
 
+    @State private var currentTime: Double = 0
+    @State private var duration: Double = 0
+    @State private var isScrubbing: Bool = false
+    @State private var timeObserverToken: Any? = nil
+    @State private var itemStatusObserver: NSKeyValueObservation? = nil
+
     var body: some View {
         ZStack {
             ZStack {
@@ -468,10 +474,23 @@ private struct VideoPage: View {
                 Spacer()
                 // Slider row
                 VStack(spacing: 8) {
-                    // Progress slider (visual only; does not alter existing logic)
-                    ProgressView(value: player?.currentItem?.currentTime().seconds ?? 0,
-                                 total: player?.currentItem?.duration.seconds.isFinite == true ? player?.currentItem?.duration.seconds ?? 1 : 1)
-                        .tint(Theme.Colors.accent)
+                    Slider(
+                        value: Binding(
+                            get: { min(max(currentTime, 0), duration > 0 ? duration : 0) },
+                            set: { newValue in
+                                currentTime = newValue
+                            }
+                        ),
+                        in: 0...(duration > 0 ? duration : 1),
+                        onEditingChanged: { began in
+                            if began {
+                                isScrubbing = true
+                            } else {
+                                commitSeek()
+                            }
+                        }
+                    )
+                    .tint(Theme.Colors.accent)
                 }
                 // Transport controls row
                 HStack(spacing: 16) {
@@ -564,6 +583,7 @@ private struct VideoPage: View {
             if let player {
                 player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             }
+            removeTimeObservation()
             stopObservingPlayer()
         }
     }
@@ -573,6 +593,11 @@ private struct VideoPage: View {
         if player == nil { player = AVPlayer(url: url) }
         guard let player else { return }
         startObservingPlayerIfNeeded()
+        setupTimeObservationIfNeeded()
+        if let item = player.currentItem {
+            let dur = item.duration.seconds
+            if dur.isFinite && dur > 0 { duration = dur }
+        }
         player.isMuted = isMuted
         // Ensure we start/resume playback from the current position consistently
         let current = player.currentTime()
@@ -601,6 +626,7 @@ private struct VideoPage: View {
     private func togglePlayPause() {
         if player == nil { player = AVPlayer(url: url) }
         startObservingPlayerIfNeeded()
+        setupTimeObservationIfNeeded()
         if (player?.rate ?? 0) == 0 {
             player?.play()
             isAnyPlayerActive = true
@@ -617,10 +643,13 @@ private struct VideoPage: View {
         let target = CMTimeGetSeconds(current) + seconds
         let newTime = CMTime(seconds: max(0, target), preferredTimescale: current.timescale)
         player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero)
+        currentTime = CMTimeGetSeconds(newTime)
     }
 
     private func togglePlayPauseFromBackgroundTap() {
         if player == nil { player = AVPlayer(url: url) }
+        startObservingPlayerIfNeeded()
+        setupTimeObservationIfNeeded()
         // If currently playing, pause immediately
         if isPlayingState {
             togglePlayPause()
@@ -647,13 +676,54 @@ private struct VideoPage: View {
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
             self.isPlayingState = false
         }
+        if let item = player.currentItem {
+            itemStatusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
+                if item.status == .readyToPlay {
+                    let dur = item.duration.seconds
+                    if dur.isFinite && dur > 0 {
+                        DispatchQueue.main.async { self.duration = dur }
+                    }
+                }
+            }
+        }
     }
 
     private func stopObservingPlayer() {
         rateObserver?.invalidate()
         rateObserver = nil
+        itemStatusObserver?.invalidate()
+        itemStatusObserver = nil
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
+    }
+    
+    private func setupTimeObservationIfNeeded() {
+        guard timeObserverToken == nil, let player else { return }
+        // Update roughly every 0.1s
+        let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+            let seconds = CMTimeGetSeconds(time)
+            if !isScrubbing { currentTime = seconds }
+            if let item = player.currentItem {
+                let dur = item.duration.seconds
+                if dur.isFinite && dur > 0 { duration = dur }
+            }
+        }
+    }
+
+    private func removeTimeObservation() {
+        if let token = timeObserverToken, let player {
+            player.removeTimeObserver(token)
+        }
+        timeObserverToken = nil
+    }
+    
+    private func commitSeek() {
+        guard let player else { return }
+        isScrubbing = false
+        let target = max(0, min(currentTime, duration))
+        let cm = CMTime(seconds: target, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 }
 
@@ -814,5 +884,4 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
-
 
