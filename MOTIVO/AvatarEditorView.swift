@@ -50,6 +50,7 @@ public struct AvatarEditorView: View {
 
     // Layout tracking
     @State private var editorDiameter: CGFloat = 280
+    @Environment(\.colorScheme) private var colorScheme
     private let placeholderInitials: String?
 
     private let minScale: CGFloat = 1.0
@@ -60,9 +61,7 @@ public struct AvatarEditorView: View {
     @State private var item: PhotosPickerItem?
     #endif
 
-    #if canImport(UIKit)
     @State private var showCamera = false
-    #endif
     
     private let onSave: (UIImage) -> Void
     private let onDelete: () -> Void
@@ -138,55 +137,92 @@ public struct AvatarEditorView: View {
                 .frame(height: 320)
                 Spacer()
             }
-            .navigationTitle("Edit Avatar")
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
+            .safeAreaInset(edge: .top) {
+                HStack {
                     Button(action: onCancel) {
-                        Image(systemName: "chevron.left")
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                            Image(systemName: "chevron.left")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
                     }
+                    .buttonStyle(.plain)
                     .accessibilityLabel("Back")
-                }
-                ToolbarItemGroup(placement: .navigationBarTrailing) {
-                    #if canImport(UIKit)
-                    Button {
-                        showCamera = true
-                    } label: {
-                        Image(systemName: "camera")
-                            .imageScale(.large)
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.primary)
-                    }
-                    .accessibilityLabel("Take photo with camera")
-                    #endif
 
-                    #if canImport(PhotosUI)
-                    Button {
-                        showPhotoPicker = true
-                    } label: {
-                        Image(systemName: "photo.on.rectangle")
-                            .imageScale(.large)
-                            .symbolRenderingMode(.hierarchical)
-                            .foregroundStyle(.primary)
+                    Spacer()
+
+                    HStack(spacing: Theme.Spacing.l) {
+                        Button { showCamera = true } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                Image(systemName: "camera")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            }
+                            .frame(width: 40, height: 40)
+                            .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Take photo with camera")
+
+                        #if canImport(PhotosUI)
+                        Button { showPhotoPicker = true } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                Image(systemName: "photo.on.rectangle")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            }
+                            .frame(width: 40, height: 40)
+                            .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Choose photo from library")
+                        #endif
+
+                        Button {
+                            guard let image = workingImage else { return }
+                            let effectiveScale = min(max(baseScale, minScale), maxScale)
+                            let cropped = renderCroppedCircle(
+                                from: image,
+                                outputSize: 512,
+                                editorDiameter: editorDiameter,
+                                scale: effectiveScale,
+                                offset: offset
+                            )
+                            onSave(cropped)
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                Image(systemName: "checkmark")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                            }
+                            .frame(width: 40, height: 40)
+                            .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Save avatar photo")
                     }
-                    .accessibilityLabel("Choose photo from library")
-                    #endif
-                    
-                    Button("Save") {
-                        guard let image = workingImage else { return }
-                        let effectiveScale = min(max(baseScale, minScale), maxScale)
-                        let cropped = renderCroppedCircle(
-                            from: image,
-                            outputSize: 512,
-                            editorDiameter: editorDiameter,
-                            scale: effectiveScale,
-                            offset: offset
-                        )
-                        onSave(cropped)
-                    }
-                    .accessibilityLabel("Save avatar photo")
-                    .bold()
                 }
-            }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
+             }
             #if canImport(PhotosUI)
             .photosPicker(isPresented: $showPhotoPicker, selection: $item, matching: .images)
             .task(id: item) {
