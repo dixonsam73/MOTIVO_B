@@ -6,6 +6,12 @@ import PhotosUI
 import UIKit
 #endif
 
+private enum TopButtonsUI {
+    static let size: CGFloat = 40
+    static let fillOpacityLight: CGFloat = 0.96
+    static let fillOpacityDark: CGFloat = 0.88
+}
+
 fileprivate struct InitialsCircleView: View {
     let initials: String
     let diameter: CGFloat
@@ -145,13 +151,13 @@ public struct AvatarEditorView: View {
                         ZStack {
                             Circle()
                                 .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                 .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .frame(width: 40, height: 40)
+                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                         .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
@@ -164,13 +170,13 @@ public struct AvatarEditorView: View {
                             ZStack {
                                 Circle()
                                     .fill(.thinMaterial)
-                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "camera")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            .frame(width: 40, height: 40)
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                             .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
@@ -181,13 +187,13 @@ public struct AvatarEditorView: View {
                             ZStack {
                                 Circle()
                                     .fill(.thinMaterial)
-                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "photo.on.rectangle")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            .frame(width: 40, height: 40)
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                             .contentShape(Circle())
                         }
                         .buttonStyle(.plain)
@@ -209,13 +215,13 @@ public struct AvatarEditorView: View {
                             ZStack {
                                 Circle()
                                     .fill(.thinMaterial)
-                                    .opacity(colorScheme == .dark ? 0.88 : 0.96)
+                                    .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                     .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
                                 Image(systemName: "checkmark")
                                     .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            .frame(width: 40, height: 40)
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                             .contentShape(Circle())
                         }
                         .buttonStyle(.plain)

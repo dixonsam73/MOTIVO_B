@@ -2,18 +2,19 @@ import SwiftUI
 import AVKit
 import AVFoundation
 
-private final class _ImageCache {
-    static let shared = _ImageCache()
-    let cache = NSCache<NSURL, UIImage>()
-    private init() {}
-}
-
 struct AttachmentViewerView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let topButtonSize: CGFloat = 40
+    private let fillOpacityLight: CGFloat = 0.96
+    private let fillOpacityDark: CGFloat = 0.88
+    private let headerSpacing: CGFloat = Theme.Spacing.l
+
     let imageURLs: [URL]
     let videoURLs: [URL]
     let audioURLs: [URL]
     @State var startIndex: Int
-    var themeBackground: Color = Color(.systemBackground) // dynamic light/dark
+    var themeBackground: Color = Color.clear // inherits app background
 
     @Environment(\.dismiss) private var dismiss
     @State private var currentIndex: Int = 0
@@ -56,7 +57,7 @@ struct AttachmentViewerView: View {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
     }
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color(.systemBackground), videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil) {
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color.clear, videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil) {
         self.imageURLs = imageURLs
         self.videoURLs = videoURLs
         self.audioURLs = audioURLs
@@ -87,14 +88,13 @@ struct AttachmentViewerView: View {
 
     var body: some View {
         ZStack {
-            themeBackground.ignoresSafeArea()
+            Color.clear.appBackground().ignoresSafeArea()
 
             GeometryReader { proxy in
                 TabView(selection: $currentIndex) {
                     ForEach(media.indices, id: \.self) { i in
                         MediaPage(attachment: media[i], isAnyPlayerActive: $isAnyPlayerActive, onRequestStopAll: $stopAllPlayersToggle, background: themeBackground)
                             .frame(width: proxy.size.width, height: proxy.size.height)
-                            .background(Color.clear)
                             .clipped()
                             .tag(i)
                     }
@@ -161,10 +161,17 @@ struct AttachmentViewerView: View {
                         stopAllPlayersToggle.toggle()
                         dismiss()
                     } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 17, weight: .semibold))
-                            .padding(10)
-                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: topButtonSize, height: topButtonSize)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
@@ -176,67 +183,97 @@ struct AttachmentViewerView: View {
                         let isFav = (isFavourite?(currentURL) ?? false)
                         let isPriv = localIsPrivate
 
-                        Button {
-                            let url = currentURL
-                            let priv = isPrivate?(url) ?? false
-                            onFavourite?(url)
-                            if !priv { /* presenter enforces single-thumbnail rule */ }
-                        } label: {
-                            Image(systemName: isFav ? "star.fill" : "star")
-                                .font(.system(size: 17, weight: .semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
+                        HStack(spacing: headerSpacing) {
+                            Button {
+                                let url = currentURL
+                                let priv = isPrivate?(url) ?? false
+                                onFavourite?(url)
+                                if !priv { /* presenter enforces single-thumbnail rule */ }
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                    Image(systemName: isFav ? "star.fill" : "star")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
 
-                        Button {
-                            let url = currentURL
-                            // Optimistic UI update – no rebuild, no flash
-                            localIsPrivate.toggle()
-                            onTogglePrivacy?(url)
-                        } label: {
-                            Image(systemName: isPriv ? "eye.slash" : "eye")
-                                .font(.system(size: 17, weight: .semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(isPriv ? "Make attachment visible to others" : "Hide attachment from others")
+                            Button {
+                                let url = currentURL
+                                // Optimistic UI update – no rebuild, no flash
+                                localIsPrivate.toggle()
+                                onTogglePrivacy?(url)
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                    Image(systemName: isPriv ? "eye.slash" : "eye")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(isPriv ? "Make attachment visible to others" : "Hide attachment from others")
 
-                        Button {
-                            let url = currentURL
-                            onDelete?(url)
-                            stopAllPlayersToggle.toggle()
-                            dismiss()
-                        } label: {
-                            Image(systemName: "trash")
-                                .font(.system(size: 17, weight: .semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Delete attachment")
+                            Button {
+                                let url = currentURL
+                                onDelete?(url)
+                                stopAllPlayersToggle.toggle()
+                                dismiss()
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Delete attachment")
 
-                        ShareLink(item: currentURL) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 17, weight: .semibold))
-                                .padding(10)
-                                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
-                        }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-                        .onAppear {
-                            // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
-                            let tmp = FileManager.default.temporaryDirectory
-                            if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
-                                registerTemp(currentURL)
+                            ShareLink(item: currentURL) {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                    Image(systemName: "square.and.arrow.up")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .onAppear {
+                                // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
+                                let tmp = FileManager.default.temporaryDirectory
+                                if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
+                                    registerTemp(currentURL)
+                                }
                             }
                         }
                     }
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 16)
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
 
                 Spacer()
             }
@@ -278,10 +315,16 @@ struct AttachmentViewerView: View {
     }
 }
 
+private final class _ImageCache {
+    static let shared = _ImageCache()
+    let cache = NSCache<NSURL, UIImage>()
+    private init() {}
+}
+
 // MARK: - Async URL Image Loader (no blocking on main)
 private struct URLImageView: View {
     let url: URL
-    var background: Color = Color(.systemBackground)
+    var background: Color = Color.clear
     @State private var uiImage: UIImage?
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>? = nil
@@ -307,7 +350,7 @@ private struct URLImageView: View {
             loadTask?.cancel()
             loadTask = nil
         }
-        .background(background)
+        .background(Color.clear)
         .ignoresSafeArea()
     }
 
