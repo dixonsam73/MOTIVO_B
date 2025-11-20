@@ -63,6 +63,13 @@ struct PostRecordDetailsView: View {
     private let draftNotesKey = "PostRecordDetailsView.draft.notes"
     private let draftFocusKey = "PostRecordDetailsView.draft.focusDot"
 
+    private let sessionIDKey = "PracticeTimer.currentSessionID"
+    private let lastSeenSessionIDKey = "PostRecordDetailsView.lastSeenSessionID"
+
+    private func currentSessionID() -> String? {
+        UserDefaults.standard.string(forKey: sessionIDKey)
+    }
+
     // v7.9E — State circles (neutral greys)
     private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
 
@@ -376,6 +383,8 @@ struct PostRecordDetailsView: View {
                         // Also purge any surrogate temp files created for staged items
                         purgeStagedTempFiles()
                         onCancel()
+                        // Update last seen session ID on cancel to prevent re-clearing within same session
+                        if let cur = currentSessionID() { UserDefaults.standard.set(cur, forKey: lastSeenSessionIDKey) }
                         isPresented = false
                     } label: {
                         Image(systemName: "chevron.left")
@@ -429,6 +438,19 @@ struct PostRecordDetailsView: View {
                         UserDefaults.standard.set(dict, forKey: key)
                     }
                 }
+
+                // Clear Notes and Focus when entering from a fresh PracticeTimer session
+                let ud = UserDefaults.standard
+                let currentID = currentSessionID()
+                let lastSeen = ud.string(forKey: lastSeenSessionIDKey)
+                if currentID != nil && currentID != lastSeen {
+                    // New session detected: clear persisted draft and local state
+                    notes = ""
+                    selectedDotIndex = nil
+                    clearDraft()
+                    ud.set(currentID, forKey: lastSeenSessionIDKey)
+                }
+
                 preselectFocusFromNotesIfNeeded()
                 loadDraftIfAvailable()
                 instruments = fetchInstruments()
@@ -480,9 +502,17 @@ struct PostRecordDetailsView: View {
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
                 purgeStagedTempFiles()
             }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.willTerminateNotification)) { _ in
+                clearDraft()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+                // Do not clear drafts on background; preserve in-session state when user switches apps
+            }
             .appBackground()
             .onDisappear {
                 purgeStagedTempFiles()
+                // Keep last seen session ID in sync on disappear (non-destructive)
+                if let cur = currentSessionID() { UserDefaults.standard.set(cur, forKey: lastSeenSessionIDKey) }
             }
         }
     }
@@ -990,6 +1020,12 @@ struct PostRecordDetailsView: View {
 
             onSaved?()
             clearDraft()
+            // Mark this session ID as seen so reopening within the same session doesn't clear again
+            if let cur = currentSessionID() { UserDefaults.standard.set(cur, forKey: lastSeenSessionIDKey) }
+
+            // Reset local fields after save so next fresh session starts blank
+            notes = ""
+            selectedDotIndex = nil
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
             let fm = FileManager.default
@@ -1368,14 +1404,6 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
-
-
-
-
-
-
 
 
 

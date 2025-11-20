@@ -125,6 +125,7 @@ struct PracticeTimerView: View {
 
     // Ephemeral media flag key added as per instructions
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
+    private let currentSessionIDKey = "PracticeTimer.currentSessionID"
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
@@ -727,6 +728,7 @@ struct PracticeTimerView: View {
                     clearPersistedTimer()
                     resetUIOnly()
                     UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                     UserDefaults.standard.set(currentBootID, forKey: sessionBootIDKey)
                 }
 
@@ -748,6 +750,7 @@ struct PracticeTimerView: View {
                     selectedThumbnailID = nil
                     clearPersistedTimer()
                     resetUIOnly()
+                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                     UserDefaults.standard.set(true, forKey: sessionActiveKey)
                 }
 
@@ -791,6 +794,7 @@ struct PracticeTimerView: View {
                     clearAllStagingStoreRefs()
                     UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
                     UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                 }
 
                 // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
@@ -918,6 +922,7 @@ struct PracticeTimerView: View {
                         clearAllStagingStoreRefs()
                         UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
                         UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                         clearPersistedTasks()
                         clearPersistedTimer()
                         resetUIOnly()
@@ -1081,6 +1086,7 @@ struct PracticeTimerView: View {
                         selectedThumbnailID = nil
                         UserDefaults.standard.set(false, forKey: sessionActiveKey)
                         UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                         isPresented = false
                     },
                     onCancel: { didCancelFromReview = true }
@@ -1115,6 +1121,7 @@ struct PracticeTimerView: View {
                         StagingStore.deleteFiles(for: refsToDelete)
                         purgeStagedTempFiles()
                         UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                     }
                     didCancelFromReview = false
                 }
@@ -1469,6 +1476,11 @@ struct PracticeTimerView: View {
     // MARK: - Background-safe timer controls
     private func start() {
         UserDefaults.standard.set(true, forKey: sessionActiveKey)
+        // Seed a new session ID when starting a fresh session so PostRecordDetailsView can clear its drafts
+        let ud = UserDefaults.standard
+        if ud.string(forKey: currentSessionIDKey) == nil {
+            ud.set(UUID().uuidString, forKey: currentSessionIDKey)
+        }
         guard instrument != nil else { return }
         if !isRunning {
             if startDate == nil { startDate = Date() }
@@ -1499,6 +1511,7 @@ struct PracticeTimerView: View {
         clearPersistedStagedAttachments()
         clearPersistedTasks()
         resetUIOnly()
+        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
     }
 
     private func finish() {
@@ -2670,6 +2683,7 @@ struct PracticeTimerView: View {
         clearAllStagingStoreRefs()
         UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
         UserDefaults.standard.set(false, forKey: sessionActiveKey)
+        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
         clearPersistedTasks()
         clearPersistedTimer()
         resetUIOnly()
