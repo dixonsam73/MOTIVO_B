@@ -112,8 +112,13 @@ struct PracticeTimerView: View {
     @State private var showVideoRecorder: Bool = false
     @State private var stagedVideos: [StagedAttachment] = []
     @State private var videoThumbnails: [UUID: UIImage] = [:]
-    @State private var showVideoPlayer: Bool = false
-    @State private var videoPlayerItem: AVPlayer? = nil
+    // Remove old video player state:
+    // @State private var showVideoPlayer: Bool = false
+    // @State private var videoPlayerItem: AVPlayer? = nil
+
+    // Attachment viewer routing state
+    @State private var showAttachmentViewer: Bool = false
+    @State private var attachmentViewerTappedURL: URL? = nil
 
     // Add trimming state for audio/video clips
     @State private var trimItem: StagedAttachment? = nil
@@ -1182,6 +1187,8 @@ struct PracticeTimerView: View {
                     stageImage(image)
                 }
             }
+            // Removed old VideoPlayer sheet entirely (per instructions)
+            /*
             .sheet(isPresented: $showVideoPlayer, onDismiss: {
                 videoPlayerItem?.pause()
                 videoPlayerItem = nil
@@ -1194,6 +1201,45 @@ struct PracticeTimerView: View {
                     Text("Unable to play video")
                         .padding()
                 }
+            }
+            */
+            .fullScreenCover(isPresented: $showAttachmentViewer) {
+                // Build media URLs from staged items written to temp surrogates
+                let imageURLs: [URL] = stagedImages.map { img in
+                    let u = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(img.id.uuidString)
+                        .appendingPathExtension("jpg")
+                    // Best-effort write (idempotent)
+                    _ = try? img.data.write(to: u, options: .atomic)
+                    return u
+                }
+                let videoURLs: [URL] = stagedVideos.map { vid in
+                    let u = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(vid.id.uuidString)
+                        .appendingPathExtension("mov")
+                    _ = try? vid.data.write(to: u, options: .atomic)
+                    return u
+                }
+                let audioURLs: [URL] = stagedAudio.map { aud in
+                    let u = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(aud.id.uuidString)
+                        .appendingPathExtension("m4a")
+                    _ = try? aud.data.write(to: u, options: .atomic)
+                    return u
+                }
+                // Compute start index from tapped URL within combined order [images, videos, audios]
+                let combined: [URL] = imageURLs + videoURLs + audioURLs
+                let startIndex: Int = {
+                    guard let tapped = attachmentViewerTappedURL, let idx = combined.firstIndex(of: tapped) else { return 0 }
+                    return idx
+                }()
+                AttachmentViewerView(
+                    imageURLs: imageURLs,
+                    startIndex: startIndex,
+                    themeBackground: Color(.systemBackground),
+                    videoURLs: videoURLs,
+                    audioURLs: audioURLs
+                )
             }
             .alert("Camera access denied",
                    isPresented: $showCameraDeniedAlert,
@@ -2189,14 +2235,14 @@ struct PracticeTimerView: View {
     // Prepare and present a video player for a given staged video ID
     private func playVideo(_ id: UUID) {
         guard let att = stagedVideos.first(where: { $0.id == id }) else { return }
-        // Write data to a temp file for AVPlayer
+        // Ensure a temp surrogate exists for AttachmentViewerView
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
         do {
             try att.data.write(to: url, options: .atomic)
-            videoPlayerItem = AVPlayer(url: url)
-            showVideoPlayer = true
+            attachmentViewerTappedURL = url
+            showAttachmentViewer = true
         } catch {
-            print("Failed to prepare video for playback: \(error)")
+            print("Failed to prepare video for viewer: \(error)")
         }
     }
 
