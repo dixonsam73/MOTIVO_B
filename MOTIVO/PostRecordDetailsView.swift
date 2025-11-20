@@ -60,6 +60,9 @@ struct PostRecordDetailsView: View {
 
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
+    private let draftNotesKey = "PostRecordDetailsView.draft.notes"
+    private let draftFocusKey = "PostRecordDetailsView.draft.focusDot"
+
     // v7.9E — State circles (neutral greys)
     private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
 
@@ -427,6 +430,7 @@ struct PostRecordDetailsView: View {
                     }
                 }
                 preselectFocusFromNotesIfNeeded()
+                loadDraftIfAvailable()
                 instruments = fetchInstruments()
                 if instrument == nil {
                     if let primaryName = fetchPrimaryInstrumentName(),
@@ -451,12 +455,23 @@ struct PostRecordDetailsView: View {
                 }
                 loadUserActivities()
                 syncActivityChoiceFromState()
+                loadDraftIfAvailable()
             }
             .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
             .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
             .onChange(of: activityDetail) { old, new in
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            }
+            .onChange(of: notes) { _, new in
+                UserDefaults.standard.set(new, forKey: draftNotesKey)
+            }
+            .onChange(of: selectedDotIndex) { _, new in
+                if let v = new {
+                    UserDefaults.standard.set(v, forKey: draftFocusKey)
+                } else {
+                    UserDefaults.standard.removeObject(forKey: draftFocusKey)
+                }
             }
             .onAppear { loadPrivacyMap() }
             .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
@@ -470,7 +485,30 @@ struct PostRecordDetailsView: View {
                 purgeStagedTempFiles()
             }
         }
-}
+    }
+
+    // MARK: - Draft helpers
+
+    private func loadDraftIfAvailable() {
+        let ud = UserDefaults.standard
+        if let draft = ud.string(forKey: draftNotesKey) {
+            if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                notes = draft
+            }
+        }
+        if selectedDotIndex == nil, ud.object(forKey: draftFocusKey) != nil {
+            let v = ud.integer(forKey: draftFocusKey)
+            if (0...11).contains(v) {
+                selectedDotIndex = v
+            }
+        }
+    }
+
+    private func clearDraft() {
+        let ud = UserDefaults.standard
+        ud.removeObject(forKey: draftNotesKey)
+        ud.removeObject(forKey: draftFocusKey)
+    }
 
     // MARK: - Subviews
 
@@ -951,6 +989,7 @@ struct PostRecordDetailsView: View {
             purgeStagedTempFiles()
 
             onSaved?()
+            clearDraft()
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
             let fm = FileManager.default
@@ -1325,6 +1364,9 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
 
 
