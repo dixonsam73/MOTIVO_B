@@ -1204,35 +1204,21 @@ struct PracticeTimerView: View {
             }
             */
             .fullScreenCover(isPresented: $showAttachmentViewer) {
-                // Build media URLs from staged items written to temp surrogates
-                let imageURLs: [URL] = stagedImages.map { img in
-                    let u = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(img.id.uuidString)
-                        .appendingPathExtension("jpg")
-                    // Best-effort write (idempotent)
-                    _ = try? img.data.write(to: u, options: .atomic)
-                    return u
-                }
-                let videoURLs: [URL] = stagedVideos.map { vid in
-                    let u = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(vid.id.uuidString)
-                        .appendingPathExtension("mov")
-                    _ = try? vid.data.write(to: u, options: .atomic)
-                    return u
-                }
-                let audioURLs: [URL] = stagedAudio.map { aud in
-                    let u = FileManager.default.temporaryDirectory
-                        .appendingPathComponent(aud.id.uuidString)
-                        .appendingPathExtension("m4a")
-                    _ = try? aud.data.write(to: u, options: .atomic)
-                    return u
-                }
-                // Compute start index from tapped URL within combined order [images, videos, audios]
-                let combined: [URL] = imageURLs + videoURLs + audioURLs
-                let startIndex: Int = {
-                    guard let tapped = attachmentViewerTappedURL, let idx = combined.firstIndex(of: tapped) else { return 0 }
-                    return idx
+                // Build media URLs for the viewer. For this page, only launch the viewer for a single tapped video.
+                let imageURLs: [URL] = []
+                let audioURLs: [URL] = []
+                let videoURLs: [URL] = {
+                    // attachmentViewerTappedURL is set in playVideo(_:) to a .mov surrogate
+                    if let tapped = attachmentViewerTappedURL, tapped.pathExtension.lowercased() == "mov" {
+                        // Ensure the surrogate exists (best-effort rewrite already performed in playVideo)
+                        return [tapped]
+                    } else {
+                        return []
+                    }
                 }()
+
+                let startIndex: Int = 0
+
                 AttachmentViewerView(
                     imageURLs: imageURLs,
                     startIndex: startIndex,
