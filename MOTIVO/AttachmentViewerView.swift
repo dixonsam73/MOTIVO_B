@@ -420,16 +420,17 @@ private struct VideoPage: View {
     @State private var playRequested: Bool = false
     var body: some View {
         ZStack {
-            Group {
-                if let poster { Image(uiImage: poster).resizable().scaledToFit() }
-                else { Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary) }
-            }
-            .task(id: url) { await generatePoster() }
+            ZStack {
+                Group {
+                    if let poster { Image(uiImage: poster).resizable().scaledToFit() }
+                    else { Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary) }
+                }
+                .task(id: url) { await generatePoster() }
 
-            if let player {
-                PlayerContainerView(player: player)
-                    .onDisappear { player.pause() }
+                if let player { PlayerContainerView(player: player).onDisappear { player.pause() } }
             }
+            .contentShape(Rectangle())
+            .onTapGesture { togglePlayPauseFromBackgroundTap() }
 
             // Play overlay
             Button(action: { requestPlay() }) {
@@ -456,9 +457,16 @@ private struct VideoPage: View {
                 HStack(spacing: 16) {
                     // Speaker (mute/unmute)
                     Button(action: { toggleMute() }) {
-                        Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
 
@@ -466,25 +474,46 @@ private struct VideoPage: View {
 
                     // Back 10s
                     Button(action: { seek(by: -10) }) {
-                        Image(systemName: "gobackward.10")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: "gobackward.10")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
 
                     // Play/Pause
                     Button(action: { togglePlayPause() }) {
-                        Image(systemName: (player?.rate ?? 0) == 0 ? "play.fill" : "pause.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: (player?.rate ?? 0) == 0 ? "play.fill" : "pause.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
 
                     // Forward 10s
                     Button(action: { seek(by: 10) }) {
-                        Image(systemName: "goforward.10")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: "goforward.10")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
                     }
                     .buttonStyle(.plain)
 
@@ -503,13 +532,23 @@ private struct VideoPage: View {
             }
         }
         .onChange(of: onRequestStopAll) { _, _ in stop() }
-        .onDisappear { stop() }
+        .onDisappear {
+            // Stop playback and reset to start so revisiting begins from the beginning
+            stop()
+            if let player {
+                player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
+            }
+        }
     }
     private func requestPlay() {
         onRequestStopAll.toggle()
         if player == nil { player = AVPlayer(url: url) }
-        player?.isMuted = isMuted
-        player?.play()
+        guard let player else { return }
+        player.isMuted = isMuted
+        // Ensure we start/resume playback from the current position consistently
+        let current = player.currentTime()
+        player.seek(to: current, toleranceBefore: .zero, toleranceAfter: .zero)
+        player.play()
         isAnyPlayerActive = true
     }
     private func stop() { player?.pause(); isAnyPlayerActive = false }
@@ -534,6 +573,11 @@ private struct VideoPage: View {
         let target = CMTimeGetSeconds(current) + seconds
         let newTime = CMTime(seconds: max(0, target), preferredTimescale: current.timescale)
         player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
+    private func togglePlayPauseFromBackgroundTap() {
+        if player == nil { player = AVPlayer(url: url) }
+        togglePlayPause()
     }
 }
 
