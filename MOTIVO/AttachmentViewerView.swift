@@ -11,8 +11,8 @@ struct AttachmentViewerView: View {
     private let headerSpacing: CGFloat = Theme.Spacing.l
 
     let imageURLs: [URL]
-    let videoURLs: [URL]
-    let audioURLs: [URL]
+    @State var videoURLs: [URL]
+    @State var audioURLs: [URL]
     @State var startIndex: Int
     var themeBackground: Color = Color.clear // inherits app background
 
@@ -25,6 +25,10 @@ struct AttachmentViewerView: View {
     @State private var cachedURL: URL? = nil
     @State private var isAnyPlayerActive = false
     @State private var stopAllPlayersToggle = false
+    @State private var isShowingTrimmer: Bool = false
+    @State private var trimURL: URL? = nil
+    @State private var trimKind: MediaKind? = nil
+    @State private var mediaMutationTick: Int = 0
 
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
     @State private var tempFilesToCleanup: Set<URL> = []
@@ -52,15 +56,17 @@ struct AttachmentViewerView: View {
     var isFavourite: ((URL) -> Bool)? = nil
     var onTogglePrivacy: ((URL) -> Void)? = nil
     var isPrivate: ((URL) -> Bool)? = nil
+    var onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil
+    var onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil
 
     private func currentURL() -> URL? {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
     }
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color.clear, videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil) {
+    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color.clear, videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil, onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil, onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil) {
         self.imageURLs = imageURLs
-        self.videoURLs = videoURLs
-        self.audioURLs = audioURLs
+        self._videoURLs = State(initialValue: videoURLs)
+        self._audioURLs = State(initialValue: audioURLs)
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
@@ -69,9 +75,12 @@ struct AttachmentViewerView: View {
         self.isFavourite = isFavourite
         self.onTogglePrivacy = onTogglePrivacy
         self.isPrivate = isPrivate
+        self.onReplaceAttachment = onReplaceAttachment
+        self.onSaveAsNewAttachment = onSaveAsNewAttachment
     }
 
     enum MediaKind { case image, video, audio }
+    enum ViewerAttachmentKind { case image, video, audio }
     struct MediaAttachment: Identifiable {
         let id = UUID()
         let kind: MediaKind
@@ -84,6 +93,14 @@ struct AttachmentViewerView: View {
         items.append(contentsOf: videoURLs.map { MediaAttachment(kind: .video, url: $0) })
         items.append(contentsOf: audioURLs.map { MediaAttachment(kind: .audio, url: $0) })
         return items
+    }
+    
+    private func mediaKindToAttachmentKind(_ kind: MediaKind) -> ViewerAttachmentKind {
+        switch kind {
+        case .audio: return .audio
+        case .video: return .video
+        case .image: return .image
+        }
     }
 
     var body: some View {
@@ -99,6 +116,7 @@ struct AttachmentViewerView: View {
                             .tag(i)
                     }
                 }
+                .id(mediaMutationTick)
                 .frame(width: proxy.size.width, height: proxy.size.height) // <-- key
                 .contentShape(Rectangle()) // full-area swipe target
                 .tabViewStyle(.page(indexDisplayMode: .never))
@@ -181,6 +199,7 @@ struct AttachmentViewerView: View {
                         let currentURL = media[currentIndex].url
                         let isFav = (isFavourite?(currentURL) ?? false)
                         let isPriv = localIsPrivate
+                        let currentKind = media[currentIndex].kind
 
                         HStack(spacing: headerSpacing) {
                             Button {
@@ -224,6 +243,30 @@ struct AttachmentViewerView: View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(isPriv ? "Make attachment visible to others" : "Hide attachment from others")
+
+                            if currentKind == .video || currentKind == .audio {
+                                Button {
+                                    trimURL = currentURL
+                                    trimKind = currentKind
+                                    isShowingTrimmer = true
+                                    stopAllPlayersToggle.toggle()
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                        Image(systemName: "scissors")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(currentKind == .video ? "Trim video" : "Trim audio")
+                                .accessibilityHint("Open trimmer to shorten this recording")
+                            }
 
                             Button {
                                 let url = currentURL
@@ -293,6 +336,133 @@ struct AttachmentViewerView: View {
             } catch { }
             // Storage Safety: Ensure any temp surrogates created by the viewer are removed on dismiss
             cleanupTempFiles()
+        }
+        .sheet(isPresented: $isShowingTrimmer, onDismiss: {
+            isShowingTrimmer = false
+            trimURL = nil
+            trimKind = nil
+        }) {
+            if let url = trimURL, let kind = trimKind {
+                MediaTrimView(assetURL: url,
+                              mediaType: kind == .audio ? .audio : .video,
+                              onCancel: {
+                                isShowingTrimmer = false
+                                trimURL = nil
+                                trimKind = nil
+                              },
+                              onSaveAsNew: { tempURL in
+                                guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }) else {
+                                    isShowingTrimmer = false
+                                    trimURL = nil
+                                    trimKind = nil
+                                    return
+                                }
+                                let suggestedName = url.deletingPathExtension().lastPathComponent.isEmpty ? "Trimmed" : url.deletingPathExtension().lastPathComponent
+                                let attachmentKind = mediaKindToAttachmentKind(kind)
+                                let globalKind: AttachmentKind
+                                switch attachmentKind {
+                                case .image: globalKind = .image
+                                case .video: globalKind = .video
+                                case .audio: globalKind = .audio
+                                }
+                                if let newPath = try? AttachmentStore.adoptTempExport(tempURL, suggestedName: suggestedName, kind: globalKind) {
+                                    let newURL = URL(fileURLWithPath: newPath)
+                                    switch kind {
+                                    case .video:
+                                        var newVideos = videoURLs
+                                        let insertIndex = currentMediaIndex - imageURLs.count
+                                        if insertIndex >= 0 && insertIndex <= newVideos.count {
+                                            newVideos.insert(newURL, at: insertIndex + 1)
+                                        } else {
+                                            newVideos.append(newURL)
+                                        }
+                                        self.videoURLs = newVideos
+                                        currentIndex = currentIndex + 1
+                                    case .audio:
+                                        var newAudios = audioURLs
+                                        let insertIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                        if insertIndex >= 0 && insertIndex <= newAudios.count {
+                                            newAudios.insert(newURL, at: insertIndex + 1)
+                                        } else {
+                                            newAudios.append(newURL)
+                                        }
+                                        self.audioURLs = newAudios
+                                        currentIndex = currentIndex + 1
+                                    case .image: break
+                                    }
+                                    cachedURL = newURL
+                                    stopAllPlayersToggle.toggle()
+                                    #if canImport(UIKit)
+                                    if kind == .video {
+                                        _ = AttachmentStore.generateVideoPoster(url: newURL)
+                                    }
+                                    #endif
+                                    mediaMutationTick += 1
+                                    
+                                    if let cb = onSaveAsNewAttachment {
+                                        cb(newURL, globalKind)
+                                    }
+                                }
+                                isShowingTrimmer = false
+                                trimURL = nil
+                                trimKind = nil
+                              },
+                              onReplaceOriginal: { tempURL in
+                                guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }),
+                                      url.isFileURL else {
+                                    isShowingTrimmer = false
+                                    trimURL = nil
+                                    trimKind = nil
+                                    return
+                                }
+                                let originalPath = url.path
+                                let attachmentKind = mediaKindToAttachmentKind(kind)
+                                let globalKind: AttachmentKind
+                                switch attachmentKind {
+                                case .image: globalKind = .image
+                                case .video: globalKind = .video
+                                case .audio: globalKind = .audio
+                                }
+                                if let finalPath = try? AttachmentStore.replaceAttachmentFile(withTempURL: tempURL, forExistingPath: originalPath, kind: globalKind) {
+                                    let finalURL = URL(fileURLWithPath: finalPath)
+                                    switch kind {
+                                    case .video:
+                                        var newVideos = videoURLs
+                                        let videoIndex = currentMediaIndex - imageURLs.count
+                                        if videoIndex >= 0 && videoIndex < newVideos.count {
+                                            newVideos[videoIndex] = finalURL
+                                        }
+                                        self.videoURLs = newVideos
+                                        let upper = media.count - 1
+                                        currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                                    case .audio:
+                                        var newAudios = audioURLs
+                                        if currentMediaIndex - imageURLs.count - videoURLs.count < newAudios.count {
+                                            let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                            if audioIndex >= 0 && audioIndex < newAudios.count {
+                                                newAudios[audioIndex] = finalURL
+                                            }
+                                        }
+                                        self.audioURLs = newAudios
+                                        let upper = media.count - 1
+                                        currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                                    case .image: break
+                                    }
+                                    cachedURL = finalURL
+                                    onReplaceAttachment?(url, finalURL, globalKind)
+                                    stopAllPlayersToggle.toggle()
+                                    #if canImport(UIKit)
+                                    if kind == .video {
+                                        _ = AttachmentStore.generateVideoPoster(url: finalURL)
+                                    }
+                                    #endif
+                                    mediaMutationTick += 1
+                                }
+                                isShowingTrimmer = false
+                                trimURL = nil
+                                trimKind = nil
+                              })
+            }
         }
     }
     

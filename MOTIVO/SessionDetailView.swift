@@ -142,9 +142,224 @@ struct SessionDetailView: View {
     }
 
     var body: some View {
-    ScrollView {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+        ScrollView {
+            mainContent()
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
+        }
+        .navigationTitle("Session")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 12) {
+                    Button("Edit") {
+                        editWasPresented = true
+                        showEdit = true
+                    }
+                    Button(role: .destructive) { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("Delete session")
+                    .accessibilityIdentifier("button.deleteSession")
+                }
+            }
+        }
+        // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
+        .fullScreenCover(isPresented: $showEdit) {
+            // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
+            AddEditSessionView(session: session)
+        }
+        .onChange(of: showEdit) { _, newValue in
+            if newValue == false {
+                // Editor dismissed; if no save occurred, stop auto-pop behavior
+                // We will also clear this flag on successful save when we dismiss below
+                // (handled by the context change observer)
+            }
+        }
+        .sheet(isPresented: $isShowingPreview) {
+            if let url = previewURL { QuickLookPreview(url: url) }
+        }
+        .sheet(isPresented: $isCommentsPresented) {
+            if let id = sessionIDForComments {
+                CommentsView(sessionID: id, placeholderAuthor: "You")
+            } else {
+                Text("Comments unavailable for this item.")
+                    .padding()
+            }
+        }
+        #if DEBUG
+        .sheet(isPresented: $isDebugPresented) {
+            NavigationStack {
+                DebugViewerView(title: debugTitle, jsonString: $_debugJSONBuffer)
+                    .onAppear {
+                        guard let s = debugSessionRef else {
+                            _debugJSONBuffer = "{\"error\":\"unavailable\"}"
+                            return
+                        }
+                        // Defer to next runloop to ensure presentation and fault realization
+                        DispatchQueue.main.async {
+                            _debugJSONBuffer = DebugDump.dump(session: s)
+                        }
+                    }
+            }
+        }
+        #endif
+        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
+            // Build URLs from the same source-of-truth order as thumbnails
+            let split = splitAttachments()
+            let images = split.images
+            let videos = split.videos
+            let others = split.others
 
+            let imageURLs: [URL] = images.compactMap { a in
+                resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            }
+            let videoURLs: [URL] = videos.compactMap { a in
+                resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            }
+            // Treat non-image, non-video attachments as audio when possible
+            let audioURLs: [URL] = others.compactMap { a in
+                let kind = (a.kind ?? "")
+                guard kind == "audio" else { return nil }
+                return resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            }
+
+            // Compute start index based on the tapped URL within the combined media order [images, videos, audios]
+            let combined: [URL] = imageURLs + videoURLs + audioURLs
+            let startIndex: Int = {
+                guard let tapped = viewerTappedURL, let idx = combined.firstIndex(of: tapped) else {
+                    // Fallback: if we only had an image index previously, try to map it
+                    if let first = imageURLs.first, combined.firstIndex(of: first) != nil {
+                        return min(max(viewerStartIndex, 0), (combined.count > 0 ? combined.count - 1 : 0))
+                    }
+                    return 0
+                }
+                return idx
+            }()
+
+            AttachmentViewerView(
+                imageURLs: imageURLs,
+                startIndex: startIndex,
+                themeBackground: Color(.systemBackground),
+                videoURLs: videoURLs,
+                audioURLs: audioURLs,
+                onDelete: { url in
+                    // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let match = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }) {
+                        viewContext.delete(match)
+                        do { try viewContext.save() } catch { print("Attachment delete error: \(error)") }
+                    } else {
+                        print("[AttachmentViewer] No matching attachment found for URL: \(url)")
+                    }
+                },
+                onFavourite: { url in
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let match = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }) {
+                        // Ensure only one favourite
+                        for att in set { att.setValue(att == match, forKey: "isThumbnail") }
+                        do { try viewContext.save() } catch { print("Favourite save error:", error) }
+                    } else {
+                        print("onFavourite: attachment not found for", url)
+                    }
+                },
+                isFavourite: { url in
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let a = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }) {
+                        return (a.value(forKey: "isThumbnail") as? Bool) == true
+                    }
+                    return false
+                },
+                onTogglePrivacy: { url in
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    let match = set.first { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }
+                    togglePrivacy(id: (match?.value(forKey: "id") as? UUID), url: url)
+                    _refreshTick &+= 1
+                },
+                isPrivate: { url in
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    let match = set.first { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }
+                    return isPrivateAttachment(id: (match?.value(forKey: "id") as? UUID), url: url)
+                },
+                onReplaceAttachment: { originalURL, newURL, kind in
+                    // Match by stable basename (UUID-like) ignoring extension, since replace moves .mov -> .mp4
+                    let originalStem = originalURL.deletingPathExtension().lastPathComponent
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let match = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String, !stored.isEmpty else { return false }
+                        let storedLast = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
+                        return storedLast == originalStem
+                    }) {
+                        match.setValue(newURL.path, forKey: "fileURL")
+                        do { try viewContext.save() } catch { print("Replace attachment save error:", error) }
+                        _refreshTick &+= 1
+                    } else {
+                        print("[AttachmentViewer] onReplaceAttachment: attachment not found (stem)", originalStem)
+                    }
+                }
+            )
+            .onDisappear { _refreshTick &+= 1 }
+        }
+        .alert("Delete Session?", isPresented: $showDeleteConfirm) {
+            Button("Delete", role: .destructive) { deleteSession() }
+            Button("Cancel", role: .cancel) { }
+        }
+        
+        .id(_refreshTick)
+        .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
+            func touchesThisSession(_ set: Set<NSManagedObject>?) -> Bool {
+                guard let set = set else { return false }
+                for obj in set {
+                    if let att = obj as? Attachment, att.session == self.session { return true }
+                    if let ses = obj as? Session, ses.objectID == self.session.objectID { return true }
+                }
+                return false
+            }
+            let updated = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject>
+            let inserted = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>
+            let deleted = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>
+            if touchesThisSession(updated) || touchesThisSession(inserted) || touchesThisSession(deleted) {
+                _refreshTick &+= 1
+            }
+            // If the edit sheet was (or is) presented and this session was updated, pop back to ContentView
+            if editWasPresented && (touchesThisSession(updated) || touchesThisSession(inserted)) {
+                editWasPresented = false
+                // Ensure the edit sheet is closed, then dismiss this detail view
+                showEdit = false
+                DispatchQueue.main.async {
+                    dismiss()
+                }
+            }
+        }
+        .appBackground()
+        // Added task to hydrate local interaction state on sessionUUID change
+        .task(id: sessionUUID) {
+            if let sid = sessionUUID {
+                isLikedLocal = FeedInteractionStore.isLiked(sid)
+                likeCountLocal = FeedInteractionStore.likeCount(sid)
+                commentCountLocal = FeedInteractionStore.commentCount(sid)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private func mainContent() -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             SessionIdentityHeader(session: session)
                 .environmentObject(auth)
                 #if DEBUG
@@ -156,16 +371,14 @@ struct SessionDetailView: View {
                 #endif
                 .padding(.bottom, 4)
 
-            // 1) Top card — Activity Description (headline), shown only if non-empty
             if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(activityDescriptionText)
-                        .fixedSize(horizontal: false, vertical: true) // allow multiline
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 .cardSurface()
             }
 
-            // 2) Second card — Instrument : Activity + Date • Time • Duration
             VStack(alignment: .leading, spacing: 6) {
                 Group {
                     HStack {
@@ -182,7 +395,6 @@ struct SessionDetailView: View {
             }
             .cardSurface()
 
-            // Notes
             let originalNotes = session.notes ?? ""
             let (focusDotIndex, displayNotes) = extractFocusDotIndex(from: originalNotes)
             if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -193,32 +405,24 @@ struct SessionDetailView: View {
                 .cardSurface()
             }
 
-            // Read-only State card (only if FocusDotIndex exists)
             if let dot = focusDotIndex {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Focus").sectionHeader()
-
                     GeometryReader { geo in
                         let totalWidth = geo.size.width
                         let spacing: CGFloat = 8
                         let count = stateDotsCountDetail
-                        // compute diameter so dots + spacings fill available width
-                        let diameter = max(14, min(32,
-                            (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
+                        let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
                         let ringDot = max(0, min(count - 1, dot))
-
                         HStack(spacing: spacing) {
                             ForEach(0..<count, id: \.self) { i in
                                 let isRinged = (i == ringDot)
                                 let baseScale: CGFloat = isRinged ? 1.18 : 1.0
                                 Circle()
-                                    // Adaptive fill: black in light mode, white in dark mode, using centralized opacity ramp
                                     .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
-                                    // Hairline outline on every dot for guaranteed contrast
                                     .overlay(
                                         Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
                                     )
-                                    // Adaptive ring for the selected/average index
                                     .overlay(
                                         Group {
                                             if i == ringDot {
@@ -230,7 +434,7 @@ struct SessionDetailView: View {
                                         }
                                     )
                                     .frame(width: diameter, height: diameter)
-                                    .scaleEffect(baseScale)                // NEW: persistent emphasis
+                                    .scaleEffect(baseScale)
                                     .accessibilityHidden(true)
                             }
                         }
@@ -251,7 +455,6 @@ struct SessionDetailView: View {
                 .cardSurface()
             }
 
-            // Attachments (only show when present)
             let (images, videos, others) = splitAttachments()
             if !(images.isEmpty && videos.isEmpty && others.isEmpty) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -299,7 +502,6 @@ struct SessionDetailView: View {
                         let kind = (a.kind ?? "")
                         if kind == "audio" {
                             AttachmentRow(attachment: a) {
-                                // Open unified AttachmentViewerView for audio, matching image/video behavior
                                 let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
                                 viewerTappedURL = url
                                 isShowingAttachmentViewer = true
@@ -311,7 +513,7 @@ struct SessionDetailView: View {
                 }
                 .cardSurface()
             }
-            
+
             if let sid = sessionUUID {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     interactionRow(sessionID: sid)
@@ -319,202 +521,7 @@ struct SessionDetailView: View {
                 .cardSurface()
             }
         }
-        .padding(.horizontal, Theme.Spacing.l)
-        .padding(.top, Theme.Spacing.l)
-        .padding(.bottom, Theme.Spacing.xl)
     }
-    .navigationTitle("Session")
-    .toolbar {
-        ToolbarItem(placement: .topBarTrailing) {
-            HStack(spacing: 12) {
-                Button("Edit") {
-                    editWasPresented = true
-                    showEdit = true
-                }
-                Button(role: .destructive) { showDeleteConfirm = true } label: {
-                    Image(systemName: "trash")
-                }
-                .accessibilityLabel("Delete session")
-                .accessibilityIdentifier("button.deleteSession")
-            }
-        }
-    }
-    // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
-    .fullScreenCover(isPresented: $showEdit) {
-        // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
-        AddEditSessionView(session: session)
-    }
-    .onChange(of: showEdit) { _, newValue in
-        if newValue == false {
-            // Editor dismissed; if no save occurred, stop auto-pop behavior
-            // We will also clear this flag on successful save when we dismiss below
-            // (handled by the context change observer)
-        }
-    }
-    .sheet(isPresented: $isShowingPreview) {
-        if let url = previewURL { QuickLookPreview(url: url) }
-    }
-    .sheet(isPresented: $isCommentsPresented) {
-        if let id = sessionIDForComments {
-            CommentsView(sessionID: id, placeholderAuthor: "You")
-        } else {
-            Text("Comments unavailable for this item.")
-                .padding()
-        }
-    }
-    #if DEBUG
-    .sheet(isPresented: $isDebugPresented) {
-        NavigationStack {
-            DebugViewerView(title: debugTitle, jsonString: $_debugJSONBuffer)
-                .onAppear {
-                    guard let s = debugSessionRef else {
-                        _debugJSONBuffer = "{\"error\":\"unavailable\"}"
-                        return
-                    }
-                    // Defer to next runloop to ensure presentation and fault realization
-                    DispatchQueue.main.async {
-                        _debugJSONBuffer = DebugDump.dump(session: s)
-                    }
-                }
-        }
-    }
-    #endif
-    .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
-        // Build URLs from the same source-of-truth order as thumbnails
-        let split = splitAttachments()
-        let images = split.images
-        let videos = split.videos
-        let others = split.others
-
-        let imageURLs: [URL] = images.compactMap { a in
-            resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
-        }
-        let videoURLs: [URL] = videos.compactMap { a in
-            resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
-        }
-        // Treat non-image, non-video attachments as audio when possible
-        let audioURLs: [URL] = others.compactMap { a in
-            let kind = (a.kind ?? "")
-            guard kind == "audio" else { return nil }
-            return resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
-        }
-
-        // Compute start index based on the tapped URL within the combined media order [images, videos, audios]
-        let combined: [URL] = imageURLs + videoURLs + audioURLs
-        let startIndex: Int = {
-            guard let tapped = viewerTappedURL, let idx = combined.firstIndex(of: tapped) else {
-                // Fallback: if we only had an image index previously, try to map it
-                if let first = imageURLs.first, combined.firstIndex(of: first) != nil {
-                    return min(max(viewerStartIndex, 0), (combined.count > 0 ? combined.count - 1 : 0))
-                }
-                return 0
-            }
-            return idx
-        }()
-
-        AttachmentViewerView(
-            imageURLs: imageURLs,
-            startIndex: startIndex,
-            themeBackground: Color(.systemBackground),
-            videoURLs: videoURLs,
-            audioURLs: audioURLs,
-            onDelete: { url in
-                // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
-                let set = (session.attachments as? Set<Attachment>) ?? []
-                if let match = set.first(where: { att in
-                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
-                    return resolveAttachmentURL(from: stored) == url
-                }) {
-                    viewContext.delete(match)
-                    do { try viewContext.save() } catch { print("Attachment delete error: \(error)") }
-                } else {
-                    print("[AttachmentViewer] No matching attachment found for URL: \(url)")
-                }
-            },
-            onFavourite: { url in
-                let set = (session.attachments as? Set<Attachment>) ?? []
-                if let match = set.first(where: { att in
-                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
-                    return resolveAttachmentURL(from: stored) == url
-                }) {
-                    // Ensure only one favourite
-                    for att in set { att.setValue(att == match, forKey: "isThumbnail") }
-                    do { try viewContext.save() } catch { print("Favourite save error:", error) }
-                } else {
-                    print("onFavourite: attachment not found for", url)
-                }
-            },
-            isFavourite: { url in
-                let set = (session.attachments as? Set<Attachment>) ?? []
-                if let a = set.first(where: { att in
-                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
-                    return resolveAttachmentURL(from: stored) == url
-                }) {
-                    return (a.value(forKey: "isThumbnail") as? Bool) == true
-                }
-                return false
-            },
-            onTogglePrivacy: { url in
-                let set = (session.attachments as? Set<Attachment>) ?? []
-                let match = set.first { att in
-                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
-                    return resolveAttachmentURL(from: stored) == url
-                }
-                togglePrivacy(id: (match?.value(forKey: "id") as? UUID), url: url)
-                _refreshTick &+= 1
-            },
-            isPrivate: { url in
-                let set = (session.attachments as? Set<Attachment>) ?? []
-                let match = set.first { att in
-                    guard let stored = att.value(forKey: "fileURL") as? String else { return false }
-                    return resolveAttachmentURL(from: stored) == url
-                }
-                return isPrivateAttachment(id: (match?.value(forKey: "id") as? UUID), url: url)
-            }
-        )
-        .onDisappear { _refreshTick &+= 1 }
-    }
-    .alert("Delete Session?", isPresented: $showDeleteConfirm) {
-        Button("Delete", role: .destructive) { deleteSession() }
-        Button("Cancel", role: .cancel) { }
-    }
-    
-    .id(_refreshTick)
-    .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
-        func touchesThisSession(_ set: Set<NSManagedObject>?) -> Bool {
-            guard let set = set else { return false }
-            for obj in set {
-                if let att = obj as? Attachment, att.session == self.session { return true }
-                if let ses = obj as? Session, ses.objectID == self.session.objectID { return true }
-            }
-            return false
-        }
-        let updated = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject>
-        let inserted = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>
-        let deleted = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>
-        if touchesThisSession(updated) || touchesThisSession(inserted) || touchesThisSession(deleted) {
-            _refreshTick &+= 1
-        }
-        // If the edit sheet was (or is) presented and this session was updated, pop back to ContentView
-        if editWasPresented && (touchesThisSession(updated) || touchesThisSession(inserted)) {
-            editWasPresented = false
-            // Ensure the edit sheet is closed, then dismiss this detail view
-            showEdit = false
-            DispatchQueue.main.async {
-                dismiss()
-            }
-        }
-    }
-    .appBackground()
-    // Added task to hydrate local interaction state on sessionUUID change
-    .task(id: sessionUUID) {
-        if let sid = sessionUUID {
-            isLikedLocal = FeedInteractionStore.isLiked(sid)
-            likeCountLocal = FeedInteractionStore.likeCount(sid)
-            commentCountLocal = FeedInteractionStore.commentCount(sid)
-        }
-    }
-}
 
 // MARK: - Meta line (date • time • duration)
 
