@@ -311,6 +311,23 @@ struct SessionDetailView: View {
                     } else {
                         print("[AttachmentViewer] onReplaceAttachment: attachment not found (stem)", originalStem)
                     }
+                },
+                onSaveAsNewAttachment: { newURL, kind in
+                    // Persist a new Attachment for this session; do not modify or delete the original
+                    let finalPath = newURL.path
+                    // Map AttachmentKind from viewer callback to storage kind
+                    let storageKind: AttachmentKind = kind
+                    do {
+                        _ = try AttachmentStore.addAttachment(kind: storageKind,
+                                                              filePath: finalPath,
+                                                              to: session,
+                                                              isThumbnail: false,
+                                                              ctx: viewContext)
+                        try viewContext.save()
+                        _refreshTick &+= 1
+                    } catch {
+                        print("Save-as-new attachment error:", error)
+                    }
                 }
             )
             .onDisappear { _refreshTick &+= 1 }
