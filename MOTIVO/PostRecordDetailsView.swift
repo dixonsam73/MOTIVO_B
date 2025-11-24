@@ -610,7 +610,12 @@ struct PostRecordDetailsView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 let index = stagedIndexForAttachment(att)
-                                if index >= 0 { viewerStartIndex = index; isShowingAttachmentViewer = true }
+                                if index >= 0 {
+                                    viewerStartIndex = index
+                                    // Ensure temp surrogate files exist for images/videos/audios before presenting the viewer
+                                    ensureSurrogateFilesExistForViewer()
+                                    isShowingAttachmentViewer = true
+                                }
                             }
                         }
                     }
@@ -1211,6 +1216,23 @@ struct PostRecordDetailsView: View {
         return combined.firstIndex(where: { $0.id == target.id }) ?? -1
     }
 
+    private func ensureSurrogateFilesExistForViewer() {
+        let fm = FileManager.default
+        for att in stagedAttachments {
+            guard let url = surrogateURL(for: att) else { continue }
+            if !fm.fileExists(atPath: url.path) {
+                switch att.kind {
+                case .image, .video, .audio:
+                    // Write the staged bytes to the surrogate temp URL so the viewer can load by URL
+                    try? att.data.write(to: url, options: .atomic)
+                case .file:
+                    // Files are not displayed in the full-screen media viewer
+                    break
+                }
+            }
+        }
+    }
+
     private func viewerURLArrays() -> (images: [URL], videos: [URL], audios: [URL]) {
         let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { surrogateURL(for: $0) }
         let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { surrogateURL(for: $0) }
@@ -1558,6 +1580,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
