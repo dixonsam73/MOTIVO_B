@@ -1,3 +1,7 @@
+// CHANGE-ID: 20251124_180000-ptv-video-viewer-payload-sheet
+// SCOPE: Use AttachmentViewerPayload + fullScreenCover(item:) to guarantee non-empty media on first open
+
+
 // CHANGE-ID: 20251110_141500-trim-sheet-item
 // SCOPE: Switch trim presentation to .sheet(item:) to remove first-attempt race; no UI/logic changes elsewhere
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
@@ -31,6 +35,14 @@ private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neu
 // SessionActivityType moved to SessionActivityType.swift
 
 struct PracticeTimerView: View {
+    private struct AttachmentViewerPayload: Identifiable {
+        let id = UUID()
+        let imageURLs: [URL]
+        let videoURLs: [URL]
+        let audioURLs: [URL]
+        let startIndex: Int
+    }
+
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
@@ -117,8 +129,7 @@ struct PracticeTimerView: View {
     // @State private var videoPlayerItem: AVPlayer? = nil
 
     // Attachment viewer routing state
-    @State private var showAttachmentViewer: Bool = false
-    @State private var attachmentViewerTappedURL: URL? = nil
+    @State private var attachmentViewerPayload: AttachmentViewerPayload? = nil
 
     // Add trimming state for audio/video clips
     @State private var trimItem: StagedAttachment? = nil
@@ -1203,28 +1214,13 @@ struct PracticeTimerView: View {
                 }
             }
             */
-            .fullScreenCover(isPresented: $showAttachmentViewer) {
-                // Build media URLs for the viewer. For this page, only launch the viewer for a single tapped video.
-                let imageURLs: [URL] = []
-                let audioURLs: [URL] = []
-                let videoURLs: [URL] = {
-                    // attachmentViewerTappedURL is set in playVideo(_:) to a .mov surrogate
-                    if let tapped = attachmentViewerTappedURL, tapped.pathExtension.lowercased() == "mov" {
-                        // Ensure the surrogate exists (best-effort rewrite already performed in playVideo)
-                        return [tapped]
-                    } else {
-                        return []
-                    }
-                }()
-
-                let startIndex: Int = 0
-
+            .fullScreenCover(item: $attachmentViewerPayload) { payload in
                 AttachmentViewerView(
-                    imageURLs: imageURLs,
-                    startIndex: startIndex,
+                    imageURLs: payload.imageURLs,
+                    startIndex: payload.startIndex,
                     themeBackground: Color(.systemBackground),
-                    videoURLs: videoURLs,
-                    audioURLs: audioURLs
+                    videoURLs: payload.videoURLs,
+                    audioURLs: payload.audioURLs
                 )
             }
             .alert("Camera access denied",
@@ -2221,12 +2217,21 @@ struct PracticeTimerView: View {
     // Prepare and present a video player for a given staged video ID
     private func playVideo(_ id: UUID) {
         guard let att = stagedVideos.first(where: { $0.id == id }) else { return }
-        // Ensure a temp surrogate exists for AttachmentViewerView
+        // Ensure a temp surrogate exists for AttachmentViewerView and drive viewer state explicitly
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
         do {
+            #if DEBUG
+            print("[PracticeTimer] playVideo id=\(id)")
+            print("[PracticeTimer] temp url=\(url.path)")
+            print("[PracticeTimer] temp exists=\(FileManager.default.fileExists(atPath: url.path))")
+            #endif
             try att.data.write(to: url, options: .atomic)
-            attachmentViewerTappedURL = url
-            showAttachmentViewer = true
+            attachmentViewerPayload = AttachmentViewerPayload(
+                imageURLs: [],
+                videoURLs: [url],
+                audioURLs: [],
+                startIndex: 0
+            )
         } catch {
             print("Failed to prepare video for viewer: \(error)")
         }

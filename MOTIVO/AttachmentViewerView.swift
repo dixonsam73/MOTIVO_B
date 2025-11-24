@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251124_170600-attachment-viewer-debug
+// SCOPE: Add debug logging for media handoff into AttachmentViewerView
+
 import SwiftUI
 import AVKit
 import AVFoundation
@@ -64,6 +67,10 @@ struct AttachmentViewerView: View {
     }
 
     init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color.clear, videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil, onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil, onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil) {
+        #if DEBUG
+        print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
+        #endif
+
         self.imageURLs = imageURLs
         self._videoURLs = State(initialValue: videoURLs)
         self._audioURLs = State(initialValue: audioURLs)
@@ -104,6 +111,14 @@ struct AttachmentViewerView: View {
     }
 
     var body: some View {
+        #if DEBUG
+        let _ = {
+            let count = media.count
+            print("[AttachmentViewer] body initial media.count=\(count) currentIndex=\(currentIndex)")
+            return 0
+        }()
+        #endif
+
         ZStack {
             Color.clear.appBackground().ignoresSafeArea()
 
