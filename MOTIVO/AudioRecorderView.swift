@@ -181,6 +181,17 @@ struct AudioRecorderView: View {
 
 // MARK: - Private helpers
 private extension AudioRecorderView {
+    @MainActor
+    private func ensurePlaybackSessionActive() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // best-effort; ignore
+        }
+    }
+
     enum RecordingState: Equatable {
         case idle
         case recording
@@ -415,6 +426,7 @@ private extension AudioRecorderView {
             stopPlaybackTimer()
 
         case .paused, .idle:
+            ensurePlaybackSessionActive()
             do {
                 if player == nil || player?.url != url {
                     player = try AVAudioPlayer(contentsOf: url)

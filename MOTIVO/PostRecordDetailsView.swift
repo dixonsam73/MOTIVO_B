@@ -1481,6 +1481,12 @@ fileprivate struct AttachmentThumbCell: View {
                         .padding(.horizontal, 6)
                 }
             }
+            .onAppear {
+                // Ensure a temp surrogate exists for the staged audio so inline players/viewers can resolve it after navigation
+                if let url = resolvedURL, !FileManager.default.fileExists(atPath: url.path) {
+                    try? att.data.write(to: url, options: .atomic)
+                }
+            }
         case .video:
             ZStack {
                 if let poster = videoPoster {
@@ -1552,6 +1558,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

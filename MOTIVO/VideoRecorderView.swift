@@ -582,7 +582,19 @@ final class VideoRecorderController: NSObject, ObservableObject, AVCaptureFileOu
     }
 
     // MARK: - Playback
+
+    private func ensurePlaybackSessionActive() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true, options: [.notifyOthersOnDeactivation])
+        } catch {
+            // ignore
+        }
+    }
+
     private func playRecording() {
+        ensurePlaybackSessionActive()
         guard let url = recordingURL else { return }
         let item = AVPlayerItem(url: url)
         player = AVPlayer(playerItem: item)
