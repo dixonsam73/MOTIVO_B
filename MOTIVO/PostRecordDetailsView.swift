@@ -1503,10 +1503,10 @@ fileprivate struct AttachmentThumbCell: View {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             }
-            .contentShape(Rectangle())
-            .onTapGesture { if resolvedURL != nil { isPresentingVideo = true } }
-            .sheet(isPresented: $isPresentingVideo) {
-                if let url = resolvedURL { VideoPlayerSheet(url: url) }
+            .onAppear {
+                if let url = resolvedURL, !FileManager.default.fileExists(atPath: url.path) {
+                    try? att.data.write(to: url, options: .atomic)
+                }
             }
         case .file:
             placeholder(system: "doc")
@@ -1552,6 +1552,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
