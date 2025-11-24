@@ -1,9 +1,5 @@
-// CHANGE-ID: 20251124_180000-ptv-video-viewer-payload-sheet
-// SCOPE: Use AttachmentViewerPayload + fullScreenCover(item:) to guarantee non-empty media on first open
-
-
-// CHANGE-ID: 20251110_141500-trim-sheet-item
-// SCOPE: Switch trim presentation to .sheet(item:) to remove first-attempt race; no UI/logic changes elsewhere
+// CHANGE-ID: 20251124_213000-ptv-viewerRoutingAndHitTests
+// SCOPE: Ensure audio rows win hit-testing over video tiles in attachments card
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
 // SCOPE: Fix tasks pad placement; proper state; pass notesPrefill
 
@@ -35,14 +31,6 @@ private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neu
 // SessionActivityType moved to SessionActivityType.swift
 
 struct PracticeTimerView: View {
-    private struct AttachmentViewerPayload: Identifiable {
-        let id = UUID()
-        let imageURLs: [URL]
-        let videoURLs: [URL]
-        let audioURLs: [URL]
-        let startIndex: Int
-    }
-
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
@@ -129,7 +117,11 @@ struct PracticeTimerView: View {
     // @State private var videoPlayerItem: AVPlayer? = nil
 
     // Attachment viewer routing state
-    @State private var attachmentViewerPayload: AttachmentViewerPayload? = nil
+    private struct PTVViewerURL: Identifiable, Equatable {
+        let id = UUID()
+        let url: URL
+    }
+    @State private var attachmentViewer: PTVViewerURL? = nil
 
     // Add trimming state for audio/video clips
     @State private var trimItem: StagedAttachment? = nil
@@ -591,6 +583,7 @@ struct PracticeTimerView: View {
                                     }
                                     .buttonStyle(.plain)
                                 }
+                                .zIndex(1)
                                 .contextMenu {
                                     Button("Trim", systemImage: "scissors") {
                                         if let url = surrogateURL(for: att) {
@@ -608,6 +601,10 @@ struct PracticeTimerView: View {
                                 LazyVGrid(columns: columns, spacing: 12) {
                                     ForEach(stagedVideos, id: \.id) { att in
                                         ZStack(alignment: .topTrailing) {
+                                            // Ensure video tiles sit behind audio rows in hit testing
+                                            // so audio play buttons remain responsive when regions overlap.
+                                            // (Audio rows use .zIndex(1).)
+                                        
                                             ZStack {
                                                 if let thumb = videoThumbnails[att.id] {
                                                     Image(uiImage: thumb)
@@ -1214,13 +1211,20 @@ struct PracticeTimerView: View {
                 }
             }
             */
-            .fullScreenCover(item: $attachmentViewerPayload) { payload in
+            .fullScreenCover(item: $attachmentViewer) { payload in
+                // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
+                let imageURLs: [URL] = []
+                let audioURLs: [URL] = []
+                let videoURLs: [URL] = [payload.url]
+
+                let startIndex: Int = 0
+
                 AttachmentViewerView(
-                    imageURLs: payload.imageURLs,
-                    startIndex: payload.startIndex,
+                    imageURLs: imageURLs,
+                    startIndex: startIndex,
                     themeBackground: Color(.systemBackground),
-                    videoURLs: payload.videoURLs,
-                    audioURLs: payload.audioURLs
+                    videoURLs: videoURLs,
+                    audioURLs: audioURLs
                 )
             }
             .alert("Camera access denied",
@@ -2217,21 +2221,11 @@ struct PracticeTimerView: View {
     // Prepare and present a video player for a given staged video ID
     private func playVideo(_ id: UUID) {
         guard let att = stagedVideos.first(where: { $0.id == id }) else { return }
-        // Ensure a temp surrogate exists for AttachmentViewerView and drive viewer state explicitly
+        // Ensure a temp surrogate exists for AttachmentViewerView
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
         do {
-            #if DEBUG
-            print("[PracticeTimer] playVideo id=\(id)")
-            print("[PracticeTimer] temp url=\(url.path)")
-            print("[PracticeTimer] temp exists=\(FileManager.default.fileExists(atPath: url.path))")
-            #endif
             try att.data.write(to: url, options: .atomic)
-            attachmentViewerPayload = AttachmentViewerPayload(
-                imageURLs: [],
-                videoURLs: [url],
-                audioURLs: [],
-                startIndex: 0
-            )
+            attachmentViewer = PTVViewerURL(url: url)
         } catch {
             print("Failed to prepare video for viewer: \(error)")
         }
@@ -2778,4 +2772,3 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
-
