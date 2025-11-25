@@ -10,6 +10,7 @@
 import SwiftUI
 import CoreData
 import PhotosUI
+import UniformTypeIdentifiers
 import AVFoundation
 import UIKit
 
@@ -451,10 +452,24 @@ struct PostRecordDetailsView: View {
             .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
-            .photosPicker(isPresented: $showPhotoPicker, selection: $photoPickerItem, matching: .images)
+            .photosPicker(isPresented: $showPhotoPicker,
+                        selection: $photoPickerItem,
+                        matching: .any(of: [.images, .videos]))
             .task(id: photoPickerItem) {
                 guard let item = photoPickerItem else { return }
-                if let data = try? await item.loadTransferable(type: Data.self) { stageData(data, kind: .image) }
+                if let contentType = item.supportedContentTypes.first {
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        if contentType.conforms(to: .image) {
+                            stageData(data, kind: .image)
+                        } else if contentType.conforms(to: .movie) {
+                            stageData(data, kind: .video)
+                        } else {
+                            stageData(data, kind: .file)
+                        }
+                    }
+                } else if let data = try? await item.loadTransferable(type: Data.self) {
+                    stageData(data, kind: .file)
+                }
             }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
             .sheet(isPresented: $showCamera) { CameraCaptureView { image in
