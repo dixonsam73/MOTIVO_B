@@ -1243,6 +1243,17 @@ private var instrumentPicker: some View {
 
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
+        // For staged videos (e.g. imported from the photo library), write a temporary
+        // surrogate file so that VideoPosterView can resolve a real URL and generate
+        // a poster frame while we are still in edit mode. This uses the same
+        // extension mapping as the persisted attachments.
+        if kind == .video {
+            let ext: String = (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
+            let tempURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(id.uuidString)
+                .appendingPathExtension(ext)
+            try? data.write(to: tempURL, options: .atomic)
+        }
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
         if kind == .image {
             let imageCount = stagedAttachments.filter { $0.kind == .image }.count
