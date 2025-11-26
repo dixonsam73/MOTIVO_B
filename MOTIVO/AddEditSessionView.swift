@@ -70,6 +70,9 @@ struct AddEditSessionView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
+    @State private var isShowingAttachmentViewer: Bool = false
+    @State private var viewerStartIndex: Int = 0
+
     // UI stability (instruments empty-state)
     @State private var instrumentsGateArmed = false
     @State private var instrumentsReady = false
@@ -453,6 +456,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                         removeStagedAttachment(att)
                                     } label: { Text("Remove") }
                                 }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    let index = stagedIndexForAttachment_edit(att)
+                                    if index >= 0 {
+                                        viewerStartIndex = index
+                                        ensureSurrogateFilesExistForViewer_edit()
+                                        isShowingAttachmentViewer = true
+                                    }
+                                }
                             }
                         }
                         .padding(.vertical, 4)
@@ -570,6 +582,94 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                    }
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
+            let arrays = viewerURLArrays_edit()
+            let imageURLs = arrays.images
+            let videoURLs = arrays.videos
+            let audioURLs = arrays.audios
+            let combined = imageURLs + videoURLs + audioURLs
+            let startIndex = min(max(viewerStartIndex, 0), max(combined.count - 1, 0))
+
+            AttachmentViewerView(
+                imageURLs: imageURLs,
+                startIndex: startIndex,
+                themeBackground: Color(.systemBackground),
+                videoURLs: videoURLs,
+                audioURLs: audioURLs,
+                onDelete: { url in
+                    // Map by staged id from surrogate URL stem
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                        let removed = stagedAttachments.remove(at: idx)
+                        existingAttachmentIDs.remove(removed.id)
+                        if selectedThumbnailID == removed.id {
+                            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+                        }
+                    }
+                },
+                onFavourite: { url in
+                    // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                        selectedThumbnailID = att.id
+                    }
+                },
+                isFavourite: { url in
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                        return selectedThumbnailID == att.id
+                    }
+                    return false
+                },
+                onTogglePrivacy: { url in
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                        let priv = isPrivate(id: att.id, url: url)
+                        setPrivate(id: att.id, url: url, !priv)
+                    }
+                },
+                isPrivate: { url in
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                        return isPrivate(id: att.id, url: url)
+                    }
+                    return false
+                },
+                onReplaceAttachment: { originalURL, newURL, kind in
+                    // Replace staged data by matching surrogate stem
+                    let stem = originalURL.deletingPathExtension().lastPathComponent
+                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                        if let data = try? Data(contentsOf: newURL) {
+                            let old = stagedAttachments[idx]
+                            stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                        }
+                    }
+                },
+                onSaveAsNewAttachment: { newURL, kind in
+                    // Append a new staged item of provided kind after current index section-wise
+                    let newID = UUID()
+                    let data = (try? Data(contentsOf: newURL)) ?? Data()
+                    let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+                    // Insert by section: images, then videos, then audios
+                    switch kind {
+                    case .image:
+                        if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
+                            stagedAttachments.insert(newAtt, at: splitIndex)
+                        } else { stagedAttachments.append(newAtt) }
+                    case .video:
+                        let lastVideoIndex = stagedAttachments.lastIndex(where: { $0.kind == .video })
+                        if let lastVideoIndex { stagedAttachments.insert(newAtt, at: lastVideoIndex + 1) }
+                        else if let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image }) { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) }
+                        else { stagedAttachments.append(newAtt) }
+                    case .audio:
+                        let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
+                        if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
+                    case .file:
+                        stagedAttachments.append(newAtt)
+                    }
+                }
+            )
+        }
         .task { hydrate() } // unified first-appearance init
         .onAppear {
             preselectFocusFromNotesIfNeeded_edit()
@@ -1341,6 +1441,38 @@ private var instrumentPicker: some View {
         existingAttachmentIDs.removeAll()
     }
 
+    // Added helpers for attachment viewer integration:
+
+    private func stagedIndexForAttachment_edit(_ target: StagedAttachment) -> Int {
+        let images = stagedAttachments.filter { $0.kind == .image }
+        let videos = stagedAttachments.filter { $0.kind == .video }
+        let audios = stagedAttachments.filter { $0.kind == .audio }
+        let combined: [StagedAttachment] = images + videos + audios
+        return combined.firstIndex(where: { $0.id == target.id }) ?? -1
+    }
+
+    private func ensureSurrogateFilesExistForViewer_edit() {
+        let fm = FileManager.default
+        for att in stagedAttachments {
+            guard let url = surrogateURL(for: att) else { continue }
+            if !fm.fileExists(atPath: url.path) {
+                switch att.kind {
+                case .image, .video, .audio:
+                    try? att.data.write(to: url, options: .atomic)
+                case .file:
+                    break
+                }
+            }
+        }
+    }
+
+    private func viewerURLArrays_edit() -> (images: [URL], videos: [URL], audios: [URL]) {
+        let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { surrogateURL(for: $0) }
+        let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { surrogateURL(for: $0) }
+        let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { surrogateURL(for: $0) }
+        return (imageURLs, videoURLs, audioURLs)
+    }
+
     // MARK: - Fetches & misc helpers
 
     private func fetchInstruments() -> [Instrument] {
@@ -1546,9 +1678,6 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
-
 
 
 
