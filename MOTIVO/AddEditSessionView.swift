@@ -1557,6 +1557,7 @@ private var instrumentPicker: some View {
         case .video:
             ZStack {
                 VideoPosterView(url: surrogateURL(for: att))
+                    .allowsHitTesting(false)
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 28, weight: .semibold))
                     .foregroundStyle(.white)
@@ -1678,6 +1679,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
