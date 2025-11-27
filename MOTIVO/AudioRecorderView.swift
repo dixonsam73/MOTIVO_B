@@ -1,21 +1,21 @@
 // AudioRecorderView.swift
-// CHANGE-ID: 20251127_ContinuousModeToggle
-// SCOPE: Add RecordingMode state + segmented picker UI; no call-site, storage, or audio logic changes.
-
-// Motivo
-// Created by Assistant on 2025-10-20
+// CHANGE-ID: 20251127_RecordingModeForegroundVsBackground
+// SCOPE: Mode selector now controls behaviour:
+// - In app: stop recording when app goes to background
+// - Background: allow continuous/background recording (requires Background Audio capability on target)
 
 import SwiftUI
 import AVFoundation
 import AVKit
 
 /// A lightweight, self-contained audio recorder view using AVAudioRecorder.
-/// Stores audio files in the app's Documents directory and returns the saved URL via `onSave`.
+/// Stores audio files in the app's temporary directory and returns the saved URL via `onSave`.
 struct AudioRecorderView: View {
     // MARK: - Public API
     var onSave: (URL) -> Void
     @EnvironmentObject private var stagingStore: StagingStoreObject
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase   // track foreground/background
 
     // MARK: - State
     @State private var recorder: AVAudioRecorder?
@@ -26,8 +26,8 @@ struct AudioRecorderView: View {
 
     @State private var state: RecordingState = .idle
     @State private var errorMessage: String?
-    @State private var recordingMode: RecordingMode = .standard
-    
+    @State private var recordingMode: RecordingMode = .inApp   // default: in-app only
+
     @State private var stagedID: UUID? = nil
 
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
@@ -52,6 +52,7 @@ struct AudioRecorderView: View {
     @State private var wasRecordingBeforeInterruption: Bool = false
     @State private var wasPlayingBeforeInterruption: Bool = false
     @State private var observersInstalled: Bool = false
+    @State private var meteringTimer: Timer?
 
     // MARK: - Body
     var body: some View {
@@ -68,22 +69,22 @@ struct AudioRecorderView: View {
                     .accessibilityLabel("Elapsed time \(timeString)")
             }
             .frame(maxWidth: .infinity)
-            // Recording mode
+
+            // Recording mode selector
             HStack(spacing: 12) {
                 Text("Mode")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                 Picker("Recording mode", selection: $recordingMode) {
-                    Text("Standard").tag(RecordingMode.standard)
-                    Text("Continuous").tag(RecordingMode.continuous)
+                    Text("In app").tag(RecordingMode.inApp)
+                    Text("Background").tag(RecordingMode.background)
                 }
                 .pickerStyle(.segmented)
             }
             .frame(maxWidth: .infinity)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Recording mode")
-            .accessibilityValue(recordingMode == .standard ? "Standard" : "Continuous")
-            
+            .accessibilityValue(recordingMode == .inApp ? "In app only" : "Background")
 
             // Controls
             let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
@@ -178,12 +179,15 @@ struct AudioRecorderView: View {
             cleanupWaveform()
             removeObservers()
         }
+        .onChange(of: scenePhase) { newPhase in
+            handleScenePhaseChange(newPhase)
+        }
     }
 
     // MARK: - Public Helpers
 
     func documentsDirectory() -> URL {
-        // Using temporaryDirectory per your existing implementation
+        // Using temporaryDirectory per existing implementation
         FileManager.default.temporaryDirectory
     }
 
@@ -206,11 +210,12 @@ struct AudioRecorderView: View {
         var canStop: Bool { self == .recording || self == .playing || self == .paused || self == .pausedRecording }
         var canPlayToggle: Bool { self != .recording && self != .pausedRecording }
     }
-    enum RecordingMode: String, CaseIterable {
-        case standard
-        case continuous
-    }
 
+    /// Controls whether recording is foreground-only or allowed to run in background.
+    enum RecordingMode: String, CaseIterable {
+        case inApp
+        case background
+    }
 
     var titleForState: String {
         switch state {
@@ -502,8 +507,6 @@ struct AudioRecorderView: View {
         frozenRenderBars = renderBars
     }
 
-    @State private var meteringTimer: Timer?
-
     func startMeteringTimer() {
         stopMeteringTimer()
         meteringTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
@@ -581,7 +584,27 @@ struct AudioRecorderView: View {
         renderBars = bars
     }
 
-    // MARK: - Interruption Handling
+    // MARK: - Interruption & ScenePhase Handling
+
+    /// Respond to app moving between active/inactive/background.
+    /// In "In app" mode, we stop any active recording as soon as the app leaves the foreground.
+    func handleScenePhaseChange(_ phase: ScenePhase) {
+        guard recordingMode == .inApp else { return }
+
+        switch phase {
+        case .inactive, .background:
+            if state == .recording {
+                #if DEBUG
+                print("[AudioRecorder] ScenePhase=\(phase) in In-app mode; pausing recording")
+                #endif
+                pauseRecording()
+            }
+        case .active:
+            break
+        @unknown default:
+            break
+        }
+    }
 
     func installObserversIfNeeded() {
         guard !observersInstalled else { return }
