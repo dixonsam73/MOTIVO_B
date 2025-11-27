@@ -416,7 +416,7 @@
 				DEVELOPMENT_TEAM = K352DG4UJA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "";
+				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";
@@ -450,7 +450,7 @@
 				DEVELOPMENT_TEAM = K352DG4UJA;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = "";
+				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";

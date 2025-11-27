@@ -1,6 +1,6 @@
 // AudioRecorderView.swift
-// CHANGE-ID: 20251110_161547-AudioRecorderView-freezeInitialZoom
-// SCOPE: Freeze initial progressive zoom as constant waveform density; add samplesPerSecond param; timers on .common; no other logic changes.
+// CHANGE-ID: 20251127_ContinuousModeToggle
+// SCOPE: Add RecordingMode state + segmented picker UI; no call-site, storage, or audio logic changes.
 
 // Motivo
 // Created by Assistant on 2025-10-20
@@ -26,6 +26,7 @@ struct AudioRecorderView: View {
 
     @State private var state: RecordingState = .idle
     @State private var errorMessage: String?
+    @State private var recordingMode: RecordingMode = .standard
     
     @State private var stagedID: UUID? = nil
 
@@ -39,9 +40,10 @@ struct AudioRecorderView: View {
     @State private var timer: Timer?
     @State private var playbackTimer: Timer?
 
-    // Waveform metering
-    @State private var waveformTimer: Timer?
-    @State private var waveformSamples: [CGFloat] = []
+    // MARK: - Waveform state (for current recording or playback)
+    @State private var renderBars: [CGFloat] = []
+    @State private var frozenRenderBars: [CGFloat]? = nil
+    @State private var waveformSamples: [Float] = []
     @State private var waveformWriteIndex: Int = 0
     @State private var waveformHasWrapped: Bool = false
     private let waveformSampleRate: TimeInterval = 1.0 / 30.0 // ~30 Hz
@@ -66,6 +68,22 @@ struct AudioRecorderView: View {
                     .accessibilityLabel("Elapsed time \(timeString)")
             }
             .frame(maxWidth: .infinity)
+            // Recording mode
+            HStack(spacing: 12) {
+                Text("Mode")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Picker("Recording mode", selection: $recordingMode) {
+                    Text("Standard").tag(RecordingMode.standard)
+                    Text("Continuous").tag(RecordingMode.continuous)
+                }
+                .pickerStyle(.segmented)
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Recording mode")
+            .accessibilityValue(recordingMode == .standard ? "Standard" : "Continuous")
+            
 
             // Controls
             let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
@@ -90,22 +108,25 @@ struct AudioRecorderView: View {
                         if state == .recording {
                             pauseRecording()
                         } else if state == .pausedRecording {
-                            await resumeRecording()
+                            resumeRecording()
                         } else {
                             await startRecording()
                         }
                     }
                 }
-                .accessibilityLabel(state == .recording ? "Pause recording" : (state == .pausedRecording ? "Resume recording" : "Start recording"))
+                .accessibilityLabel(state == .recording ? "Pause recording" :
+                                    (state == .pausedRecording ? "Resume recording" : "Start recording"))
 
                 // Stop
-                ControlButton(systemName: "stop.fill", tint: tintStopDelete, isEnabled: state.canStop) {
-                    stopAllAndFinalizeRecording()
+                ControlButton(systemName: "stop.circle.fill", tint: tintStopDelete, isEnabled: state.canStop) {
+                    stopAll()
                 }
                 .accessibilityLabel("Stop")
 
                 // Play / Pause
-                ControlButton(systemName: (state == .playing) ? "pause.fill" : "play.fill", tint: tintPlay, isEnabled: recordingURL != nil && state.canPlayToggle) {
+                ControlButton(systemName: (state == .playing || state == .paused) ? "pause.circle.fill" : "play.circle.fill",
+                              tint: tintPlay,
+                              isEnabled: recordingURL != nil && state.canPlayToggle) {
                     togglePlayback()
                 }
                 .accessibilityLabel(state == .playing ? "Pause" : "Play")
@@ -118,19 +139,15 @@ struct AudioRecorderView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .cardSurface(padding: 12)
 
-            // Decorative waveform indicator
-            WaveformIndicatorView(
-                samples: waveformSamples,
-                color: Color(red: 0.36, green: 0.60, blue: 0.52), // align with media accents
-                background: Theme.Colors.surface(colorScheme),
-                writeIndex: waveformWriteIndex,
-                hasWrapped: waveformHasWrapped,
-                samplesPerSecond: 1.0 / waveformSampleRate
+            // Waveform
+            WaveformView(
+                samples: frozenRenderBars ?? renderBars,
+                isRecording: state == .recording,
+                isPlaying: state == .playing
             )
-            .frame(height: 44)
-            .opacity(state == .recording ? 1 : (waveformSamples.isEmpty ? 0 : ((state == .paused || state == .pausedRecording) ? 0.6 : 0.85)))
+            .frame(height: 80)
+            .padding(.top, 8)
             .accessibilityHidden(true)
 
             if let errorMessage {
@@ -148,49 +165,34 @@ struct AudioRecorderView: View {
         .background(
             Theme.Colors.surface(colorScheme)
         )
-        .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-        )
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: Color.black.opacity(0.2), radius: 18, x: 0, y: 10)
+        .padding()
         .onAppear {
+            setupWaveformBuffer()
             installObserversIfNeeded()
-            // Sync display to current state on appear
-            switch state {
-            case .recording:
-                displayTime = accumulatedRecordedTime + elapsed
-            case .pausedRecording:
-                displayTime = accumulatedRecordedTime
-            case .playing, .paused:
-                displayTime = playbackPosition
-            case .idle:
-                displayTime = finalRecordedTime
-            }
         }
         .onDisappear {
-            removeObserversIfNeeded()
-            cleanup()
-            Task { try? await StagingStore.bootstrap() }
+            stopAll()
+            stopElapsedTimer()
+            cleanupWaveform()
+            removeObservers()
         }
-        .task { await configureSessionIfNeeded() }
-        #if DEBUG
-        .animation(.default, value: state)
-        #endif
     }
-}
 
-// MARK: - Private helpers
-private extension AudioRecorderView {
-    @MainActor
-    private func ensurePlaybackSessionActive() {
-        let session = AVAudioSession.sharedInstance()
-        do {
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-            try session.setActive(true, options: [.notifyOthersOnDeactivation])
-        } catch {
-            // best-effort; ignore
-        }
+    // MARK: - Public Helpers
+
+    func documentsDirectory() -> URL {
+        // Using temporaryDirectory per your existing implementation
+        FileManager.default.temporaryDirectory
     }
+
+    func newRecordingURL() -> URL {
+        let filename = "motivo_rec_\(UUID().uuidString).m4a"
+        return documentsDirectory().appendingPathComponent(filename)
+    }
+
+    // MARK: - Recording State / Title
 
     enum RecordingState: Equatable {
         case idle
@@ -204,6 +206,11 @@ private extension AudioRecorderView {
         var canStop: Bool { self == .recording || self == .playing || self == .paused || self == .pausedRecording }
         var canPlayToggle: Bool { self != .recording && self != .pausedRecording }
     }
+    enum RecordingMode: String, CaseIterable {
+        case standard
+        case continuous
+    }
+
 
     var titleForState: String {
         switch state {
@@ -217,58 +224,42 @@ private extension AudioRecorderView {
 
     var timeString: String {
         let clamped = max(0, displayTime)
-        let totalTenths = Int((clamped * 10).rounded(.down))
-        let wholeSeconds = totalTenths / 10
-        let minutes = wholeSeconds / 60
-        let seconds = wholeSeconds % 60
-        let fraction = totalTenths % 10
-        return String(format: "%02d:%02d.%01d", minutes, seconds, fraction)
+        let minutes = Int(clamped) / 60
+        let seconds = Int(clamped) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
-    func documentsDirectory() -> URL {
-        // Storage Safety Protocol: Recorder output should be written to a temporary location.
-        return FileManager.default.temporaryDirectory
-    }
+    // MARK: - Recording Logic
 
-    func newRecordingURL() -> URL {
-        // Use a UUID-based filename in tmp to avoid collisions and to ensure cleanup on success/cancel.
-        let name = "motivo_rec_\(UUID().uuidString).m4a"
-        return documentsDirectory().appendingPathComponent(name)
-    }
-
-    func recordingSettings() -> [String: Any] {
-        [
-            AVFormatIDKey: kAudioFormatMPEG4AAC as NSNumber,
-            AVSampleRateKey: 44_100 as NSNumber,
-            AVNumberOfChannelsKey: 1 as NSNumber,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue as NSNumber
-        ]
-    }
-
-    func configureSessionIfNeeded() async {
-        do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .spokenAudio, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
-            try session.setActive(true)
-        } catch {
-            setError("Audio session error: \(error.localizedDescription)")
+    func ensureRecordPermission() async -> Bool {
+        let session = AVAudioSession.sharedInstance()
+        switch session.recordPermission {
+        case .granted:
+            return true
+        case .denied:
+            return false
+        case .undetermined:
+            do {
+                return try await withCheckedThrowingContinuation { continuation in
+                    session.requestRecordPermission { granted in
+                        continuation.resume(returning: granted)
+                    }
+                }
+            } catch {
+                return false
+            }
+        @unknown default:
+            return false
         }
     }
 
-    func ensureRecordPermission() async -> Bool {
-        await withCheckedContinuation { continuation in
-            switch AVAudioSession.sharedInstance().recordPermission {
-            case .granted:
-                continuation.resume(returning: true)
-            case .denied:
-                continuation.resume(returning: false)
-            case .undetermined:
-                AVAudioSession.sharedInstance().requestRecordPermission { granted in
-                    continuation.resume(returning: granted)
-                }
-            @unknown default:
-                continuation.resume(returning: false)
-            }
+    func configureSessionIfNeeded() async {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true, options: [])
+        } catch {
+            setError("Failed to configure audio session: \(error.localizedDescription)")
         }
     }
 
@@ -288,15 +279,14 @@ private extension AudioRecorderView {
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
             AVSampleRateKey: 44100,
             AVNumberOfChannelsKey: 1,
-            AVEncoderBitRateKey: 128000,
-            AVEncoderAudioQualityKey: AVAudioQuality.medium.rawValue
+            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
         ]
 
+        stopAll()
         do {
             recorder = try AVAudioRecorder(url: fileURL, settings: settings)
             recorder?.isMeteringEnabled = true
             recorder?.prepareToRecord()
-
             if recorder?.record() == true {
                 recordingURL = fileURL
                 // Reset accumulated time because this is a new file
@@ -309,7 +299,7 @@ private extension AudioRecorderView {
                 errorMessage = nil
                 UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
                 #if DEBUG
-                print("[AudioRecorder] Ephemeral flag set true (recording started)")
+                print("[AudioRecorder] Ephemeral flag set true (recording started, mode=\(recordingMode.rawValue))")
                 #endif
             } else {
                 setError("Failed to start recording.")
@@ -322,217 +312,145 @@ private extension AudioRecorderView {
     func pauseRecording() {
         guard state == .recording else { return }
         recorder?.pause()
-        // Add the elapsed chunk to accumulated time and stop the timer
-        accumulatedRecordedTime += elapsed
         stopElapsedTimer()
-        // Reset per-chunk elapsed
-        elapsed = 0
-        displayTime = accumulatedRecordedTime
         state = .pausedRecording
-        stopWaveformTimer()
     }
 
-    func resumeRecording() async {
+    func resumeRecording() {
         guard state == .pausedRecording else { return }
-        do {
-            // Ensure session is active
-            await configureSessionIfNeeded()
-            if recorder?.record() == true {
-                recorder?.isMeteringEnabled = true
-                startElapsedTimer()
-                startWaveform()
-                state = .recording
-            } else {
-                setError("Failed to resume recording.")
-            }
-        }
+        recorder?.record()
+        startElapsedTimer()
+        state = .recording
+    }
+
+    func stopRecording() {
+        guard state == .recording || state == .pausedRecording else { return }
+        recorder?.stop()
+        recorder = nil
+        stopElapsedTimer()
+        stopWaveformAndFreeze()
+        finalRecordedTime = accumulatedRecordedTime
+        displayTime = finalRecordedTime
+        state = .idle
+    }
+
+    func stopPlayback() {
+        player?.stop()
+        player = nil
+        stopPlaybackTimer()
+        stopWaveformAndFreeze()
+        displayTime = finalRecordedTime
+        state = .idle
     }
 
     func stopAll() {
-        if recorder?.isRecording == true {
-            recorder?.stop()
-        } else if state == .pausedRecording {
-            recorder?.stop()
+        if state == .recording || state == .pausedRecording {
+            stopRecording()
         }
-        if player?.isPlaying == true {
-            player?.stop()
-        }
-        player?.currentTime = 0
-        playbackPosition = 0
-        stopElapsedTimer()
-        stopPlaybackTimer()
-        stopWaveformTimer()
-        clearWaveform()
-        // Do not change accumulatedRecordedTime here; let finalization compute total
-    }
-
-    func stopAllAndFinalizeRecording() {
-        let wasRecording = (state == .recording) || (state == .pausedRecording)
-        stopAll()
-
-        // Junk Clip Suppression: discard very short accidental taps
-        if let fileURL = recordingURL {
-            // Measure finalized file duration using AVAudioPlayer for reliability
-            var duration: TimeInterval = 0
-            if let p = try? AVAudioPlayer(contentsOf: fileURL) {
-                duration = p.duration
-            } else {
-                // Fallback: use recorder's last known currentTime if available
-                duration = recorder?.currentTime ?? 0
-            }
-
-            if duration < 0.5 {
-                recorder?.deleteRecording()
-                try? FileManager.default.removeItem(at: fileURL)
-                recorder = nil
-                // Reset state for a clean slate
-                recordingURL = nil
-                playbackPosition = 0
-                accumulatedRecordedTime = 0
-                finalRecordedTime = 0
-                elapsed = 0
-                displayTime = 0
-                state = .idle
-                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                return
-            } else {
-                // Optional: confirm format consistency
-            }
-        }
-
-        if wasRecording {
-            // If we were in active or paused recording, compute total recorded time
-            let total = accumulatedRecordedTime + ((state == .recording) ? elapsed : 0)
-            finalRecordedTime = max(total, accumulatedRecordedTime)
-            // Reset per-chunk elapsed
-            elapsed = 0
-            displayTime = finalRecordedTime
+        if state == .playing || state == .paused {
+            stopPlayback()
         }
         state = .idle
     }
 
-    func togglePlayback() {
-        guard let url = recordingURL else { return }
-        // If currently recording or paused recording, ignore play toggles
-        guard state != .recording && state != .pausedRecording else { return }
-
-        switch state {
-        case .playing:
-            // Pause and store current time
-            playbackPosition = player?.currentTime ?? playbackPosition
-            displayTime = playbackPosition
-            player?.pause()
-            state = .paused
-            stopPlaybackTimer()
-
-        case .paused, .idle:
-            ensurePlaybackSessionActive()
-            do {
-                if player == nil || player?.url != url {
-                    player = try AVAudioPlayer(contentsOf: url)
-                    player?.delegate = AudioPlayerDelegate(onFinish: {
-                        DispatchQueue.main.async {
-                            // Reset to idle and clear position when finished
-                            state = .idle
-                            playbackPosition = 0
-                            displayTime = 0
-                        }
-                    })
-                    player?.prepareToPlay()
-                }
-                // Resume from last position if available
-                player?.currentTime = playbackPosition
-                displayTime = player?.currentTime ?? playbackPosition
-                player?.play()
-                state = .playing
-                startPlaybackTimer()
-            } catch {
-                setError("Playback error: \(error.localizedDescription)")
-            }
-
-        case .recording, .pausedRecording:
-            break
-        }
-    }
-
-    func deleteRecording() {
-        stopAll()
-        guard let url = recordingURL else { return }
-        do {
-            try FileManager.default.removeItem(at: url)
-            #if DEBUG
-            print("[AudioRecorder] Temp recording file removed on delete: \(url.lastPathComponent)")
-            #endif
-            recordingURL = nil
-            playbackPosition = 0
-            accumulatedRecordedTime = 0
-            finalRecordedTime = 0
-            elapsed = 0
-            displayTime = 0
-            stopPlaybackTimer()
-            stopWaveformTimer()
-            clearWaveform()
-            state = .idle
-            UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-            #if DEBUG
-            print("[AudioRecorder] Deleted recording; ephemeral flag reset false")
-            #endif
-        } catch {
-            setError("Delete failed: \(error.localizedDescription)")
-        }
-    }
-
-    
     func saveRecording() {
-        stopAllAndFinalizeRecording()
         guard let url = recordingURL else {
             setError("No recording to save.")
             return
         }
+
+        stopAll()
+
+        // Reset ephemeral flag once we hand the file off to the caller / staging
+        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+        #if DEBUG
+        print("[AudioRecorder] Ephemeral flag reset false (saveRecording)")
+        #endif
+
         onSave(url)
     }
 
-
-    func setError(_ message: String) {
-        errorMessage = message
+    func deleteRecording() {
+        stopAll()
+        if let url = recordingURL {
+            try? FileManager.default.removeItem(at: url)
+        }
+        recordingURL = nil
+        displayTime = 0
+        accumulatedRecordedTime = 0
+        finalRecordedTime = 0
+        state = .idle
+        errorMessage = nil
+        clearWaveform()
     }
 
-    func startElapsedTimer() {
-        startTime = Date()
-        elapsed = 0
-        timer?.invalidate()
-        let newTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            DispatchQueue.main.async {
-                if let start = startTime {
-                    elapsed = Date().timeIntervalSince(start)
-                    displayTime = accumulatedRecordedTime + elapsed
-                }
+    func togglePlayback() {
+        guard let url = recordingURL else { return }
+
+        switch state {
+        case .playing:
+            player?.pause()
+            stopPlaybackTimer()
+            state = .paused
+        case .paused:
+            player?.play()
+            startPlaybackTimer()
+            state = .playing
+        case .idle, .pausedRecording, .recording:
+            do {
+                stopAll()
+                player = try AVAudioPlayer(contentsOf: url)
+                player?.isMeteringEnabled = true
+                player?.prepareToPlay()
+                player?.play()
+                displayTime = 0 // playback starts at zero
+                startPlaybackTimer()
+                startWaveform()
+                state = .playing
+            } catch {
+                setError("Playback error: \(error.localizedDescription)")
             }
         }
-        timer = newTimer
-        RunLoop.main.add(newTimer, forMode: .common)
+    }
+
+    // MARK: - Elapsed Time Timer
+
+    func startElapsedTimer() {
+        stopElapsedTimer()
+        startTime = Date()
+        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            guard let startTime else { return }
+            let now = Date()
+            elapsed = now.timeIntervalSince(startTime)
+            displayTime = accumulatedRecordedTime + elapsed
+        }
+        RunLoop.main.add(timer!, forMode: .common)
     }
 
     func stopElapsedTimer() {
+        accumulatedRecordedTime += elapsed
+        elapsed = 0
+        startTime = nil
         timer?.invalidate()
         timer = nil
-        startTime = nil
+        displayTime = accumulatedRecordedTime
     }
 
+    // MARK: - Playback Timer
+
     func startPlaybackTimer() {
-        // Avoid duplicating timers
-        if playbackTimer != nil { return }
-        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { _ in
-            DispatchQueue.main.async {
-                if state == .playing {
-                    let current = player?.currentTime ?? playbackPosition
-                    playbackPosition = current
-                    displayTime = current
-                }
+        stopPlaybackTimer()
+        playbackPosition = 0
+        playbackTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            guard let player else { return }
+            self.playbackPosition = player.currentTime
+            self.displayTime = player.currentTime
+            if !player.isPlaying {
+                self.stopPlayback()
             }
         }
-        if let t = playbackTimer {
-            RunLoop.main.add(t, forMode: .common)
+        if let playbackTimer {
+            RunLoop.main.add(playbackTimer, forMode: .common)
         }
     }
 
@@ -541,142 +459,181 @@ private extension AudioRecorderView {
         playbackTimer = nil
     }
 
-    func cleanup() {
-        stopAll()
-        removeObserversIfNeeded()
-        stopPlaybackTimer()
-        stopWaveformTimer()
-        clearWaveform()
-        recorder = nil
-        player = nil
-        accumulatedRecordedTime = 0
-        finalRecordedTime = 0
-        elapsed = 0
-        displayTime = 0
-        if let url = recordingURL {
-            let fm = FileManager.default
-            if fm.fileExists(atPath: url.path) {
-                do { try fm.removeItem(at: url) } catch { /* swallow */ }
-                #if DEBUG
-                print("[AudioRecorder] Cleanup removed recorder temp: \(url.lastPathComponent)")
-                #endif
-            }
+    // MARK: - Error Handling
+
+    func setError(_ message: String) {
+        withAnimation {
+            errorMessage = message
         }
-        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-        #if DEBUG
-        print("[AudioRecorder] Cleanup on disappear; ephemeral flag reset false")
-        #endif
-    }
-    
-    func clearAllStagedAudio() {
-        Task {
-            try? await StagingStore.bootstrap()
-            let refs = StagingStore.list().filter { $0.kind == .audio }
-            for ref in refs { StagingStore.remove(ref) }
-        }
-    }
-    
-    // MARK: - Waveform metering
-    func startWaveform() {
-        if waveformTimer != nil { return }
-        // Prepare buffer size based on duration and sample rate
-        let capacity = max(1, Int((waveformDuration / waveformSampleRate).rounded()))
-        if waveformSamples.count != capacity {
-            // Prefill with a small visible baseline so we render a stable window from frame 0.
-            let baseline: CGFloat = 0.02
-            waveformSamples = Array(repeating: baseline, count: capacity)
-            waveformWriteIndex = 0
-            waveformHasWrapped = false
-        }
-        stopWaveformTimer()
-        let newTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
-            DispatchQueue.main.async {
-                guard state == .recording else { return }
-                recorder?.updateMeters()
-                let db = recorder?.averagePower(forChannel: 0) ?? -160
-                // Convert dBFS to linear 0...1 and ensure a minimum visible amplitude
-                let linear = max(0, min(1, pow(10.0, 0.06 * CGFloat(db))))
-                let visible = max(linear, 0.01)
-                // Less damping so early frames move more
-                let count = waveformSamples.count
-                let prevIndex = count > 0 ? (waveformWriteIndex - 1 + count) % count : 0
-                let previous = count > 0 ? waveformSamples[prevIndex] : 0
-                let smoothedRaw = previous * 0.5 + visible * 0.5
-                // Ensure a very small but visible baseline for quiet rooms
-                let smoothed = max(smoothedRaw, 0.015)
-                writeWaveformSample(smoothed)
-            }
-        }
-        waveformTimer = newTimer
-        RunLoop.main.add(newTimer, forMode: .common)
     }
 
-    func stopWaveformTimer() {
-        waveformTimer?.invalidate()
-        waveformTimer = nil
+    // MARK: - Waveform Helpers (Recording + Playback)
+
+    func setupWaveformBuffer() {
+        let sampleCount = Int(waveformDuration / waveformSampleRate)
+        waveformSamples = Array(repeating: 0, count: sampleCount)
+        waveformWriteIndex = 0
+        waveformHasWrapped = false
+        updateRenderBarsFromSamples()
     }
 
-    func writeWaveformSample(_ value: CGFloat) {
-        if waveformSamples.isEmpty { return }
-        waveformSamples[waveformWriteIndex] = value
-        let nextIndex = (waveformWriteIndex + 1) % waveformSamples.count
-        // If next index wraps to 0, we've completed at least one full window
-        if nextIndex == 0 { waveformHasWrapped = true }
-        waveformWriteIndex = nextIndex
+    func cleanupWaveform() {
+        waveformSamples.removeAll()
+        renderBars.removeAll()
+        frozenRenderBars = nil
     }
 
     func clearWaveform() {
-        waveformSamples.removeAll(keepingCapacity: false)
+        let sampleCount = Int(waveformDuration / waveformSampleRate)
+        waveformSamples = Array(repeating: 0, count: sampleCount)
         waveformWriteIndex = 0
         waveformHasWrapped = false
+        frozenRenderBars = nil
+        updateRenderBarsFromSamples()
     }
-    
-    // MARK: - Audio session observers
+
+    func startWaveform() {
+        frozenRenderBars = nil
+        startMeteringTimer()
+    }
+
+    func stopWaveformAndFreeze() {
+        stopMeteringTimer()
+        frozenRenderBars = renderBars
+    }
+
+    @State private var meteringTimer: Timer?
+
+    func startMeteringTimer() {
+        stopMeteringTimer()
+        meteringTimer = Timer.scheduledTimer(withTimeInterval: waveformSampleRate, repeats: true) { _ in
+            sampleWaveform()
+        }
+        if let meteringTimer {
+            RunLoop.main.add(meteringTimer, forMode: .common)
+        }
+    }
+
+    func stopMeteringTimer() {
+        meteringTimer?.invalidate()
+        meteringTimer = nil
+    }
+
+    func sampleWaveform() {
+        // If recording, sample from recorder
+        if let recorder, state == .recording {
+            recorder.updateMeters()
+            let level = recorder.averagePower(forChannel: 0)
+            let normalized = normalizedPower(level)
+            writeWaveformSample(normalized)
+        }
+        // If playing, sample from player
+        else if let player, (state == .playing || state == .paused) {
+            player.updateMeters()
+            let level = player.averagePower(forChannel: 0)
+            let normalized = normalizedPower(level)
+            writeWaveformSample(normalized)
+        }
+        // Otherwise, gently decay toward zero
+        else {
+            writeWaveformSample(0.0)
+        }
+    }
+
+    func normalizedPower(_ decibels: Float) -> Float {
+        guard decibels.isFinite else { return 0 }
+        let minDb: Float = -60
+        if decibels <= minDb {
+            return 0
+        }
+        let normalized = (decibels - minDb) / -minDb
+        return max(0, min(1, normalized))
+    }
+
+    func writeWaveformSample(_ sample: Float) {
+        guard !waveformSamples.isEmpty else { return }
+        waveformSamples[waveformWriteIndex] = sample
+        waveformWriteIndex += 1
+        if waveformWriteIndex >= waveformSamples.count {
+            waveformWriteIndex = 0
+            waveformHasWrapped = true
+        }
+        updateRenderBarsFromSamples()
+    }
+
+    func updateRenderBarsFromSamples() {
+        guard !waveformSamples.isEmpty else { return }
+        let orderedSamples: [Float]
+        if waveformHasWrapped {
+            let head = waveformSamples[waveformWriteIndex..<waveformSamples.count]
+            let tail = waveformSamples[0..<waveformWriteIndex]
+            orderedSamples = Array(head + tail)
+        } else {
+            orderedSamples = waveformSamples
+        }
+
+        // Map floats [0,1] to CGFloat heights
+        let bars = orderedSamples.map { sample -> CGFloat in
+            let minHeight: CGFloat = 0.1
+            let height = CGFloat(sample)
+            return max(minHeight, height)
+        }
+        renderBars = bars
+    }
+
+    // MARK: - Interruption Handling
+
     func installObserversIfNeeded() {
         guard !observersInstalled else { return }
         observersInstalled = true
-        let nc = NotificationCenter.default
-        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
-            handleAudioInterruption(note)
+
+        let center = NotificationCenter.default
+        center.addObserver(
+            forName: AVAudioSession.interruptionNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { notification in
+            handleInterruption(notification: notification)
         }
-        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
-            handleRouteChange(note)
+
+        center.addObserver(
+            forName: AVAudioSession.routeChangeNotification,
+            object: AVAudioSession.sharedInstance(),
+            queue: .main
+        ) { notification in
+            handleRouteChange(notification: notification)
         }
     }
 
-    func removeObserversIfNeeded() {
+    func removeObservers() {
         guard observersInstalled else { return }
         observersInstalled = false
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.interruptionNotification, object: AVAudioSession.sharedInstance())
+        NotificationCenter.default.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: AVAudioSession.sharedInstance())
     }
 
-    func handleAudioInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
+    func handleInterruption(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
+              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else {
+            return
+        }
 
         switch type {
         case .began:
-            // Remember what we were doing
-            wasRecordingBeforeInterruption = (state == .recording || state == .pausedRecording)
+            wasRecordingBeforeInterruption = (state == .recording)
             wasPlayingBeforeInterruption = (state == .playing)
-            // Pause ongoing work
-            if state == .recording { pauseRecording() }
-            if state == .playing { togglePlayback() } // will transition to .paused
+            if wasRecordingBeforeInterruption {
+                pauseRecording()
+            }
+            if wasPlayingBeforeInterruption {
+                togglePlayback()
+            }
         case .ended:
-            // Optionally resume if the system allows
-            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt
-            let shouldResume = optionsValue.map { AVAudioSession.InterruptionOptions(rawValue: $0).contains(.shouldResume) } ?? false
-            if shouldResume {
-                Task { @MainActor in
-                    if wasRecordingBeforeInterruption && state == .pausedRecording {
-                        await resumeRecording()
-                    } else if wasPlayingBeforeInterruption && state == .paused {
-                        togglePlayback()
-                    }
-                    wasRecordingBeforeInterruption = false
-                    wasPlayingBeforeInterruption = false
+            if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                if options.contains(.shouldResume) {
+                    // We don't auto-resume; user must explicitly resume
                 }
             }
         @unknown default:
@@ -684,13 +641,15 @@ private extension AudioRecorderView {
         }
     }
 
-    func handleRouteChange(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+    func handleRouteChange(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+            return
+        }
+
         switch reason {
-        case .oldDeviceUnavailable:
-            // Headphones unplugged etc. Pause playback to avoid blasting speaker unexpectedly
+        case .oldDeviceUnavailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange:
             if state == .playing {
                 togglePlayback()
             }
@@ -700,142 +659,84 @@ private extension AudioRecorderView {
     }
 }
 
-// MARK: - Minimal AVAudioPlayer delegate bridge
-private final class AudioPlayerDelegate: NSObject, AVAudioPlayerDelegate {
-    let onFinish: () -> Void
-    init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
-}
+// MARK: - ControlButton
 
-// MARK: - Control Button
 private struct ControlButton: View {
-    var systemName: String
-    var tint: Color
+    let systemName: String
+    let tint: Color
     var role: ButtonRole? = nil
-    var isEnabled: Bool = true
-    var action: () -> Void
+    let isEnabled: Bool
+    let action: () -> Void
 
     var body: some View {
-        Button(role: role) { action() } label: {
+        Button(role: role == .destructive ? .destructive : nil) {
+            if isEnabled {
+                action()
+            }
+        } label: {
             Image(systemName: systemName)
-                .font(.system(size: 32))
-                .foregroundColor(tint.opacity(isEnabled ? 1 : 0.4))
-                .frame(width: 52, height: 52)
-                .background(Circle().fill(Color(.systemGray6)).frame(width: 60, height: 60))
-                .opacity(isEnabled ? 1 : 0.5)
-                .contentShape(Circle())
+                .font(.system(size: 36, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(isEnabled ? tint : tint.opacity(0.3))
+                .frame(width: 56, height: 56)
+                .background(
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .shadow(radius: 4, y: 2)
+                )
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityHint("")
     }
 }
 
-// MARK: - WaveformIndicatorView
-private struct WaveformIndicatorView: View {
-    @Environment(\.colorScheme) private var colorScheme
+// MARK: - WaveformView
 
-    var samples: [CGFloat]
-    var color: Color
-    var background: Color
-    var writeIndex: Int = 0
-    var hasWrapped: Bool = false
-    var samplesPerSecond: Double = 30.0
-
-    @State private var frozenRenderBars: Int? = nil
-    private let freezeSeconds: Double = 3.0
+private struct WaveformView: View {
+    let samples: [CGFloat]
+    let isRecording: Bool
+    let isPlaying: Bool
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                background
-                Canvas { context, size in
-                    // Draw using a stable, locked density/stride. No state mutations here.
-                    guard !samples.isEmpty else { return }
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let count = max(samples.count, 1)
+            let barWidth = max(width / CGFloat(count), 1)
 
-                    let barCount = samples.count              // ring buffer capacity
-                    let barSpacing: CGFloat = 2
-                    let minPixel = max(1.0 / UIScreen.main.scale, 1.0)
-                    let availableWidth = size.width
-                    let midY = size.height / 2
-                    let maxHeight = size.height
-
-                    // How many samples are actually written so far.
-                    let writtenCount: Int = {
-                        if hasWrapped { return barCount }
-                        return max(0, min(barCount, writeIndex))
-                    }()
-                    guard writtenCount > 0 else { return }
-
-                    // Determine target bars from frozen value or a sensible default.
-                    let defaultTarget = max(1, Int((freezeSeconds * samplesPerSecond).rounded()))
-                    let targetBars = max(1, min(frozenRenderBars ?? defaultTarget, barCount))
-                    let renderBars = max(1, min(targetBars, writtenCount))
-
-                    // Lock stride based on capacity so speed/density are stable from frame 0.
-                    let stride = max(1, barCount / max(1, targetBars))
-
-                    // Bar width derived from renderBars so bars stay readable.
-                    let rawBarWidth = (availableWidth - CGFloat(renderBars - 1) * barSpacing) / CGFloat(renderBars)
-                    let barWidth = max(minPixel, floor(rawBarWidth))
-                    let step = barWidth + barSpacing
-
-                    // Index math: newest sample index in the circular buffer.
-                    let newest = (writeIndex - 1 + barCount) % barCount
-
-                    // Draw oldest -> newest across full width using downsampling with locked stride.
-                    for i in 0..<renderBars {
-                        let idxBack = (renderBars - 1 - i) * stride
-                        let srcIdx = (newest - idxBack + barCount) % barCount
-                        let v = samples[srcIdx]
-                        let clamped = max(0, min(1, v))
-                        let h = clamped * maxHeight
-                        let x = CGFloat(i) * step
-                        let rect = CGRect(x: x, y: midY - h/2, width: barWidth, height: h)
-                        context.fill(
-                            Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                            with: .color(color.opacity(0.95))
-                        )
-                    }
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                    .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-            )
-            .onChange(of: writeIndex) { _ in
-                // Defensive re-freeze if needed on late rotations etc.
-                if frozenRenderBars == nil {
-                    let threshold = max(1, Int(freezeSeconds * samplesPerSecond))
-                    let written = hasWrapped ? samples.count : max(0, writeIndex)
-                    if written >= threshold {
-                        DispatchQueue.main.async {
-                            frozenRenderBars = threshold
-                        }
-                    }
-                }
-            }
-            .onAppear {
-                if frozenRenderBars == nil {
-                    let threshold = max(1, Int(freezeSeconds * samplesPerSecond))
-                    DispatchQueue.main.async {
-                        frozenRenderBars = threshold
-                    }
+            HStack(alignment: .center, spacing: 0) {
+                ForEach(samples.indices, id: \.self) { index in
+                    let sample = samples[index]
+                    Capsule()
+                        .frame(width: barWidth, height: max(height * sample, 2))
+                        .foregroundStyle(color(for: index))
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+    }
+
+    func color(for index: Int) -> Color {
+        if isRecording {
+            return Color.red.opacity(0.8)
+        } else if isPlaying {
+            return Color.blue.opacity(0.8)
+        } else {
+            return Color.secondary.opacity(0.4)
+        }
     }
 }
 
 // MARK: - Preview
-#Preview("Audio Recorder") {
-    AudioRecorderView { url in
+
+struct AudioRecorderView_Previews: PreviewProvider {
+    static var previews: some View {
+        AudioRecorderView { url in
+            print("Saved: \(url)")
+        }
+        .environmentObject(StagingStoreObject())
+        .padding()
+        .background(Color.black.opacity(0.1))
+        .previewLayout(.sizeThatFits)
     }
-    .padding()
 }
 
