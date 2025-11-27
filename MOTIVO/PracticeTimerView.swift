@@ -1207,6 +1207,17 @@ struct PracticeTimerView: View {
                     didCancelFromReview = false
                 }
             }
+            .onChange(of: activityChoice) { _, _ in
+                // Clear current pad contents and auto-text mappings
+                taskLines.removeAll()
+                autoTaskTexts.removeAll()
+
+                // Load the correct per-activity template (Practice, Rehearsal, Recording, etc.)
+                loadPracticeDefaultsIfNeeded()
+
+                // Persist snapshot so the pad survives suspends/resumes
+                persistTasksSnapshot()
+            }
             // Info sheets for recording help
             .sheet(isPresented: $showAudioHelp) {
                 InfoSheetView(
