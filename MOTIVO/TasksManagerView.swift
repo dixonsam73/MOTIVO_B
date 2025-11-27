@@ -147,15 +147,6 @@ struct TasksManagerView: View {
                                     }
                                 }
                             }
-                            Divider()
-                                .overlay(
-                                    GeometryReader { proxy in
-                                        Color.clear
-                                            .background(
-                                                Theme.Colors.cardStroke(Environment(\.colorScheme).wrappedValue)
-                                            )
-                                    }
-                                )
 
                             Text("Defaults below apply when you start a session with this activity selected in the Practice Timer.")
                                 .font(.footnote)
@@ -190,68 +181,55 @@ struct TasksManagerView: View {
                 }
 
                 Section {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Default Tasks").sectionHeader()
+                    Text("Add Task").sectionHeader()
+                }
 
-                        if items.isEmpty {
-                            Text("No tasks yet. Add tasks to create a default list.")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        } else {
-                            ForEach(items.indices, id: \.self) { index in
-                                HStack {
-                                    TextField("Task", text: Binding(
-                                        get: { items[index] },
-                                        set: { newValue in
-                                            items[index] = newValue
-                                            saveItems()
-                                        }
-                                    ))
-                                    .textFieldStyle(.plain)
-
-                                    if isEditing {
-                                        Button(role: .destructive) {
-                                            deleteItem(at: index)
-                                        } label: {
-                                            Image(systemName: "trash")
-                                                .imageScale(.small)
-                                        }
-                                        .buttonStyle(BorderlessButtonStyle())
-                                    }
-                                }
-                            }
-                            .onDelete(perform: delete)
-                        }
-
+                Section {
+                    VStack(spacing: 0) {
                         HStack {
                             TextField("Add task", text: $newItemText)
+                                .font(Theme.Text.body)
                                 .textFieldStyle(.plain)
-                            Button {
-                                addItem()
-                            } label: {
-                                Image(systemName: "plus.circle.fill")
-                                    .foregroundStyle(.primary)
-                                    .padding(6)
+                            Button(action: { addItem() }) {
+                                Text("Add").font(Theme.Text.body)
                             }
-                            .buttonStyle(.plain)
                             .disabled(newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .padding(.top, Theme.Spacing.s)
+                    .cardSurface()
+                }
 
-                        Divider()
-                            .overlay(
-                                GeometryReader { proxy in
-                                    Color.clear
-                                        .background(
-                                            Theme.Colors.cardStroke(Environment(\.colorScheme).wrappedValue)
-                                        )
-                                }
-                            )
+                Section {
+                    Text("Your Tasks").sectionHeader()
+                }
 
+                Section {
+                    if items.isEmpty {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("No tasks yet.")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .font(Theme.Text.body)
+                            Text("These tasks are used as a template when the Tasks pad is empty. You can still edit and add tasks inside a live session without affecting this default list.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .cardSurface(padding: Theme.Spacing.card)
+                    } else {
+                        ForEach(items.indices, id: \.self) { index in
+                            Text(items[index])
+                                .font(Theme.Text.body)
+                        }
+                        .onDelete(perform: delete)
+
+                        // Persistent helper card row after the list
                         Text("These tasks are used as a template when the Tasks pad is empty. You can still edit and add tasks inside a live session without affecting this default list.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .cardSurface(padding: Theme.Spacing.card)
                     }
-                    .cardSurface()
                 }
             }
             .navigationTitle("")
@@ -362,3 +340,4 @@ struct TasksManagerView: View {
         userActivities = (try? viewContext.fetch(req)) ?? []
     }
 }
+
