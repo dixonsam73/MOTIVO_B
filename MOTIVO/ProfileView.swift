@@ -662,10 +662,10 @@ fileprivate struct SettingRow: View {
                  ActivityListView()
                      .environment(\.managedObjectContext, ctx)
              }
-             .sheet(isPresented: $showTasksManager) {
-                 TasksManagerView()
-                     .environment(\.managedObjectContext, ctx)
-             }
+            .sheet(isPresented: $showTasksManager) {
+                TasksManagerView(activityRef: normalizedPrimaryActivityRef())
+                    .environment(\.managedObjectContext, ctx)
+            }
          )
          #if canImport(PhotosUI)
          view = AnyView(view.sheet(isPresented: $showPhotoPicker) {
@@ -729,6 +729,7 @@ fileprivate struct SettingRow: View {
      }
  }
  #endif
+
 
 
 

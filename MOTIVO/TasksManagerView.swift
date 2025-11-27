@@ -1,133 +1,268 @@
-// CHANGE-ID: 20251013_140811-tasks-manager-v79B-a1
-// SCOPE: New file: TasksManagerView — practice defaults manager with namespaced UserDefaults and auto-fill toggle
-
 import SwiftUI
 import CoreData
 
-/// Profile-side manager for default Practice tasks.
+/// TasksManagerView
+///
+/// Manages the default task list that can auto-fill into PracticeTimerView's task pad
+/// for a given activity.
+///
 /// Storage is namespaced per signed-in user; falls back to a device scope when not signed in.
-/// Keys:
+/// Keys (v7.12+):
+///  - tasks:   "practiceTasks_v1::<owner>::<activityRef>"
+///  - toggle:  "practiceTasks_autofill_enabled::<owner>::<activityRef>"
+///
+/// Legacy (pre-v7.12) practice-only keys are still read as a fallback for migration:
 ///  - tasks:   "practiceTasks_v1::<owner>"
 ///  - toggle:  "practiceTasks_autofill_enabled::<owner>"
 struct TasksManagerView: View {
+    /// Initial activity reference string (e.g. "core:0" or "custom:Rehearsal") whose defaults we are editing.
+    let activityRef: String
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
-    @Environment(\.editMode) private var editMode
 
-    // MARK: - User-scoped keys
+    // MARK: - State
+
+    /// The activity currently being edited in this sheet. Can be switched by the user.
+    @State private var selectedActivityRef: String = "core:0"
+    @State private var items: [String] = []
+    @State private var newItemText: String = ""
+    @State private var isEditing: Bool = false
+    @State private var autofillEnabled: Bool = true
+    @State private var userActivities: [UserActivity] = []
+
+    // MARK: - Init
+
+    init(activityRef: String) {
+        self.activityRef = activityRef
+        _selectedActivityRef = State(initialValue: activityRef)
+    }
+
+    // MARK: - Storage keys
+
     private var ownerScope: String {
-        if let id = PersistenceController.shared.currentUserID, !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if let id = PersistenceController.shared.currentUserID,
+           !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return id
         }
         return "device"
     }
-    private var tasksKey: String { "practiceTasks_v1::" + ownerScope }
-    private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
 
-    // MARK: - State
-    @State private var items: [String] = []
-    @State private var newItem: String = ""
-    @State private var autofillEnabled: Bool = true
-    @FocusState private var newItemFocused: Bool
+    /// Normalizes an activity ref string to "core:<raw>" / "custom:<name>" or "core:0" if malformed.
+    private func normalizedActivityRef(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("core:") || trimmed.hasPrefix("custom:") {
+            return trimmed
+        }
+        return "core:0"
+    }
+
+    private var currentNormalizedActivityRef: String {
+        normalizedActivityRef(selectedActivityRef)
+    }
+
+    /// Per-activity keys (v7.12+)
+    private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef }
+    private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef }
+
+    /// Legacy keys (v7.9–v7.11, practice-only)
+    private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
+    private var legacyToggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
+
+    // MARK: - Activity helpers
+
+    /// All activity refs available in the system: core activities + custom UserActivity entries.
+    private var allActivityRefs: [String] {
+        var result: [String] = []
+
+        // Core activities
+        for t in SessionActivityType.allCases {
+            let ref = "core:\(t.rawValue)"
+            result.append(ref)
+        }
+
+        // Custom activities from Core Data
+        let customs: [String] = userActivities.compactMap { ua in
+            let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? nil : "custom:\(n)"
+        }
+        for c in customs where !result.contains(c) {
+            result.append(c)
+        }
+
+        // Ensure current selection is present even if unknown
+        let normalized = currentNormalizedActivityRef
+        if !result.contains(normalized) {
+            result.insert(normalized, at: 0)
+        }
+
+        return result
+    }
+
+    private func activityDisplayName(for ref: String) -> String {
+        let trimmed = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if trimmed.hasPrefix("core:") {
+            if let rawPart = trimmed.split(separator: ":").last,
+               let rawValue = Int16(rawPart),
+               let t = SessionActivityType(rawValue: rawValue) {
+                return t.label
+            }
+            return SessionActivityType.practice.label
+        } else if trimmed.hasPrefix("custom:") {
+            let name = String(trimmed.dropFirst("custom:".count))
+            return name.isEmpty ? "Custom" : name
+        }
+
+        return SessionActivityType.practice.label
+    }
 
     // MARK: - Body
+
     var body: some View {
         NavigationStack {
             List {
+                // Activity picker
                 Section {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                        HStack {
-                            TextField("Add task", text: $newItem)
-                                .textInputAutocapitalization(.never)
-                                .autocorrectionDisabled(true)
-                                .focused($newItemFocused)
-                                .font(Theme.Text.body)
-                            Button("Add") { addNew() }
-                                .disabled(newItem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                        .padding(.vertical, 0)
-                    }
-                    .cardSurface()
-                } header: {
-                    Text("Add Task").sectionHeader()
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                        Toggle(isOn: Binding(get: {
-                            autofillEnabled
-                        }, set: { v in
-                            autofillEnabled = v
-                            saveToggle()
-                        })) {
-                            Text("Auto-fill on Practice")
-                                .font(Theme.Text.body)
-                        }
-                    }
-                    .cardSurface()
-                } footer: {
-                    Text("If enabled, the Practice Timer will pre-populate your Notes/Tasks pad with this list when you open it and it's currently empty.")
-                }
-
-                Section {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                        if items.isEmpty {
-                            Text("No tasks yet").foregroundStyle(.secondary)
-                                .font(Theme.Text.body)
-                        } else {
-                            ForEach(items.indices, id: \.self) { idx in
-                                TaskRow(
-                                    text: Binding(
-                                        get: { items[idx] },
-                                        set: { items[idx] = $0; saveItems() }
-                                    ),
-                                    onDelete: { delete(at: IndexSet(integer: idx)) }
-                                )
-                                .padding(.vertical, Theme.Spacing.inline)
+                    HStack {
+                        Text("Activity")
+                        Spacer()
+                        Menu {
+                            ForEach(allActivityRefs, id: \.self) { ref in
+                                Button {
+                                    selectedActivityRef = ref
+                                } label: {
+                                    Label(activityDisplayName(for: ref),
+                                          systemImage: ref == selectedActivityRef ? "checkmark" : "circle")
+                                }
                             }
-                            .onMove(perform: move)
-                            .onDelete(perform: delete)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(activityDisplayName(for: selectedActivityRef))
+                                    .foregroundStyle(.primary)
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    .cardSurface()
-                } header: {
-                    Text("Your Tasks").sectionHeader()
+                    Text("Defaults below apply when you start a session with this activity selected in the Practice Timer.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                // Auto-fill toggle
+                Section {
+                    Toggle(isOn: $autofillEnabled) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Auto-fill for this activity")
+                                .font(.headline)
+                            Text("If enabled, the Practice Timer will pre-fill the Tasks pad with this list when you open it and it's currently empty.")
+                                .font(.footnote)
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .onChange(of: autofillEnabled) { _ in
+                        saveToggle()
+                    }
+                }
+
+                // Default tasks list
+                Section(header: Text("Default Tasks")) {
+                    if items.isEmpty {
+                        Text("No tasks yet. Add tasks to create a default list.")
+                            .foregroundColor(.secondary)
+                    } else {
+                        ForEach(items.indices, id: \.self) { index in
+                            HStack {
+                                TextField("Task", text: Binding(
+                                    get: { items[index] },
+                                    set: { newValue in
+                                        items[index] = newValue
+                                        saveItems()
+                                    }
+                                ))
+                                .textFieldStyle(.plain)
+
+                                if isEditing {
+                                    Button(role: .destructive) {
+                                        deleteItem(at: index)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .imageScale(.small)
+                                    }
+                                    .buttonStyle(BorderlessButtonStyle())
+                                }
+                            }
+                        }
+                        .onDelete(perform: delete)
+                    }
+
+                    HStack {
+                        TextField("Add task", text: $newItemText)
+                            .textFieldStyle(.plain)
+                        Button {
+                            addItem()
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        .disabled(newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+
+                Section(
+                    footer:
+                        Text("These tasks are used as a template when the Tasks pad is empty. You can still edit and add tasks inside a live session without affecting this default list.")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                ) {
+                    EmptyView()
                 }
             }
-            .listStyle(.plain)
-            .padding(.horizontal, Theme.Spacing.l)
+            .navigationTitle("Tasks Manager")
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Manage Tasks")
-                        .font(Theme.Text.pageTitle)
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Close") {
+                        dismiss()
+                    }
                 }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(action: { dismiss() }) {
-                        Text("Close")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(.primary)
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button(isEditing ? "Done" : "Edit") {
+                        withAnimation {
+                            isEditing.toggle()
+                        }
                     }
                 }
             }
-            .navigationBarTitleDisplayMode(.inline)
-            .onAppear { loadAll() }
-            .appBackground()
+            .onAppear {
+                // Normalize initial ref and load data
+                selectedActivityRef = normalizedActivityRef(activityRef)
+                loadUserActivities()
+                loadAll()
+            }
+            .onChange(of: selectedActivityRef) { _ in
+                // When user switches activity, reload its defaults
+                loadAll()
+            }
         }
     }
 
     // MARK: - Actions
-    private func addNew() {
-        let trimmed = newItem.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    private func addItem() {
+        let trimmed = newItemText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         items.append(trimmed)
-        newItem = ""
+        newItemText = ""
         saveItems()
-        // keep focus for fast adding
-        DispatchQueue.main.async { newItemFocused = true }
     }
 
-    private func move(from offsets: IndexSet, to newOffset: Int) {
-        items.move(fromOffsets: offsets, toOffset: newOffset)
+    private func deleteItem(at index: Int) {
+        guard items.indices.contains(index) else { return }
+        items.remove(at: index)
         saveItems()
     }
 
@@ -137,51 +272,50 @@ struct TasksManagerView: View {
     }
 
     // MARK: - Persistence
+
     private func loadAll() {
         let defaults = UserDefaults.standard
+
+        // Tasks — prefer per-activity key, fall back to legacy practice-only key for migration.
         if let arr = defaults.array(forKey: tasksKey) as? [String] {
             items = arr
+        } else if currentNormalizedActivityRef == "core:0",
+                  let legacyArr = defaults.array(forKey: legacyTasksKey) as? [String] {
+            items = legacyArr
+            // Migrate to the new per-activity slot for the current activity.
+            defaults.set(legacyArr, forKey: tasksKey)
         } else {
             items = []
         }
-        if defaults.object(forKey: toggleKey) == nil {
-            autofillEnabled = true // default ON
+
+        // Toggle — prefer per-activity key, fall back to legacy key, default ON if missing.
+        if defaults.object(forKey: toggleKey) != nil {
+            autofillEnabled = defaults.bool(forKey: toggleKey)
+        } else if currentNormalizedActivityRef == "core:0",
+                  defaults.object(forKey: legacyToggleKey) != nil {
+            autofillEnabled = defaults.bool(forKey: legacyToggleKey)
             saveToggle()
         } else {
-            autofillEnabled = defaults.bool(forKey: toggleKey)
+            autofillEnabled = true // default ON
+            saveToggle()
         }
     }
 
     private func saveItems() {
-        UserDefaults.standard.set(items, forKey: tasksKey)
+        let defaults = UserDefaults.standard
+        defaults.set(items, forKey: tasksKey)
     }
 
     private func saveToggle() {
-        UserDefaults.standard.set(autofillEnabled, forKey: toggleKey)
+        let defaults = UserDefaults.standard
+        defaults.set(autofillEnabled, forKey: toggleKey)
+    }
+
+    // MARK: - Data fetch
+
+    private func loadUserActivities() {
+        let req: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
+        req.sortDescriptors = [NSSortDescriptor(key: "displayName", ascending: true)]
+        userActivities = (try? viewContext.fetch(req)) ?? []
     }
 }
-
-private struct TaskRow: View {
-    @Binding var text: String
-    var onDelete: () -> Void
-
-    var body: some View {
-        HStack(spacing: Theme.Spacing.inline) {
-            Image(systemName: "line.3.horizontal")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-            TextField("Task", text: $text)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled(true)
-                .font(Theme.Text.body)
-            Spacer(minLength: Theme.Spacing.inline)
-            Button(role: .destructive, action: onDelete) {
-                Image(systemName: "trash")
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Delete task")
-        }
-        .padding(.vertical, Theme.Spacing.inline)
-    }
-}
-

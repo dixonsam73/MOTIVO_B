@@ -154,36 +154,104 @@ struct PracticeTimerView: View {
     private let sessionBootIDKey = "PracticeTimer.bootID"
     private var currentBootID: String { String(getpid()) }
 
+    // BEGIN TASKS DEFAULTS PATCH
+
+    /// Legacy v7.9-style global defaults loader (Practice only).
+    /// Kept as a fallback for very old keys.
     private func loadDefaultTasksIfNeeded() {
         guard activity == .practice, taskLines.isEmpty else { return }
-        if let defaults = UserDefaults.standard.array(forKey: tasksDefaultsKey) as? [String] {
-            let mapped = defaults.map { TaskLine(text: $0, isDone: false) }
+
+        let defaults = UserDefaults.standard
+        guard let data = defaults.data(forKey: tasksDefaultsKey) else { return }
+
+        if let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            print("[PracticeTimer] Loaded default tasks from legacy defaults key")
+            let mapped = decoded.map { TaskLine(text: $0, isDone: false) }
             self.taskLines = mapped
-            // Store auto-texts for restore behavior
             for line in mapped {
                 autoTaskTexts[line.id] = line.text
             }
         }
     }
+
+    /// Derive an activity reference string matching the Profile/TasksManager scheme.
+    /// Prefers the explicit activityChoice (e.g. "core:0", "custom:Rehearsal"), falls back to primaryActivityRef,
+    /// and finally to "core:0" (Practice) if malformed.
+    private func currentActivityRefForTasks() -> String {
+        let trimmedChoice = activityChoice.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedChoice.hasPrefix("core:") || trimmedChoice.hasPrefix("custom:") {
+            return trimmedChoice
+        }
+
+        let trimmedPrimary = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedPrimary.hasPrefix("core:") || trimmedPrimary.hasPrefix("custom:") {
+            return trimmedPrimary
+        }
+
+        return "core:0"
+    }
+
+    /// Per-activity default tasks loader (core + custom).
+    /// Uses keys:
+    ///   tasks:  "practiceTasks_v1::<ownerScope>::<activityRef>"
+    ///   toggle: "practiceTasks_autofill_enabled::<ownerScope>::<activityRef>"
+    ///
+    /// Also migrates old practice-only lists from "practiceTasks_v1::<ownerScope>" on first use.
     private func loadPracticeDefaultsIfNeeded() {
-        // Determine owner scope using current user ID from PersistenceController; fallback to device
         let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
-        let tasksKey = "practiceTasks_v1::\(ownerScope)"
-        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)"
+        let activityRef = currentActivityRefForTasks()
+        let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
+        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
+        let defaults = UserDefaults.standard
 
-        // Only proceed if practice activity, no existing lines, and autofill toggle is enabled
-        guard activity == .practice,
-              taskLines.isEmpty,
-              UserDefaults.standard.bool(forKey: toggleKey) == true else { return }
+        // Only proceed if we currently have no lines.
+        guard taskLines.isEmpty else { return }
 
-        if let arr = UserDefaults.standard.array(forKey: tasksKey) as? [String] {
+        // Default ON when no explicit preference exists.
+        let toggleValue: Bool
+        if defaults.object(forKey: toggleKey) == nil {
+            toggleValue = true
+        } else {
+            toggleValue = defaults.bool(forKey: toggleKey)
+        }
+        guard toggleValue else { return }
+
+        // 1) Preferred path: per-activity template already exists.
+        if let arr = defaults.array(forKey: tasksKey) as? [String] {
             let mapped = arr.map { TaskLine(text: $0, isDone: false) }
             self.taskLines = mapped
             for line in mapped {
                 autoTaskTexts[line.id] = line.text
             }
+            return
+        }
+
+        // 2) Backwards-compat: if we're on Practice, migrate from legacy practice-only key.
+        if activity == .practice {
+            let legacyKey = "practiceTasks_v1::\(ownerScope)"
+            if let legacyArr = defaults.array(forKey: legacyKey) as? [String] {
+                let mapped = legacyArr.map { TaskLine(text: $0, isDone: false) }
+                self.taskLines = mapped
+                for line in mapped {
+                    autoTaskTexts[line.id] = line.text
+                }
+                // Persist into the per-activity slot for next time.
+                defaults.set(legacyArr, forKey: tasksKey)
+            } else {
+                // Very old global data path (no ownerScope).
+                if let arr = defaults.array(forKey: "practiceTasks_v1") as? [String] {
+                    let mapped = arr.map { TaskLine(text: $0, isDone: false) }
+                    self.taskLines = mapped
+                    for line in mapped {
+                        autoTaskTexts[line.id] = line.text
+                    }
+                    defaults.set(arr, forKey: tasksKey)
+                }
+            }
         }
     }
+
+    // END TASKS DEFAULTS PATCH
     private func composeNotesString() -> String? {
         // Keep only non-empty lines (trimmed)
         let nonEmpty = taskLines
