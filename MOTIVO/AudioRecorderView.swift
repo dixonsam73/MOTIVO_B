@@ -523,6 +523,11 @@ struct AudioRecorderView: View {
     }
 
     func sampleWaveform() {
+        // When paused (recording or playback), freeze the waveform — no new samples.
+        if state == .pausedRecording || state == .paused {
+            return
+        }
+
         // If recording, sample from recorder
         if let recorder, state == .recording {
             recorder.updateMeters()
@@ -531,7 +536,7 @@ struct AudioRecorderView: View {
             writeWaveformSample(normalized)
         }
         // If playing, sample from player
-        else if let player, (state == .playing || state == .paused) {
+        else if let player, state == .playing {
             player.updateMeters()
             let level = player.averagePower(forChannel: 0)
             let normalized = normalizedPower(level)
