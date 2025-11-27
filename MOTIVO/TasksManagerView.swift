@@ -121,113 +121,153 @@ struct TasksManagerView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                // Activity picker
+            Form {
                 Section {
-                    HStack {
-                        Text("Activity")
-                        Spacer()
-                        Menu {
-                            ForEach(allActivityRefs, id: \.self) { ref in
-                                Button {
-                                    selectedActivityRef = ref
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Activity").sectionHeader()
+
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            HStack {
+                                Menu {
+                                    ForEach(allActivityRefs, id: \.self) { ref in
+                                        Button {
+                                            selectedActivityRef = ref
+                                        } label: {
+                                            Label(activityDisplayName(for: ref),
+                                                  systemImage: ref == selectedActivityRef ? "checkmark" : "circle")
+                                        }
+                                    }
                                 } label: {
-                                    Label(activityDisplayName(for: ref),
-                                          systemImage: ref == selectedActivityRef ? "checkmark" : "circle")
+                                    HStack(spacing: 6) {
+                                        Text(activityDisplayName(for: selectedActivityRef))
+                                            .foregroundStyle(Theme.Colors.accent)
+                                        Image(systemName: "chevron.up.chevron.down")
+                                            .font(.caption2)
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
                                 }
                             }
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(activityDisplayName(for: selectedActivityRef))
-                                    .foregroundStyle(.primary)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    Text("Defaults below apply when you start a session with this activity selected in the Practice Timer.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                            Divider()
+                                .overlay(
+                                    GeometryReader { proxy in
+                                        Color.clear
+                                            .background(
+                                                Theme.Colors.cardStroke(Environment(\.colorScheme).wrappedValue)
+                                            )
+                                    }
+                                )
 
-                // Auto-fill toggle
-                Section {
-                    Toggle(isOn: $autofillEnabled) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Auto-fill for this activity")
-                                .font(.headline)
-                            Text("If enabled, the Practice Timer will pre-fill the Tasks pad with this list when you open it and it's currently empty.")
+                            Text("Defaults below apply when you start a session with this activity selected in the Practice Timer.")
                                 .font(.footnote)
-                                .foregroundColor(.secondary)
+                                .foregroundStyle(Theme.Colors.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
+                        .cardSurface()
+                        .padding(.horizontal, Theme.Spacing.card)
+                        .padding(.vertical, Theme.Spacing.s)
                     }
-                    .onChange(of: autofillEnabled) { _ in
-                        saveToggle()
-                    }
+                    .listRowSeparator(.hidden)
                 }
 
-                // Default tasks list
-                Section(header: Text("Default Tasks")) {
-                    if items.isEmpty {
-                        Text("No tasks yet. Add tasks to create a default list.")
-                            .foregroundColor(.secondary)
-                    } else {
-                        ForEach(items.indices, id: \.self) { index in
-                            HStack {
-                                TextField("Task", text: Binding(
-                                    get: { items[index] },
-                                    set: { newValue in
-                                        items[index] = newValue
-                                        saveItems()
-                                    }
-                                ))
-                                .textFieldStyle(.plain)
+                Section {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Auto-fill for this activity").sectionHeader()
 
-                                if isEditing {
-                                    Button(role: .destructive) {
-                                        deleteItem(at: index)
-                                    } label: {
-                                        Image(systemName: "trash")
-                                            .imageScale(.small)
-                                    }
-                                    .buttonStyle(BorderlessButtonStyle())
-                                }
+                        Toggle(isOn: $autofillEnabled) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("If enabled, the Practice Timer will pre-fill the Tasks pad with this list when you open it and it's currently empty.")
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                         }
-                        .onDelete(perform: delete)
-                    }
-
-                    HStack {
-                        TextField("Add task", text: $newItemText)
-                            .textFieldStyle(.plain)
-                        Button {
-                            addItem()
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
+                        .onChange(of: autofillEnabled) { _ in
+                            saveToggle()
                         }
-                        .disabled(newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
+                    .cardSurface(padding: Theme.Spacing.card)
+                    .listRowSeparator(.hidden)
                 }
 
-                Section(
-                    footer:
+                Section {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Default Tasks").sectionHeader()
+
+                        if items.isEmpty {
+                            Text("No tasks yet. Add tasks to create a default list.")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        } else {
+                            ForEach(items.indices, id: \.self) { index in
+                                HStack {
+                                    TextField("Task", text: Binding(
+                                        get: { items[index] },
+                                        set: { newValue in
+                                            items[index] = newValue
+                                            saveItems()
+                                        }
+                                    ))
+                                    .textFieldStyle(.plain)
+
+                                    if isEditing {
+                                        Button(role: .destructive) {
+                                            deleteItem(at: index)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                                .imageScale(.small)
+                                        }
+                                        .buttonStyle(BorderlessButtonStyle())
+                                    }
+                                }
+                            }
+                            .onDelete(perform: delete)
+                        }
+
+                        HStack {
+                            TextField("Add task", text: $newItemText)
+                                .textFieldStyle(.plain)
+                            Button {
+                                addItem()
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(.primary)
+                                    .padding(6)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+
+                        Divider()
+                            .overlay(
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .background(
+                                            Theme.Colors.cardStroke(Environment(\.colorScheme).wrappedValue)
+                                        )
+                                }
+                            )
+
                         Text("These tasks are used as a template when the Tasks pad is empty. You can still edit and add tasks inside a live session without affecting this default list.")
-                        .font(.footnote)
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                ) {
-                    EmptyView()
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .cardSurface()
                 }
             }
-            .navigationTitle("Tasks Manager")
+            .navigationTitle("")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Close") {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
                         dismiss()
+                    } label: {
+                        Text("Close")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(.primary)
                     }
+                }
+                ToolbarItem(placement: .principal) {
+                    Text("Tasks Manager")
+                        .font(Theme.Text.pageTitle)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button(isEditing ? "Done" : "Edit") {
@@ -235,6 +275,8 @@ struct TasksManagerView: View {
                             isEditing.toggle()
                         }
                     }
+                    .font(Theme.Text.body)
+                    .tint(Theme.Colors.accent)
                 }
             }
             .onAppear {
@@ -247,6 +289,7 @@ struct TasksManagerView: View {
                 // When user switches activity, reload its defaults
                 loadAll()
             }
+            .appBackground()
         }
     }
 
