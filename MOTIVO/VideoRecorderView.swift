@@ -1092,14 +1092,30 @@ private final class PreviewContainerView: UIView {
     }
 
     static func currentOrientation() -> AVCaptureVideoOrientation {
+        // Ensure UIKit APIs are always accessed from the main thread.
+        if Thread.isMainThread {
+            return currentOrientationOnMain()
+        } else {
+            return DispatchQueue.main.sync {
+                currentOrientationOnMain()
+            }
+        }
+    }
+
+    private static func currentOrientationOnMain() -> AVCaptureVideoOrientation {
         let o = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.interfaceOrientation
+
         switch o {
-        case .landscapeLeft: return .landscapeLeft
-        case .landscapeRight: return .landscapeRight
-        case .portraitUpsideDown: return .portraitUpsideDown
-        default: return .portrait
+        case .landscapeLeft:
+            return .landscapeLeft
+        case .landscapeRight:
+            return .landscapeRight
+        case .portraitUpsideDown:
+            return .portraitUpsideDown
+        default:
+            return .portrait
         }
     }
 }
