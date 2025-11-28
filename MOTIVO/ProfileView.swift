@@ -281,23 +281,44 @@ struct ProfileView: View {
     private var instrumentsSection: some View {
         Section(header: Text("Instruments").sectionHeader()) {
             VStack(spacing: 0) {
-                Button { showInstrumentManager = true } label: { manageRow(title: "Manage Instruments") }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    .frame(minHeight: 44, alignment: .center)
-                    .font(Theme.Text.body)
+                Button { showInstrumentManager = true } label: {
+                    manageRow(title: "Manage Instruments")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .frame(minHeight: 44, alignment: .center)
+                .font(Theme.Text.body)
 
                 Divider().padding(.leading, 16)
 
-                VStack(spacing: Theme.Spacing.s) {
-                    Picker("Primary Instrument", selection: $primaryInstrumentName) {
-                        ForEach(instruments.map { $0.name ?? "" }.filter { !$0.isEmpty }, id: \.self) { n in
-                            Text(n).tag(n)
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    // Softer header-style label
+                    Text("Primary Instrument")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+
+                    // Menu directly below, aligned on same rail
+                    Menu {
+                        ForEach(instrumentsArray, id: \.self) { name in
+                            Button {
+                                primaryInstrumentName = name
+                            } label: {
+                                let isCurrent = (primaryInstrumentName == name)
+                                Label(name, systemImage: isCurrent ? "checkmark" : "")
+                            }
                         }
+                    } label: {
+                        Text(primaryInstrumentName.isEmpty ? "Select" : primaryInstrumentName)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .font(Theme.Text.body)
+                    .tint(Theme.Colors.accent) // Motivo green, no iOS blue
+                    .accessibilityLabel("Primary Instrument")
                 }
+                .padding(.top, Theme.Spacing.s)
                 .frame(minHeight: 44, alignment: .center)
             }
             .padding(.horizontal, 16)
@@ -308,34 +329,77 @@ struct ProfileView: View {
         }
         .padding(.top, Theme.Spacing.section)
     }
-
     @ViewBuilder
     private var activitiesSection: some View {
         Section(header: Text("Activities").sectionHeader()) {
             VStack(spacing: 0) {
-                Button { showActivityManager = true } label: { manageRow(title: "Manage Activities") }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    .frame(minHeight: 44)
-                    .font(Theme.Text.body)
+                Button { showActivityManager = true } label: {
+                    manageRow(title: "Manage Activities")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .frame(minHeight: 44)
+                .font(Theme.Text.body)
 
                 Divider().padding(.leading, 16)
 
-                VStack(spacing: Theme.Spacing.s) {
-                    Picker("Primary Activity", selection: $primaryActivityChoice) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    // Softer header-style label
+                    Text("Primary Activity")
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+
+                    // Compute current label for the menu
+                    let currentActivityLabel: String = {
+                        if primaryActivityChoice.hasPrefix("core:") {
+                            if let v = Int(primaryActivityChoice.split(separator: ":").last ?? "0"),
+                               let type = SessionActivityType(rawValue: Int16(v)) {
+                                return type.label
+                            }
+                        } else if primaryActivityChoice.hasPrefix("custom:") {
+                            return String(primaryActivityChoice.dropFirst("custom:".count))
+                        }
+                        // Fallback
+                        return "Practice"
+                    }()
+
+                    // Menu directly below, aligned on same rail
+                    Menu {
+                        // Core activities
                         ForEach(SessionActivityType.allCases) { type in
-                            Text(type.label).tag("core:\(type.rawValue)")
+                            let tag = "core:\(type.rawValue)"
+                            Button {
+                                primaryActivityChoice = tag
+                                writePrimaryActivityRef(tag)
+                            } label: {
+                                let isCurrent = (primaryActivityChoice == tag)
+                                Label(type.label, systemImage: isCurrent ? "checkmark" : "")
+                            }
                         }
+
+                        // Custom activities
                         ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                            Text(name).tag("custom:\(name)")
+                            let tag = "custom:\(name)"
+                            Button {
+                                primaryActivityChoice = tag
+                                writePrimaryActivityRef(tag)
+                            } label: {
+                                let isCurrent = (primaryActivityChoice == tag)
+                                Label(name, systemImage: isCurrent ? "checkmark" : "")
+                            }
                         }
+                    } label: {
+                        Text(currentActivityLabel)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(.primary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .onChange(of: primaryActivityChoice) { _, newValue in
-                        writePrimaryActivityRef(newValue)
-                    }
-                    .font(Theme.Text.body)
+                    .tint(Theme.Colors.accent) // Motivo green, no iOS blue
+                    .accessibilityLabel("Primary Activity")
                 }
+                .padding(.top, Theme.Spacing.s)
                 .frame(minHeight: 44)
             }
             .padding(.horizontal, 16)
@@ -345,7 +409,6 @@ struct ProfileView: View {
             .padding(.bottom, Theme.Spacing.m)
         }
     }
-
     @ViewBuilder
     private var tasksSection: some View {
         Section(header: Text("Tasks").sectionHeader()) {
