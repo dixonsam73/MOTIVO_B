@@ -1419,7 +1419,8 @@ struct PracticeTimerView: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(height: 44)
-                .background(Theme.Colors.accent.opacity(0.18))
+                // Use primaryAction (original green) instead of accent
+                .background(Theme.Colors.primaryAction.opacity(0.18))
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 

@@ -54,9 +54,15 @@ enum Theme {
         static func cardStroke(_ scheme: ColorScheme) -> Color {
             stroke(scheme)
         }
-        // Evergreen accent (can be tailored later)
+        
         static var accent: Color {
-            Color(red: 0.16, green: 0.38, blue: 0.29)            // deep green
+            // Slate blue-grey accent for UI chrome
+            Color(red: 0.32, green: 0.38, blue: 0.46)
+        }
+
+        static var primaryAction: Color {
+            // Original timer green for key actions
+            Color(red: 0.16, green: 0.38, blue: 0.29)
         }
         static var secondaryText: Color {
             Color.primary.opacity(0.55)
