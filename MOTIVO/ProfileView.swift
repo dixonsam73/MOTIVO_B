@@ -413,12 +413,15 @@ struct ProfileView: View {
     private var tasksSection: some View {
         Section(header: Text("Tasks").sectionHeader()) {
             VStack(spacing: 0) {
-                Button { showTasksManager = true } label: { manageRow(title: "Manage Tasks") }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .accessibilityAddTraits(.isButton)
-                    .frame(minHeight: 44)
-                    .font(Theme.Text.body)
+                Button { showTasksManager = true } label: {
+                    manageRow(title: "Manage Tasks")
+                        .foregroundStyle(Theme.Colors.secondaryText)   // ⬅️ add this
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .frame(minHeight: 44)
+                .font(Theme.Text.body)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
