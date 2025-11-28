@@ -95,8 +95,10 @@
      @State private var name: String = ""
      @State private var primaryInstrumentName: String = ""
      @State private var defaultPrivacy: Bool = false
- 
-     @FocusState private var isNameFocused: Bool
+     @State private var isWelcomeExpanded: Bool = false
+
+
+@FocusState private var isNameFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
      @State private var showActivityManager: Bool = false
@@ -144,6 +146,7 @@
          modalsAndAlerts(
              NavigationStack {
                  Form {
+                     welcomeSection
                      Group {
                          profileSection
                          privacySection
@@ -169,7 +172,64 @@
      }
  
      // MARK: - Sections
- 
+
+     @ViewBuilder
+     private var welcomeSection: some View {
+         Section {
+             VStack(spacing: 0) {
+                 Button {
+                     isWelcomeExpanded.toggle()
+                 } label: {
+                     HStack(spacing: Theme.Spacing.s) {
+                         Text("Welcome!")
+                             .font(Theme.Text.body)
+                                 .foregroundStyle(Theme.Colors.accent)
+                         Spacer()
+                         Image(systemName: isWelcomeExpanded ? "chevron.up" : "chevron.down")
+                             .font(.footnote.weight(.semibold))
+                             .padding(6)
+                             .background(.ultraThinMaterial, in: Circle())
+                             .foregroundStyle(Theme.Colors.accent)
+                     }
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityLabel(Text("Welcome to Motivo"))
+                 .accessibilityHint(Text(isWelcomeExpanded ? "Hide welcome information" : "Show welcome information"))
+                 .frame(minHeight: 24)
+
+                 if isWelcomeExpanded {
+                     Divider()
+                         .padding(.vertical, 8)
+
+                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                         Text("Welcome to Motivo")
+                             .font(Theme.Text.body)
+                             .fontWeight(.semibold)
+
+                         Text("""
+This is your Profile. Add your name, location and instruments here, and choose a primary instrument to pre-fill new sessions.
+Activities work the same way — use presets or add your own, and set a primary for quick session starts.
+The Feed shows your practice/session history (and others, if you follow them). Use the Feed Filter to switch between All and Mine, and use search to find what you’re after (e.g. scales, Motown). Adjust privacy globally or per session, and choose whether posts include attachments or nothing at all.
+The Practice Timer lets you record sessions with photos, audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — you can write notes, add tasks as you go, or use default task lists set in the Tasks Manager on this page. These defaults auto-populate the task pad based on the activity you’ve selected.
+Saved sessions appear in the Feed, and you can track how your practice evolves over time on the Stats page.
+""")
+                             .font(Theme.Text.body)
+                             .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .frame(maxWidth: .infinity, alignment: .leading)
+                     .transition(.opacity.combined(with: .move(edge: .top)))
+                 }
+             }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 2)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
+         }
+         .padding(.top, Theme.Spacing.section)
+             .listRowBackground(Color.clear)
+     }
+
      @ViewBuilder
      private var profileSection: some View {
          Section(header: Text("Name").sectionHeader()) {
