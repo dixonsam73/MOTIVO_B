@@ -215,7 +215,7 @@
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for fast selection. Adjust global privacy to control who sees what.")
+                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for auto-selection. Adjust global privacy to control who sees what.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -237,7 +237,7 @@
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Launched from the feed's record button. Use it to log your practice, rehearsal, performance, or recording sessions. Attach photos, audio, or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that automatically appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page.")
+                                 Text("Launched from the feed's record button. Use it to log your practice, rehearsal, performance, or recording sessions. Attach photos, record audio or video, and trim those recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that automatically appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page (e.g., a setlist for a rehearsal, warm-ups and scales for a practice session).")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -248,7 +248,7 @@
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Tap the three bars in the Your Sessions header on the feed to view your practice breakdown — time spent, frequency, activity mix, and more.")
+                                 Text("Tap the three bars in the Your Sessions header on the feed to see a detailed breakdown of your activity history.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
