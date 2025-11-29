@@ -207,15 +207,58 @@
                              .font(Theme.Text.body)
                              .fontWeight(.semibold)
 
-                         Text("""
-This is the Profile page. You can add your personal details and instruments here, and choose a primary instrument to pre-fill new sessions.
-Activities work the same way — use presets or add your own, and set a primary for quick session starts. Adjust your global privacy settings to determine who sees what.
-The Feed page shows your session history (and fellow users’ posts if you follow them). Use the Feed Filter to switch the feed display between All and Mine, and use search to find what you’re after (e.g. scales, Bach, SLAP). Click a post to launch the Session page for more details on a particular session and to view attached media. Like and comment from both pages.
-The Practice Timer (launched from the feed by the record button in the top righthand corner) lets you record your sessions (practice, rehearsals, performances, recording.. whatever you want to log) with photos, audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — you can write notes, add tasks as you go, or use default task lists set in the Tasks Manager on this page. These defaults auto-populate the task pad based on the activity you’ve selected (add a setlist for rehearsals or performances, pieces you need to work through for your practice sessions etc). You can also manually add sessions after the fact with the plus button at the top of the feed page.
-The three bars in the Your Sessions window (at the top of the feed) launches your Stats page, where you can see a breakdown of your activity history. Time to SHRED.
-""")
-                             .font(Theme.Text.body)
-                             .foregroundStyle(Theme.Colors.secondaryText)
+                         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+
+                             // Profile
+                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                 Text("Profile")
+                                     .font(Theme.Text.body.weight(.semibold))
+                                     .foregroundStyle(Theme.Colors.accent)
+
+                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for fast selection. Adjust global privacy to control who sees what.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+                             }
+
+                             // Feed
+                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                 Text("Feed")
+                                     .font(Theme.Text.body.weight(.semibold))
+                                     .foregroundStyle(Theme.Colors.accent)
+
+                                 Text("Your activity history appears here (and posts from users you follow). Use the Feed Filter to switch between All (you + the accounts you follow) or Mine (just you). Use search to find posts by title or content (e.g. Bach, scales, SLAP). Tap a post to open full session details, view media, and like or comment.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+                             }
+
+                             // Practice Timer
+                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                 Text("Practice Timer")
+                                     .font(Theme.Text.body.weight(.semibold))
+                                     .foregroundStyle(Theme.Colors.accent)
+
+                                 Text("Launched from the feed's record button. Use it to log your practice, rehearsal, performance, or recording sessions. Attach photos, audio, or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that automatically appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+                             }
+
+                             // Stats
+                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                 Text("Stats")
+                                     .font(Theme.Text.body.weight(.semibold))
+                                     .foregroundStyle(Theme.Colors.accent)
+
+                                 Text("Tap the three bars in the Your Sessions header on the feed to view your practice breakdown — time spent, frequency, activity mix, and more.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+                             }
+
+                             // Closing
+                             Text("Happy noting!")
+                                 .font(Theme.Text.body.weight(.semibold))
+                                 .foregroundStyle(Theme.Colors.accent)
+                         }
+                         .frame(maxWidth: .infinity, alignment: .leading)
                      }
                      .frame(maxWidth: .infinity, alignment: .leading)
                      .transition(.opacity.combined(with: .move(edge: .top)))
