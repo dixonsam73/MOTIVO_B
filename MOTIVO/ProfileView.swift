@@ -208,11 +208,11 @@
                              .fontWeight(.semibold)
 
                          Text("""
-This is your Profile. Add your name, location and instruments here, and choose a primary instrument to pre-fill new sessions.
-Activities work the same way — use presets or add your own, and set a primary for quick session starts.
-The Feed shows your practice/session history (and others, if you follow them). Use the Feed Filter to switch between All and Mine, and use search to find what you’re after (e.g. scales, Motown). Adjust privacy globally or per session, and choose whether posts include attachments or nothing at all.
-The Practice Timer lets you record sessions with photos, audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — you can write notes, add tasks as you go, or use default task lists set in the Tasks Manager on this page. These defaults auto-populate the task pad based on the activity you’ve selected.
-Saved sessions appear in the Feed, and you can track how your practice evolves over time on the Stats page.
+This is the Profile page. You can add your personal details and instruments here, and choose a primary instrument to pre-fill new sessions.
+Activities work the same way — use presets or add your own, and set a primary for quick session starts. Adjust your global privacy settings to determine who sees what.
+The Feed page shows your session history (and fellow users’ posts if you follow them). Use the Feed Filter to switch the feed display between All and Mine, and use search to find what you’re after (e.g. scales, Bach, SLAP). Click a post to launch the Session page for more details on a particular session and to view attached media. Like and comment from both pages.
+The Practice Timer (launched from the feed by the record button in the top righthand corner) lets you record your sessions (practice, rehearsals, performances, recording.. whatever you want to log) with photos, audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — you can write notes, add tasks as you go, or use default task lists set in the Tasks Manager on this page. These defaults auto-populate the task pad based on the activity you’ve selected (add a setlist for rehearsals or performances, pieces you need to work through for your practice sessions etc). You can also manually add sessions after the fact with the plus button at the top of the feed page.
+The three bars in the Your Sessions window (at the top of the feed) launches your Stats page, where you can see a breakdown of your activity history. Time to SHRED.
 """)
                              .font(Theme.Text.body)
                              .foregroundStyle(Theme.Colors.secondaryText)
