@@ -342,7 +342,7 @@ Saved sessions appear in the Feed, and you can track how your practice evolves o
          Section(header: Text("Instruments").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showInstrumentManager = true } label: {
-                     manageRow(title: "Manage Instruments")
+                     manageRow(title: "Manage")
                          .foregroundStyle(Theme.Colors.secondaryText)
                  }
                  .buttonStyle(.plain)
@@ -399,7 +399,7 @@ Saved sessions appear in the Feed, and you can track how your practice evolves o
          Section(header: Text("Activities").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showActivityManager = true } label: {
-                     manageRow(title: "Manage Activities")
+                     manageRow(title: "Manage")
                          .foregroundStyle(Theme.Colors.secondaryText)
                  }
                  .buttonStyle(.plain)
@@ -484,7 +484,7 @@ Saved sessions appear in the Feed, and you can track how your practice evolves o
          Section(header: Text("Tasks").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showTasksManager = true } label: {
-                     manageRow(title: "Manage Tasks")
+                     manageRow(title: "Manage")
                          .foregroundStyle(Theme.Colors.secondaryText)   // ⬅️ add this
                  }
                  .buttonStyle(.plain)
