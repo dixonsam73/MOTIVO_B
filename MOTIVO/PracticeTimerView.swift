@@ -144,6 +144,12 @@ struct PracticeTimerView: View {
     }
     @State private var taskLines: [TaskLine] = []
     @State private var autoTaskTexts: [UUID: String] = [:]
+
+    // NEW: track explicit clears so we don't auto-refill
+    @State private var userClearedTasksForCurrentContext: Bool = false
+    // NEW: remember which activity's defaults we last loaded (for activity-change behaviour)
+    @State private var lastDefaultsActivityRef: String? = nil
+
     @FocusState private var focusedTaskID: UUID?
     private let tasksDefaultsKey: String = "practiceTasks_v1"
     private let sessionDiscardedKey = "PracticeTimer.sessionDiscarded"
@@ -159,7 +165,11 @@ struct PracticeTimerView: View {
     /// Legacy v7.9-style global defaults loader (Practice only).
     /// Kept as a fallback for very old keys.
     private func loadDefaultTasksIfNeeded() {
-        guard activity == .practice, taskLines.isEmpty else { return }
+        // Only ever applies to Practice
+        guard activity == .practice else { return }
+
+        // Only load when empty AND user hasn't explicitly cleared this context
+        guard taskLines.isEmpty, !userClearedTasksForCurrentContext else { return }
 
         let defaults = UserDefaults.standard
         guard let data = defaults.data(forKey: tasksDefaultsKey) else { return }
@@ -168,9 +178,14 @@ struct PracticeTimerView: View {
             print("[PracticeTimer] Loaded default tasks from legacy defaults key")
             let mapped = decoded.map { TaskLine(text: $0, isDone: false) }
             self.taskLines = mapped
+            autoTaskTexts.removeAll()
             for line in mapped {
                 autoTaskTexts[line.id] = line.text
             }
+
+            // Treat this as the Practice template context
+            lastDefaultsActivityRef = "core:0"
+            userClearedTasksForCurrentContext = false
         }
     }
 
@@ -200,12 +215,22 @@ struct PracticeTimerView: View {
     private func loadPracticeDefaultsIfNeeded() {
         let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
         let activityRef = currentActivityRefForTasks()
-        let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
-        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
         let defaults = UserDefaults.standard
 
-        // Only proceed if we currently have no lines.
-        guard taskLines.isEmpty else { return }
+        // Decide whether we should block due to an explicit clear.
+        // If the user cleared for this same activity, don't auto-refill.
+        let clearedForSameActivity: Bool
+        if let lastRef = lastDefaultsActivityRef {
+            clearedForSameActivity = userClearedTasksForCurrentContext && (lastRef == activityRef)
+        } else {
+            clearedForSameActivity = userClearedTasksForCurrentContext
+        }
+
+        // Only proceed if we currently have no lines AND we're not blocked by a clear
+        guard taskLines.isEmpty, !clearedForSameActivity else { return }
+
+        let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
+        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
 
         // Default ON when no explicit preference exists.
         let toggleValue: Bool
@@ -216,13 +241,21 @@ struct PracticeTimerView: View {
         }
         guard toggleValue else { return }
 
-        // 1) Preferred path: per-activity template already exists.
-        if let arr = defaults.array(forKey: tasksKey) as? [String] {
-            let mapped = arr.map { TaskLine(text: $0, isDone: false) }
+        // Helper to apply a loaded template and update tracking flags
+        func applyTemplate(_ strings: [String]) {
+            let mapped = strings.map { TaskLine(text: $0, isDone: false) }
             self.taskLines = mapped
+            autoTaskTexts.removeAll()
             for line in mapped {
                 autoTaskTexts[line.id] = line.text
             }
+            lastDefaultsActivityRef = activityRef
+            userClearedTasksForCurrentContext = false
+        }
+
+        // 1) Preferred path: per-activity template already exists.
+        if let arr = defaults.array(forKey: tasksKey) as? [String] {
+            applyTemplate(arr)
             return
         }
 
@@ -230,21 +263,13 @@ struct PracticeTimerView: View {
         if activity == .practice {
             let legacyKey = "practiceTasks_v1::\(ownerScope)"
             if let legacyArr = defaults.array(forKey: legacyKey) as? [String] {
-                let mapped = legacyArr.map { TaskLine(text: $0, isDone: false) }
-                self.taskLines = mapped
-                for line in mapped {
-                    autoTaskTexts[line.id] = line.text
-                }
+                applyTemplate(legacyArr)
                 // Persist into the per-activity slot for next time.
                 defaults.set(legacyArr, forKey: tasksKey)
             } else {
                 // Very old global data path (no ownerScope).
                 if let arr = defaults.array(forKey: "practiceTasks_v1") as? [String] {
-                    let mapped = arr.map { TaskLine(text: $0, isDone: false) }
-                    self.taskLines = mapped
-                    for line in mapped {
-                        autoTaskTexts[line.id] = line.text
-                    }
+                    applyTemplate(arr)
                     defaults.set(arr, forKey: tasksKey)
                 }
             }
@@ -275,6 +300,38 @@ struct PracticeTimerView: View {
         guard !trimmedCompleted.isEmpty else { return nil }
         return trimmedCompleted.map { "• \($0)" }.joined(separator: "\n")
     }
+    private func resetTasksForNewSessionContext() {
+        // Fresh context: allow presets to load again when pad opens
+        taskLines.removeAll()
+        autoTaskTexts.removeAll()
+        userClearedTasksForCurrentContext = false
+        lastDefaultsActivityRef = nil
+        persistTasksSnapshot()
+    }
+
+    private func handleTaskReturn(for id: UUID) {
+        guard let idx = taskLines.firstIndex(where: { $0.id == id }) else { return }
+
+        // Mirror the old onSubmit behaviour: restore auto text if left empty
+        let trimmed = taskLines[idx].text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty, let auto = autoTaskTexts[id] {
+            taskLines[idx].text = auto
+        } else {
+            taskLines[idx].text = trimmed
+        }
+
+        // Create a new empty line directly after the current one
+        let newLine = TaskLine(text: "")
+        let insertIndex = taskLines.index(after: idx)
+        taskLines.insert(newLine, at: insertIndex)
+
+        // Persist once after the updates
+        persistTasksSnapshot()
+
+        // Move focus to the new line so the user can continue typing
+        focusedTaskID = newLine.id
+    }
+
     private func addEmptyTaskLine() {
         taskLines.append(TaskLine(text: ""))
         persistTasksSnapshot()
@@ -288,7 +345,21 @@ struct PracticeTimerView: View {
     private func deleteLine(_ id: UUID) {
         taskLines.removeAll { $0.id == id }
         autoTaskTexts.removeValue(forKey: id)
-        if taskLines.isEmpty { showTasksPad = false }
+
+        if taskLines.isEmpty {
+            // User has effectively cleared the pad for this activity/context
+            userClearedTasksForCurrentContext = true
+            showTasksPad = false
+        }
+
+        persistTasksSnapshot()
+    }
+
+    private func clearAllTasks() {
+        // Explicit "wipe this pad for now" – do not auto-refill until context changes
+        userClearedTasksForCurrentContext = true
+        taskLines.removeAll()
+        autoTaskTexts.removeAll()
         persistTasksSnapshot()
     }
     var body: some View {
@@ -360,25 +431,37 @@ struct PracticeTimerView: View {
                             VStack(alignment: .leading, spacing: 8) {
                                 // Centered header to align with rest of page
                                 HStack(alignment: .firstTextBaseline) {
-                                    Spacer(minLength: 0)
-                                    Text("Notes / Tasks")
-                                        .sectionHeader()
-                                    Spacer(minLength: 0)
-                                    Button(action: { showTasksPad = false }) {
-                                        Text("Close")
-                                            .font(Theme.Text.body)
-                                            .foregroundStyle(.primary)
-                                            .padding(.horizontal, 10)
-                                            .padding(.vertical, 6)
-                                            .background(
-                                                Capsule()
-                                                    .stroke(Theme.Colors.secondaryText.opacity(0.12), lineWidth: 1)
-                                            )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contentShape(Capsule())
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                                            Text("Notes / Tasks")
+                                                .sectionHeader()
+
+                                            Spacer(minLength: 0)
+
+                                            // Discrete "Clear all" – wipes pad, no auto-refill
+                                            Button(action: {
+                                                clearAllTasks()
+                                            }) {
+                                                Text("Clear all")
+                                                    .font(Theme.Text.body)
+                                                    .foregroundStyle(tasksAccent)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Clear all tasks")
+
+                                            // Chevron-up to collapse
+                                            Button(action: {
+                                                showTasksPad = false
+                                            }) {
+                                                Image(systemName: "chevron.up")
+                                                    .font(.system(size: 14, weight: .semibold))
+                                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                                    .padding(.horizontal, 4)
+                                                    .padding(.vertical, 6)
+                                                    .contentShape(Rectangle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Hide notes and tasks")
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
 
                                 ForEach($taskLines) { $line in
                                     HStack(spacing: 8) {
@@ -386,30 +469,38 @@ struct PracticeTimerView: View {
                                             Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
                                                 .foregroundStyle(tasksAccent)
                                         }
-                                        TextField("Task", text: $line.text)
-                                            .textFieldStyle(.plain)
-                                            .disableAutocorrection(true)
-                                            .focused($focusedTaskID, equals: line.id)
-                                            .onTapGesture {
-                                                focusedTaskID = line.id
-                                            }
-                                            .onSubmit {
-                                                // If user leaves it empty, restore auto text if available
-                                                let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                                                if trimmed.isEmpty, let auto = autoTaskTexts[line.id] {
-                                                    line.text = auto
+                                        TextField(
+                                            "Task",
+                                            text: Binding(
+                                                get: { line.text },
+                                                set: { newValue in
+                                                    if newValue.contains("\n") {
+                                                        // Strip newline characters and treat as "return"
+                                                        let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
+                                                        line.text = cleaned
+                                                        handleTaskReturn(for: line.id)
+                                                    } else {
+                                                        line.text = newValue
+                                                    }
+                                                }
+                                            ),
+                                            axis: .vertical
+                                        )
+                                        .textFieldStyle(.plain)
+                                        .disableAutocorrection(true)
+                                        .focused($focusedTaskID, equals: line.id)
+                                        .onTapGesture {
+                                            focusedTaskID = line.id
+                                        }
+                                        .onChange(of: focusedTaskID) { _, newFocus in
+                                            if newFocus == line.id {
+                                                // If current equals auto text, clear to start fresh
+                                                if let auto = autoTaskTexts[line.id], line.text == auto {
+                                                    line.text = ""
                                                 }
                                                 persistTasksSnapshot()
                                             }
-                                            .onChange(of: focusedTaskID) { _, newFocus in
-                                                if newFocus == line.id {
-                                                    // If current equals auto text, clear to start fresh
-                                                    if let auto = autoTaskTexts[line.id], line.text == auto {
-                                                        line.text = ""
-                                                    }
-                                                    persistTasksSnapshot()
-                                                }
-                                            }
+                                        }
 
                                         Spacer(minLength: 8)
 
@@ -436,14 +527,21 @@ struct PracticeTimerView: View {
                                 loadDefaultTasksIfNeeded()
                                 persistTasksSnapshot()
                             }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "plus.circle")
-                                    Text("Notes / Tasks").sectionHeader()
+                                HStack(spacing: 8) {
+                                    Text("Notes / Tasks")
+                                        .sectionHeader()
+
+                                    Spacer()
+
+                                    Image(systemName: "chevron.down")
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
                                 }
-                                .foregroundStyle(tasksAccent)
-                                .frame(maxWidth: .infinity, alignment: .center)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .accessibilityLabel("Show notes and tasks")
                             .padding(.vertical, 8)
                         }
                     }
@@ -833,6 +931,8 @@ struct PracticeTimerView: View {
                     resetUIOnly()
                     UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                     UserDefaults.standard.set(true, forKey: sessionActiveKey)
+                    // NEW: reset Notes / Tasks pad for this fresh session
+                    resetTasksForNewSessionContext()
                 }
 
                 instruments = fetchInstruments()
@@ -1129,6 +1229,8 @@ struct PracticeTimerView: View {
                         .labelsHidden()
                         .onChange(of: activityChoice) { _, choice in
                             applyChoice(choice)
+                            // NEW: when activity changes in the timer, reset tasks context
+                            resetTasksForNewSessionContext()
                         }
                     }
                     .navigationTitle("Activity")
