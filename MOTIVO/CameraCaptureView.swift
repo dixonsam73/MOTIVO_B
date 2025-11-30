@@ -201,6 +201,13 @@ final class CameraViewController: UIViewController {
         if let device = videoDeviceInput?.device, device.hasFlash {
             settings.flashMode = self.flashMode
         }
+
+        // Ensure the still photo orientation matches the preview orientation
+        if let connection = photoOutput.connection(with: .video),
+           connection.isVideoOrientationSupported {
+            connection.videoOrientation = PreviewView.currentVideoOrientation()
+        }
+
         photoOutput.capturePhoto(with: settings, delegate: self)
     }
 
@@ -264,15 +271,42 @@ final class CameraViewController: UIViewController {
     }
 }
 
+extension UIImage {
+    /// Returns an image whose `imageOrientation` is `.up`.
+    /// Safe for all JPEGs and PNGs produced by AVCapturePhotoOutput.
+    func motivo_normalizedUp() -> UIImage {
+        if imageOrientation == .up { return self }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = scale
+        format.opaque = false
+
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            self.draw(in: CGRect(origin: .zero, size: size))
+        }
+    }
+}
+
 // MARK: - AVCapturePhotoCaptureDelegate
 extension CameraViewController: AVCapturePhotoCaptureDelegate {
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+    func photoOutput(_ output: AVCapturePhotoOutput,
+                     didFinishProcessingPhoto photo: AVCapturePhoto,
+                     error: Error?) {
         if let error = error {
             print("Capture error: \(error)")
             return
         }
-        guard let data = photo.fileDataRepresentation(), let image = UIImage(data: data) else { return }
-        onImageCaptured?(image)
+
+        guard let data = photo.fileDataRepresentation(),
+              let rawImage = UIImage(data: data) else {
+            return
+        }
+
+        // Normalise orientation so all saved images are .up
+        let normalized = rawImage.motivo_normalizedUp()
+
+        onImageCaptured?(normalized)
     }
 }
 
@@ -284,15 +318,44 @@ private final class PreviewView: UIView {
         get { videoPreviewLayer.session }
         set { videoPreviewLayer.session = newValue }
     }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        videoPreviewLayer.frame = bounds
+
+        if let connection = videoPreviewLayer.connection,
+           connection.isVideoOrientationSupported {
+            connection.videoOrientation = Self.currentVideoOrientation()
+        }
+    }
+
+    static func currentVideoOrientation() -> AVCaptureVideoOrientation {
+        let orientation = UIApplication.shared
+            .connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first?
+            .interfaceOrientation
+
+        switch orientation {
+        case .landscapeLeft:        return .landscapeLeft
+        case .landscapeRight:       return .landscapeRight
+        case .portraitUpsideDown:   return .portraitUpsideDown
+        default:                    return .portrait
+        }
+    }
 }
 
+
+
 // MARK: - Padded label helper
+
 final class PaddedLabel: UILabel {
     private struct AssociatedKeys { static var insetsKey: UInt8 = 0 }
 
     public var textInsets: UIEdgeInsets {
         get {
-            return (objc_getAssociatedObject(self, &AssociatedKeys.insetsKey) as? NSValue)?.uiEdgeInsetsValue ?? .zero
+            return (objc_getAssociatedObject(self, &AssociatedKeys.insetsKey) as? NSValue)?
+                .uiEdgeInsetsValue ?? .zero
         }
         set {
             let value = NSValue(uiEdgeInsets: newValue)
