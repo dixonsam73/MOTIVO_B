@@ -95,26 +95,39 @@ public struct VideoRecorderView: View {
 
             VStack(spacing: 12) {
                 Spacer()
+
+                // Use actual interface orientation, not the card's width/height
+                let orientation = PreviewContainerView.currentOrientation()
+                let isLandscape = (orientation == .landscapeLeft || orientation == .landscapeRight)
+
                 GeometryReader { g in
                     let h = g.size.height
-                    let scale: CGFloat = h < 700 ? max(0.82, h/700) : 1.0
-                    VStack(spacing: 6) {
-                        Text(controller.title)
-                            .font(.headline)
-                            .accessibilityIdentifier("VideoRecorderView_Title")
-                            .lineLimit(1)
+                    let baseScale: CGFloat = h < 700 ? max(0.82, h / 700) : 1.0
+                    // Slightly smaller card in landscape
+                    let scale: CGFloat = isLandscape ? baseScale * 0.9 : baseScale
+
+                    // Tint colours unchanged
+                    let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
+                    let tintStopDelete = Color(red: 0.72, green: 0.42, blue: 0.40)   // muted clay / gray-red
+                    let tintPlay = Color(red: 0.36, green: 0.60, blue: 0.52)         // desaturated mint / slate green
+                    let tintConfirm = Color(red: 0.38, green: 0.48, blue: 0.62)      // slate blue-gray
+
+                    VStack(spacing: isLandscape ? 2 : 6) {
+                        // In landscape we hide the title to save vertical space.
+                        if !isLandscape {
+                            Text(controller.title)
+                                .font(.headline)
+                                .accessibilityIdentifier("VideoRecorderView_Title")
+                                .lineLimit(1)
+                        }
+
                         Text(controller.formattedTime)
                             .font(.system(.largeTitle, design: .rounded))
                             .monospacedDigit()
                             .accessibilityIdentifier("VideoRecorderView_Clock")
                             .lineLimit(1)
 
-                        let tintRecord = Color(red: 0.92, green: 0.30, blue: 0.28)       // soft coral/red
-                        let tintStopDelete = Color(red: 0.72, green: 0.42, blue: 0.40)   // muted clay / gray-red
-                        let tintPlay = Color(red: 0.36, green: 0.60, blue: 0.52)         // desaturated mint / slate green
-                        let tintConfirm = Color(red: 0.38, green: 0.48, blue: 0.62)      // slate blue-gray
-
-                        HStack(spacing: 20) {
+                        HStack(spacing: isLandscape ? 16 : 20) {
                             ControlButton(systemName: "trash",
                                           color: tintStopDelete,
                                           accessibilityLabel: "Delete",
@@ -145,14 +158,15 @@ public struct VideoRecorderView: View {
                         .layoutPriority(1)
                         .minimumScaleFactor(0.8)
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.bottom, 0)
-                    .cardSurface(padding: 12)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, isLandscape ? 4 : 6)
+                    .padding(.bottom, isLandscape ? 0 : 0)
+                    .cardSurface(padding: isLandscape ? 10 : 12)
+                    .padding(.horizontal, isLandscape ? 6 : 10)
+                    // In landscape, remove extra bottom padding so the bar hugs the bottom edge more closely.
+                    .padding(.bottom, isLandscape ? 0 : 10)
                     .scaleEffect(scale, anchor: .bottom)
                 }
-                .frame(height: 180)
+                .frame(height: isLandscape ? 150 : 180)
                 .zIndex(10)
             }
         }
@@ -1187,4 +1201,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-
