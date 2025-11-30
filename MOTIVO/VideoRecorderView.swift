@@ -254,6 +254,8 @@ final class VideoRecorderController: NSObject,
     private var shouldResumeAfterRouteChange = false
     private var shouldResumeAfterResignActive = false
 
+    private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
+
     private let onSave: (URL) -> Void
 
     init(onSave: @escaping (URL) -> Void) {
@@ -495,6 +497,7 @@ final class VideoRecorderController: NSObject,
         if let conn = vOutput.connection(with: .video) {
             if conn.isVideoOrientationSupported {
                 conn.videoOrientation = PreviewContainerView.currentOrientation()
+                self.currentVideoOrientation = conn.videoOrientation
             }
             if conn.isVideoMirroringSupported {
                 conn.isVideoMirrored = (preferredPosition == .front)
@@ -562,6 +565,7 @@ final class VideoRecorderController: NSObject,
                let conn = vOutput.connection(with: .video) {
                 if conn.isVideoOrientationSupported {
                     conn.videoOrientation = PreviewContainerView.currentOrientation()
+                    self.currentVideoOrientation = conn.videoOrientation
                 }
                 if conn.isVideoMirroringSupported {
                     conn.isVideoMirrored = (nextPosition == .front)
@@ -600,19 +604,41 @@ final class VideoRecorderController: NSObject,
     private func setupWriter(for url: URL) throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
 
-        // Video settings: HEVC 1080p, balanced bitrate
+        // Determine canvas dimensions based on orientation (we encode upright for the chosen orientation)
+        let isLandscape = (currentVideoOrientation == .landscapeLeft || currentVideoOrientation == .landscapeRight)
+        let width: Int
+        let height: Int
+        if isLandscape {
+            width = 1920
+            height = 1080
+        } else {
+            width = 1080
+            height = 1920
+        }
+
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: 1080,
-            AVVideoHeightKey: 1920,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 5_000_000, // ~5 Mbps target
+                AVVideoAverageBitRateKey: 5_000_000,
                 AVVideoAllowFrameReorderingKey: false
             ]
         ]
 
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
+
+        // Do not rotate; choose width/height above to match orientation. Only mirror for front camera.
+        var transform = CGAffineTransform.identity
+        if preferredPosition == .front {
+            // Horizontal mirror; translate back into the frame
+            let mirror = CGAffineTransform(scaleX: -1, y: 1)
+            let translate = CGAffineTransform(translationX: CGFloat(width), y: 0)
+            transform = mirror.concatenating(translate)
+        }
+
+        vInput.transform = transform
 
         // Audio settings: AAC 44.1kHz mono
         let audioSettings: [String: Any] = [
@@ -639,6 +665,10 @@ final class VideoRecorderController: NSObject,
         guard state == .idle || state == .pausedRecording else { return }
         configureAudioSession()
         configureSessionIfNeeded()
+        if let conn = videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
+            conn.videoOrientation = PreviewContainerView.currentOrientation()
+            currentVideoOrientation = conn.videoOrientation
+        }
         startCaptureSession()
 
         isReadyToSave = false
@@ -1030,6 +1060,11 @@ final class VideoRecorderController: NSObject,
               let vInput = videoInput else { return }
 
         if writer.status == .unknown {
+            // Lock orientation at first frame if needed
+            if let conn = videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
+                currentVideoOrientation = conn.videoOrientation
+            }
+
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
             writer.startWriting()
             writer.startSession(atSourceTime: pts)
@@ -1152,3 +1187,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
