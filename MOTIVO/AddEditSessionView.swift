@@ -51,6 +51,7 @@ struct AddEditSessionView: View {
 
     @State private var isPublic: Bool = true
     @State private var notes: String = ""
+    @State private var areNotesPrivate_edit: Bool = false
 
     // Wheels
     @State private var showStartPicker = false
@@ -354,7 +355,28 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                 // Notes
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Notes").sectionHeader()
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Notes").sectionHeader()
+                        Spacer(minLength: 0)
+                        Button(action: {
+                            areNotesPrivate_edit.toggle()
+                            #if canImport(UIKit)
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            #endif
+                        }) {
+                            Image(systemName: areNotesPrivate_edit ? "eye.slash" : "eye")
+                                .font(.system(size: 14, weight: .semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(areNotesPrivate_edit ? "Make notes visible to others" : "Make notes private")
+                    }
+                    if areNotesPrivate_edit {
+                        Text("Only you will see these notes.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes)
                             .font(Theme.Text.body)
@@ -928,6 +950,11 @@ private var instrumentPicker: some View {
             durationSeconds = Int(s.durationSeconds)
             isPublic = s.isPublic
             notes = s.notes ?? ""
+            if s.entity.attributesByName.keys.contains("areNotesPrivate") {
+                areNotesPrivate_edit = (s.value(forKey: "areNotesPrivate") as? Bool) == true
+            } else {
+                areNotesPrivate_edit = false
+            }
             // Preselect focus from notes before stripping token so the dots reflect persisted state
             preselectFocusFromNotesIfNeeded_edit()
             // Ensure the token is not visible in the Notes UI on edit hydrate
@@ -1036,6 +1063,9 @@ private var instrumentPicker: some View {
         } else {
             // No focus selected — ensure tokens are not persisted
             stripFocusTokensFromNotes_edit()
+        }
+        if s.entity.attributesByName.keys.contains("areNotesPrivate") {
+            s.setValue(areNotesPrivate_edit, forKey: "areNotesPrivate")
         }
         s.notes = notes
 
@@ -1679,6 +1709,9 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
 
 

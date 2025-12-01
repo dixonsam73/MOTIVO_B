@@ -106,6 +106,15 @@ struct SessionDetailView: View {
     // Added private computed properties for session UUID and privacy
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
+    private var areNotesPrivate: Bool {
+        // Only touch KVC if the attribute exists on this entity; otherwise, default to false.
+        let entity = session.entity
+        if entity.attributesByName.keys.contains("areNotesPrivate") {
+            return (session.value(forKey: "areNotesPrivate") as? Bool) == true
+        }
+        // Attribute not present in this store/model version → treat notes as public.
+        return false
+    }
 
     // Stable session ID for comments. Prefer real UUID if present; otherwise derive from Core Data objectID.
     private var sessionIDForComments: UUID? {
@@ -414,12 +423,27 @@ struct SessionDetailView: View {
 
             let originalNotes = session.notes ?? ""
             let (focusDotIndex, displayNotes) = extractFocusDotIndex(from: originalNotes)
+            let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
             if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Notes").sectionHeader()
-                    Text(displayNotes)
+                if areNotesPrivate && !isOwner {
+                    // Do not show notes to non-owners when private
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Notes").sectionHeader()
+                            Spacer(minLength: 0)
+                            if areNotesPrivate {
+                                Image(systemName: "eye.slash")
+                                    .imageScale(.small)
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                    .accessibilityHidden(true)
+                            }
+                        }
+                        Text(displayNotes)
+                    }
+                    .cardSurface()
                 }
-                .cardSurface()
             }
 
             if let dot = focusDotIndex {

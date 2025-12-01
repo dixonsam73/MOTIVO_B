@@ -41,6 +41,8 @@ struct PostRecordDetailsView: View {
 
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
+    
+    @State private var areNotesPrivate: Bool = false
 
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
@@ -353,7 +355,28 @@ struct PostRecordDetailsView: View {
 
                     // ---------- Notes ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Notes").sectionHeader()
+                        HStack(alignment: .firstTextBaseline) {
+                            Text("Notes").sectionHeader()
+                            Spacer()
+                            Button(action: {
+                                areNotesPrivate.toggle()
+                                #if canImport(UIKit)
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                #endif
+                            }) {
+                                Image(systemName: areNotesPrivate ? "eye.slash" : "eye")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(areNotesPrivate ? "Make notes visible to others" : "Make notes private")
+                        }
+                        if areNotesPrivate {
+                            Text("Only you will see these notes.")
+                                .font(.footnote)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                         TextEditor(text: $notes)
                             .frame(minHeight: 120)
                             .font(Theme.Text.body)
@@ -1060,6 +1083,9 @@ struct PostRecordDetailsView: View {
         s.effort = Int16(effort)
 
         applyFocusToNotesBeforeSave()
+        if s.entity.attributesByName.keys.contains("areNotesPrivate") {
+            s.setValue(areNotesPrivate, forKey: "areNotesPrivate")
+        }
         s.notes = notes
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
@@ -1595,6 +1621,8 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
 
 
 
