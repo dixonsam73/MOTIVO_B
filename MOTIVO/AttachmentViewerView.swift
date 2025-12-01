@@ -1,5 +1,5 @@
 // CHANGE-ID: 20251124_170600-attachment-viewer-debug
-// SCOPE: Add debug logging for media handoff into AttachmentViewerView
+// SCOPE: Add debug logging for media handoff into AttachmentViewerView + audio waveform playback indicator
 
 import SwiftUI
 import AVKit
@@ -66,7 +66,19 @@ struct AttachmentViewerView: View {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
     }
 
-    init(imageURLs: [URL], startIndex: Int, themeBackground: Color = Color.clear, videoURLs: [URL] = [], audioURLs: [URL] = [], onDelete: ((URL) -> Void)? = nil, onFavourite: ((URL) -> Void)? = nil, isFavourite: ((URL) -> Bool)? = nil, onTogglePrivacy: ((URL) -> Void)? = nil, isPrivate: ((URL) -> Bool)? = nil, onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil, onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil) {
+    init(imageURLs: [URL],
+         startIndex: Int,
+         themeBackground: Color = Color.clear,
+         videoURLs: [URL] = [],
+         audioURLs: [URL] = [],
+         onDelete: ((URL) -> Void)? = nil,
+         onFavourite: ((URL) -> Void)? = nil,
+         isFavourite: ((URL) -> Bool)? = nil,
+         onTogglePrivacy: ((URL) -> Void)? = nil,
+         isPrivate: ((URL) -> Bool)? = nil,
+         onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
+         onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil
+    ) {
         #if DEBUG
         print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
         #endif
@@ -101,7 +113,7 @@ struct AttachmentViewerView: View {
         items.append(contentsOf: audioURLs.map { MediaAttachment(kind: .audio, url: $0) })
         return items
     }
-    
+
     private func mediaKindToAttachmentKind(_ kind: MediaKind) -> ViewerAttachmentKind {
         switch kind {
         case .audio: return .audio
@@ -125,10 +137,15 @@ struct AttachmentViewerView: View {
             GeometryReader { proxy in
                 TabView(selection: $currentIndex) {
                     ForEach(media.indices, id: \.self) { i in
-                        MediaPage(attachment: media[i], isAnyPlayerActive: $isAnyPlayerActive, onRequestStopAll: $stopAllPlayersToggle, background: themeBackground)
-                            .frame(width: proxy.size.width, height: proxy.size.height)
-                            .clipped()
-                            .tag(i)
+                        MediaPage(
+                            attachment: media[i],
+                            isAnyPlayerActive: $isAnyPlayerActive,
+                            onRequestStopAll: $stopAllPlayersToggle,
+                            background: themeBackground
+                        )
+                        .frame(width: proxy.size.width, height: proxy.size.height)
+                        .clipped()
+                        .tag(i)
                     }
                 }
                 .id(mediaMutationTick)
@@ -197,7 +214,11 @@ struct AttachmentViewerView: View {
                             Circle()
                                 .fill(.thinMaterial)
                                 .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                .shadow(
+                                    color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                    radius: 2,
+                                    y: 1
+                                )
                             Image(systemName: "xmark")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -221,13 +242,19 @@ struct AttachmentViewerView: View {
                                 let url = currentURL
                                 let priv = isPrivate?(url) ?? false
                                 onFavourite?(url)
-                                if !priv { /* presenter enforces single-thumbnail rule */ }
+                                if !priv {
+                                    /* presenter enforces single-thumbnail rule */
+                                }
                             } label: {
                                 ZStack {
                                     Circle()
                                         .fill(.thinMaterial)
                                         .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
                                     Image(systemName: isFav ? "star.fill" : "star")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -248,7 +275,11 @@ struct AttachmentViewerView: View {
                                     Circle()
                                         .fill(.thinMaterial)
                                         .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
                                     Image(systemName: isPriv ? "eye.slash" : "eye")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -257,7 +288,9 @@ struct AttachmentViewerView: View {
                                 .contentShape(Circle())
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(isPriv ? "Make attachment visible to others" : "Hide attachment from others")
+                            .accessibilityLabel(
+                                isPriv ? "Make attachment visible to others" : "Hide attachment from others"
+                            )
 
                             if currentKind == .video || currentKind == .audio {
                                 Button {
@@ -269,8 +302,16 @@ struct AttachmentViewerView: View {
                                     ZStack {
                                         Circle()
                                             .fill(.thinMaterial)
-                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                            .opacity(
+                                                colorScheme == .dark ? fillOpacityDark : fillOpacityLight
+                                            )
+                                            .shadow(
+                                                color: .black.opacity(
+                                                    colorScheme == .dark ? 0.35 : 0.15
+                                                ),
+                                                radius: 2,
+                                                y: 1
+                                            )
                                         Image(systemName: "scissors")
                                             .font(.system(size: 17, weight: .semibold))
                                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -293,7 +334,11 @@ struct AttachmentViewerView: View {
                                     Circle()
                                         .fill(.thinMaterial)
                                         .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
                                     Image(systemName: "trash")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -309,7 +354,11 @@ struct AttachmentViewerView: View {
                                     Circle()
                                         .fill(.thinMaterial)
                                         .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
                                     Image(systemName: "square.and.arrow.up")
                                         .font(.system(size: 17, weight: .semibold))
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -358,129 +407,142 @@ struct AttachmentViewerView: View {
             trimKind = nil
         }) {
             if let url = trimURL, let kind = trimKind {
-                MediaTrimView(assetURL: url,
-                              mediaType: kind == .audio ? .audio : .video,
-                              onCancel: {
-                                isShowingTrimmer = false
-                                trimURL = nil
-                                trimKind = nil
-                              },
-                              onSaveAsNew: { tempURL in
-                                guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }) else {
-                                    isShowingTrimmer = false
-                                    trimURL = nil
-                                    trimKind = nil
-                                    return
+                MediaTrimView(
+                    assetURL: url,
+                    mediaType: kind == .audio ? .audio : .video,
+                    onCancel: {
+                        isShowingTrimmer = false
+                        trimURL = nil
+                        trimKind = nil
+                    },
+                    onSaveAsNew: { tempURL in
+                        guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }) else {
+                            isShowingTrimmer = false
+                            trimURL = nil
+                            trimKind = nil
+                            return
+                        }
+                        let suggestedName = url
+                            .deletingPathExtension()
+                            .lastPathComponent
+                            .isEmpty ? "Trimmed" : url.deletingPathExtension().lastPathComponent
+                        let attachmentKind = mediaKindToAttachmentKind(kind)
+                        let globalKind: AttachmentKind
+                        switch attachmentKind {
+                        case .image: globalKind = .image
+                        case .video: globalKind = .video
+                        case .audio: globalKind = .audio
+                        }
+                        if let newPath = try? AttachmentStore.adoptTempExport(
+                            tempURL,
+                            suggestedName: suggestedName,
+                            kind: globalKind
+                        ) {
+                            let newURL = URL(fileURLWithPath: newPath)
+                            switch kind {
+                            case .video:
+                                var newVideos = videoURLs
+                                let insertIndex = currentMediaIndex - imageURLs.count
+                                if insertIndex >= 0 && insertIndex <= newVideos.count {
+                                    newVideos.insert(newURL, at: insertIndex + 1)
+                                } else {
+                                    newVideos.append(newURL)
                                 }
-                                let suggestedName = url.deletingPathExtension().lastPathComponent.isEmpty ? "Trimmed" : url.deletingPathExtension().lastPathComponent
-                                let attachmentKind = mediaKindToAttachmentKind(kind)
-                                let globalKind: AttachmentKind
-                                switch attachmentKind {
-                                case .image: globalKind = .image
-                                case .video: globalKind = .video
-                                case .audio: globalKind = .audio
+                                self.videoURLs = newVideos
+                                currentIndex = currentIndex + 1
+                            case .audio:
+                                var newAudios = audioURLs
+                                let insertIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                if insertIndex >= 0 && insertIndex <= newAudios.count {
+                                    newAudios.insert(newURL, at: insertIndex + 1)
+                                } else {
+                                    newAudios.append(newURL)
                                 }
-                                if let newPath = try? AttachmentStore.adoptTempExport(tempURL, suggestedName: suggestedName, kind: globalKind) {
-                                    let newURL = URL(fileURLWithPath: newPath)
-                                    switch kind {
-                                    case .video:
-                                        var newVideos = videoURLs
-                                        let insertIndex = currentMediaIndex - imageURLs.count
-                                        if insertIndex >= 0 && insertIndex <= newVideos.count {
-                                            newVideos.insert(newURL, at: insertIndex + 1)
-                                        } else {
-                                            newVideos.append(newURL)
-                                        }
-                                        self.videoURLs = newVideos
-                                        currentIndex = currentIndex + 1
-                                    case .audio:
-                                        var newAudios = audioURLs
-                                        let insertIndex = currentMediaIndex - imageURLs.count - videoURLs.count
-                                        if insertIndex >= 0 && insertIndex <= newAudios.count {
-                                            newAudios.insert(newURL, at: insertIndex + 1)
-                                        } else {
-                                            newAudios.append(newURL)
-                                        }
-                                        self.audioURLs = newAudios
-                                        currentIndex = currentIndex + 1
-                                    case .image: break
+                                self.audioURLs = newAudios
+                                currentIndex = currentIndex + 1
+                            case .image: break
+                            }
+                            cachedURL = newURL
+                            stopAllPlayersToggle.toggle()
+                            #if canImport(UIKit)
+                            if kind == .video {
+                                _ = AttachmentStore.generateVideoPoster(url: newURL)
+                            }
+                            #endif
+                            mediaMutationTick += 1
+
+                            if let cb = onSaveAsNewAttachment {
+                                cb(newURL, globalKind)
+                            }
+                        }
+                        isShowingTrimmer = false
+                        trimURL = nil
+                        trimKind = nil
+                    },
+                    onReplaceOriginal: { tempURL in
+                        guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }),
+                              url.isFileURL else {
+                            isShowingTrimmer = false
+                            trimURL = nil
+                            trimKind = nil
+                            return
+                        }
+                        let originalPath = url.path
+                        let attachmentKind = mediaKindToAttachmentKind(kind)
+                        let globalKind: AttachmentKind
+                        switch attachmentKind {
+                        case .image: globalKind = .image
+                        case .video: globalKind = .video
+                        case .audio: globalKind = .audio
+                        }
+                        if let finalPath = try? AttachmentStore.replaceAttachmentFile(
+                            withTempURL: tempURL,
+                            forExistingPath: originalPath,
+                            kind: globalKind
+                        ) {
+                            let finalURL = URL(fileURLWithPath: finalPath)
+                            switch kind {
+                            case .video:
+                                var newVideos = videoURLs
+                                let videoIndex = currentMediaIndex - imageURLs.count
+                                if videoIndex >= 0 && videoIndex < newVideos.count {
+                                    newVideos[videoIndex] = finalURL
+                                }
+                                self.videoURLs = newVideos
+                                let upper = media.count - 1
+                                currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                            case .audio:
+                                var newAudios = audioURLs
+                                if currentMediaIndex - imageURLs.count - videoURLs.count < newAudios.count {
+                                    let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                    if audioIndex >= 0 && audioIndex < newAudios.count {
+                                        newAudios[audioIndex] = finalURL
                                     }
-                                    cachedURL = newURL
-                                    stopAllPlayersToggle.toggle()
-                                    #if canImport(UIKit)
-                                    if kind == .video {
-                                        _ = AttachmentStore.generateVideoPoster(url: newURL)
-                                    }
-                                    #endif
-                                    mediaMutationTick += 1
-                                    
-                                    if let cb = onSaveAsNewAttachment {
-                                        cb(newURL, globalKind)
-                                    }
                                 }
-                                isShowingTrimmer = false
-                                trimURL = nil
-                                trimKind = nil
-                              },
-                              onReplaceOriginal: { tempURL in
-                                guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }),
-                                      url.isFileURL else {
-                                    isShowingTrimmer = false
-                                    trimURL = nil
-                                    trimKind = nil
-                                    return
-                                }
-                                let originalPath = url.path
-                                let attachmentKind = mediaKindToAttachmentKind(kind)
-                                let globalKind: AttachmentKind
-                                switch attachmentKind {
-                                case .image: globalKind = .image
-                                case .video: globalKind = .video
-                                case .audio: globalKind = .audio
-                                }
-                                if let finalPath = try? AttachmentStore.replaceAttachmentFile(withTempURL: tempURL, forExistingPath: originalPath, kind: globalKind) {
-                                    let finalURL = URL(fileURLWithPath: finalPath)
-                                    switch kind {
-                                    case .video:
-                                        var newVideos = videoURLs
-                                        let videoIndex = currentMediaIndex - imageURLs.count
-                                        if videoIndex >= 0 && videoIndex < newVideos.count {
-                                            newVideos[videoIndex] = finalURL
-                                        }
-                                        self.videoURLs = newVideos
-                                        let upper = media.count - 1
-                                        currentIndex = min(max(currentIndex, 0), max(upper, 0))
-                                    case .audio:
-                                        var newAudios = audioURLs
-                                        if currentMediaIndex - imageURLs.count - videoURLs.count < newAudios.count {
-                                            let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
-                                            if audioIndex >= 0 && audioIndex < newAudios.count {
-                                                newAudios[audioIndex] = finalURL
-                                            }
-                                        }
-                                        self.audioURLs = newAudios
-                                        let upper = media.count - 1
-                                        currentIndex = min(max(currentIndex, 0), max(upper, 0))
-                                    case .image: break
-                                    }
-                                    cachedURL = finalURL
-                                    onReplaceAttachment?(url, finalURL, globalKind)
-                                    stopAllPlayersToggle.toggle()
-                                    #if canImport(UIKit)
-                                    if kind == .video {
-                                        _ = AttachmentStore.generateVideoPoster(url: finalURL)
-                                    }
-                                    #endif
-                                    mediaMutationTick += 1
-                                }
-                                isShowingTrimmer = false
-                                trimURL = nil
-                                trimKind = nil
-                              })
+                                self.audioURLs = newAudios
+                                let upper = media.count - 1
+                                currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                            case .image: break
+                            }
+                            cachedURL = finalURL
+                            onReplaceAttachment?(url, finalURL, globalKind)
+                            stopAllPlayersToggle.toggle()
+                            #if canImport(UIKit)
+                            if kind == .video {
+                                _ = AttachmentStore.generateVideoPoster(url: finalURL)
+                            }
+                            #endif
+                            mediaMutationTick += 1
+                        }
+                        isShowingTrimmer = false
+                        trimURL = nil
+                        trimKind = nil
+                    }
+                )
             }
         }
     }
-    
+
     /// Prefetch only image thumbnails around given index to improve scroll performance
     private func prefetchNeighbors(around index: Int) {
         guard !media.isEmpty else { return }
@@ -582,9 +644,17 @@ private struct MediaPage: View {
         case .image:
             ImagePage(url: attachment.url, background: background)
         case .video:
-            VideoPage(url: attachment.url, isAnyPlayerActive: $isAnyPlayerActive, onRequestStopAll: $onRequestStopAll)
+            VideoPage(
+                url: attachment.url,
+                isAnyPlayerActive: $isAnyPlayerActive,
+                onRequestStopAll: $onRequestStopAll
+            )
         case .audio:
-            AudioPage(url: attachment.url, isAnyPlayerActive: $isAnyPlayerActive, onRequestStopAll: $onRequestStopAll)
+            AudioPage(
+                url: attachment.url,
+                isAnyPlayerActive: $isAnyPlayerActive,
+                onRequestStopAll: $onRequestStopAll
+            )
         }
     }
 }
@@ -610,7 +680,7 @@ private struct VideoPage: View {
     @State private var endObserver: Any? = nil
 
     @State private var overlayTapGuard: Bool = false
-    
+
     @State private var ignoreStopBroadcastUntil: Date? = nil
 
     @State private var currentTime: Double = 0
@@ -623,12 +693,22 @@ private struct VideoPage: View {
         ZStack {
             ZStack {
                 Group {
-                    if let poster { Image(uiImage: poster).resizable().scaledToFit() }
-                    else { Image(systemName: "film").imageScale(.large).foregroundStyle(.secondary) }
+                    if let poster {
+                        Image(uiImage: poster)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Image(systemName: "film")
+                            .imageScale(.large)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 .task(id: url) { await generatePoster() }
 
-                if let player { PlayerContainerView(player: player).onDisappear { player.pause() } }
+                if let player {
+                    PlayerContainerView(player: player)
+                        .onDisappear { player.pause() }
+                }
             }
             .contentShape(Rectangle())
             .onTapGesture {
@@ -646,8 +726,11 @@ private struct VideoPage: View {
                 requestPlay()
             }) {
                 ZStack {
-                    Circle().fill(.ultraThinMaterial).frame(width: 56, height: 56)
-                    Image(systemName: "play.fill").font(.system(size: 20, weight: .semibold))
+                    Circle()
+                        .fill(.ultraThinMaterial)
+                        .frame(width: 56, height: 56)
+                    Image(systemName: "play.fill")
+                        .font(.system(size: 20, weight: .semibold))
                 }
             }
             .buttonStyle(.plain)
@@ -661,13 +744,25 @@ private struct VideoPage: View {
                 VStack(spacing: 8) {
                     Slider(
                         value: Binding(
-                            get: { min(max(currentTime, 0), duration > 0 ? duration : 0) },
+                            get: {
+                                min(
+                                    max(currentTime, 0),
+                                    duration > 0 ? duration : 0
+                                )
+                            },
                             set: { newValue in
                                 currentTime = newValue
                                 // Realtime scrubbing: seek player as the slider moves
                                 if let player {
-                                    let cm = CMTime(seconds: max(0, min(newValue, duration)), preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-                                    player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
+                                    let cm = CMTime(
+                                        seconds: max(0, min(newValue, duration)),
+                                        preferredTimescale: CMTimeScale(NSEC_PER_SEC)
+                                    )
+                                    player.seek(
+                                        to: cm,
+                                        toleranceBefore: .zero,
+                                        toleranceAfter: .zero
+                                    )
                                 }
                             }
                         ),
@@ -777,6 +872,7 @@ private struct VideoPage: View {
             stopObservingPlayer()
         }
     }
+
     private func requestPlay() {
         onRequestStopAll.toggle()
         ignoreStopBroadcastUntil = Date().addingTimeInterval(0.15)
@@ -795,20 +891,26 @@ private struct VideoPage: View {
         player.play()
         isAnyPlayerActive = true
     }
+
     private func stop() {
         player?.pause()
         isAnyPlayerActive = false
         isPlayingState = false
     }
+
     private func toggleMute() {
         isMuted.toggle()
         player?.isMuted = isMuted
     }
+
     private func generatePoster() async {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
-                DispatchQueue.main.async { self.poster = img; cont.resume() }
+                DispatchQueue.main.async {
+                    self.poster = img
+                    cont.resume()
+                }
             }
         }
     }
@@ -827,11 +929,15 @@ private struct VideoPage: View {
         player?.isMuted = isMuted
         isPlayingState = ((player?.rate ?? 0) > 0)
     }
+
     private func seek(by seconds: Double) {
         guard let player else { return }
         let current = player.currentTime()
         let target = CMTimeGetSeconds(current) + seconds
-        let newTime = CMTime(seconds: max(0, target), preferredTimescale: current.timescale)
+        let newTime = CMTime(
+            seconds: max(0, target),
+            preferredTimescale: current.timescale
+        )
         player.seek(to: newTime, toleranceBefore: .zero, toleranceAfter: .zero)
         currentTime = CMTimeGetSeconds(newTime)
     }
@@ -863,7 +969,11 @@ private struct VideoPage: View {
             }
         }
         // Observe end of item to set state to paused
-        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: player.currentItem, queue: .main) { _ in
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: player.currentItem,
+            queue: .main
+        ) { _ in
             self.isPlayingState = false
         }
         if let item = player.currentItem {
@@ -883,15 +993,20 @@ private struct VideoPage: View {
         rateObserver = nil
         itemStatusObserver?.invalidate()
         itemStatusObserver = nil
-        if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+        }
         endObserver = nil
     }
-    
+
     private func setupTimeObservationIfNeeded() {
         guard timeObserverToken == nil, let player else { return }
         // Update roughly every 0.1s
         let interval = CMTime(seconds: 0.1, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
-        timeObserverToken = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+        timeObserverToken = player.addPeriodicTimeObserver(
+            forInterval: interval,
+            queue: .main
+        ) { time in
             let seconds = CMTimeGetSeconds(time)
             if !isScrubbing { currentTime = seconds }
             if let item = player.currentItem {
@@ -907,12 +1022,15 @@ private struct VideoPage: View {
         }
         timeObserverToken = nil
     }
-    
+
     private func commitSeek() {
         guard let player else { return }
         isScrubbing = false
         let target = max(0, min(currentTime, duration))
-        let cm = CMTime(seconds: target, preferredTimescale: CMTimeScale(NSEC_PER_SEC))
+        let cm = CMTime(
+            seconds: target,
+            preferredTimescale: CMTimeScale(NSEC_PER_SEC)
+        )
         player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 }
@@ -972,9 +1090,12 @@ private struct PlayerContainerView: UIViewRepresentable {
     }
 }
 
-// New class added above AudioPage
+// MARK: - Audio player + waveform
+
 private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var isPlaying: Bool = false
+    @Published var currentLevel: Float = 0 // 0...1 for waveform
+
     private var player: AVAudioPlayer?
 
     func play(url: URL) {
@@ -983,12 +1104,13 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
             player = try AVAudioPlayer(contentsOf: url)
             player?.delegate = self
             player?.volume = 1.0
+            player?.isMeteringEnabled = true
             player?.prepareToPlay()
             player?.play()
             isPlaying = true
         } catch {
-            // Removed print statement here as requested
             isPlaying = false
+            currentLevel = 0
         }
     }
 
@@ -996,12 +1118,35 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
         player?.stop()
         player = nil
         isPlaying = false
+        currentLevel = 0
     }
 
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
         DispatchQueue.main.async {
             self.isPlaying = false
+            self.currentLevel = 0
         }
+    }
+
+    /// Sample current audio power level and normalize to 0...1.
+    func sampleLevel() {
+        guard let player, isPlaying else {
+            currentLevel = 0
+            return
+        }
+        player.updateMeters()
+        let db = player.averagePower(forChannel: 0)
+        currentLevel = normalizedPower(db)
+    }
+
+    private func normalizedPower(_ decibels: Float) -> Float {
+        guard decibels.isFinite else { return 0 }
+        let minDb: Float = -60
+        if decibels <= minDb {
+            return 0
+        }
+        let normalized = (decibels - minDb) / -minDb
+        return max(0, min(1, normalized))
     }
 }
 
@@ -1011,21 +1156,35 @@ private struct AudioPage: View {
     @Binding var onRequestStopAll: Bool
     @StateObject private var audioController = AudioPlayerController()
 
+    // Waveform state (lightweight ring buffer)
+    @State private var waveformSamples: [CGFloat] = Array(repeating: 0.15, count: 80)
+    @State private var waveformWriteIndex: Int = 0
+    @State private var waveformHasWrapped: Bool = false
+    @State private var waveformTimer: Timer?
+
     var body: some View {
         VStack(spacing: 16) {
-            Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
+            AttachmentWaveformView(
+                samples: renderBars(),
+                isPlaying: audioController.isPlaying
+            )
+            .frame(height: 64)
+            .padding(.horizontal, Theme.Spacing.l)
+            .accessibilityHidden(true)
+
             HStack(spacing: 16) {
                 Button(action: {
                     if audioController.isPlaying {
                         audioController.stop()
+                        stopWaveform()
                         isAnyPlayerActive = false
                     } else {
-                        // Fix: ensure file exists before playback, fallback to resolveAudioURL (see SessionDetailView resolveAttachmentURL logic)
                         guard let resolvedURL = resolveAudioURL(url) else {
                             return
                         }
                         audioController.play(url: resolvedURL)
                         isAnyPlayerActive = true
+                        startWaveform()
                     }
                 }) {
                     Image(systemName: audioController.isPlaying ? "pause.fill" : "play.fill")
@@ -1040,10 +1199,12 @@ private struct AudioPage: View {
         .contentShape(Rectangle())
         .onChange(of: onRequestStopAll) { _, _ in
             audioController.stop()
+            stopWaveform()
             isAnyPlayerActive = false
         }
         .onDisappear {
             audioController.stop()
+            stopWaveform()
             isAnyPlayerActive = false
         }
     }
@@ -1066,6 +1227,93 @@ private struct AudioPage: View {
         }
         return nil
     }
+
+    // MARK: - Waveform helpers
+
+    private func startWaveform() {
+        stopWaveform()
+        waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
+            audioController.sampleLevel()
+            writeWaveformSample(audioController.currentLevel)
+        }
+        if let waveformTimer {
+            RunLoop.main.add(waveformTimer, forMode: .common)
+        }
+    }
+
+    private func stopWaveform() {
+        waveformTimer?.invalidate()
+        waveformTimer = nil
+    }
+
+    private func writeWaveformSample(_ value: Float) {
+        guard !waveformSamples.isEmpty else { return }
+        let clamped = max(0, min(1, value))
+        waveformSamples[waveformWriteIndex] = max(0.1, CGFloat(clamped))
+        waveformWriteIndex += 1
+        if waveformWriteIndex >= waveformSamples.count {
+            waveformWriteIndex = 0
+            waveformHasWrapped = true
+        }
+    }
+
+    private func renderBars() -> [CGFloat] {
+        guard !waveformSamples.isEmpty else { return [] }
+        if waveformHasWrapped {
+            let head = waveformSamples[waveformWriteIndex..<waveformSamples.count]
+            let tail = waveformSamples[0..<waveformWriteIndex]
+            return Array(head + tail)
+        } else {
+            return waveformSamples
+        }
+    }
+}
+
+// MARK: - Waveform view for audio playback
+
+private struct AttachmentWaveformView: View {
+    let samples: [CGFloat]
+    let isPlaying: Bool
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let height = proxy.size.height
+            let count = max(samples.count, 1)
+            let barWidth = max(width / CGFloat(count), 1)
+
+            HStack(alignment: .center, spacing: 0) {
+                ForEach(samples.indices, id: \.self) { index in
+                    let sample = samples[index]
+                    Capsule()
+                        .frame(
+                            width: barWidth,
+                            // boost differences between quiet and loud:
+                            height: max(height * boosted(sample), 2)
+                        )
+                        .foregroundStyle(color)
+                }
+            }
+        }
+    }
+
+    // Exaggerate peaks a bit so quiet vs loud is clearer
+    private func boosted(_ sample: CGFloat) -> CGFloat {
+        let clamped = max(0, min(sample, 1))
+        let eased = pow(clamped, 1.9)      // tweak exponent if you want more/less contrast
+        let minHeight: CGFloat = 0.05      // was ~0.1 before; gives more headroom
+        return max(minHeight, eased)
+    }
+
+    // Lighter “Start button” green when playing, soft grey when idle
+    private var color: Color {
+        if isPlaying {
+            // same hue as primaryAction, but lighter
+            return Theme.Colors.primaryAction.opacity(0.55)
+        } else {
+            return Theme.Colors.secondaryText.opacity(0.35)
+        }
+    }
 }
 
 // MARK: - Helpers
@@ -1074,4 +1322,3 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
-
