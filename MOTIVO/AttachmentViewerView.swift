@@ -1266,7 +1266,7 @@ private struct AudioPage: View {
     }
 }
 
-// MARK: - Waveform view for audio playback
+/// MARK: - Waveform view
 
 private struct AttachmentWaveformView: View {
     let samples: [CGFloat]
@@ -1278,43 +1278,35 @@ private struct AttachmentWaveformView: View {
             let height = proxy.size.height
             let count = max(samples.count, 1)
 
-            // Slightly larger than true width so bars overlap a bit
-            let barWidth = max(width / CGFloat(count) * 1.35, 2)
+            // Bars now tile the width with no gaps.
+            let barWidth = max(width / CGFloat(count), 1)
 
             HStack(alignment: .center, spacing: 0) {
-                ForEach(samples.indices, id: \.self) { index in
-                    let sample = samples[index]
-
-                    Rectangle()
+                ForEach(samples.indices, id: \.self) { i in
+                    let s = samples[i]
+                    Capsule()
                         .frame(
                             width: barWidth,
-                            height: max(height * boosted(sample), 2)
+                            height: max(height * boosted(s), 2)
                         )
                         .foregroundStyle(color)
-                        .clipped()
                 }
             }
         }
     }
 
-    // Exaggerate peaks a bit so quiet vs loud is clearer
-    private func boosted(_ sample: CGFloat) -> CGFloat {
-        let clamped = max(0, min(sample, 1))
-        let eased = pow(clamped, 1.35)
-        let minHeight: CGFloat = 0.06
-        return max(minHeight, eased)
+    private func boosted(_ s: CGFloat) -> CGFloat {
+        let minHeight: CGFloat = 0.015
+        let boosted = (exp(s * 3) - 1) / (exp(3) - 1)
+        return max(minHeight, boosted)
     }
 
-    // Use Start-button green when playing, soft grey when idle.
     private var color: Color {
         isPlaying
-        ? Theme.Colors.primaryAction.opacity(0.22)   // close to Start button wash
-        : Theme.Colors.secondaryText.opacity(0.28)
+        ? Theme.Colors.primaryAction.opacity(0.45)
+        : Theme.Colors.secondaryText.opacity(0.35)
     }
 }
-
-
-
 // MARK: - Helpers
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
