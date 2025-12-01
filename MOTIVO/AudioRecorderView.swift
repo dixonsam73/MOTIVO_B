@@ -1,8 +1,6 @@
 // AudioRecorderView.swift
-// CHANGE-ID: 20251127_RecordingModeForegroundVsBackground
-// SCOPE: Mode selector now controls behaviour:
-// - In app: stop recording when app goes to background
-// - Background: allow continuous/background recording (requires Background Audio capability on target)
+// CHANGE-ID: 20251201_AudioRecorderWaveformParity
+// SCOPE: Waveform visual parity with AttachmentViewerView (green playback, softer mapping)
 
 import SwiftUI
 import AVFoundation
@@ -580,11 +578,12 @@ struct AudioRecorderView: View {
             orderedSamples = waveformSamples
         }
 
-        // Map floats [0,1] to CGFloat heights
+        // Map floats [0,1] to CGFloat heights with a mild easing curve
         let bars = orderedSamples.map { sample -> CGFloat in
-            let minHeight: CGFloat = 0.1
-            let height = CGFloat(sample)
-            return max(minHeight, height)
+            let clamped = max(0, min(1, CGFloat(sample)))
+            let eased = pow(clamped, 1.3)          // gentle contrast boost
+            let minHeight: CGFloat = 0.05          // slightly slimmer baseline than before
+            return max(minHeight, eased)
         }
         renderBars = bars
     }
@@ -745,11 +744,14 @@ private struct WaveformView: View {
 
     func color(for index: Int) -> Color {
         if isRecording {
+            // Strong red for capture
             return Color.red.opacity(0.8)
         } else if isPlaying {
-            return Color.blue.opacity(0.8)
+            // Match Start-button / playback wash: primaryAction green, soft opacity
+            return Theme.Colors.primaryAction.opacity(0.45)
         } else {
-            return Color.secondary.opacity(0.4)
+            // Idle / no live signal
+            return Theme.Colors.secondaryText.opacity(0.35)
         }
     }
 }
@@ -767,4 +769,3 @@ struct AudioRecorderView_Previews: PreviewProvider {
         .previewLayout(.sizeThatFits)
     }
 }
-
