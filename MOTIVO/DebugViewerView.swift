@@ -1,6 +1,5 @@
-// CHANGE-ID: v7.12B-DebugViewer-RestoreIdentitySim-20251112_134145
-// SCOPE: Restore Identity menu + Simulate Follows panel; use FollowStore.debugReload()
-// SCOPE: Debug Viewer Mode (DEBUG only), read-only inspector
+// CHANGE-ID: v7.13A-DebugViewer-OverrideViewerID-20251201_1830
+// SCOPE: Social hardening — use Debug.currentUserIDOverride in followContext viewerID + ensure JSON block is visible in scroll view.
 
 #if DEBUG
 import SwiftUI
@@ -47,10 +46,16 @@ public struct DebugViewerView: View {
     @State private var isPretty: Bool = true
     @State private var targetID: String = "user_B"
     @State private var acceptFromID: String = "local-device"
+    @StateObject private var followStore = FollowStore.shared
 
     private var activeViewerID: String {
-        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
-        return PersistenceController.shared.currentUserID ?? "local-device"
+        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"), !o.isEmpty {
+            return o
+        }
+        if let current = PersistenceController.shared.currentUserID {
+            return current
+        }
+        return "local-device"
     }
 
     public init(title: String, jsonString: Binding<String>) {
@@ -59,38 +64,72 @@ public struct DebugViewerView: View {
     }
 
     private var displayText: String {
-        if isPretty, let pretty = Self.prettyPrinted(jsonString: jsonString) { return pretty }
-        return jsonString
+        if isPretty, let pretty = Self.prettyPrinted(jsonString: jsonString), !pretty.isEmpty {
+            return pretty
+        }
+        if !jsonString.isEmpty {
+            return jsonString
+        }
+        // Fallback so we *see* something if the buffer is never populated
+        return "(debugJSONBuffer is empty – no debug payload received)"
     }
 
     public var body: some View {
         ScrollView {
-            Text(displayText)
-                .font(.system(.body, design: .monospaced))
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
-        }
-        BackendModeSection()
+            VStack(alignment: .leading, spacing: 24) {
 
-        APIConfigView()
-        SyncQueueSection()
+                // JSON dump at the top
+                Text(displayText)
+                    .font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding()
+                    .background(Color.black.opacity(0.06))
+                    .cornerRadius(8)
+                    .padding(.horizontal)
 
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Simulate Follows").font(.headline)
-            HStack { Text("Viewer: \(activeViewerID)").font(.subheadline); Spacer() }
-            HStack {
-                TextField("Counterparty ID", text: $targetID).textFieldStyle(.roundedBorder)
-                Button("Request") { FollowStore.shared.simulateRequestFollow(to: targetID); FollowStore.shared.debugReload() }
-                Button("Unfollow") { FollowStore.shared.simulateUnfollow(targetID); FollowStore.shared.debugReload() }
+                // Backend + sync controls
+                BackendModeSection()
+                APIConfigView()
+                SyncQueueSection()
+
+                // Simulate Follows panel
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Simulate Follows").font(.headline)
+
+                    HStack {
+                        Text("Viewer: \(activeViewerID)")
+                            .font(.subheadline)
+                        Spacer()
+                    }
+
+                    HStack {
+                        TextField("Counterparty ID", text: $targetID)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Request") {
+                            FollowStore.shared.simulateRequestFollow(to: targetID)
+                            FollowStore.shared.debugReload()
+                        }
+                        Button("Unfollow") {
+                            FollowStore.shared.simulateUnfollow(targetID)
+                            FollowStore.shared.debugReload()
+                        }
+                    }
+
+                    HStack {
+                        TextField("Accept From ID", text: $acceptFromID)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Accept From") {
+                            FollowStore.shared.simulateAcceptFollow(from: acceptFromID)
+                            FollowStore.shared.debugReload()
+                        }
+                    }
+                }
+                .padding(.horizontal)
+                .padding(.bottom)
             }
-            HStack {
-                TextField("Accept From ID", text: $acceptFromID).textFieldStyle(.roundedBorder)
-                Button("Accept From") { FollowStore.shared.simulateAcceptFollow(from: acceptFromID); FollowStore.shared.debugReload() }
-            }
+            .padding(.top, 8)
         }
-        .padding(.horizontal)
-        .padding(.bottom)
         .navigationTitle(title)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -108,6 +147,8 @@ public struct DebugViewerView: View {
 
                 // Share button
                 ShareButton(content: displayText)
+
+                // Identity menu
                 Menu("Identity") {
                     Button("local-device") {
                         UserDefaults.standard.set("local-device", forKey: "Debug.currentUserIDOverride")
@@ -299,22 +340,31 @@ public enum DebugDump {
             }
         }
 
-        // Determine viewer ID using whatever is available in DEBUG; prefer auth if present, else persistence fallback
-        var viewerIDResolved: String? = nil
-        // Try an Auth-like singleton if present
-        if let authClass = NSClassFromString("AuthManager") as? NSObject.Type,
-           let auth = authClass.value(forKey: "shared") as? NSObject,
-           let currentUserID = auth.value(forKey: "currentUserID") as? String {
-            viewerIDResolved = currentUserID
-        }
-        if viewerIDResolved == nil,
-           let pcClass = NSClassFromString("PersistenceController") as? NSObject.Type,
-           let pcShared = pcClass.value(forKey: "shared") as? NSObject,
-           let currentUserID = pcShared.value(forKey: "currentUserID") as? String {
-            viewerIDResolved = currentUserID
-        }
+        // Determine viewer ID using whatever is available in DEBUG; prefer override, then auth, then persistence fallback
+        let viewerIDResolved: String = {
+            if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+               !override.isEmpty {
+                return override
+            }
 
-        let followCtx = viewerIDResolved.map { DebugDump.followContext(for: $0, sessionOwnerID: ownerUserID) }
+            if let authClass = NSClassFromString("AuthManager") as? NSObject.Type,
+               let auth = authClass.value(forKey: "shared") as? NSObject,
+               let currentUserID = auth.value(forKey: "currentUserID") as? String,
+               !currentUserID.isEmpty {
+                return currentUserID
+            }
+
+            if let pcClass = NSClassFromString("PersistenceController") as? NSObject.Type,
+               let pcShared = pcClass.value(forKey: "shared") as? NSObject,
+               let currentUserID = pcShared.value(forKey: "currentUserID") as? String,
+               !currentUserID.isEmpty {
+                return currentUserID
+            }
+
+            return "local-device"
+        }()
+
+        let followCtx = DebugDump.followContext(for: viewerIDResolved, sessionOwnerID: ownerUserID)
 
         let payload = SessionDumpWrapper(
             session: snap,
@@ -349,7 +399,7 @@ public enum DebugDump {
         dict["id"] = (obj.value(forKey: "id") as? UUID)?.uuidString ?? (obj.value(forKey: "id") as? String)
         dict["ownerUserID"] = obj.value(forKey: "ownerUserID") as? String
         dict["createdAt"] = obj.value(forKey: "createdAt") as? Date
-        dict["text"] = obj.value(forKey: "text") as? String
+        dict["text"] = (obj.value(forKey: "text") as? String)
         dict["sessionID"] = (obj.value(forKey: "sessionID") as? UUID)?.uuidString
         return encodeJSON(dict)
     }
@@ -379,4 +429,3 @@ public enum DebugDump {
 }
 
 #endif
-

@@ -205,9 +205,10 @@ struct SessionDetailView: View {
                             _debugJSONBuffer = "{\"error\":\"unavailable\"}"
                             return
                         }
-                        // Defer to next runloop to ensure presentation and fault realization
                         DispatchQueue.main.async {
-                            _debugJSONBuffer = DebugDump.dump(session: s)
+                            let json = DebugDump.dump(session: s)
+                            NSLog("[DebugViewer] session dump = %@", json)
+                            _debugJSONBuffer = json
                         }
                     }
             }

@@ -1,3 +1,6 @@
+// CHANGE-ID: v7.13A-ProfilePeek-ViewerOverride-20251201_1600
+// SCOPE: Social hardening — align viewerID with Debug.currentUserIDOverride for dummy accounts.
+
 import SwiftUI
 import CoreData
 import Combine
@@ -11,12 +14,24 @@ struct ProfilePeekView: View {
     let ownerID: String
 
     // Derived
+    /// Effective viewer ID, respecting DEBUG override, then Auth, then PersistenceController.
     private var viewerID: String {
-        auth.currentUserID ?? (try? PersistenceController.shared.currentUserID) ?? "localUser"
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+        if let authID = auth.currentUserID, !authID.isEmpty {
+            return authID
+        }
+        return (try? PersistenceController.shared.currentUserID) ?? "localUser"
     }
+
     private var canSee: Bool {
         viewerID == ownerID || FollowStore.shared.state(for: ownerID) == .following
     }
+
     // Fetch a few lightweight stats locally
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
@@ -65,7 +80,7 @@ struct ProfilePeekView: View {
                         HStack(spacing: 8) {
                             Text(displayName(ownerID))
                                 .font(.headline)
-                            let myID = (try? PersistenceController.shared.currentUserID) ?? "local-device"
+                            let myID = viewerID
                             let isOwner = (ownerID == myID)
                             if !isOwner {
                                 let state = (FollowStore.shared.state(for: ownerID))
@@ -132,7 +147,8 @@ struct ProfilePeekView: View {
             }
             .task {
                 // Trigger a one-time backfill only when peeking our own profile
-                if viewerID == ownerID, let uid = auth.currentUserID ?? (try? PersistenceController.shared.currentUserID) {
+                if viewerID == ownerID,
+                   let uid = auth.currentUserID ?? (try? PersistenceController.shared.currentUserID) {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
             }

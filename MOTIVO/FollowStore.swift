@@ -1,9 +1,6 @@
-// CHANGE-ID: v7.12B-FollowStore-DebugReload-20251112_133748
-// SCOPE: Add debugReload() + following helpers (no release impact)
-// FollowStore.swift
-// CHANGE-ID: 20251110_201947-FollowStore_v712A_LocalSim
-// SCOPE: Replace entire file; removes AuthManager.shared, adds PersistenceController-based currentUserID and local follow simulation.
-// STATUS: Green build expected, no schema or UI changes.
+// CHANGE-ID: v7.13A-FollowStore-DummyIdentities-20251201_1715
+// SCOPE: Social Hardening — Dummy identities (local-device, user_B, user_C)
+// Fixes: FollowStore now reloads follow/request sets after identity override.
 
 import Foundation
 import Combine
@@ -27,9 +24,17 @@ public final class FollowStore: ObservableObject {
 
     // MARK: - Core Data / Persistence Identity
 
-    /// Returns the current user ID from PersistenceController; falls back to local-device for offline/dev.
+    /// Returns the current user ID for follow maps.
+    /// In DEBUG, respects Debug.currentUserIDOverride so each dummy identity
+    /// (local-device, user_B, user_C) gets its own follow set.
     private var currentUserID: String {
-        (try? PersistenceController.shared.currentUserID) ?? "local-device"
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+        return (try? PersistenceController.shared.currentUserID) ?? "local-device"
     }
 
     // MARK: - Local UserDefaults Keys
@@ -161,13 +166,15 @@ extension FollowStore {
         return .none
     }
 
-#if DEBUG
-    /// DEBUG: Force-reload FollowStore for the active viewer (applies override if set) and notify observers.
+    #if DEBUG
+    /// DEBUG: Force-reload FollowStore for the active viewer (applies override if set).
+    /// Ensures dummy identities actually switch follow/request sets.
     public func debugReload() {
         load()
         objectWillChange.send()
+        NSLog("[FollowStore] debugReload → active user = %@", currentUserID)
     }
-#endif
+    #endif
 
     /// Returns true if the active viewer is following the given user ID.
     public func isFollowing(_ targetUserID: String) -> Bool {

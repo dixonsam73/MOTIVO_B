@@ -719,7 +719,6 @@ fileprivate struct SessionRow: View {
         }
     }
 
-
     private var accessibilitySummary: String {
         var parts: [String] = []
         parts.append(feedTitle)
@@ -741,10 +740,24 @@ fileprivate struct SessionRow: View {
         let uri = session.objectID.uriRepresentation().absoluteString
         return stableUUID(from: uri)
     }
-    
+
     private var commentsCount: Int {
         guard let id = sessionIDForComments else { return 0 }
         return commentsStore.comments(for: id).count
+    }
+
+    /// Effective viewer ID, respecting DEBUG override, then Auth, then PersistenceController.
+    private var viewerUserID: String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+        if let authID = auth.currentUserID, !authID.isEmpty {
+            return authID
+        }
+        return try? PersistenceController.shared.currentUserID
     }
 
     private func stableUUID(from string: String) -> UUID {
@@ -779,12 +792,11 @@ fileprivate struct SessionRow: View {
     }
 
     private var viewerIsOwner: Bool {
-        // Compare session.ownerUserID to the current signed-in user, if available
-        let current = (try? PersistenceController.shared.currentUserID) ?? nil
-        let owner = session.ownerUserID
-        if let c = current, let o = owner { return c == o }
-        return false
+        // Compare session.ownerUserID to the effective viewer ID, if available
+        guard let viewer = viewerUserID, let owner = session.ownerUserID else { return false }
+        return viewer == owner
     }
+
     private func isPrivate(_ att: Attachment) -> Bool {
         let id = att.value(forKey: "id") as? UUID
         // Resolve a stable URL if possible
@@ -796,13 +808,15 @@ fileprivate struct SessionRow: View {
         ZStack(alignment: .bottomTrailing) {
             VStack(alignment: .leading, spacing: 6) {
                 // Identity header
-                if scope != .mine, let ownerID = (session.ownerUserID ?? (viewerIsOwner ? ((try? PersistenceController.shared.currentUserID) ?? nil) : nil)), !ownerID.isEmpty {
+                if scope != .mine,
+                   let ownerIDNonEmpty = (session.ownerUserID ?? (viewerIsOwner ? viewerUserID : nil)),
+                   !ownerIDNonEmpty.isEmpty {
                     HStack(alignment: .center, spacing: 8) {
                         // Avatar 32pt circle
                         Button(action: { showPeek = true }) {
                             Group {
                                 #if canImport(UIKit)
-                                if let img = ProfileStore.avatarImage(for: ownerID) {
+                                if let img = ProfileStore.avatarImage(for: ownerIDNonEmpty) {
                                     Image(uiImage: img)
                                         .resizable()
                                         .scaledToFill()
@@ -815,11 +829,14 @@ fileprivate struct SessionRow: View {
                                             if let ctx = session.managedObjectContext,
                                                let p = try? ctx.fetch(req).first,
                                                let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                let words = n.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+                                                let words = n.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    .components(separatedBy: .whitespacesAndNewlines)
+                                                    .filter { !$0.isEmpty }
                                                 if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
                                                 let first = words.first?.first.map { String($0).uppercased() } ?? ""
                                                 let last = words.last?.first.map { String($0).uppercased() } ?? ""
-                                                return first + last
+                                                let combo = (first + last)
+                                                return combo.isEmpty ? "Y" : combo
                                             }
                                             return "Y"
                                         } else {
@@ -853,7 +870,9 @@ fileprivate struct SessionRow: View {
                             if viewerIsOwner {
                                 let req: NSFetchRequest<Profile> = Profile.fetchRequest()
                                 req.fetchLimit = 1
-                                if let ctx = session.managedObjectContext, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                if let ctx = session.managedObjectContext,
+                                   let p = try? ctx.fetch(req).first,
+                                   let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                                     return n
                                 }
                                 return "You"
@@ -862,7 +881,7 @@ fileprivate struct SessionRow: View {
                             }
                         }()
 
-                        let loc = ProfileStore.location(for: ownerID)
+                        let loc = ProfileStore.location(for: ownerIDNonEmpty)
 
                         HStack(spacing: 6) {
                             Text(realName).font(.subheadline.weight(.semibold))
@@ -958,7 +977,7 @@ fileprivate struct SessionRow: View {
             }
         }
         .sheet(isPresented: $showPeek) {
-            ProfilePeekView(ownerID: session.ownerUserID ?? ((try? PersistenceController.shared.currentUserID) ?? ""))
+            ProfilePeekView(ownerID: session.ownerUserID ?? (viewerUserID ?? ""))
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
         }
@@ -1024,9 +1043,9 @@ fileprivate struct SessionRow: View {
                     .buttonStyle(.plain)
                 }
             }
-            
+
             Spacer(minLength: 0)
-            
+
             if attachmentCount > 0 {
                 HStack(spacing: 6) {
                     Image(systemName: "paperclip")
