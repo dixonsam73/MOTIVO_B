@@ -1142,11 +1142,9 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
     private func normalizedPower(_ decibels: Float) -> Float {
         guard decibels.isFinite else { return 0 }
         let minDb: Float = -60
-        if decibels <= minDb {
-            return 0
-        }
-        let normalized = (decibels - minDb) / -minDb
-        return max(0, min(1, normalized))
+        let clamped = max(decibels, minDb)
+        let linear = (clamped - minDb) / -minDb
+        return max(0, min(1, linear))
     }
 }
 
@@ -1156,19 +1154,20 @@ private struct AudioPage: View {
     @Binding var onRequestStopAll: Bool
     @StateObject private var audioController = AudioPlayerController()
 
-    // Waveform state (lightweight ring buffer)
-    @State private var waveformSamples: [CGFloat] = Array(repeating: 0.15, count: 80)
+    // Waveform ring buffer
+    @State private var waveformSamples: [CGFloat] = Array(repeating: 0.1, count: 120)
     @State private var waveformWriteIndex: Int = 0
     @State private var waveformHasWrapped: Bool = false
     @State private var waveformTimer: Timer?
 
     var body: some View {
         VStack(spacing: 16) {
+
             AttachmentWaveformView(
                 samples: renderBars(),
                 isPlaying: audioController.isPlaying
             )
-            .frame(height: 64)
+            .frame(height: 60)
             .padding(.horizontal, Theme.Spacing.l)
             .accessibilityHidden(true)
 
@@ -1209,26 +1208,25 @@ private struct AudioPage: View {
         }
     }
 
-    /// Try to resolve a valid audio file URL from potentially stale or partial URLs. Returns nil if not found.
     private func resolveAudioURL(_ src: URL) -> URL? {
         let fm = FileManager.default
         if fm.fileExists(atPath: src.path) { return src }
         let filename = src.lastPathComponent
-        let candidateDirs: [URL?] = [
-            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
-            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+        let dirs: [URL] = [
+            fm.urls(for: .documentDirectory, in: .userDomainMask).first!,
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first!,
+            fm.urls(for: .libraryDirectory, in: .userDomainMask).first!,
+            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!,
             fm.temporaryDirectory
         ]
-        for base in candidateDirs.compactMap({ $0 }) {
+        for base in dirs {
             let candidate = base.appendingPathComponent(filename)
             if fm.fileExists(atPath: candidate.path) { return candidate }
         }
         return nil
     }
 
-    // MARK: - Waveform helpers
+    // MARK: Waveform helpers
 
     private func startWaveform() {
         stopWaveform()
@@ -1247,9 +1245,8 @@ private struct AudioPage: View {
     }
 
     private func writeWaveformSample(_ value: Float) {
-        guard !waveformSamples.isEmpty else { return }
-        let clamped = max(0, min(1, value))
-        waveformSamples[waveformWriteIndex] = max(0.1, CGFloat(clamped))
+        let clamped = CGFloat(max(0, min(1, value)))
+        waveformSamples[waveformWriteIndex] = clamped
         waveformWriteIndex += 1
         if waveformWriteIndex >= waveformSamples.count {
             waveformWriteIndex = 0
@@ -1280,18 +1277,21 @@ private struct AttachmentWaveformView: View {
             let width = proxy.size.width
             let height = proxy.size.height
             let count = max(samples.count, 1)
-            let barWidth = max(width / CGFloat(count), 1)
+
+            // Slightly larger than true width so bars overlap a bit
+            let barWidth = max(width / CGFloat(count) * 1.35, 2)
 
             HStack(alignment: .center, spacing: 0) {
                 ForEach(samples.indices, id: \.self) { index in
                     let sample = samples[index]
-                    Capsule()
+
+                    Rectangle()
                         .frame(
                             width: barWidth,
-                            // boost differences between quiet and loud:
                             height: max(height * boosted(sample), 2)
                         )
                         .foregroundStyle(color)
+                        .clipped()
                 }
             }
         }
@@ -1300,21 +1300,20 @@ private struct AttachmentWaveformView: View {
     // Exaggerate peaks a bit so quiet vs loud is clearer
     private func boosted(_ sample: CGFloat) -> CGFloat {
         let clamped = max(0, min(sample, 1))
-        let eased = pow(clamped, 1.9)      // tweak exponent if you want more/less contrast
-        let minHeight: CGFloat = 0.05      // was ~0.1 before; gives more headroom
+        let eased = pow(clamped, 1.35)
+        let minHeight: CGFloat = 0.06
         return max(minHeight, eased)
     }
 
-    // Lighter “Start button” green when playing, soft grey when idle
+    // Use Start-button green when playing, soft grey when idle.
     private var color: Color {
-        if isPlaying {
-            // same hue as primaryAction, but lighter
-            return Theme.Colors.primaryAction.opacity(0.55)
-        } else {
-            return Theme.Colors.secondaryText.opacity(0.35)
-        }
+        isPlaying
+        ? Theme.Colors.primaryAction.opacity(0.22)   // close to Start button wash
+        : Theme.Colors.secondaryText.opacity(0.28)
     }
 }
+
+
 
 // MARK: - Helpers
 private extension Comparable {
