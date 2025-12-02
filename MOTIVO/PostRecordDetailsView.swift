@@ -71,6 +71,7 @@ struct PostRecordDetailsView: View {
 
     private let sessionIDKey = "PracticeTimer.currentSessionID"
     private let lastSeenSessionIDKey = "PostRecordDetailsView.lastSeenSessionID"
+    private let sessionStartTimestampKey = "PracticeTimer.currentSessionStartTimestamp"
 
     private func currentSessionID() -> String? {
         UserDefaults.standard.string(forKey: sessionIDKey)
@@ -192,7 +193,25 @@ struct PostRecordDetailsView: View {
         onCancel: @escaping () -> Void = {}
     ) {
         self._isPresented = isPresented
-        self.prefillTimestamp = timestamp ?? Date()
+        // Prefer the actual session start time from PracticeTimerView if available
+        let ud = UserDefaults.standard
+        var resolvedStart = timestamp
+        if resolvedStart == nil {
+            if let sessionID = ud.string(forKey: sessionIDKey) {
+                // If a session is active, try to load its recorded start timestamp
+                let key = "\(sessionStartTimestampKey).\(sessionID)"
+                if let startInterval = ud.object(forKey: key) as? TimeInterval {
+                    resolvedStart = Date(timeIntervalSince1970: startInterval)
+                } else if let startInterval = ud.object(forKey: sessionStartTimestampKey) as? TimeInterval {
+                    // Back-compat: support a global start timestamp key if used by older builds
+                    resolvedStart = Date(timeIntervalSince1970: startInterval)
+                }
+            } else if let startInterval = ud.object(forKey: sessionStartTimestampKey) as? TimeInterval {
+                // Fallback if no session ID is available but a start timestamp exists
+                resolvedStart = Date(timeIntervalSince1970: startInterval)
+            }
+        }
+        self.prefillTimestamp = resolvedStart ?? Date()
         self.prefillDurationSeconds = max(0, durationSeconds ?? 0)
         self._timestamp = State(initialValue: self.prefillTimestamp)
         self._durationSeconds = State(initialValue: self.prefillDurationSeconds)
@@ -1621,6 +1640,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

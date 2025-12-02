@@ -70,7 +70,8 @@ struct PracticeTimerView: View {
 
     // Used when presenting the review sheet so we pass a stable, final duration
     @State private var finalizedDuration: Int = 0
-
+    @State private var finalizedStartDate: Date? = nil
+    
     // Review sheet
     @State private var showReviewSheet = false
     @State private var didSaveFromReview: Bool = false
@@ -1247,7 +1248,7 @@ struct PracticeTimerView: View {
             .sheet(isPresented: $showReviewSheet) {
                 PostRecordDetailsView(
                     isPresented: $showReviewSheet,
-                    timestamp: startDate ?? Date(),
+                    timestamp: (finalizedStartDate ?? startDate ?? Date()),
                     durationSeconds: finalizedDuration,
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
@@ -1698,6 +1699,22 @@ struct PracticeTimerView: View {
         guard instrument != nil else { return }
         if !isRunning {
             if startDate == nil { startDate = Date() }
+
+            // Persist the actual session start time for PostRecordDetailsView consumers
+            let ud = UserDefaults.standard
+            let startEpoch = startDate?.timeIntervalSince1970 ?? Date().timeIntervalSince1970
+            // Prefer a per-session key when we have a session ID
+            if let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty {
+                let perSessionKey = "PracticeTimer.currentSessionStartTimestamp.\(sid)"
+                if ud.object(forKey: perSessionKey) == nil {
+                    ud.set(startEpoch, forKey: perSessionKey)
+                }
+            }
+            // Also set a global fallback if not already present (back-compat)
+            if ud.object(forKey: "PracticeTimer.currentSessionStartTimestamp") == nil {
+                ud.set(startEpoch, forKey: "PracticeTimer.currentSessionStartTimestamp")
+            }
+
             isRunning = true
             persistTimerState()
         }
@@ -1729,12 +1746,32 @@ struct PracticeTimerView: View {
     }
 
     private func finish() {
-        let total = trueElapsedSeconds()
-        finalizedDuration = total
-        pause()
-        didSaveFromReview = false
-        showReviewSheet = true
-    }
+          // Resolve true start time in order: in-memory startDate, per-session key, global fallback
+          let ud = UserDefaults.standard
+          var resolvedStart: Date? = startDate
+          if resolvedStart == nil {
+              if let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty {
+                  let perSessionKey = "PracticeTimer.currentSessionStartTimestamp.\(sid)"
+                  if ud.object(forKey: perSessionKey) != nil {
+                      let epoch = ud.double(forKey: perSessionKey)
+                      if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
+                  }
+              }
+          }
+          if resolvedStart == nil {
+              if ud.object(forKey: "PracticeTimer.currentSessionStartTimestamp") != nil {
+                  let epoch = ud.double(forKey: "PracticeTimer.currentSessionStartTimestamp")
+                  if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
+              }
+          }
+          finalizedStartDate = resolvedStart
+
+          let total = trueElapsedSeconds()
+          finalizedDuration = total
+          pause()
+          didSaveFromReview = false
+          showReviewSheet = true
+      }
 
     // MARK: - UI ticker
     private func startTicker() {
@@ -2954,3 +2991,4 @@ private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
+
