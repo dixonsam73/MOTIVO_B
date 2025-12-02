@@ -383,7 +383,7 @@ struct PracticeTimerView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
                     selectorsCard()
 
                     // === DRONE CONTROL STRIP ===
@@ -505,7 +505,8 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     timerCard()
@@ -572,7 +573,8 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal)
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     // --- Tasks/Notes Pad (v7.9A) ---
@@ -695,6 +697,8 @@ struct PracticeTimerView: View {
                             .padding(.vertical, 8)
                         }
                     }
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     // --- Attachments card (images + audio + videos) ---
@@ -1022,10 +1026,12 @@ struct PracticeTimerView: View {
                                     .padding(.top, 4)
                             }
                         }
+                        .padding(.horizontal, Theme.Spacing.m)
+                        .padding(.vertical, Theme.Spacing.m)
                         .cardSurface()
                     }
                 }
-                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.horizontal, Theme.Spacing.xl)
                 .padding(.top, Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.xl)
             }
@@ -1629,6 +1635,8 @@ struct PracticeTimerView: View {
                     .padding(.horizontal)
             }
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.m)
             .cardSurface()
         } else {
             VStack(spacing: Theme.Spacing.m) {
