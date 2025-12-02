@@ -394,7 +394,10 @@ struct PracticeTimerView: View {
                             Button(action: {
                                 droneIsOn.toggle()
                                 if droneIsOn {
-                                    droneEngine.start(frequency: Double(droneFreq), volume: droneVolume)
+                                    let note = droneNotes[droneNoteIndex]
+                                    let base = Double(droneFreq)   // A4 reference from the wheel
+                                    let freq = DroneEngine.frequency(for: note, baseA4: base)
+                                    droneEngine.start(frequency: freq, volume: droneVolume)
                                 } else {
                                     droneEngine.stop()
                                 }
@@ -420,17 +423,18 @@ struct PracticeTimerView: View {
                             .frame(width: 70, height: 80)
                             .clipped()
                             .onChange(of: droneNoteIndex) { _, newIndex in
-                                let newFreq = DroneEngine.frequency(for: droneNotes[newIndex])
-                                droneFreq = newFreq
+                                let note = droneNotes[newIndex]
+                                let base = Double(droneFreq)   // current A4 reference
+                                let playFreq = DroneEngine.frequency(for: note, baseA4: base)
                                 if droneIsOn {
-                                    droneEngine.update(frequency: Double(newFreq))
+                                    droneEngine.update(frequency: playFreq)
                                 }
                             }
 
-                            // Frequency wheel (Hz)
+                            // Frequency wheel (Hz) — A4 reference only
                             Picker("", selection: $droneFreq) {
                                 ForEach(400...480, id: \.self) { f in
-                                    Text("\(f)")
+                                    Text("\(f) Hz")
                                         .tag(f)
                                 }
                             }
@@ -438,8 +442,11 @@ struct PracticeTimerView: View {
                             .frame(width: 80, height: 80)
                             .clipped()
                             .onChange(of: droneFreq) { _, newF in
+                                let note = droneNotes[droneNoteIndex]
+                                let base = Double(newF)   // new A4 reference
+                                let playFreq = DroneEngine.frequency(for: note, baseA4: base)
                                 if droneIsOn {
-                                    droneEngine.update(frequency: Double(newF))
+                                    droneEngine.update(frequency: playFreq)
                                 }
                             }
 
@@ -477,7 +484,7 @@ struct PracticeTimerView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal)
                     .cardSurface()
-                    
+
                     timerCard()
 
                     // ---------- Recording helpers (moved below timer) ----------
@@ -3202,46 +3209,51 @@ final class DroneEngine {
         targetVolume = max(0, min(1, volume))
     }
 
-    // Map e.g. "A4", "Bb4" → Hz (A4 = 440)
-    static func frequency(for note: String) -> Int {
-        guard note.count >= 2 else { return 440 }
+    // Map "A4", "Bb3" etc. → Hz using an arbitrary A4 reference
+        static func frequency(for note: String, baseA4: Double = 440) -> Double {
+            guard note.count >= 2 else { return baseA4 }
 
-        let chars = Array(note)
-        var namePart = ""
-        var octavePart = ""
+            let chars = Array(note)
+            var namePart = ""
+            var octavePart = ""
 
-        // Split into pitch name + octave (e.g. "Bb" + "4")
-        for c in chars {
-            if c.isNumber {
-                octavePart.append(c)
-            } else if octavePart.isEmpty {
-                namePart.append(c)
+            // Split into pitch name + octave (e.g. "Bb" + "4")
+            for c in chars {
+                if c.isNumber {
+                    octavePart.append(c)
+                } else if octavePart.isEmpty {
+                    namePart.append(c)
+                }
             }
+
+            let noteName = namePart
+            let octave = Int(octavePart) ?? 4
+
+            // Semitone offsets within an octave relative to C
+            let semitoneMap: [String: Int] = [
+                "C": 0, "C#": 1, "Db": 1,
+                "D": 2, "D#": 3, "Eb": 3,
+                "E": 4,
+                "F": 5, "F#": 6, "Gb": 6,
+                "G": 7, "G#": 8, "Ab": 8,
+                "A": 9, "A#": 10, "Bb": 10,
+                "B": 11
+            ]
+
+            guard let semitone = semitoneMap[noteName] else { return baseA4 }
+
+            // MIDI note number: C-1 = 0 → A4 = 69
+            let midi = (octave + 1) * 12 + semitone
+
+            // Standard equal temperament using arbitrary A4 reference
+            let freq = baseA4 * pow(2.0, Double(midi - 69) / 12.0)
+            return freq
         }
 
-        let noteName = namePart
-        let octave = Int(octavePart) ?? 4
-
-        // Semitone offsets within an octave relative to C
-        let semitoneMap: [String: Int] = [
-            "C": 0, "C#": 1, "Db": 1,
-            "D": 2, "D#": 3, "Eb": 3,
-            "E": 4,
-            "F": 5, "F#": 6, "Gb": 6,
-            "G": 7, "G#": 8, "Ab": 8,
-            "A": 9, "A#": 10, "Bb": 10,
-            "B": 11
-        ]
-
-        guard let semitone = semitoneMap[noteName] else { return 440 }
-
-        // MIDI note number: C-1 = 0 → A4 = 69
-        let midi = (octave + 1) * 12 + semitone
-        let freq = 440.0 * pow(2.0, Double(midi - 69) / 12.0)
-
-        return Int(freq.rounded())
-    }
-
+        // Convenience: compute using default A=440
+        static func frequency(for note: String) -> Int {
+            Int(frequency(for: note, baseA4: 440).rounded())
+        }
     // MARK: - Internal
 
     private func configureSession() {
