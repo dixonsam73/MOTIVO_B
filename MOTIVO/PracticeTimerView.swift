@@ -76,7 +76,24 @@ struct PracticeTimerView: View {
     @State private var showReviewSheet = false
     @State private var didSaveFromReview: Bool = false
     @State private var didCancelFromReview: Bool = false
+    // === DRONE STATE (insert below existing @State vars) ===
+    @State private var droneIsOn: Bool = false
+    @State private var droneVolume: Double = 0.5
+    @State private var droneNoteIndex: Int = 24       // Default A4 (index 24 in chromatic list)
+    @State private var droneFreq: Int = 440           // Integer Hz for frequency wheel
+    @State private var showDroneVolumePopover: Bool = false
 
+    // The chromatic list for the note wheel (A2 → A6 keeps wheels compact)
+    private let droneNotes: [String] = [
+        "A2","A#2","B2","C3","C#3","D3","D#3","E3","F3","F#3","G3","G#3",
+        "A3","A#3","B3","C4","C#4","D4","D#4","E4","F4","F#4","G4","G#4",
+        "A4","A#4","B4","C5","C#5","D5","D#5","E5","F5","F#5","G5","G#5",
+        "A5","A#5","B5","C6","C#6","D6","D#6","E6","F6","F#6","G6","G#6",
+        "A6"
+    ]
+
+    // Clean, minimal engine for soft sine-ish drone
+    private let droneEngine = DroneEngine()
     // Info-only recording helpers
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
@@ -368,6 +385,99 @@ struct PracticeTimerView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     selectorsCard()
+
+                    // === DRONE CONTROL STRIP ===
+                    VStack(spacing: 12) {
+                        HStack(spacing: Theme.Spacing.m) {
+
+                            // Start / Stop button
+                            Button(action: {
+                                droneIsOn.toggle()
+                                if droneIsOn {
+                                    droneEngine.start(frequency: Double(droneFreq), volume: droneVolume)
+                                } else {
+                                    droneEngine.stop()
+                                }
+                            }) {
+                                Image(systemName: "tuningfork")
+                                    .symbolRenderingMode(.monochrome)
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(recorderIcon)
+                                    .frame(width: 48, height: 48)
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityLabel(droneIsOn ? "Stop drone" : "Start drone")
+                            .accessibilityHint("Plays a continuous tuning tone for this session.")
+
+                            // Note wheel (A2–A6)
+                            Picker("", selection: $droneNoteIndex) {
+                                ForEach(droneNotes.indices, id: \.self) { i in
+                                    Text(droneNotes[i]).tag(i)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 70, height: 80)
+                            .clipped()
+                            .onChange(of: droneNoteIndex) { _, newIndex in
+                                let newFreq = DroneEngine.frequency(for: droneNotes[newIndex])
+                                droneFreq = newFreq
+                                if droneIsOn {
+                                    droneEngine.update(frequency: Double(newFreq))
+                                }
+                            }
+
+                            // Frequency wheel (Hz)
+                            Picker("", selection: $droneFreq) {
+                                ForEach(400...480, id: \.self) { f in
+                                    Text("\(f)")
+                                        .tag(f)
+                                }
+                            }
+                            .labelsHidden()
+                            .frame(width: 80, height: 80)
+                            .clipped()
+                            .onChange(of: droneFreq) { _, newF in
+                                if droneIsOn {
+                                    droneEngine.update(frequency: Double(newF))
+                                }
+                            }
+
+                            // Volume button (opens slider)
+                            Button {
+                                showDroneVolumePopover.toggle()
+                            } label: {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .symbolRenderingMode(.monochrome)
+                                    .font(.system(size: 22, weight: .semibold))
+                                    .foregroundStyle(recorderIcon)
+                                    .frame(width: 48, height: 48)
+                                    .contentShape(Circle())
+                            }
+                            .buttonStyle(.bordered)
+                            .popover(isPresented: $showDroneVolumePopover) {
+                                VStack {
+                                    Text("Drone volume")
+                                        .font(Theme.Text.body)
+                                    Slider(value: $droneVolume, in: 0...1, step: 0.01)
+                                        .padding(.horizontal)
+                                        .onChange(of: droneVolume) { _, newVal in
+                                            if droneIsOn {
+                                                droneEngine.updateVolume(newVal)
+                                            }
+                                        }
+                                }
+                                .padding()
+                            }
+                            .accessibilityLabel("Drone volume")
+                            .accessibilityHint("Adjusts the volume of the tuning tone.")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.horizontal)
+                    .cardSurface()
+                    
                     timerCard()
 
                     // ---------- Recording helpers (moved below timer) ----------
@@ -391,6 +501,10 @@ struct PracticeTimerView: View {
                             // New: Take Photo button (camera) inserted between mic and video
                             if UIImagePickerController.isSourceTypeAvailable(.camera) {
                                 Button {
+                                    // Stop drone before opening camera
+                                    droneEngine.stop()
+                                    droneIsOn = false
+
                                     ensureCameraAuthorized { showCamera = true }
                                 } label: {
                                     Image(systemName: "camera.fill")
@@ -407,6 +521,11 @@ struct PracticeTimerView: View {
 
                             Button {
                                 stopAttachmentPlayback()
+
+                                // Stop drone before opening video recorder
+                                droneEngine.stop()
+                                droneIsOn = false
+
                                 showVideoRecorder = true
                             } label: {
                                 Image(systemName: "video.fill")
@@ -1357,6 +1476,13 @@ struct PracticeTimerView: View {
                 .presentationDetents([.medium])
                 .presentationDragIndicator(.visible)
             }
+            // Attach .onChange OUTSIDE the sheet closure
+            .onChange(of: showAudioRecorder) { oldValue, newValue in
+                if newValue == true {
+                    droneEngine.stop()
+                    droneIsOn = false
+                }
+            }
             // Video recorder fullScreenCover replacement
             .fullScreenCover(isPresented: $showVideoRecorder) {
                 NavigationStack {
@@ -1372,9 +1498,21 @@ struct PracticeTimerView: View {
                     .navigationBarTitleDisplayMode(.inline)
                 }
             }
+            .onChange(of: showVideoRecorder) { oldValue, newValue in
+                if newValue == true {
+                    droneEngine.stop()
+                    droneIsOn = false
+                }
+            }
             .sheet(isPresented: $showCamera) {
                 CameraCaptureView { image in
                     stageImage(image)
+                }
+            }
+            .onChange(of: showCamera) { oldValue, newValue in
+                if newValue == true {
+                    droneEngine.stop()
+                    droneIsOn = false
                 }
             }
             // Removed old VideoPlayer sheet entirely (per instructions)
@@ -2474,6 +2612,12 @@ struct PracticeTimerView: View {
     }
 
     private func togglePlay(_ id: UUID) {
+        // Stop drone before any audio attachment playback
+        if droneIsOn {
+            droneEngine.stop()
+            droneIsOn = false
+        }
+
         if showAudioRecorder {
             return
         }
@@ -2983,7 +3127,179 @@ fileprivate struct InfoSheetView: View {
         .appBackground()
     }
 }
+// === DRONE ENGINE (soft sine-ish tone with smoothing) ===
+final class DroneEngine {
+    private let engine = AVAudioEngine()
+    private var sourceNode: AVAudioSourceNode?
 
+    private let sampleRate: Double
+    private var phase: Double = 0
+    private let twoPi = 2.0 * Double.pi
+
+    private var currentFrequency: Double = 440
+    private var targetFrequency: Double = 440
+
+    private var currentVolume: Double = 0
+    private var targetVolume: Double = 0
+
+    // Small smoothing factor to avoid clicks when changing freq/volume
+    private let smoothingFactor: Double = 0.002
+
+    init() {
+        let session = AVAudioSession.sharedInstance()
+        let sr = session.sampleRate
+        sampleRate = sr > 0 ? sr : 44_100
+    }
+
+    // MARK: - Public API
+
+    func start(frequency: Double, volume: Double) {
+        targetFrequency = frequency
+        targetVolume = volume
+
+        configureSession()
+
+        if sourceNode == nil {
+            createSourceNode()
+        }
+
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                print("[DroneEngine] Failed to start engine: \(error)")
+            }
+        }
+
+        // Fade in from silence
+        currentFrequency = targetFrequency
+        currentVolume = 0.0
+        targetVolume = volume
+    }
+
+    func stop() {
+        // Smooth fade-out
+        targetVolume = 0.0
+
+        // After a short delay, pause engine + detach node to save CPU
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            if self.currentVolume <= 0.0001 {
+                self.engine.pause()
+                if let node = self.sourceNode {
+                    self.engine.detach(node)
+                    self.sourceNode = nil
+                }
+            }
+        }
+    }
+
+    func update(frequency: Double) {
+        targetFrequency = max(20, min(20_000, frequency))
+    }
+
+    func updateVolume(_ volume: Double) {
+        targetVolume = max(0, min(1, volume))
+    }
+
+    // Map e.g. "A4", "Bb4" → Hz (A4 = 440)
+    static func frequency(for note: String) -> Int {
+        guard note.count >= 2 else { return 440 }
+
+        let chars = Array(note)
+        var namePart = ""
+        var octavePart = ""
+
+        // Split into pitch name + octave (e.g. "Bb" + "4")
+        for c in chars {
+            if c.isNumber {
+                octavePart.append(c)
+            } else if octavePart.isEmpty {
+                namePart.append(c)
+            }
+        }
+
+        let noteName = namePart
+        let octave = Int(octavePart) ?? 4
+
+        // Semitone offsets within an octave relative to C
+        let semitoneMap: [String: Int] = [
+            "C": 0, "C#": 1, "Db": 1,
+            "D": 2, "D#": 3, "Eb": 3,
+            "E": 4,
+            "F": 5, "F#": 6, "Gb": 6,
+            "G": 7, "G#": 8, "Ab": 8,
+            "A": 9, "A#": 10, "Bb": 10,
+            "B": 11
+        ]
+
+        guard let semitone = semitoneMap[noteName] else { return 440 }
+
+        // MIDI note number: C-1 = 0 → A4 = 69
+        let midi = (octave + 1) * 12 + semitone
+        let freq = 440.0 * pow(2.0, Double(midi - 69) / 12.0)
+
+        return Int(freq.rounded())
+    }
+
+    // MARK: - Internal
+
+    private func configureSession() {
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setActive(true)
+        } catch {
+            print("[DroneEngine] Audio Session error: \(error)")
+        }
+    }
+
+    private func createSourceNode() {
+        let format = engine.outputNode.inputFormat(forBus: 0)
+
+        let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList -> OSStatus in
+            guard let self else { return noErr }
+
+            let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
+            if ablPointer.isEmpty { return noErr }
+
+            let frames = Int(frameCount)
+            let dt = 1.0 / self.sampleRate
+
+            func smooth(_ current: Double, _ target: Double) -> Double {
+                current + (target - current) * self.smoothingFactor
+            }
+
+            for frame in 0..<frames {
+                self.currentFrequency = smooth(self.currentFrequency, self.targetFrequency)
+                self.currentVolume = smooth(self.currentVolume, self.targetVolume)
+
+                let phaseIncrement = self.twoPi * self.currentFrequency * dt
+                self.phase += phaseIncrement
+                if self.phase > self.twoPi {
+                    self.phase -= self.twoPi
+                }
+
+                // Soft-ish waveform (sine with tiny second harmonic)
+                let sample = Float(
+                    sin(self.phase) * self.currentVolume * 0.9 +
+                    sin(2 * self.phase) * self.currentVolume * 0.1
+                )
+
+                for buffer in ablPointer {
+                    let ptr = buffer.mData!.assumingMemoryBound(to: Float.self)
+                    ptr[frame] = sample
+                }
+            }
+
+            return noErr
+        }
+
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: format)
+        sourceNode = node
+    }
+}
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
 
 private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
