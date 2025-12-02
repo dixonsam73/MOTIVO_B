@@ -413,15 +413,24 @@ struct PracticeTimerView: View {
                             .accessibilityLabel(droneIsOn ? "Stop drone" : "Start drone")
                             .accessibilityHint("Plays a continuous tuning tone for this session.")
 
-                            // Note wheel (A2–A6)
+                            // Note wheel (A2–A6), in a bubble
                             Picker("", selection: $droneNoteIndex) {
                                 ForEach(droneNotes.indices, id: \.self) { i in
-                                    Text(droneNotes[i]).tag(i)
+                                    Text(droneNotes[i])
+                                        .font(Theme.Text.body)
+                                        .tag(i)
                                 }
                             }
                             .labelsHidden()
+                            .pickerStyle(.wheel)
                             .frame(width: 70, height: 80)
                             .clipped()
+                            .tint(recorderIcon)
+                            .background(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                            )
+
                             .onChange(of: droneNoteIndex) { _, newIndex in
                                 let note = droneNotes[newIndex]
                                 let base = Double(droneFreq)   // current A4 reference
@@ -431,19 +440,33 @@ struct PracticeTimerView: View {
                                 }
                             }
 
-                            // Frequency wheel (Hz) — A4 reference only
+                            // Frequency wheel (Hz) — A4 reference only, in a bubble
                             Picker("", selection: $droneFreq) {
                                 ForEach(400...480, id: \.self) { f in
                                     Text("\(f) Hz")
+                                        .font(Theme.Text.body)
                                         .tag(f)
                                 }
                             }
                             .labelsHidden()
-                            .frame(width: 80, height: 80)
+                            .pickerStyle(.wheel)
+                            .frame(width: 96, height: 80)   // wider so “440 Hz” stays on one line
                             .clipped()
+                            .tint(recorderIcon)
+                            .background(
+                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                            )
+
                             .onChange(of: droneFreq) { _, newF in
+                                // Clamp defensively to the picker’s valid range
+                                let clamped = min(max(newF, 400), 480)
+                                if clamped != droneFreq {
+                                    droneFreq = clamped
+                                }
+
                                 let note = droneNotes[droneNoteIndex]
-                                let base = Double(newF)   // new A4 reference
+                                let base = Double(clamped)   // new A4 reference
                                 let playFreq = DroneEngine.frequency(for: note, baseA4: base)
                                 if droneIsOn {
                                     droneEngine.update(frequency: playFreq)
