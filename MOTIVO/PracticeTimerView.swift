@@ -384,7 +384,14 @@ struct PracticeTimerView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                    selectorsCard()
+                    SessionMetaCard(
+                                        instruments: instruments,
+                                        instrument: $instrument,
+                                        showInstrumentSheet: $showInstrumentSheet,
+                                        showActivitySheet: $showActivitySheet,
+                                        currentInstrumentName: currentInstrumentName(),
+                                        activityLabel: activityDisplayName(for: activityChoice)
+                                    )
 
                     // === DRONE CONTROL STRIP ===
                     DroneControlStripCard(
@@ -1167,67 +1174,7 @@ struct PracticeTimerView: View {
 
     // MARK: - Cards (split to help the type-checker)
 
-    @ViewBuilder
-    private func selectorsCard() -> some View {
-        if hasNoInstruments {
-            VStack(alignment: .center, spacing: Theme.Spacing.s) {
-                Text("No instruments found")
-                    .font(.headline)
-                Text("Add an instrument in your Profile to start timing sessions.")
-                    .font(.subheadline)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.m)
-            .cardSurface()
-        } else {
-            VStack(spacing: Theme.Spacing.m) {
-                Text("Session").sectionHeader()
-                VStack(spacing: Theme.Spacing.s) {
-                    if hasMultipleInstruments {
-                        Button {
-                            if let current = instrument,
-                               let idx = instruments.firstIndex(of: current) {
-                                instrumentIndex = idx
-                            }
-                            showInstrumentSheet = true
-                        } label: {
-                            HStack {
-                                Text("Instrument")
-                                Spacer()
-                                Text(currentInstrumentName())
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    } else if let only = instruments.first {
-                        HStack {
-                            Text("Instrument")
-                            Spacer()
-                            Text(only.name ?? "Instrument")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .onAppear { instrument = only }
-                    }
-
-                    Button { showActivitySheet = true } label: {
-                        HStack {
-                            Text("Activity")
-                            Spacer()
-                            Text(activityDisplayName(for: activityChoice))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .cardSurface()
-        }
-    }
-
+   
     @ViewBuilder
     private func timerCard() -> some View {
         VStack(alignment: .center, spacing: Theme.Spacing.m) {
