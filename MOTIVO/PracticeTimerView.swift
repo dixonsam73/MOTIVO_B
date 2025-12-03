@@ -77,11 +77,11 @@ struct PracticeTimerView: View {
     @State private var didSaveFromReview: Bool = false
     @State private var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
-    @State private var droneIsOn: Bool = false
-    @State private var droneVolume: Double = 0.5
-    @State private var droneNoteIndex: Int = 24       // Default A4 (index 24 in chromatic list)
-    @State private var droneFreq: Int = 440           // Integer Hz for frequency wheel
-    @State private var showDroneVolumePopover: Bool = false
+    @State var droneIsOn: Bool = false
+    @State var droneVolume: Double = 0.5
+    @State var droneNoteIndex: Int = 24
+    @State var droneFreq: Int = 440
+    @State var showDroneVolumePopover: Bool = false
 
     // The chromatic list for the note wheel (A2 → A6 keeps wheels compact)
     private let droneNotes: [String] = [
@@ -93,32 +93,29 @@ struct PracticeTimerView: View {
     ]
 
     // Clean, minimal engine for soft sine-ish drone
-    private let droneEngine = DroneEngine()
+    let droneEngine = DroneEngine()
     // Info-only recording helpers
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
 
     // New audio recording and attachments state
-    @State private var showAudioRecorder: Bool = false
-    @State private var stagedAudio: [StagedAttachment] = []
-    @State private var audioPlayer: AVAudioPlayer? = nil
-    @State private var currentlyPlayingID: UUID? = nil
-    @State private var audioPlayerDelegate: AudioPlayerDelegateBridge? = nil
-    @State private var isAudioPlaying: Bool = false
+    @State var showAudioRecorder: Bool = false
+    @State var stagedAudio: [StagedAttachment] = []
+    @State var audioPlayer: AVAudioPlayer? = nil
+    @State var currentlyPlayingID: UUID? = nil
+    @State var audioPlayerDelegate: AudioPlayerDelegateBridge? = nil
+    @State var isAudioPlaying: Bool = false
 
-    // Added state for audio titles and focus
-    @State private var audioTitles: [UUID: String] = [:]
-    @State private var audioAutoTitles: [UUID: String] = [:]
-    @State private var audioDurations: [UUID: Int] = [:]
+    @State var audioTitles: [UUID: String] = [:]
+    @State var audioAutoTitles: [UUID: String] = [:]
+    @State var audioDurations: [UUID: Int] = [:]
     @FocusState private var focusedAudioTitleID: UUID?
-    // Editing buffer for audio title while focused to prevent premature auto-fill
-    @State private var audioTitleEditingBuffer: [UUID: String] = [:]
-    @State private var audioTitleDebounceWork: [UUID: DispatchWorkItem] = [:]
-    @State private var audioTitleDidImmediatePersist: Set<UUID> = []
+    @State var audioTitleEditingBuffer: [UUID: String] = [:]
+    @State var audioTitleDebounceWork: [UUID: DispatchWorkItem] = [:]
+    @State var audioTitleDidImmediatePersist: Set<UUID> = []
 
-    // Audio observer and interruption flags
-    @State private var audioObserversInstalled: Bool = false
-    @State private var wasPlayingBeforeInterruption_timer: Bool = false
+    @State var audioObserversInstalled: Bool = false
+    @State var wasPlayingBeforeInterruption_timer: Bool = false
 
     // Image capture state (mirrors AddEdit/PostRecord behavior)
     @State private var stagedImages: [StagedAttachment] = []
@@ -1752,7 +1749,7 @@ struct PracticeTimerView: View {
         audioDurations = audioDurations.filter { valid.contains($0.key) }
     }
 
-    private func persistStagedAttachments() {
+    func persistStagedAttachments() {
         pruneAudioMetadataToStaged()
         
         let validAudioIDs = Set(stagedAudio.map { $0.id })
@@ -2098,202 +2095,7 @@ struct PracticeTimerView: View {
         }
     }
 
-    private func togglePlay(_ id: UUID) {
-        // Stop drone before any audio attachment playback
-        if droneIsOn {
-            droneEngine.stop()
-            droneIsOn = false
-        }
-
-        if showAudioRecorder {
-            return
-        }
-        if currentlyPlayingID == id {
-            // Toggle play/pause for the same item and keep the selection so the icon flips reliably
-            if let p = audioPlayer {
-                if p.isPlaying {
-                    p.pause()
-                    isAudioPlaying = false
-                    // Keep currentlyPlayingID so UI shows the item as selected (pause icon becomes play on next render)
-                    // No change needed to currentlyPlayingID here
-                } else {
-                    // Attempt to resume
-                    p.play()
-                    isAudioPlaying = p.isPlaying
-                    if !p.isPlaying {
-                        // Resume failed; clear selection to avoid stuck icon
-                        currentlyPlayingID = nil
-                        isAudioPlaying = false
-                    }
-                }
-            } else {
-                // Player is nil; clear selection so the button becomes actionable again
-                currentlyPlayingID = nil
-                isAudioPlaying = false
-            }
-            return
-        }
-        // Stop any existing playback first (single-player policy)
-        if audioPlayer?.isPlaying == true || currentlyPlayingID != nil {
-            audioPlayer?.stop()
-            audioPlayer = nil
-            currentlyPlayingID = nil
-            isAudioPlaying = false
-        }
-        guard let item = stagedAudio.first(where: { $0.id == id }) else { return }
-        do {
-            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
-            try? item.data.write(to: tmp, options: .atomic)
-            audioPlayer = try AVAudioPlayer(contentsOf: tmp)
-            let delegate = AudioPlayerDelegateBridge(onFinish: {
-                DispatchQueue.main.async {
-                    if currentlyPlayingID == id {
-                        currentlyPlayingID = nil
-                        isAudioPlaying = false
-                    }
-                }
-            })
-            audioPlayer?.delegate = delegate
-            audioPlayerDelegate = delegate // retain delegate so callbacks fire
-            installAudioObserversIfNeeded()
-            audioPlayer?.play()
-            isAudioPlaying = (audioPlayer?.isPlaying == true)
-            currentlyPlayingID = id
-        } catch {
-            print("Playback error: \(error)")
-        }
-    }
-
-    private func deleteAudio(_ id: UUID) {
-        if currentlyPlayingID == id {
-            audioPlayer?.stop()
-            audioPlayer = nil
-            currentlyPlayingID = nil
-            isAudioPlaying = false
-        }
-        // Remove surrogate temp file best-effort
-        let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("m4a")
-        try? FileManager.default.removeItem(at: tmp)
-        stagedAudio.removeAll { $0.id == id }
-        audioTitles.removeValue(forKey: id)
-        audioAutoTitles.removeValue(forKey: id)
-        audioDurations.removeValue(forKey: id)
-        persistStagedAttachments()
-        // Mirror delete to staging store
-        if let ref = StagingStore.list().first(where: { $0.id == id }) {
-            StagingStore.remove(ref)
-        }
-        // Clear audio metadata in StagingStore for this id
-        StagingStore.updateAudioMetadata(id: id, title: "", autoTitle: "", duration: nil)
-    }
-
-    private func stopAttachmentPlayback() {
-        if audioPlayer?.isPlaying == true {
-            audioPlayer?.stop()
-        }
-        audioPlayer = nil
-        isAudioPlaying = false
-        currentlyPlayingID = nil
-    }
-
-    private func installAudioObserversIfNeeded() {
-        guard !audioObserversInstalled else { return }
-        let nc = NotificationCenter.default
-        nc.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { note in
-            handleTimerAudioInterruption(note)
-        }
-        nc.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { note in
-            handleTimerAudioRouteChange(note)
-        }
-        #if canImport(UIKit)
-        nc.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
-            if audioPlayer?.isPlaying == true {
-                wasPlayingBeforeInterruption_timer = true
-                audioPlayer?.pause()
-                isAudioPlaying = false
-                // do not clear currentlyPlayingID so UI shows paused state
-            }
-        }
-        nc.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
-            if wasPlayingBeforeInterruption_timer, audioPlayer != nil {
-                audioPlayer?.play()
-                isAudioPlaying = true
-            } else if audioPlayer == nil {
-                // Player deallocated or invalid — reset UI so the button toggles work
-                currentlyPlayingID = nil
-                isAudioPlaying = false
-            }
-            wasPlayingBeforeInterruption_timer = false
-        }
-        #endif
-        audioObserversInstalled = true
-    }
-
-    private func removeAudioObserversIfNeeded() {
-        guard audioObserversInstalled else { return }
-        let nc = NotificationCenter.default
-        nc.removeObserver(self, name: AVAudioSession.interruptionNotification, object: nil)
-        nc.removeObserver(self, name: AVAudioSession.routeChangeNotification, object: nil)
-        #if canImport(UIKit)
-        nc.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
-        nc.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
-        #endif
-        audioObserversInstalled = false
-    }
-
-    private func handleTimerAudioInterruption(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let typeValue = info[AVAudioSessionInterruptionTypeKey] as? UInt,
-              let type = AVAudioSession.InterruptionType(rawValue: typeValue) else { return }
-        switch type {
-        case .began:
-            if audioPlayer?.isPlaying == true {
-                wasPlayingBeforeInterruption_timer = true
-                audioPlayer?.pause()
-                isAudioPlaying = false
-                // Keep currentlyPlayingID set so UI shows paused state
-            }
-        case .ended:
-            let optionsValue = info[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            if options.contains(.shouldResume), wasPlayingBeforeInterruption_timer, audioPlayer != nil {
-                // Try to resume playback
-                audioPlayer?.play()
-                isAudioPlaying = true
-            } else {
-                // If we can't resume, clear stuck UI by resetting currentlyPlayingID
-                wasPlayingBeforeInterruption_timer = false
-                if audioPlayer == nil || audioPlayer?.url == nil {
-                    currentlyPlayingID = nil
-                    isAudioPlaying = false
-                }
-            }
-            wasPlayingBeforeInterruption_timer = false
-        @unknown default:
-            break
-        }
-    }
-
-    private func handleTimerAudioRouteChange(_ notification: Notification) {
-        guard let info = notification.userInfo,
-              let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
-              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        switch reason {
-        case .oldDeviceUnavailable:
-            if audioPlayer?.isPlaying == true {
-                wasPlayingBeforeInterruption_timer = true
-                audioPlayer?.pause()
-                isAudioPlaying = false
-            }
-        default:
-            break
-        }
-        // If the route change invalidated the player, clear UI selection to prevent a stuck button
-        if audioPlayer == nil {
-            currentlyPlayingID = nil
-            isAudioPlaying = false
-        }
-    }
+    
 
     // MARK: - Image attachment helpers (camera)
     private func stageImage(_ image: UIImage) {
@@ -2617,9 +2419,7 @@ fileprivate struct InfoSheetView: View {
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
 
-private final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
-    let onFinish: () -> Void
-    init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
-    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
-}
+
+
+
 
