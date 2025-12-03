@@ -10,6 +10,9 @@ import AuthenticationServices
 import CryptoKit
 import Combine
 
+// CHANGE-ID: 20251203_BackendIdentityHandshakeStep5
+// SCOPE: Step 5 — backend identity handshake scaffolding (backendUserID persistence + IdentityService integration)
+
 // MARK: - Minimal Keychain helpers
 
 enum Keychain {
@@ -54,13 +57,29 @@ enum Keychain {
 final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
+    @Published private(set) var backendUserID: String?
 
     private var currentNonce: String?
+    private let identityService: IdentityService
 
-    override init() {
+    private static let backendUserDefaultsKey = "backendUserID_v1"
+
+    override convenience init() {
+        self.init(identityService: LocalStubIdentityService())
+    }
+
+    init(identityService: IdentityService) {
+        self.identityService = identityService
         super.init()
         self.currentUserID = Keychain.get("appleUserID")
         self.displayName = Keychain.get("displayName")
+        self.backendUserID = UserDefaults.standard.string(forKey: Self.backendUserDefaultsKey)
+
+        // Existing users (signed in before Step 5): perform a one-time handshake
+        // if we already have an Apple user ID but no backend ID yet.
+        if let appleID = currentUserID {
+            ensureBackendIdentityIfNeeded(for: appleID)
+        }
     }
 
     var isSignedIn: Bool { currentUserID != nil }
@@ -90,9 +109,11 @@ final class AuthManager: NSObject, ObservableObject {
     func signOut() {
         Keychain.delete("appleUserID")
         Keychain.delete("displayName")
+        UserDefaults.standard.removeObject(forKey: Self.backendUserDefaultsKey)
         DispatchQueue.main.async {
             self.currentUserID = nil
             self.displayName = nil
+            self.backendUserID = nil
         }
     }
 
@@ -122,6 +143,23 @@ final class AuthManager: NSObject, ObservableObject {
         } else {
             // Subsequent sign-ins: keep any existing stored name (if any)
             self.displayName = Keychain.get("displayName")
+        }
+
+        // Backend identity handshake (local stub): performed only if we don't already have a backendUserID.
+        ensureBackendIdentityIfNeeded(for: userID)
+    }
+
+    private func ensureBackendIdentityIfNeeded(for appleID: String) {
+        guard backendUserID == nil else { return }
+
+        Task { [weak self] in
+            guard let self else { return }
+            let identity = await self.identityService.ensureBackendIdentity(appleSubject: appleID)
+            let backendID = identity.backendUserID
+            UserDefaults.standard.set(backendID, forKey: Self.backendUserDefaultsKey)
+            await MainActor.run {
+                self.backendUserID = backendID
+            }
         }
     }
 

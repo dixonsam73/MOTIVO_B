@@ -9,13 +9,21 @@ import SwiftUI
 import CoreData
 import Foundation
 
+// CHANGE-ID: 20251203_BackendIdentityHandshakeStep5
+// SCOPE: Step 5 — Inject LocalStubIdentityService into AuthManager (no behaviour/UI changes)
+
 @main
 struct MOTIVOApp: App {
     let persistenceController = PersistenceController.shared
-    @StateObject private var auth = AuthManager()
+    private let identityService: IdentityService
+    @StateObject private var auth: AuthManager
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     init() {
+        let identityService = LocalStubIdentityService()
+        self.identityService = identityService
+        _auth = StateObject(wrappedValue: AuthManager(identityService: identityService))
+
         // [ROLLBACK ANCHOR] v7.8 pre-hotfix — launch stall (profile-id backfill)
 
         // Backfill: ensure all Profile rows have a non-nil UUID `id`
@@ -59,11 +67,11 @@ struct MOTIVOApp: App {
     private func cleanupEphemeralMediaIfNeeded() {
         let d = UserDefaults.standard
         guard d.bool(forKey: ephemeralMediaFlagKey) == true else { return }
-        
+
         #if DEBUG
         print("[EphemeralCleanup] Launch cleanup triggered")
         #endif
-        
+
         // Best-effort: ensure staging area exists so list/remove works
         do { try StagingStore.bootstrap() } catch { /* ignore */ }
         // Remove all staged refs and files
@@ -123,4 +131,3 @@ struct MOTIVOApp: App {
         }
     }
 }
-
