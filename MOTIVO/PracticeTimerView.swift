@@ -387,8 +387,8 @@ struct PracticeTimerView: View {
                     selectorsCard()
 
                     // === DRONE CONTROL STRIP ===
-                    VStack(spacing: 12) {
-                        HStack(spacing: Theme.Spacing.m) {
+                    VStack(spacing: 6) {
+                        HStack(spacing: Theme.Spacing.s) {
 
                             // Start / Stop button
                             Button(action: {
@@ -404,9 +404,9 @@ struct PracticeTimerView: View {
                             }) {
                                 Image(systemName: "tuningfork")
                                     .symbolRenderingMode(.monochrome)
-                                    .font(.system(size: 22, weight: .semibold))
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(recorderIcon)
-                                    .frame(width: 48, height: 48)
+                                    .frame(width: 36, height: 36)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
@@ -423,11 +423,11 @@ struct PracticeTimerView: View {
                             }
                             .labelsHidden()
                             .pickerStyle(.wheel)
-                            .frame(width: 70, height: 80)
+                            .frame(width: 56, height: 56)
                             .clipped()
                             .tint(recorderIcon)
                             .background(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
                                     .fill(.ultraThinMaterial)
                             )
 
@@ -444,17 +444,17 @@ struct PracticeTimerView: View {
                             Picker("", selection: $droneFreq) {
                                 ForEach(400...480, id: \.self) { f in
                                     Text("\(f) Hz")
-                                        .font(Theme.Text.body)
+                                        .font(.caption2)
                                         .tag(f)
                                 }
                             }
                             .labelsHidden()
                             .pickerStyle(.wheel)
-                            .frame(width: 96, height: 80)   // wider so “440 Hz” stays on one line
+                            .frame(width: 72, height: 56)   // wider so “440 Hz” stays on one line
                             .clipped()
                             .tint(recorderIcon)
                             .background(
-                                RoundedRectangle(cornerRadius: 24, style: .continuous)
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
                                     .fill(.ultraThinMaterial)
                             )
 
@@ -479,9 +479,9 @@ struct PracticeTimerView: View {
                             } label: {
                                 Image(systemName: "speaker.wave.2.fill")
                                     .symbolRenderingMode(.monochrome)
-                                    .font(.system(size: 22, weight: .semibold))
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundStyle(recorderIcon)
-                                    .frame(width: 48, height: 48)
+                                    .frame(width: 36, height: 36)
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
