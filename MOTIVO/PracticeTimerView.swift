@@ -407,7 +407,14 @@ struct PracticeTimerView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .cardSurface()
 
-                    timerCard()
+                    TimerCard(
+                                         elapsedLabel: formattedElapsed(elapsedSeconds),
+                                         isRunning: isRunning,
+                                         onStart: { start() },
+                                         onPause: { pause() },
+                                         onReset: { reset() },
+                                         onFinish: { finish() }
+                                     )
 
                     // ---------- Recording helpers (moved below timer) ----------
                     MediaRecorderRowCard(
@@ -1175,57 +1182,7 @@ struct PracticeTimerView: View {
     // MARK: - Cards (split to help the type-checker)
 
    
-    @ViewBuilder
-    private func timerCard() -> some View {
-        VStack(alignment: .center, spacing: Theme.Spacing.m) {
-            Text(formattedElapsed(elapsedSeconds))
-                .font(.system(size: 50, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .frame(maxWidth: .infinity, alignment: .center)
-
-            HStack(spacing: Theme.Spacing.m) {
-                Button(isRunning ? "Pause" : "Start") {
-                    isRunning ? pause() : start()
-                }
-                .buttonStyle(.bordered)
-                .tint(.clear)
-                .frame(height: 44)
-                // Use primaryAction (original green) instead of accent
-                .background(Theme.Colors.primaryAction.opacity(0.18))
-                .foregroundStyle(.primary)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                Button("Reset") { reset() }
-                    .buttonStyle(.bordered)
-                    .tint(.clear)
-                    .frame(height: 44)
-                    .background((isRunning ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                if isRunning {
-                    Button("Finish") { finish() }
-                        .buttonStyle(.bordered)
-                        .tint(.clear)
-                        .frame(height: 44)
-                        .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                } else {
-                    Button("Finish") { finish() }
-                        .buttonStyle(.bordered)
-                        .tint(.clear)
-                        .frame(height: 44)
-                        .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
-                        .foregroundStyle(.primary)
-                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-        .cardSurface()
-    }
+   
 
     // MARK: - Helpers for wheel UI
 
