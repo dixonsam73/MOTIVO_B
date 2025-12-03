@@ -383,7 +383,7 @@ struct PracticeTimerView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.xl) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     selectorsCard()
 
                     // === DRONE CONTROL STRIP ===
@@ -505,8 +505,6 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     timerCard()
@@ -573,8 +571,6 @@ struct PracticeTimerView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     // --- Tasks/Notes Pad (v7.9A) ---
@@ -697,8 +693,6 @@ struct PracticeTimerView: View {
                             .padding(.vertical, 8)
                         }
                     }
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .padding(.vertical, Theme.Spacing.m)
                     .cardSurface()
 
                     // --- Attachments card (images + audio + videos) ---
@@ -1026,12 +1020,10 @@ struct PracticeTimerView: View {
                                     .padding(.top, 4)
                             }
                         }
-                        .padding(.horizontal, Theme.Spacing.m)
-                        .padding(.vertical, Theme.Spacing.m)
                         .cardSurface()
                     }
                 }
-                .padding(.horizontal, Theme.Spacing.xl)
+                .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.l)
                 .padding(.bottom, Theme.Spacing.xl)
             }
