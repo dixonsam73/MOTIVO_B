@@ -53,6 +53,7 @@ struct PracticeTimerView: View {
 
     // Primary Activity (Stage 1 persisted)
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
 
     // Wheel picker sheet toggles
@@ -98,7 +99,17 @@ struct PracticeTimerView: View {
     // Info-only recording helpers
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
+    // MARK: - Metronome State
 
+    @State private var metronomeIsOn: Bool = false
+    @State private var metronomeBPM: Int = 80
+    @State private var metronomeAccentEvery: Int = 0   // 0 = no accent, 2–15 = every N beats
+    @State private var metronomeVolume: Double = 0.7
+
+
+
+    // Engine instance (local to PTV)
+    private let metronomeEngine = MetronomeEngine()
     // New audio recording and attachments state
     @State var showAudioRecorder: Bool = false
     @State var stagedAudio: [StagedAttachment] = []
@@ -392,17 +403,34 @@ struct PracticeTimerView: View {
                                     )
 
                     if showDroneStrip {
-                        // === DRONE CONTROL STRIP ===
-                        DroneControlStripCard(
-                            droneIsOn: $droneIsOn,
-                            droneVolume: $droneVolume,
-                            droneNoteIndex: $droneNoteIndex,
-                            droneFreq: $droneFreq,
-                            showDroneVolumePopover: $showDroneVolumePopover,
-                            droneNotes: droneNotes,
-                            droneEngine: droneEngine,
-                            recorderIcon: recorderIcon
-                        )
+                        // === DRONE CARD ===
+                        VStack(spacing: Theme.Spacing.s) {
+                            DroneControlStripCard(
+                                droneIsOn: $droneIsOn,
+                                droneVolume: $droneVolume,
+                                droneNoteIndex: $droneNoteIndex,
+                                droneFreq: $droneFreq,
+                                showDroneVolumePopover: $showDroneVolumePopover,
+                                droneNotes: droneNotes,
+                                droneEngine: droneEngine,
+                                recorderIcon: recorderIcon
+                            )
+                        }
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .cardSurface()
+                    }
+
+                    if showMetronomeStrip {
+                        VStack(spacing: Theme.Spacing.s) {
+                            MetronomeControlStripCard(
+                                metronomeIsOn: $metronomeIsOn,
+                                metronomeBPM: $metronomeBPM,
+                                metronomeAccentEvery: $metronomeAccentEvery,
+                                metronomeVolume: $metronomeVolume,
+                                metronomeEngine: metronomeEngine,
+                                recorderIcon: recorderIcon
+                            )
+                        }
                         .frame(maxWidth: .infinity, alignment: .center)
                         .cardSurface()
                     }
