@@ -158,9 +158,9 @@
                      }
                      Group {
                          activitiesSection
-                         appSettingsSection
-                         tasksSection
-                         accountSection
+                             tasksSection
+                             appSettingsSection
+                             accountSection
                      }
                  }
                  .font(.callout)
