@@ -27,7 +27,6 @@ struct TasksManagerView: View {
     @State private var selectedActivityRef: String = "core:0"
     @State private var items: [String] = []
     @State private var newItemText: String = ""
-    @State private var isEditing: Bool = false
     @State private var autofillEnabled: Bool = true
     @State private var userActivities: [UserActivity] = []
 
@@ -119,7 +118,6 @@ struct TasksManagerView: View {
 
     // MARK: - Body
 
-    
     var body: some View {
         NavigationStack {
             Form {
@@ -204,23 +202,15 @@ struct TasksManagerView: View {
                     Button {
                         dismiss()
                     } label: {
-                        Text("Close")
-                            .font(Theme.Text.body)
+                        Image(systemName: "chevron.backward")
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(.primary)
                     }
+                    .accessibilityLabel("Close tasks manager")
                 }
                 ToolbarItem(placement: .principal) {
                     Text("Tasks Manager")
                         .font(Theme.Text.pageTitle)
-                }
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(isEditing ? "Done" : "Edit") {
-                        withAnimation {
-                            isEditing.toggle()
-                        }
-                    }
-                    .font(Theme.Text.body)
-                    .tint(Theme.Colors.accent)
                 }
             }
             .onAppear {
@@ -236,7 +226,8 @@ struct TasksManagerView: View {
             .appBackground()
         }
     }
-// MARK: - Actions
+
+    // MARK: - Actions
 
     private func addItem() {
         let trimmed = newItemText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -305,4 +296,3 @@ struct TasksManagerView: View {
         userActivities = (try? viewContext.fetch(req)) ?? []
     }
 }
-

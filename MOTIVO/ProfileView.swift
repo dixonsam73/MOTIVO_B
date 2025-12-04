@@ -106,7 +106,7 @@
      @State private var showTasksManager: Bool = false
      @State private var showAppSettings: Bool = false
      @State private var profile: Profile?
-     @State private var isSaving = false
+ 
  
      // Identity MVP additions
      @State private var avatarImage: UIImage? = nil
@@ -615,32 +615,17 @@
      }
  
      // MARK: - Toolbar
- 
+
      @ToolbarContentBuilder
      private var toolbarContent: some ToolbarContent {
          ToolbarItem(placement: .cancellationAction) {
              Button(action: { onClose?() }) {
-                 Text("Close")
-                     .font(Theme.Text.body)
+                 Image(systemName: "chevron.backward")
+                     .font(.body.weight(.semibold))
                      .foregroundStyle(.primary)
              }
+             .accessibilityLabel("Close profile")
          }
-         ToolbarItem(placement: .confirmationAction) { saveButton }
-     }
- 
-     private var saveButton: some View {
-         Button {
-             onClose?()
-             isSaving = true
-             save()
-             ProfileStore.setLocation(locationText, for: auth.currentUserID)
-             isSaving = false
-         } label: {
-             Text("Save")
-                 .font(Theme.Text.body)
-                 .foregroundStyle(.primary)
-         }
-         .disabled(profile == nil)
      }
  
      // MARK: - Avatar
@@ -771,6 +756,11 @@
          p.defaultPrivacy = defaultPrivacy
          do { try ctx.save() } catch { }
      }
+
+     private func persistProfileEdits() {
+         save()
+         ProfileStore.setLocation(locationText, for: auth.currentUserID)
+     }
  
      // MARK: - Primary Activity helpers
  
@@ -852,7 +842,8 @@
      private func modalsAndAlerts<V: View>(_ base: V) -> some View {
          var view = AnyView(base)
          view = AnyView(view
-             .onAppear(perform: onAppearLoad)
+            .onAppear(perform: onAppearLoad)
+            .onDisappear(perform: persistProfileEdits)
              .onChange(of: showActivityManager) { oldValue, newValue in
                  handleActivityManagerChange(oldValue, newValue)
              }
