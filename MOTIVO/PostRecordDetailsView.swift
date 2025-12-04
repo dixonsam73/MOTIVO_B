@@ -541,14 +541,18 @@ struct PostRecordDetailsView: View {
                 }
 
                 // Clear Notes and Focus when entering from a fresh PracticeTimer session
+                // Only clear if we don't already have a prefilled note (e.g., from PracticeTimerView)
                 let ud = UserDefaults.standard
                 let currentID = currentSessionID()
                 let lastSeen = ud.string(forKey: lastSeenSessionIDKey)
                 if currentID != nil && currentID != lastSeen {
-                    // New session detected: clear persisted draft and local state
-                    notes = ""
-                    selectedDotIndex = nil
-                    clearDraft()
+                    // New session detected: clear persisted draft and local state,
+                    // but only if the current notes are effectively empty so we don't clobber a prefill.
+                    if notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        notes = ""
+                        selectedDotIndex = nil
+                        clearDraft()
+                    }
                     ud.set(currentID, forKey: lastSeenSessionIDKey)
                 }
 

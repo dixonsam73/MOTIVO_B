@@ -76,6 +76,7 @@ struct PracticeTimerView: View {
     @State private var showReviewSheet = false
     @State private var didSaveFromReview: Bool = false
     @State private var didCancelFromReview: Bool = false
+    @State private var reviewNotesPrefill: String? = nil
     // === DRONE STATE (insert below existing @State vars) ===
     @State var droneIsOn: Bool = false
     @State var droneVolume: Double = 0.5
@@ -964,7 +965,7 @@ struct PracticeTimerView: View {
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-                    notesPrefill: composeCompletedTasksNotesString(),
+                    notesPrefill: reviewNotesPrefill,
                     prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                     prefillAttachmentNames: audioTitles,
                     onSaved: {
@@ -1391,6 +1392,8 @@ struct PracticeTimerView: View {
           let total = trueElapsedSeconds()
           finalizedDuration = total
           pause()
+          // Capture the latest Notes / Tasks pad contents at the moment Finish is tapped
+          reviewNotesPrefill = composeCompletedTasksNotesString()
           didSaveFromReview = false
           showReviewSheet = true
       }
