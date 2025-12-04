@@ -97,12 +97,14 @@
      @State private var defaultPrivacy: Bool = false
      @State private var isWelcomeExpanded: Bool = false
 
+     @AppStorage("appSettings_showWelcomeSection") private var showWelcomeSection: Bool = true
 
 @FocusState private var isNameFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
      @State private var showActivityManager: Bool = false
      @State private var showTasksManager: Bool = false
+     @State private var showAppSettings: Bool = false
      @State private var profile: Profile?
      @State private var isSaving = false
  
@@ -146,7 +148,9 @@
          modalsAndAlerts(
              NavigationStack {
                  Form {
-                     welcomeSection
+                     if showWelcomeSection {
+                         welcomeSection
+                     }
                      Group {
                          profileSection
                          privacySection
@@ -154,6 +158,7 @@
                      }
                      Group {
                          activitiesSection
+                         appSettingsSection
                          tasksSection
                          accountSection
                      }
@@ -522,7 +527,29 @@
              .padding(.bottom, Theme.Spacing.m)
          }
      }
+     
      @ViewBuilder
+     private var appSettingsSection: some View {
+         Section(header: Text("App Settings").sectionHeader()) {
+             VStack(spacing: 0) {
+                 Button { showAppSettings = true } label: {
+                     manageRow(title: "Manage")
+                         .foregroundStyle(Theme.Colors.secondaryText)
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44)
+                 .font(Theme.Text.body)
+             }
+             .padding(.horizontal, 16)
+             .padding(.vertical, 12)
+             .padding(.top, Theme.Spacing.s)
+             .cardSurface()
+             .padding(.bottom, Theme.Spacing.m)
+         }
+     }
+@ViewBuilder
      private var tasksSection: some View {
          Section(header: Text("Tasks").sectionHeader()) {
              VStack(spacing: 0) {
@@ -847,6 +874,10 @@
              }
              .sheet(isPresented: $showTasksManager) {
                  TasksManagerView(activityRef: normalizedPrimaryActivityRef())
+                     .environment(\.managedObjectContext, ctx)
+             }
+             .sheet(isPresented: $showAppSettings) {
+                 AppSettingsView()
                      .environment(\.managedObjectContext, ctx)
              }
          )

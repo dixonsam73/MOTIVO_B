@@ -53,6 +53,7 @@ struct PracticeTimerView: View {
 
     // Primary Activity (Stage 1 persisted)
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
 
     // Wheel picker sheet toggles
     @State private var showInstrumentSheet: Bool = false
@@ -76,7 +77,6 @@ struct PracticeTimerView: View {
     @State private var showReviewSheet = false
     @State private var didSaveFromReview: Bool = false
     @State private var didCancelFromReview: Bool = false
-    @State private var reviewNotesPrefill: String? = nil
     // === DRONE STATE (insert below existing @State vars) ===
     @State var droneIsOn: Bool = false
     @State var droneVolume: Double = 0.5
@@ -391,19 +391,21 @@ struct PracticeTimerView: View {
                                         activityLabel: activityDisplayName(for: activityChoice)
                                     )
 
-                    // === DRONE CONTROL STRIP ===
-                    DroneControlStripCard(
-                        droneIsOn: $droneIsOn,
-                        droneVolume: $droneVolume,
-                        droneNoteIndex: $droneNoteIndex,
-                        droneFreq: $droneFreq,
-                        showDroneVolumePopover: $showDroneVolumePopover,
-                        droneNotes: droneNotes,
-                        droneEngine: droneEngine,
-                        recorderIcon: recorderIcon
-                    )
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .cardSurface()
+                    if showDroneStrip {
+                        // === DRONE CONTROL STRIP ===
+                        DroneControlStripCard(
+                            droneIsOn: $droneIsOn,
+                            droneVolume: $droneVolume,
+                            droneNoteIndex: $droneNoteIndex,
+                            droneFreq: $droneFreq,
+                            showDroneVolumePopover: $showDroneVolumePopover,
+                            droneNotes: droneNotes,
+                            droneEngine: droneEngine,
+                            recorderIcon: recorderIcon
+                        )
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .cardSurface()
+                    }
 
                     TimerCard(
                                          elapsedLabel: formattedElapsed(elapsedSeconds),
@@ -965,7 +967,7 @@ struct PracticeTimerView: View {
                     instrument: instrument,
                     activityTypeRaw: activity.rawValue,
                     activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-                    notesPrefill: reviewNotesPrefill,
+                    notesPrefill: composeCompletedTasksNotesString(),
                     prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                     prefillAttachmentNames: audioTitles,
                     onSaved: {
@@ -1392,8 +1394,6 @@ struct PracticeTimerView: View {
           let total = trueElapsedSeconds()
           finalizedDuration = total
           pause()
-          // Capture the latest Notes / Tasks pad contents at the moment Finish is tapped
-          reviewNotesPrefill = composeCompletedTasksNotesString()
           didSaveFromReview = false
           showReviewSheet = true
       }
