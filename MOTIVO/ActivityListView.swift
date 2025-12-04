@@ -77,10 +77,11 @@ struct ActivityListView: View {
                 }
                 ToolbarItem(placement: .cancellationAction) {
                     Button(action: { dismiss() }) {
-                        Text("Close")
-                            .font(Theme.Text.body)
+                        Image(systemName: "chevron.backward")
+                            .font(.body.weight(.semibold))
                             .foregroundStyle(.primary)
                     }
+                    .accessibilityLabel("Close activities")
                 }
             }
             .appBackground()
