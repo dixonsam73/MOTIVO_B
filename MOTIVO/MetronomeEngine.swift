@@ -1,5 +1,5 @@
 // MetronomeEngine.swift
-// Simple click generator with optional accent-every-N-beats.
+// Sample-based click generator with optional accent-every-N-beats.
 //
 // Public API (file-scope):
 //   let engine = MetronomeEngine()
@@ -26,7 +26,7 @@ final class MetronomeEngine {
         return node
     }()
 
-    /// Precomputed click samples for normal and accented beats.
+    /// Preloaded click samples for normal and accented beats.
     private var normalClickBuffer: AVAudioPCMBuffer?
     private var accentClickBuffer: AVAudioPCMBuffer?
 
@@ -131,75 +131,51 @@ final class MetronomeEngine {
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
         do {
+            // Aim for 44.1 kHz to match the metronome samples.
             try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            try session.setPreferredSampleRate(44_100)
             try session.setActive(true)
         } catch {
             print("[MetronomeEngine] Audio Session error: \(error)")
         }
     }
 
-    // MARK: - Click buffers
+    // MARK: - Click buffers (sample-based)
 
-    /// Prepare short click samples whose channel count matches the mixer/output.
+    /// Prepare short click samples whose channel count / sample rate can differ from the mixer.
     private func prepareClickBuffersIfNeeded() {
         if normalClickBuffer != nil && accentClickBuffer != nil { return }
 
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        let sampleRate = format.sampleRate
-        let clickLengthSeconds = 0.035  // ~35 ms, slightly rounder
-        let frameCount = AVAudioFrameCount(sampleRate * clickLengthSeconds)
+        normalClickBuffer = loadClickBuffer(named: "metronome_click_normal")
+        accentClickBuffer = loadClickBuffer(named: "metronome_click_accent")
 
-        func makeClickBuffer(frequency: Double) -> AVAudioPCMBuffer? {
+        if normalClickBuffer == nil || accentClickBuffer == nil {
+            print("[MetronomeEngine] Warning: Failed to load one or both metronome samples.")
+        }
+    }
+
+    private func loadClickBuffer(named name: String) -> AVAudioPCMBuffer? {
+        guard let url = Bundle.main.url(forResource: name, withExtension: "wav") else {
+            print("[MetronomeEngine] Missing resource: \(name).wav")
+            return nil
+        }
+
+        do {
+            let file = try AVAudioFile(forReading: url)
+            let format = file.processingFormat
+            let frameCount = AVAudioFrameCount(file.length)
+
             guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-                print("[MetronomeEngine] Failed to create click buffer")
+                print("[MetronomeEngine] Failed to create buffer for \(name)")
                 return nil
             }
 
-            buffer.frameLength = frameCount
-            let channels = Int(format.channelCount)
-            let totalFrames = Int(frameCount)
-
-            for channel in 0..<channels {
-                guard let ptr = buffer.floatChannelData?[channel] else { continue }
-
-                for i in 0..<totalFrames {
-                    let t = Double(i)
-                    let total = Double(totalFrames)
-                    let progress = t / total
-
-                    // Envelope: very quick attack, then smooth decay.
-                    let attackPortion = 0.04
-                    let attack = progress < attackPortion
-                        ? (progress / attackPortion)
-                        : 1.0
-
-                    let decayPortion = max(0.0001, 1.0 - attackPortion)
-                    let decayProgress = max(0.0, (progress - attackPortion) / decayPortion)
-                    let decay = max(0.0, 1.0 - decayProgress)
-
-                    let envelope = max(0.0, min(1.0, attack * decay))
-
-                    // "Woodblock-ish": fundamental plus a couple of short harmonics.
-                    let fundamental = sin(2.0 * Double.pi * frequency * (t / sampleRate))
-                    let second = sin(2.0 * Double.pi * frequency * 2.0 * (t / sampleRate))
-                    let third = sin(2.0 * Double.pi * frequency * 3.0 * (t / sampleRate))
-
-                    let tone = fundamental * 0.8 + second * 0.35 + third * 0.2
-
-                    // Global scale to keep headroom; per-beat gain handles loudness.
-                    let sample = Float(tone * envelope * 0.7)
-
-                    ptr[i] = sample
-                }
-            }
-
+            try file.read(into: buffer)
             return buffer
+        } catch {
+            print("[MetronomeEngine] Error loading \(name): \(error)")
+            return nil
         }
-
-        // Normal beat: lower, warmer tone.
-        // Accent beat: slightly higher pitch, same envelope.
-        normalClickBuffer = makeClickBuffer(frequency: 900.0)   // Hz
-        accentClickBuffer = makeClickBuffer(frequency: 1350.0)  // Hz
     }
 
     // MARK: - Timing helpers

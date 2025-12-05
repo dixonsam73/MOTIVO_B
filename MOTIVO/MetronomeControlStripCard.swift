@@ -89,7 +89,7 @@ struct MetronomeControlStripCard: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.wheel)
-                .frame(width: 56, height: 56)
+                .frame(width: 78, height: 56)   // match drone frequency wheel width
                 .clipped()
                 .tint(recorderIcon)
                 .background(
@@ -179,9 +179,9 @@ struct MetronomeControlStripCard: View {
 
     private func accentLabel(for value: Int) -> String {
         if value <= 0 {
-            return "Off"
+            return "None"
         } else {
-            return "×\(value)"
+            return "Every \(value)"
         }
     }
 

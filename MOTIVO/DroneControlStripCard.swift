@@ -95,7 +95,7 @@ struct DroneControlStripCard: View {
                 }
                 .labelsHidden()
                 .pickerStyle(.wheel)
-                .frame(width: 72, height: 56)   // wider so “440 Hz” stays on one line
+                .frame(width: 78, height: 56)   // wider so “440 Hz” stays on one line
                 .clipped()
                 .tint(recorderIcon)
                 .background(
