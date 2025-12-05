@@ -15,31 +15,63 @@ final class MetronomeEngine {
     // MARK: - Audio
 
     private let engine = AVAudioEngine()
-    private let player = AVAudioPlayerNode()
+
+    /// Source node that generates the metronome click in a sample-accurate way.
+    private lazy var sourceNode: AVAudioSourceNode = {
+        let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList in
+            guard let self = self else { return noErr }
+            return self.renderCallback(frameCount: frameCount, audioBufferList: audioBufferList)
+        }
+        return node
+    }()
+
+    /// Precomputed click sample matching the mixer/output format.
     private var clickBuffer: AVAudioPCMBuffer?
 
-    // MARK: - Timer
-
-    private let timerQueue = DispatchQueue(label: "MetronomeEngine.Timer")
-    private var timer: DispatchSourceTimer?
-
-    // MARK: - State
+    // MARK: - State (control)
 
     private var bpm: Double = 80
     private var accentEvery: Int = 0   // 0 = no accent
     private var volume: Double = 0.7   // 0–1
 
-    private var beatIndex: Int = 0
     private(set) var isRunning: Bool = false
+
+    // MARK: - State (audio-thread timing)
+
+    /// Sample rate of the audio graph.
+    private var sampleRate: Double = 44_100
+
+    /// Number of samples between beats.
+    private var samplesPerBeat: AVAudioFramePosition = 0
+
+    /// Countdown to the next beat (in samples).
+    private var samplesUntilNextBeat: AVAudioFramePosition = 0
+
+    /// Current click playback position within clickBuffer (in samples), -1 = no click.
+    private var currentClickSampleIndex: Int = -1
+
+    /// Gain applied to the current click (includes volume + accent).
+    private var currentClickGain: Float = 0.0
+
+    /// Beat counter used for accent calculation.
+    private var beatIndex: Int = 0
+
+    /// Smoothed volume that chases the UI volume to avoid glitches.
+    private var smoothedVolume: Double = 0.7
 
     // MARK: - Init
 
     init() {
-        // Attach + connect player once up-front using the mixer’s format
-        engine.attach(player)
+        // Attach + connect source node once up-front using the mixer’s format.
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        engine.connect(player, to: engine.mainMixerNode, format: format)
+        sampleRate = format.sampleRate > 0 ? format.sampleRate : 44_100
+
+        engine.attach(sourceNode)
+        engine.connect(sourceNode, to: engine.mainMixerNode, format: format)
+
         prepareClickBufferIfNeeded()
+        updateTiming()
     }
 
     // MARK: - Public API
@@ -52,6 +84,14 @@ final class MetronomeEngine {
 
         configureSession()
         prepareClickBufferIfNeeded()
+        updateTiming()
+
+        // Reset timing state for a clean start.
+        beatIndex = 0
+        samplesUntilNextBeat = 0   // fire on the next render callback
+        currentClickSampleIndex = -1
+        currentClickGain = 0.0
+        smoothedVolume = self.volume
 
         if !engine.isRunning {
             do {
@@ -61,9 +101,7 @@ final class MetronomeEngine {
             }
         }
 
-        player.play()
-        beatIndex = 0
-        startTimer()
+        isRunning = true
     }
 
     /// Update parameters while running. Safe to call even if stopped.
@@ -72,16 +110,15 @@ final class MetronomeEngine {
         self.accentEvery = max(0, accentEvery)
         self.volume = max(0, min(1, volume))
 
-        if isRunning {
-            restartTimer()
-        }
+        // Update timing for new tempo; keep phase as-is.
+        updateTiming()
     }
 
     /// Stop the metronome.
     func stop() {
-        stopTimer()
-        player.stop()
         isRunning = false
+        // We deliberately leave the AVAudioEngine running as before; the
+        // source node will just output silence when isRunning == false.
     }
 
     // MARK: - Session
@@ -140,62 +177,117 @@ final class MetronomeEngine {
         clickBuffer = buffer
     }
 
-    // MARK: - Timer
+    // MARK: - Timing helpers
 
-    private func startTimer() {
-        stopTimer()
+    /// Recompute samplesPerBeat when BPM or sampleRate changes.
+    private func updateTiming() {
+        let format = engine.mainMixerNode.outputFormat(forBus: 0)
+        let sr = format.sampleRate > 0 ? format.sampleRate : sampleRate
+        sampleRate = sr
 
-        guard bpm > 0 else { return }
-        let interval = max(0.03, 60.0 / bpm) // floor to avoid pathological values
+        let raw = sr * 60.0 / max(bpm, 30.0)
+        let spb = max(1, Int64(raw.rounded()))
+        samplesPerBeat = AVAudioFramePosition(spb)
 
-        let timer = DispatchSource.makeTimerSource(queue: timerQueue)
-        timer.schedule(deadline: .now(), repeating: interval)
-        timer.setEventHandler { [weak self] in
-            self?.tick()
+        // If we somehow ended up with no countdown, ensure we have something
+        // sensible to avoid division by zero or runaway scheduling.
+        if samplesUntilNextBeat <= 0 {
+            samplesUntilNextBeat = 0
+        }
+    }
+
+    // MARK: - Render callback
+
+    /// Audio render callback for the source node.
+    private func renderCallback(frameCount: AVAudioFrameCount,
+                                audioBufferList: UnsafeMutablePointer<AudioBufferList>) -> OSStatus {
+
+        let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        let frameCountInt = Int(frameCount)
+
+        // Ensure we have a click buffer; if not, output silence.
+        guard let clickBuffer = clickBuffer,
+              let clickChannelData = clickBuffer.floatChannelData else {
+            // Zero output
+            for bufferIndex in 0..<ablPointer.count {
+                let buffer = ablPointer[bufferIndex]
+                if let out = buffer.mData?.assumingMemoryBound(to: Float.self) {
+                    memset(out, 0, frameCountInt * MemoryLayout<Float>.size)
+                }
+            }
+            return noErr
         }
 
-        self.timer = timer
-        isRunning = true
-        timer.resume()
-    }
+        let clickFrameLength = Int(clickBuffer.frameLength)
+        let clickChannelCount = Int(clickBuffer.format.channelCount)
 
-    private func restartTimer() {
-        guard isRunning else { return }
-        startTimer()
-    }
-
-    private func stopTimer() {
-        timer?.cancel()
-        timer = nil
-    }
-
-    // MARK: - Tick
-
-    private func tick() {
-        guard let buffer = clickBuffer else { return }
-
-        // Decide if this beat is accented BEFORE incrementing the counter.
-        let isAccent: Bool
-        if accentEvery <= 0 {
-            isAccent = false
-        } else {
-            isAccent = (beatIndex % accentEvery == 0)
-        }
-        beatIndex &+= 1
-
-        // Apply relative gain for accent vs normal beat.
-        let base = max(0.0, min(1.0, volume))
-        let gain = Float(base * (isAccent ? 1.25 : 0.8))  // gently louder accent
-        player.volume = gain
-
-        player.scheduleBuffer(buffer, at: nil, options: [], completionHandler: nil)
-
-        if !engine.isRunning {
-            do {
-                try engine.start()
-            } catch {
-                print("[MetronomeEngine] Restart failed: \(error)")
+        // Zero the output buffers first.
+        for bufferIndex in 0..<ablPointer.count {
+            let buffer = ablPointer[bufferIndex]
+            if let out = buffer.mData?.assumingMemoryBound(to: Float.self) {
+                memset(out, 0, frameCountInt * MemoryLayout<Float>.size)
             }
         }
+
+        // Nothing to do if not running; we already wrote silence.
+        if !isRunning {
+            currentClickSampleIndex = -1
+            currentClickGain = 0.0
+            samplesUntilNextBeat = 0
+            return noErr
+        }
+
+        // Process audio frame-by-frame for precise beat placement.
+        for frame in 0..<frameCountInt {
+            // Smooth volume towards target to avoid slider-induced glitches.
+            let targetVolume = max(0.0, min(1.0, volume))
+            let smoothingFactor = 0.002  // ~few ms time constant
+            smoothedVolume += (targetVolume - smoothedVolume) * smoothingFactor
+            let baseVolume = max(0.0, min(1.0, smoothedVolume))
+
+            // Start a new beat (and click) when countdown reaches zero or below.
+            if samplesUntilNextBeat <= 0 {
+                // Decide if this beat is accented BEFORE incrementing the counter.
+                let isAccent: Bool
+                if accentEvery <= 0 {
+                    isAccent = false
+                } else {
+                    isAccent = (beatIndex % accentEvery == 0)
+                }
+                beatIndex &+= 1
+
+                // Accent: louder than normal; both scaled by smoothed volume.
+                let gain = Float(baseVolume * (isAccent ? 1.25 : 0.8))
+                currentClickGain = gain
+                currentClickSampleIndex = 0
+                samplesUntilNextBeat = samplesPerBeat
+            }
+
+            // Decrement countdown for next frame.
+            samplesUntilNextBeat -= 1
+
+            // If a click is currently playing, mix it into the output.
+            if currentClickSampleIndex >= 0 && currentClickSampleIndex < clickFrameLength {
+                for bufferIndex in 0..<ablPointer.count {
+                    let buffer = ablPointer[bufferIndex]
+                    guard let out = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+
+                    // Use matching channel from clickBuffer; if fewer channels, reuse the last.
+                    let srcChannelIndex = min(bufferIndex, clickChannelCount - 1)
+                    let srcChannel = clickChannelData[srcChannelIndex]
+                    let clickSample = srcChannel[currentClickSampleIndex]
+
+                    out[frame] += clickSample * currentClickGain
+                }
+
+                currentClickSampleIndex += 1
+                if currentClickSampleIndex >= clickFrameLength {
+                    currentClickSampleIndex = -1
+                    currentClickGain = 0.0
+                }
+            }
+        }
+
+        return noErr
     }
 }
