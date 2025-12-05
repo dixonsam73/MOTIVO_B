@@ -37,7 +37,9 @@ final class MetronomeEngine {
     private var volume: Double = 0.7   // 0–1
 
     private(set) var isRunning: Bool = false
-
+    /// Optional UI callback fired whenever a new beat starts.
+    /// Called on the main queue; `isAccent` is true for accented beats.
+    var onBeat: ((Bool) -> Void)?
     // MARK: - State (audio-thread timing)
 
     /// Sample rate of the audio graph.
@@ -263,6 +265,14 @@ final class MetronomeEngine {
                 currentClickSampleIndex = 0
                 currentClickIsAccent = isAccent
                 samplesUntilNextBeat = samplesPerBeat
+
+                // Notify UI on the main queue (lightweight, once per beat).
+                if let beatCallback = onBeat {
+                    let accentFlag = isAccent
+                    DispatchQueue.main.async {
+                        beatCallback(accentFlag)
+                    }
+                }
             }
 
             // Decrement countdown for next frame.

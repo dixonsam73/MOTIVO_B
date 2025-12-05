@@ -7,7 +7,7 @@ import SwiftUI
 struct MetronomeControlStripCard: View {
     @Binding var metronomeIsOn: Bool
     @Binding var metronomeBPM: Int          // e.g. 40–220
-    @Binding var metronomeAccentEvery: Int  // 0 = off, 2…N = accent every N beats
+    @Binding var metronomeAccentEvery: Int  // 0 = off, 1…N = accent every N beats
     @Binding var metronomeVolume: Double    // 0–1
 
     let metronomeEngine: MetronomeEngine
@@ -15,8 +15,12 @@ struct MetronomeControlStripCard: View {
 
     @State private var showMetronomeVolumePopover = false
 
+    // UI beat/animation state
+    @State private var accentFlashIntensity: Double = 0.0
+    @State private var metronomeSwingRight: Bool = false
+
     private let bpmRange: ClosedRange<Int> = 40...220
-    /// 0 = off, then 2…16 (you can tweak this list later).
+    /// 0 = off, then 1…15 (covers practical subdivisions).
     private let accentValues: [Int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     var body: some View {
@@ -29,6 +33,13 @@ struct MetronomeControlStripCard: View {
                         .symbolRenderingMode(.monochrome)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(recorderIcon)
+                        .rotationEffect(
+                            .degrees(
+                                metronomeIsOn
+                                ? (metronomeSwingRight ? 10 : -10)
+                                : 0
+                            )
+                        )
                         .frame(width: 36, height: 36)
                         .contentShape(Circle())
                 }
@@ -95,6 +106,10 @@ struct MetronomeControlStripCard: View {
                 .background(
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .fill(Color.orange.opacity(0.18 * accentFlashIntensity))
+                        )
                 )
                 .onChange(of: metronomeAccentEvery) { rawValue in
                     let clamped = clampAccent(raw: rawValue)
@@ -157,6 +172,31 @@ struct MetronomeControlStripCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .onAppear {
+            metronomeEngine.onBeat = { isAccent in
+                let beatDuration = 60.0 / Double(metronomeBPM)
+
+                // Swing the icon arm every beat
+                withAnimation(.easeInOut(duration: beatDuration / 2.0)) {
+                    metronomeSwingRight.toggle()
+                }
+
+                // Flash the accent bubble only on accented beats
+                if isAccent {
+                    accentFlashIntensity = 1.0
+                    withAnimation(.linear(duration: beatDuration)) {
+                        accentFlashIntensity = 0.0
+                    }
+                } else {
+                    // Ensure it's off on non-accent beats
+                    accentFlashIntensity = 0.0
+                }
+            }
+        }
+        .onDisappear {
+            // Avoid holding onto the callback if this view goes away
+            metronomeEngine.onBeat = nil
         }
     }
 
