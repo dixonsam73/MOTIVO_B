@@ -26,8 +26,9 @@ final class MetronomeEngine {
         return node
     }()
 
-    /// Precomputed click sample matching the mixer/output format.
-    private var clickBuffer: AVAudioPCMBuffer?
+    /// Precomputed click samples for normal and accented beats.
+    private var normalClickBuffer: AVAudioPCMBuffer?
+    private var accentClickBuffer: AVAudioPCMBuffer?
 
     // MARK: - State (control)
 
@@ -48,7 +49,7 @@ final class MetronomeEngine {
     /// Countdown to the next beat (in samples).
     private var samplesUntilNextBeat: AVAudioFramePosition = 0
 
-    /// Current click playback position within clickBuffer (in samples), -1 = no click.
+    /// Current click playback position within the active click buffer (in samples), -1 = no click.
     private var currentClickSampleIndex: Int = -1
 
     /// Gain applied to the current click (includes volume + accent).
@@ -60,6 +61,9 @@ final class MetronomeEngine {
     /// Smoothed volume that chases the UI volume to avoid glitches.
     private var smoothedVolume: Double = 0.7
 
+    /// Whether the currently playing click (if any) is an accent.
+    private var currentClickIsAccent: Bool = false
+
     // MARK: - Init
 
     init() {
@@ -70,7 +74,7 @@ final class MetronomeEngine {
         engine.attach(sourceNode)
         engine.connect(sourceNode, to: engine.mainMixerNode, format: format)
 
-        prepareClickBufferIfNeeded()
+        prepareClickBuffersIfNeeded()
         updateTiming()
     }
 
@@ -83,7 +87,7 @@ final class MetronomeEngine {
         self.volume = max(0, min(1, volume))
 
         configureSession()
-        prepareClickBufferIfNeeded()
+        prepareClickBuffersIfNeeded()
         updateTiming()
 
         // Reset timing state for a clean start.
@@ -92,6 +96,7 @@ final class MetronomeEngine {
         currentClickSampleIndex = -1
         currentClickGain = 0.0
         smoothedVolume = self.volume
+        currentClickIsAccent = false
 
         if !engine.isRunning {
             do {
@@ -117,7 +122,7 @@ final class MetronomeEngine {
     /// Stop the metronome.
     func stop() {
         isRunning = false
-        // We deliberately leave the AVAudioEngine running as before; the
+        // We deliberately leave the AVAudioEngine running; the
         // source node will just output silence when isRunning == false.
     }
 
@@ -133,58 +138,68 @@ final class MetronomeEngine {
         }
     }
 
-    // MARK: - Click buffer
+    // MARK: - Click buffers
 
-    /// Prepare a short click sample whose channel count matches the mixer/output.
-    private func prepareClickBufferIfNeeded() {
-        if clickBuffer != nil { return }
+    /// Prepare short click samples whose channel count matches the mixer/output.
+    private func prepareClickBuffersIfNeeded() {
+        if normalClickBuffer != nil && accentClickBuffer != nil { return }
 
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         let sampleRate = format.sampleRate
-        let clickLengthSeconds = 0.03  // ~30 ms
+        let clickLengthSeconds = 0.035  // ~35 ms, slightly rounder
         let frameCount = AVAudioFrameCount(sampleRate * clickLengthSeconds)
 
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
-            print("[MetronomeEngine] Failed to create click buffer")
-            return
-        }
-
-        buffer.frameLength = frameCount
-        let channels = Int(format.channelCount)
-
-        // Simple, clean "pip" tone: fast attack, short decay, no noise.
-        let baseFrequency = 1500.0 // Hz – bright but not piercing
-
-        for channel in 0..<channels {
-            guard let ptr = buffer.floatChannelData?[channel] else { continue }
-
-            for i in 0..<Int(frameCount) {
-                let t = Double(i)
-                let total = Double(frameCount)
-
-                let progress = t / total
-
-                // Very quick attack (first ~5% of the click),
-                // then a smooth exponential-ish decay.
-                let attackPortion = 0.05
-                let attack = progress < attackPortion
-                    ? (progress / attackPortion)
-                    : 1.0
-
-                let decayPortion = max(0.0001, 1.0 - attackPortion)
-                let decayProgress = max(0.0, (progress - attackPortion) / decayPortion)
-                let decay = max(0.0, 1.0 - decayProgress)
-
-                let envelope = max(0.0, min(1.0, attack * decay))
-
-                let tone = sin(2.0 * Double.pi * baseFrequency * (t / sampleRate))
-                let sample = Float(tone * envelope)
-
-                ptr[i] = sample
+        func makeClickBuffer(frequency: Double) -> AVAudioPCMBuffer? {
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameCount) else {
+                print("[MetronomeEngine] Failed to create click buffer")
+                return nil
             }
+
+            buffer.frameLength = frameCount
+            let channels = Int(format.channelCount)
+            let totalFrames = Int(frameCount)
+
+            for channel in 0..<channels {
+                guard let ptr = buffer.floatChannelData?[channel] else { continue }
+
+                for i in 0..<totalFrames {
+                    let t = Double(i)
+                    let total = Double(totalFrames)
+                    let progress = t / total
+
+                    // Envelope: very quick attack, then smooth decay.
+                    let attackPortion = 0.04
+                    let attack = progress < attackPortion
+                        ? (progress / attackPortion)
+                        : 1.0
+
+                    let decayPortion = max(0.0001, 1.0 - attackPortion)
+                    let decayProgress = max(0.0, (progress - attackPortion) / decayPortion)
+                    let decay = max(0.0, 1.0 - decayProgress)
+
+                    let envelope = max(0.0, min(1.0, attack * decay))
+
+                    // "Woodblock-ish": fundamental plus a couple of short harmonics.
+                    let fundamental = sin(2.0 * Double.pi * frequency * (t / sampleRate))
+                    let second = sin(2.0 * Double.pi * frequency * 2.0 * (t / sampleRate))
+                    let third = sin(2.0 * Double.pi * frequency * 3.0 * (t / sampleRate))
+
+                    let tone = fundamental * 0.8 + second * 0.35 + third * 0.2
+
+                    // Global scale to keep headroom; per-beat gain handles loudness.
+                    let sample = Float(tone * envelope * 0.7)
+
+                    ptr[i] = sample
+                }
+            }
+
+            return buffer
         }
 
-        clickBuffer = buffer
+        // Normal beat: lower, warmer tone.
+        // Accent beat: slightly higher pitch, same envelope.
+        normalClickBuffer = makeClickBuffer(frequency: 900.0)   // Hz
+        accentClickBuffer = makeClickBuffer(frequency: 1350.0)  // Hz
     }
 
     // MARK: - Timing helpers
@@ -215,9 +230,11 @@ final class MetronomeEngine {
         let ablPointer = UnsafeMutableAudioBufferListPointer(audioBufferList)
         let frameCountInt = Int(frameCount)
 
-        // Ensure we have a click buffer; if not, output silence.
-        guard let clickBuffer = clickBuffer,
-              let clickChannelData = clickBuffer.floatChannelData else {
+        // Ensure we have click buffers; if not, output silence.
+        guard let normalBuffer = normalClickBuffer,
+              let normalChannelData = normalBuffer.floatChannelData,
+              let accentBuffer = accentClickBuffer,
+              let accentChannelData = accentBuffer.floatChannelData else {
             // Zero output
             for bufferIndex in 0..<ablPointer.count {
                 let buffer = ablPointer[bufferIndex]
@@ -227,9 +244,6 @@ final class MetronomeEngine {
             }
             return noErr
         }
-
-        let clickFrameLength = Int(clickBuffer.frameLength)
-        let clickChannelCount = Int(clickBuffer.format.channelCount)
 
         // Zero the output buffers first.
         for bufferIndex in 0..<ablPointer.count {
@@ -244,6 +258,7 @@ final class MetronomeEngine {
             currentClickSampleIndex = -1
             currentClickGain = 0.0
             samplesUntilNextBeat = 0
+            currentClickIsAccent = false
             return noErr
         }
 
@@ -266,10 +281,11 @@ final class MetronomeEngine {
                 }
                 beatIndex &+= 1
 
-                // Accent: full-volume; normal beats quite a bit softer.
+                // Accent: full-volume; normal beats softer.
                 let gain = Float(baseVolume * (isAccent ? 1.0 : 0.35))
                 currentClickGain = gain
                 currentClickSampleIndex = 0
+                currentClickIsAccent = isAccent
                 samplesUntilNextBeat = samplesPerBeat
             }
 
@@ -277,21 +293,31 @@ final class MetronomeEngine {
             samplesUntilNextBeat -= 1
 
             // If a click is currently playing, mix it into the output.
-            if currentClickSampleIndex >= 0 && currentClickSampleIndex < clickFrameLength {
-                for bufferIndex in 0..<ablPointer.count {
-                    let buffer = ablPointer[bufferIndex]
-                    guard let out = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
+            if currentClickSampleIndex >= 0 {
+                // Pick the correct buffer for this click.
+                let activeBuffer = currentClickIsAccent ? accentBuffer : normalBuffer
+                let activeChannelData = currentClickIsAccent ? accentChannelData : normalChannelData
+                let clickFrameLength = Int(activeBuffer.frameLength)
+                let clickChannelCount = Int(activeBuffer.format.channelCount)
 
-                    // Use matching channel from clickBuffer; if fewer channels, reuse the last.
-                    let srcChannelIndex = min(bufferIndex, clickChannelCount - 1)
-                    let srcChannel = clickChannelData[srcChannelIndex]
-                    let clickSample = srcChannel[currentClickSampleIndex]
+                if currentClickSampleIndex < clickFrameLength {
+                    for bufferIndex in 0..<ablPointer.count {
+                        let buffer = ablPointer[bufferIndex]
+                        guard let out = buffer.mData?.assumingMemoryBound(to: Float.self) else { continue }
 
-                    out[frame] += clickSample * currentClickGain
-                }
+                        let srcChannelIndex = min(bufferIndex, clickChannelCount - 1)
+                        let srcChannel = activeChannelData[srcChannelIndex]
+                        let clickSample = srcChannel[currentClickSampleIndex]
 
-                currentClickSampleIndex += 1
-                if currentClickSampleIndex >= clickFrameLength {
+                        out[frame] += clickSample * currentClickGain
+                    }
+
+                    currentClickSampleIndex += 1
+                    if currentClickSampleIndex >= clickFrameLength {
+                        currentClickSampleIndex = -1
+                        currentClickGain = 0.0
+                    }
+                } else {
                     currentClickSampleIndex = -1
                     currentClickGain = 0.0
                 }
