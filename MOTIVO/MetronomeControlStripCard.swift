@@ -17,7 +17,7 @@ struct MetronomeControlStripCard: View {
 
     private let bpmRange: ClosedRange<Int> = 40...220
     /// 0 = off, then 2…16 (you can tweak this list later).
-    private let accentValues: [Int] = [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 16]
+    private let accentValues: [Int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
     var body: some View {
         VStack(spacing: 6) {

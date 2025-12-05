@@ -87,7 +87,7 @@ struct DroneControlStripCard: View {
 
                 // Frequency wheel (Hz) — A4 reference only, in a bubble
                 Picker("", selection: $droneFreq) {
-                    ForEach(400...480, id: \.self) { f in
+                    ForEach(392...460, id: \.self) { f in
                         Text("\(f) Hz")
                             .font(.caption2)
                             .tag(f)
@@ -104,7 +104,7 @@ struct DroneControlStripCard: View {
                 )
                 .onChange(of: droneFreq) { _, newF in
                     // Clamp defensively to the picker’s valid range
-                    let clamped = min(max(newF, 400), 480)
+                    let clamped = min(max(newF, 392), 460)
                     if clamped != droneFreq {
                         droneFreq = clamped
                     }
