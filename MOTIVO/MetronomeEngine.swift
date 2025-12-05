@@ -152,6 +152,9 @@ final class MetronomeEngine {
         buffer.frameLength = frameCount
         let channels = Int(format.channelCount)
 
+        // Simple, clean "pip" tone: fast attack, short decay, no noise.
+        let baseFrequency = 1500.0 // Hz – bright but not piercing
+
         for channel in 0..<channels {
             guard let ptr = buffer.floatChannelData?[channel] else { continue }
 
@@ -159,16 +162,23 @@ final class MetronomeEngine {
                 let t = Double(i)
                 let total = Double(frameCount)
 
-                // Simple attack / decay envelope
                 let progress = t / total
-                let attack = min(1.0, progress / 0.15)
-                let release = min(1.0, (1.0 - progress) / 0.4)
-                let envelope = max(0.0, min(1.0, min(attack, release)))
 
-                // White-ish noise with some bright tone for a neutral click
-                let noise = Double.random(in: -1.0...1.0)
-                let tone = sin(2.0 * Double.pi * 2000.0 * (t / sampleRate))
-                let sample = Float((noise * 0.25 + tone * 0.75) * envelope)
+                // Very quick attack (first ~5% of the click),
+                // then a smooth exponential-ish decay.
+                let attackPortion = 0.05
+                let attack = progress < attackPortion
+                    ? (progress / attackPortion)
+                    : 1.0
+
+                let decayPortion = max(0.0001, 1.0 - attackPortion)
+                let decayProgress = max(0.0, (progress - attackPortion) / decayPortion)
+                let decay = max(0.0, 1.0 - decayProgress)
+
+                let envelope = max(0.0, min(1.0, attack * decay))
+
+                let tone = sin(2.0 * Double.pi * baseFrequency * (t / sampleRate))
+                let sample = Float(tone * envelope)
 
                 ptr[i] = sample
             }
@@ -256,8 +266,8 @@ final class MetronomeEngine {
                 }
                 beatIndex &+= 1
 
-                // Accent: louder than normal; both scaled by smoothed volume.
-                let gain = Float(baseVolume * (isAccent ? 1.25 : 0.8))
+                // Accent: full-volume; normal beats quite a bit softer.
+                let gain = Float(baseVolume * (isAccent ? 1.0 : 0.35))
                 currentClickGain = gain
                 currentClickSampleIndex = 0
                 samplesUntilNextBeat = samplesPerBeat
