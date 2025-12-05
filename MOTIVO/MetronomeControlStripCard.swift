@@ -29,19 +29,13 @@ struct MetronomeControlStripCard: View {
 
                 // Start / Stop
                 Button(action: toggleMetronome) {
-                    Image(systemName: metronomeIsOn ? "metronome.fill" : "metronome")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(recorderIcon)
-                        .rotationEffect(
-                            .degrees(
-                                metronomeIsOn
-                                ? (metronomeSwingRight ? 10 : -10)
-                                : 0
-                            )
-                        )
-                        .frame(width: 36, height: 36)
-                        .contentShape(Circle())
+                    MetronomeIcon(
+                        isOn: metronomeIsOn,
+                        swingRight: metronomeSwingRight,
+                        color: recorderIcon
+                    )
+                    .frame(width: 36, height: 36)
+                    .contentShape(Circle())
                 }
                 .buttonStyle(.bordered)
                 .background(
@@ -177,7 +171,7 @@ struct MetronomeControlStripCard: View {
             metronomeEngine.onBeat = { isAccent in
                 let beatDuration = 60.0 / Double(metronomeBPM)
 
-                // Swing the icon arm every beat
+                // Swing the arm every beat
                 withAnimation(.easeInOut(duration: beatDuration / 2.0)) {
                     metronomeSwingRight.toggle()
                 }
@@ -189,13 +183,11 @@ struct MetronomeControlStripCard: View {
                         accentFlashIntensity = 0.0
                     }
                 } else {
-                    // Ensure it's off on non-accent beats
                     accentFlashIntensity = 0.0
                 }
             }
         }
         .onDisappear {
-            // Avoid holding onto the callback if this view goes away
             metronomeEngine.onBeat = nil
         }
     }
@@ -227,13 +219,56 @@ struct MetronomeControlStripCard: View {
 
     private func clampAccent(raw: Int) -> Int {
         if raw <= 0 { return 0 }
-        // Ensure value is one of accentValues; fall back to nearest.
         if accentValues.contains(raw) { return raw }
         let positive = accentValues.filter { $0 > 0 }
         guard let nearest = positive.min(by: { abs($0 - raw) < abs($1 - raw) }) else {
             return 0
         }
         return nearest
+    }
+}
+
+// MARK: - Custom Metronome Icon (Outlined Body + Swinging Arm)
+
+private struct MetronomeIcon: View {
+    let isOn: Bool
+    let swingRight: Bool
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            // Body: trapezoid with a small flat top (reads like a classic wooden metronome)
+            Path { path in
+                // Top edge (short, centered)
+                path.move(to: CGPoint(x: 9, y: 3))    // top-left
+                path.addLine(to: CGPoint(x: 15, y: 3)) // top-right
+
+                // Down to base
+                path.addLine(to: CGPoint(x: 18, y: 19)) // bottom-right
+                path.addLine(to: CGPoint(x: 6, y: 19))  // bottom-left
+
+                // Close back to top-left
+                path.closeSubpath()
+            }
+            .stroke(color, lineWidth: 1.6)
+
+            // Base
+            Capsule(style: .continuous)
+                .frame(width: 16, height: 3)
+                .offset(y: 9)
+                .foregroundStyle(color.opacity(0.9))
+
+            // Arm (only thing that moves)
+            Rectangle()
+                .frame(width: 1.5, height: 14)
+                .offset(y: 3)
+                .rotationEffect(
+                    .degrees(isOn ? (swingRight ? 16 : -16) : 0),
+                    anchor: .bottom
+                )
+                .foregroundStyle(color)
+        }
+        .frame(width: 24, height: 24)
     }
 }
 
