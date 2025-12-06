@@ -171,8 +171,15 @@ struct MetronomeControlStripCard: View {
             metronomeEngine.onBeat = { isAccent in
                 let beatDuration = 60.0 / Double(metronomeBPM)
 
-                // Swing the arm every beat
-                withAnimation(.easeInOut(duration: beatDuration / 2.0)) {
+                // Swing the arm every beat with spring/inertia (arm "mass")
+                let response = max(0.12, min(beatDuration * 0.55, 0.35))
+                withAnimation(
+                    .spring(
+                        response: response,
+                        dampingFraction: 0.72,
+                        blendDuration: 0.1
+                    )
+                ) {
                     metronomeSwingRight.toggle()
                 }
 
