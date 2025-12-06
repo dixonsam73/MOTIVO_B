@@ -19,7 +19,7 @@ struct MetronomeControlStripCard: View {
     @State private var accentFlashIntensity: Double = 0.0
     @State private var metronomeSwingRight: Bool = false
 
-    private let bpmRange: ClosedRange<Int> = 40...220
+    private let bpmRange: ClosedRange<Int> = 20...400
     /// 0 = off, then 1…15 (covers practical subdivisions).
     private let accentValues: [Int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
 
