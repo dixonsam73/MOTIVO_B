@@ -6,7 +6,7 @@ import SwiftUI
 
 struct MetronomeControlStripCard: View {
     @Binding var metronomeIsOn: Bool
-    @Binding var metronomeBPM: Int          // e.g. 40–220
+    @Binding var metronomeBPM: Int          // e.g. 20–400
     @Binding var metronomeAccentEvery: Int  // 0 = off, 1…N = accent every N beats
     @Binding var metronomeVolume: Double    // 0–1
 
@@ -19,9 +19,16 @@ struct MetronomeControlStripCard: View {
     @State private var accentFlashIntensity: Double = 0.0
     @State private var metronomeSwingRight: Bool = false
 
+    // Tap tempo state (dedicated Tap button)
+    @State private var tapTempoTimestamps: [Date] = []
+
     private let bpmRange: ClosedRange<Int> = 20...400
     /// 0 = off, then 1…15 (covers practical subdivisions).
     private let accentValues: [Int] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+    // Tap tempo tuning
+    private let tapTempoMaxInterval: TimeInterval = 2.0  // window for considering taps (seconds)
+    private let tapTempoMinTaps: Int = 2                 // minimum taps to compute BPM
 
     var body: some View {
         VStack(spacing: 6) {
@@ -51,6 +58,18 @@ struct MetronomeControlStripCard: View {
                 )
                 .clipShape(Capsule(style: .continuous))
                 .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
+
+                // Tap tempo button
+                Button(action: handleTapTempoTap) {
+                    Text("Tap")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(recorderIcon)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .clipShape(Capsule(style: .continuous))
+                .accessibilityLabel("Tap tempo")
 
                 // BPM wheel
                 Picker("", selection: $metronomeBPM) {
@@ -211,6 +230,46 @@ struct MetronomeControlStripCard: View {
             )
         } else {
             metronomeEngine.stop()
+        }
+    }
+
+    /// Handle a tap-tempo tap (from the dedicated Tap button).
+    private func handleTapTempoTap() {
+        let now = Date()
+
+        // Add this tap and keep only recent ones
+        tapTempoTimestamps.append(now)
+        tapTempoTimestamps = tapTempoTimestamps.filter {
+            now.timeIntervalSince($0) <= tapTempoMaxInterval
+        }
+
+        guard tapTempoTimestamps.count >= tapTempoMinTaps else { return }
+
+        // Compute average interval between taps
+        let sorted = tapTempoTimestamps.sorted()
+        let pairs = zip(sorted.dropFirst(), sorted)
+        let intervals = pairs.map { $0.0.timeIntervalSince($0.1) }
+        guard !intervals.isEmpty else { return }
+
+        let total = intervals.reduce(0, +)
+        guard total > 0 else { return }
+
+        let averageInterval = total / Double(intervals.count)
+        guard averageInterval > 0 else { return }
+
+        let bpmDouble = 60.0 / averageInterval
+        let clampedBPM = max(Double(bpmRange.lowerBound),
+                             min(Double(bpmRange.upperBound), bpmDouble))
+        let newBPM = Int(clampedBPM.rounded())
+
+        metronomeBPM = newBPM
+
+        if metronomeIsOn {
+            metronomeEngine.update(
+                bpm: metronomeBPM,
+                accentEvery: metronomeAccentEvery,
+                volume: metronomeVolume
+            )
         }
     }
 
