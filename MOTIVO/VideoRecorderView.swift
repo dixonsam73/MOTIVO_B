@@ -272,6 +272,8 @@ final class VideoRecorderController: NSObject,
 
     private let onSave: (URL) -> Void
 
+    private var isConfiguringSession: Bool = false
+
     init(onSave: @escaping (URL) -> Void) {
         self.onSave = onSave
         super.init()
@@ -460,6 +462,7 @@ final class VideoRecorderController: NSObject,
         guard !isSessionConfigured else { return }
 
         let session = AVCaptureSession()
+        isConfiguringSession = true
         session.beginConfiguration()
         // Upgrade preset to 1080p; HEVC encoder will use this as canvas.
         if session.canSetSessionPreset(.hd1920x1080) {
@@ -478,6 +481,7 @@ final class VideoRecorderController: NSObject,
               let videoInput = try? AVCaptureDeviceInput(device: vDev),
               session.canAddInput(videoInput) else {
             session.commitConfiguration()
+            isConfiguringSession = false
             return
         }
         session.addInput(videoInput)
@@ -519,6 +523,7 @@ final class VideoRecorderController: NSObject,
         }
 
         session.commitConfiguration()
+        isConfiguringSession = false
 
         self.captureSession = session
         self.videoOutput = vOutput
@@ -548,6 +553,7 @@ final class VideoRecorderController: NSObject,
 
         // Reconfigure inputs on a high-priority queue
         DispatchQueue.global(qos: .userInitiated).async {
+            self.isConfiguringSession = true
             session.beginConfiguration()
             // Remove existing video inputs only
             for input in session.inputs {
@@ -587,6 +593,7 @@ final class VideoRecorderController: NSObject,
             }
 
             session.commitConfiguration()
+            self.isConfiguringSession = false
             if !session.isRunning { session.startRunning() }
 
             // Fade back in on main
@@ -599,6 +606,7 @@ final class VideoRecorderController: NSObject,
     }
 
     func startCaptureSession() {
+        if isConfiguringSession { return }
         guard let session = captureSession, !session.isRunning else { return }
         DispatchQueue.global(qos: .background).async { session.startRunning() }
     }

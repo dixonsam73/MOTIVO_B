@@ -8,15 +8,21 @@ import AVFoundation
 extension PracticeTimerView {
 
     func togglePlay(_ id: UUID) {
-        // Stop drone before any audio attachment playback
+        // Do not kill for audio recorder flow
+        if showAudioRecorder {
+            return
+        }
+
+        // Kill both drone and metronome before starting or resuming attachment playback
         if droneIsOn {
             droneEngine.stop()
             droneIsOn = false
         }
-
-        if showAudioRecorder {
-            return
+        if metronomeIsOn {
+            metronomeEngine.stop()
+            metronomeIsOn = false
         }
+
         if currentlyPlayingID == id {
             // Toggle play/pause for the same item and keep the selection so the icon flips reliably
             if let p = audioPlayer {

@@ -101,7 +101,7 @@ struct PracticeTimerView: View {
     @State private var showVideoHelp = false
     // MARK: - Metronome State
 
-    @State private var metronomeIsOn: Bool = false
+    @State var metronomeIsOn: Bool = false
     @State private var metronomeBPM: Int = 80
     @State private var metronomeAccentEvery: Int = 0   // 0 = no accent, 2–15 = every N beats
     @State private var metronomeVolume: Double = 0.7
@@ -109,7 +109,7 @@ struct PracticeTimerView: View {
 
 
     // Engine instance (local to PTV)
-    private let metronomeEngine = MetronomeEngine()
+   let metronomeEngine = MetronomeEngine()
     // New audio recording and attachments state
     @State var showAudioRecorder: Bool = false
     @State var stagedAudio: [StagedAttachment] = []
@@ -1121,10 +1121,9 @@ struct PracticeTimerView: View {
                     .navigationBarTitleDisplayMode(.inline)
                 }
             }
-            .onChange(of: showVideoRecorder) { oldValue, newValue in
-                if newValue == true {
-                    droneEngine.stop()
-                    droneIsOn = false
+            .onChange(of: showVideoRecorder) { _, newValue in
+                if newValue {
+                    killDroneAndMetronome()
                 }
             }
             .sheet(isPresented: $showCamera) {
@@ -1155,6 +1154,7 @@ struct PracticeTimerView: View {
             }
             */
             .fullScreenCover(item: $attachmentViewer) { payload in
+                killDroneAndMetronome()
                 // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
                 let imageURLs: [URL] = []
                 let audioURLs: [URL] = []
@@ -1202,6 +1202,15 @@ struct PracticeTimerView: View {
                     .accessibilityHint("Edit start and end of the clip")
                 } else {
                     Text("Unable to open trimmer").padding()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                // Reconcile metronome running state with UI flag to avoid ghost instances
+                if metronomeIsOn && (metronomeEngineIsActuallyRunning() == false) {
+                    metronomeIsOn = false
+                }
+                if !metronomeIsOn && (metronomeEngineIsActuallyRunning() == true) {
+                    metronomeEngine.stop()
                 }
             }
         }
@@ -1376,6 +1385,7 @@ struct PracticeTimerView: View {
     }
 
     private func pause() {
+        killDroneAndMetronome()
         guard isRunning else { return }
         let now = Date()
         if let started = startDate {
@@ -2415,6 +2425,24 @@ struct PracticeTimerView: View {
         StorageInspector.logSandboxUsage(tag: "After Terminate Cleanup")
         #endif
     }
+
+    // MARK: - New helper: killDroneAndMetronome
+    func killDroneAndMetronome() {
+        if droneIsOn {
+            droneEngine.stop()
+            droneIsOn = false
+        }
+        if metronomeIsOn {
+            metronomeEngine.stop()
+            metronomeIsOn = false
+        }
+    }
+
+    // MARK: - New helper: metronomeEngineIsActuallyRunning
+    private func metronomeEngineIsActuallyRunning() -> Bool {
+        // MetronomeEngine exposes isRunning; prefer that when available
+        return metronomeEngine.isRunning
+    }
 }
  
 // MARK: - Local InfoSheetView (minimal)
@@ -2449,6 +2477,7 @@ fileprivate struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
