@@ -39,17 +39,17 @@ struct PracticeTimerView: View {
     @Binding var isPresented: Bool
 
     // Instruments (profile)
-    @State private var instruments: [Instrument] = []
-    @State private var instrument: Instrument?
+    @State var instruments: [Instrument] = []
+    @State var instrument: Instrument?
     @State private var userActivities: [UserActivity] = []
 
     // Instrument wheel state (index into instruments array)
-    @State private var instrumentIndex: Int = 0
+    @State var instrumentIndex: Int = 0
 
     // Activity state
-    @State private var activity: SessionActivityType = .practice
-    @State private var activityDetail: String = ""
-    @State private var activityChoice: String = "core:0" // "core:<raw>" or "custom:<name>"
+    @State var activity: SessionActivityType = .practice
+    @State var activityDetail: String = ""
+    @State var activityChoice: String = "core:0" // "core:<raw>" or "custom:<name>"
 
     // Primary Activity (Stage 1 persisted)
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
@@ -57,27 +57,27 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
 
     // Wheel picker sheet toggles
-    @State private var showInstrumentSheet: Bool = false
-    @State private var showActivitySheet: Bool = false
+    @State var showInstrumentSheet: Bool = false
+    @State var showActivitySheet: Bool = false
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
 
     // MARK: - Background-safe timer state (persisted)
     @State private var isRunning: Bool = false              // mirrored from persisted
-    @State private var startDate: Date? = nil               // start timestamp (persisted)
+    @State var startDate: Date? = nil               // start timestamp (persisted)
     @State private var accumulatedSeconds: Int = 0          // persisted running total (excludes current run segment)
     @State private var elapsedSeconds: Int = 0              // UI-only, recomputed each tick from persisted state
     @State private var ticker: AnyCancellable?
 
     // Used when presenting the review sheet so we pass a stable, final duration
-    @State private var finalizedDuration: Int = 0
-    @State private var finalizedStartDate: Date? = nil
+    @State var finalizedDuration: Int = 0
+    @State var finalizedStartDate: Date? = nil
     
     // Review sheet
-    @State private var showReviewSheet = false
-    @State private var didSaveFromReview: Bool = false
-    @State private var didCancelFromReview: Bool = false
+    @State var showReviewSheet = false
+    @State var didSaveFromReview: Bool = false
+    @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
     @State var droneIsOn: Bool = false
     @State var droneVolume: Double = 0.5
@@ -130,28 +130,28 @@ struct PracticeTimerView: View {
     @State var wasPlayingBeforeInterruption_timer: Bool = false
 
     // Image capture state (mirrors AddEdit/PostRecord behavior)
-    @State private var stagedImages: [StagedAttachment] = []
-    @State private var selectedThumbnailID: UUID? = nil
+    @State var stagedImages: [StagedAttachment] = []
+    @State var selectedThumbnailID: UUID? = nil
     @State private var showCamera: Bool = false
     @State private var showCameraDeniedAlert: Bool = false
 
     // --- Inserted video recording and attachments state ---
-    @State private var showVideoRecorder: Bool = false
-    @State private var stagedVideos: [StagedAttachment] = []
-    @State private var videoThumbnails: [UUID: UIImage] = [:]
+    @State var showVideoRecorder: Bool = false
+    @State var stagedVideos: [StagedAttachment] = []
+    @State var videoThumbnails: [UUID: UIImage] = [:]
     // Remove old video player state:
     // @State private var showVideoPlayer: Bool = false
     // @State private var videoPlayerItem: AVPlayer? = nil
 
     // Attachment viewer routing state
-    private struct PTVViewerURL: Identifiable, Equatable {
+    struct PTVViewerURL: Identifiable, Equatable {
         let id = UUID()
         let url: URL
     }
     @State private var attachmentViewer: PTVViewerURL? = nil
 
     // Add trimming state for audio/video clips
-    @State private var trimItem: StagedAttachment? = nil
+    @State var trimItem: StagedAttachment? = nil
     
     // Convenience flags
     private var hasNoInstruments: Bool { instruments.isEmpty }
@@ -159,8 +159,8 @@ struct PracticeTimerView: View {
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
     // Ephemeral media flag key added as per instructions
-    private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
-    private let currentSessionIDKey = "PracticeTimer.currentSessionID"
+    let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
+    let currentSessionIDKey = "PracticeTimer.currentSessionID"
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
@@ -181,10 +181,10 @@ struct PracticeTimerView: View {
     private let tasksDefaultsKey: String = "practiceTasks_v1"
     private let sessionDiscardedKey = "PracticeTimer.sessionDiscarded"
     // sessionActiveKey: true while a timer session is in-progress (even if paused). Used to distinguish fresh launch vs resume. We clear staging only when false.
-    private let sessionActiveKey = "PracticeTimer.sessionActive"
+    let sessionActiveKey = "PracticeTimer.sessionActive"
 
     // Unique per-process boot identifier to detect cold launches (force quit / crash relaunch)
-    private let sessionBootIDKey = "PracticeTimer.bootID"
+    let sessionBootIDKey = "PracticeTimer.bootID"
     private var currentBootID: String { String(getpid()) }
 
     // BEGIN TASKS DEFAULTS PATCH
@@ -318,7 +318,7 @@ struct PracticeTimerView: View {
     }
     // Returns a bulleted string of ONLY completed task lines, or nil if none.
     // Uses the same boolean flag that drives the checkbox in the task pad.
-    private func composeCompletedTasksNotesString() -> String? {
+    func composeCompletedTasksNotesString() -> String? {
         let trimmedCompleted = taskLines
             .filter { $0.isDone }
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -327,7 +327,7 @@ struct PracticeTimerView: View {
         guard !trimmedCompleted.isEmpty else { return nil }
         return trimmedCompleted.map { "• \($0)" }.joined(separator: "\n")
     }
-    private func resetTasksForNewSessionContext() {
+    func resetTasksForNewSessionContext() {
         // Fresh context: allow presets to load again when pad opens
         taskLines.removeAll()
         autoTaskTexts.removeAll()
@@ -995,201 +995,25 @@ private var tasksPadSection: some View {
 
     // MARK: - Sheet content helpers
 
-    @ViewBuilder
-    private var instrumentPickerSheet: some View {
-        NavigationView {
-            VStack {
-                Picker("Instrument", selection: $instrumentIndex) {
-                    ForEach(instruments.indices, id: \.self) { i in
-                        Text(instruments[i].name ?? "Instrument").tag(i)
-                    }
-                }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-            }
-            .navigationTitle("Instrument")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        applyInstrumentIndex()
-                        showInstrumentSheet = false
-                    }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showInstrumentSheet = false }
-                }
-            }
-        }
-    }
+    
 
-    @ViewBuilder
-    private var activityPickerSheet: some View {
-        NavigationView {
-            VStack {
-                Picker("Activity", selection: $activityChoice) {
-                    ForEach(activityChoicesPinned(), id: \.self) { choice in
-                        Text(activityDisplayName(for: choice)).tag(choice)
-                    }
-                }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-                .onChange(of: activityChoice) { _, choice in
-                    applyChoice(choice)
-                    // NEW: when activity changes in the timer, reset tasks context
-                    resetTasksForNewSessionContext()
-                }
-            }
-            .navigationTitle("Activity")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { showActivitySheet = false }
-                }
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { showActivitySheet = false }
-                }
-            }
-        }
-    }
+    
 
-    @ViewBuilder
-    private var reviewSheet: some View {
-        PostRecordDetailsView(
-            isPresented: $showReviewSheet,
-            timestamp: (finalizedStartDate ?? startDate ?? Date()),
-            durationSeconds: finalizedDuration,
-            instrument: instrument,
-            activityTypeRaw: activity.rawValue,
-            activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-            notesPrefill: composeCompletedTasksNotesString(),
-            prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
-            prefillAttachmentNames: audioTitles,
-            onSaved: {
-                didSaveFromReview = true
-                clearPersistedTimer()
-                clearPersistedStagedAttachments()
-                clearPersistedTasks()
-                resetUIOnly()
-                stagedAudio.removeAll()
-                audioTitles.removeAll()
-                stagedImages.removeAll()
-                stagedVideos.removeAll()
-                videoThumbnails.removeAll()
-                selectedThumbnailID = nil
-                UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                isPresented = false
-            },
-            onCancel: { didCancelFromReview = true }
-        )
-    }
+    
 
-    @ViewBuilder
-    private var audioHelpSheet: some View {
-        InfoSheetView(
-            title: "Quick audio takes (for now)",
-            bullets: [
-                "Open Voice Memos to record.",
-                "Share to Files when done.",
-                "Back here, use Add Attachment to include it."
-            ],
-            primaryCTA: nil
-        )
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
-    }
+    
 
-    @ViewBuilder
-    private var videoHelpSheet: some View {
-        InfoSheetView(
-            title: "Quick video clips (for now)",
-            bullets: [
-                "Open Camera → Video to record.",
-                "Save to Photos or Files.",
-                "Back here, use Add Attachment to include it."
-            ],
-            primaryCTA: nil
-        )
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
-    }
+    
 
-    @ViewBuilder
-    private var audioRecorderSheet: some View {
-        AudioRecorderView { url in
-            Task { await stageAudioURL(url) }
-            showAudioRecorder = false
-        }
-        .presentationDetents([.medium])
-        .presentationDragIndicator(.visible)
-    }
+    
 
-    @ViewBuilder
-    private var videoRecorderFullScreen: some View {
-        NavigationStack {
-            VideoRecorderView { url in
-                stageVideoURL(url)
-                showVideoRecorder = false
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { showVideoRecorder = false }
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
+    
 
-    @ViewBuilder
-    private var cameraSheet: some View {
-        CameraCaptureView { image in
-            stageImage(image)
-        }
-    }
+    
 
-    @ViewBuilder
-    private func attachmentViewerView(for payload: PTVViewerURL) -> some View {
-        // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
-        let imageURLs: [URL] = []
-        let audioURLs: [URL] = []
-        let videoURLs: [URL] = [payload.url]
+    
 
-        let startIndex: Int = 0
-
-        AttachmentViewerView(
-            imageURLs: imageURLs,
-            startIndex: startIndex,
-            themeBackground: Color(.systemBackground),
-            videoURLs: videoURLs,
-            audioURLs: audioURLs
-        )
-        .onAppear {
-            killDroneAndMetronome()
-        }
-    }
-
-    @ViewBuilder
-    private func trimSheet(for item: StagedAttachment) -> some View {
-        if let url = surrogateURL(for: item) {
-            MediaTrimView(
-                assetURL: url,
-                mediaType: (item.kind == .audio ? .audio : .video),
-                onCancel: {
-                    trimItem = nil
-                },
-                onSaveAsNew: { newURL in
-                    handleTrimSaveAsNew(from: newURL, basedOn: item)
-                },
-                onReplaceOriginal: { newURL in
-                    handleTrimReplaceOriginal(from: newURL, for: item)
-                }
-            )
-            .accessibilityLabel("Trim media")
-            .accessibilityHint("Edit start and end of the clip")
-        } else {
-            Text("Unable to open trimmer").padding()
-        }
-    }
+    
 // MARK: - Cards (split to help the type-checker)
 
    
@@ -1203,12 +1027,12 @@ private var tasksPadSection: some View {
         return "Instrument"
     }
 
-    private func applyInstrumentIndex() {
+    func applyInstrumentIndex() {
         guard instruments.indices.contains(instrumentIndex) else { return }
         instrument = instruments[instrumentIndex]
     }
 
-    private func activityDisplayName(for choice: String) -> String {
+    func activityDisplayName(for choice: String) -> String {
         if choice.hasPrefix("core:") {
             if let raw = Int(choice.split(separator: ":").last ?? "0"),
                let t = SessionActivityType(rawValue: Int16(raw)) {
@@ -1223,7 +1047,7 @@ private var tasksPadSection: some View {
 
     // MARK: - Apply choices / primary
 
-    private func applyChoice(_ choice: String) {
+    func applyChoice(_ choice: String) {
         if choice.hasPrefix("core:") {
             if let raw = Int(choice.split(separator: ":").last ?? "0") {
                 activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
@@ -1263,7 +1087,7 @@ private var tasksPadSection: some View {
         activityChoice = "core:0"
     }
 
-    private func activityChoicesPinned() -> [String] {
+    func activityChoicesPinned() -> [String] {
         let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
         let customs: [String] = userActivities.compactMap { ua in
             let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1325,7 +1149,7 @@ private var tasksPadSection: some View {
     }
 
     // MARK: - Background-safe timer controls
-    private func start() {
+    func start() {
         UserDefaults.standard.set(true, forKey: sessionActiveKey)
         // Seed a new session ID when starting a fresh session so PostRecordDetailsView can clear its drafts
         let ud = UserDefaults.standard
@@ -1373,7 +1197,7 @@ private var tasksPadSection: some View {
         recomputeElapsedForUI()
     }
 
-    private func reset() {
+    func reset() {
         pause()
         clearPersistedTimer()
         clearPersistedStagedAttachments()
@@ -1620,7 +1444,7 @@ private var tasksPadSection: some View {
         }
     }
 
-    private func clearPersistedTimer() {
+    func clearPersistedTimer() {
         let d = UserDefaults.standard
         d.removeObject(forKey: TimerDefaultsKey.startedAtEpoch.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.accumulated.rawValue)
@@ -1629,7 +1453,7 @@ private var tasksPadSection: some View {
         d.removeObject(forKey: TimerDefaultsKey.activityDetail.rawValue)
     }
 
-    private func resetUIOnly() {
+    func resetUIOnly() {
         isRunning = false
         startDate = nil
         accumulatedSeconds = 0
@@ -1667,7 +1491,7 @@ private var tasksPadSection: some View {
         d.set(showTasksPad, forKey: TimerDefaultsKey.showTasksPad.rawValue)
     }
 
-    private func clearPersistedTasks() {
+    func clearPersistedTasks() {
         let d = UserDefaults.standard
         d.removeObject(forKey: TimerDefaultsKey.taskLines.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.autoTaskTexts.rawValue)
@@ -1927,7 +1751,7 @@ private var tasksPadSection: some View {
         persistStagedAttachments()
     }
 
-    private func clearPersistedStagedAttachments() {
+    func clearPersistedStagedAttachments() {
         let d = UserDefaults.standard
         d.removeObject(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
@@ -1949,7 +1773,7 @@ private var tasksPadSection: some View {
 
     // MARK: - Audio attachment helpers
 
-    private func stageAudioURL(_ url: URL) async {
+    func stageAudioURL(_ url: URL) async {
         do {
             let data = try Data(contentsOf: url)
             // Clean up original file to avoid duplicates taking space
@@ -2018,7 +1842,7 @@ private var tasksPadSection: some View {
         }
     }
 
-    private func stageVideoURL(_ url: URL) {
+    func stageVideoURL(_ url: URL) {
         do {
             let data = try Data(contentsOf: url)
             // Clean up original file to avoid duplicates taking space
@@ -2113,7 +1937,7 @@ private var tasksPadSection: some View {
     
 
     // MARK: - Image attachment helpers (camera)
-    private func stageImage(_ image: UIImage) {
+    func stageImage(_ image: UIImage) {
         if let data = image.jpegData(compressionQuality: 0.8) {
             let id = UUID()
             stagedImages.append(StagedAttachment(id: id, data: data, kind: .image))
@@ -2144,7 +1968,7 @@ private var tasksPadSection: some View {
     }
 
     // Helper to get temporary surrogate URL for a staged attachment
-    private func surrogateURL(for att: StagedAttachment) -> URL? {
+    func surrogateURL(for att: StagedAttachment) -> URL? {
         let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
         return FileManager.default.temporaryDirectory.appendingPathComponent(att.id.uuidString).appendingPathExtension(ext)
     }
@@ -2256,7 +2080,7 @@ private var tasksPadSection: some View {
     }
 
     // MARK: - Trim helpers (extracted to reduce type-checking complexity)
-    private func handleTrimSaveAsNew(from newURL: URL, basedOn item: StagedAttachment) {
+    func handleTrimSaveAsNew(from newURL: URL, basedOn item: StagedAttachment) {
         if let data = try? Data(contentsOf: newURL) {
             let newID = UUID()
             let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
@@ -2289,7 +2113,7 @@ private var tasksPadSection: some View {
         trimItem = nil
     }
 
-    private func handleTrimReplaceOriginal(from newURL: URL, for item: StagedAttachment) {
+    func handleTrimReplaceOriginal(from newURL: URL, for item: StagedAttachment) {
         let refs = StagingStore.list()
         guard let ref = refs.first(where: { $0.id == item.id }) else {
             try? FileManager.default.removeItem(at: newURL)
@@ -2421,7 +2245,7 @@ private var tasksPadSection: some View {
  
 // MARK: - Local InfoSheetView (minimal)
 // If a global InfoSheetView exists later, rename this to avoid collisions.
-fileprivate struct InfoSheetView: View {
+struct InfoSheetView: View {
     let title: String
     let bullets: [String]
     let primaryCTA: (() -> Void)?
