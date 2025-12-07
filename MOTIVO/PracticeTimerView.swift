@@ -389,373 +389,177 @@ struct PracticeTimerView: View {
         autoTaskTexts.removeAll()
         persistTasksSnapshot()
     }
-    var body: some View {
+        var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Theme.Spacing.l) {
-                    SessionMetaCard(
-                                        instruments: instruments,
-                                        instrument: $instrument,
-                                        showInstrumentSheet: $showInstrumentSheet,
-                                        showActivitySheet: $showActivitySheet,
-                                        currentInstrumentName: currentInstrumentName(),
-                                        activityLabel: activityDisplayName(for: activityChoice)
-                                    )
+            mainScrollView
+        }
+    }
 
-                    if showDroneStrip {
-                        // === DRONE CARD ===
-                        VStack(spacing: Theme.Spacing.s) {
-                            DroneControlStripCard(
-                                droneIsOn: $droneIsOn,
-                                droneVolume: $droneVolume,
-                                droneNoteIndex: $droneNoteIndex,
-                                droneFreq: $droneFreq,
-                                showDroneVolumePopover: $showDroneVolumePopover,
-                                droneNotes: droneNotes,
-                                droneEngine: droneEngine,
-                                recorderIcon: recorderIcon
-                            )
-                        }
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .cardSurface()
-                    }
+    // MARK: - Cards (split to help the type-checker)
 
-                    if showMetronomeStrip {
-                        VStack(spacing: Theme.Spacing.s) {
-                            MetronomeControlStripCard(
-                                metronomeIsOn: $metronomeIsOn,
-                                metronomeBPM: $metronomeBPM,
-                                metronomeAccentEvery: $metronomeAccentEvery,
-                                metronomeVolume: $metronomeVolume,
-                                metronomeEngine: metronomeEngine,
-                                recorderIcon: recorderIcon
-                            )
-                        }
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .cardSurface()
-                    }
+    @ViewBuilder
+    private var mainScrollView: some View {
+        ScrollView {
+            mainContent
+        }
+        .navigationTitle("Timer")
+        .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
+        .appBackground()
+        // Single, unified prefetch path to avoid duplicate first-paint work
+        .task {
+            guard !didPrefetch else { return }
+            didPrefetch = true
 
-                    TimerCard(
-                                         elapsedLabel: formattedElapsed(elapsedSeconds),
-                                         isRunning: isRunning,
-                                         onStart: { start() },
-                                         onPause: { pause() },
-                                         onReset: { reset() },
-                                         onFinish: { finish() }
-                                     )
-
-                    // ---------- Recording helpers (moved below timer) ----------
-                    MediaRecorderRowCard(
-    showAudioRecorder: $showAudioRecorder,
-    showCamera: $showCamera,
-    showVideoRecorder: $showVideoRecorder,
-    droneIsOn: $droneIsOn,
-    recorderIcon: recorderIcon,
-    droneEngine: droneEngine,
-    stopAttachmentPlayback: stopAttachmentPlayback,
-    ensureCameraAuthorized: ensureCameraAuthorized
-)
-.cardSurface()
-
-                    // --- Tasks/Notes Pad (v7.9A) ---
-                    Group {
-                        if showTasksPad {
-                            VStack(alignment: .leading, spacing: 8) {
-                                // Centered header to align with rest of page
-                                HStack(alignment: .firstTextBaseline) {
-                                            Text("Notes / Tasks")
-                                                .sectionHeader()
-
-                                            Spacer(minLength: 0)
-
-                                            // Discrete "Clear all" – wipes pad, no auto-refill
-                                            Button(action: {
-                                                clearAllTasks()
-                                            }) {
-                                                Text("Clear all")
-                                                    .font(Theme.Text.body)
-                                                    .foregroundStyle(tasksAccent)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .accessibilityLabel("Clear all tasks")
-
-                                            // Chevron-up to collapse
-                                            Button(action: {
-                                                showTasksPad = false
-                                            }) {
-                                                Image(systemName: "chevron.up")
-                                                    .font(.system(size: 14, weight: .semibold))
-                                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                                    .padding(.horizontal, 4)
-                                                    .padding(.vertical, 6)
-                                                    .contentShape(Rectangle())
-                                            }
-                                            .buttonStyle(.plain)
-                                            .accessibilityLabel("Hide notes and tasks")
-                                        }
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-
-                                ForEach($taskLines) { $line in
-                                    HStack(spacing: 8) {
-                                        Button { line.isDone.toggle(); persistTasksSnapshot() } label: {
-                                            Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
-                                                .foregroundStyle(tasksAccent)
-                                        }
-                                        TextField(
-                                            "Task",
-                                            text: Binding(
-                                                get: { line.text },
-                                                set: { newValue in
-                                                    if newValue.contains("\n") {
-                                                        // Strip newline characters and treat as "return"
-                                                        let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
-                                                        line.text = cleaned
-                                                        handleTaskReturn(for: line.id)
-                                                    } else {
-                                                        line.text = newValue
-                                                    }
-                                                }
-                                            ),
-                                            axis: .vertical
-                                        )
-                                        .textFieldStyle(.plain)
-                                        .disableAutocorrection(true)
-                                        .focused($focusedTaskID, equals: line.id)
-                                        .onTapGesture {
-                                            focusedTaskID = line.id
-                                        }
-                                        .onChange(of: focusedTaskID) { _, newFocus in
-                                            if newFocus == line.id {
-                                                // If current equals auto text, clear to start fresh
-                                                if let auto = autoTaskTexts[line.id], line.text == auto {
-                                                    line.text = ""
-                                                }
-                                                persistTasksSnapshot()
-                                            }
-                                        }
-
-                                        Spacer(minLength: 8)
-
-                                        Button(role: .destructive) {
-                                            deleteLine(line.id)
-                                        } label: {
-                                            Image(systemName: "trash")
-                                                .foregroundStyle(.primary.opacity(0.8))
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                                Button(action: { addEmptyTaskLine() }) {
-                                    HStack { Image(systemName: "plus"); Text("Add line") }
-                                        .foregroundStyle(tasksAccent)
-                                }
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                        } else {
-                            Button(action: {
-                                showTasksPad = true
-                                loadPracticeDefaultsIfNeeded()
-                                loadDefaultTasksIfNeeded()
-                                persistTasksSnapshot()
-                            }) {
-                                HStack(spacing: 8) {
-                                    Text("Notes / Tasks")
-                                        .sectionHeader()
-
-                                    Spacer()
-
-                                    Image(systemName: "chevron.down")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Show notes and tasks")
-                            .padding(.vertical, 8)
-                        }
-                    }
-                    .cardSurface()
-
-                    // --- Attachments card (images + audio + videos) ---
-                    if !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty {
-                        AttachmentsCard(
-                            stagedImages: $stagedImages,
-                            stagedAudio: $stagedAudio,
-                            stagedVideos: $stagedVideos,
-                            selectedThumbnailID: $selectedThumbnailID,
-                            trimItem: $trimItem,
-                            audioTitleEditingBuffer: $audioTitleEditingBuffer,
-                            audioTitleDidImmediatePersist: $audioTitleDidImmediatePersist,
-                            audioTitles: $audioTitles,
-                            audioAutoTitles: audioAutoTitles,
-                            audioDurations: audioDurations,
-                            videoThumbnails: $videoThumbnails,
-                            stagedSizeWarning: stagedSizeWarning,
-                            currentlyPlayingID: currentlyPlayingID,
-                            isAudioPlaying: isAudioPlaying,
-                            recorderIcon: recorderIcon,
-                            focusedAudioTitleID: $focusedAudioTitleID,
-                            formattedClipDuration: formattedClipDuration,
-                            surrogateURL: surrogateURL(for:),
-                            onPersistStagedAttachments: { persistStagedAttachments() },
-                            onTogglePlay: { togglePlay($0) },
-                            onDeleteAudio: { deleteAudio($0) },
-                            onPersistAudioTitleImmediately: { id, buffer in
-                                persistAudioTitleImmediately(for: id, bufferValue: buffer)
-                            },
-                            onScheduleDebouncedAudioTitlePersist: { id, buffer in
-                                scheduleDebouncedAudioTitlePersist(for: id, bufferValue: buffer)
-                            },
-                            onPersistCommittedAudioTitle: { id in
-                                persistCommittedAudioTitle(for: id)
-                            },
-                            onPlayVideo: { playVideo($0) }
-                        )
-                        .cardSurface()
-                    }
-
-                }
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.top, Theme.Spacing.l)
-                .padding(.bottom, Theme.Spacing.xl)
+            // Detect cold launch by boot ID
+            let lastBootID = UserDefaults.standard.string(forKey: sessionBootIDKey)
+            if lastBootID != currentBootID {
+                // Fresh process launch (cold start), force clean state
+                stopAttachmentPlayback()
+                clearPersistedStagedAttachments()
+                clearAllStagingStoreRefs()
+                clearPersistedTasks()
+                purgeStagedTempFiles()
+                stagedAudio.removeAll()
+                audioTitles.removeAll()
+                audioAutoTitles.removeAll()
+                audioDurations.removeAll()
+                stagedImages.removeAll()
+                stagedVideos.removeAll()
+                videoThumbnails.removeAll()
+                selectedThumbnailID = nil
+                clearPersistedTimer()
+                resetUIOnly()
+                UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                UserDefaults.standard.set(currentBootID, forKey: sessionBootIDKey)
             }
-            .navigationTitle("Timer")
-            .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
-            .appBackground()
-            // Single, unified prefetch path to avoid duplicate first-paint work
-            .task {
-                guard !didPrefetch else { return }
-                didPrefetch = true
 
-                // Detect cold launch by boot ID
-                let lastBootID = UserDefaults.standard.string(forKey: sessionBootIDKey)
-                if lastBootID != currentBootID {
-                    // Fresh process launch (cold start), force clean state
-                    stopAttachmentPlayback()
-                    clearPersistedStagedAttachments()
-                    clearAllStagingStoreRefs()
-                    clearPersistedTasks()
-                    purgeStagedTempFiles()
-                    stagedAudio.removeAll()
-                    audioTitles.removeAll()
-                    audioAutoTitles.removeAll()
-                    audioDurations.removeAll()
-                    stagedImages.removeAll()
-                    stagedVideos.removeAll()
-                    videoThumbnails.removeAll()
-                    selectedThumbnailID = nil
-                    clearPersistedTimer()
-                    resetUIOnly()
-                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                    UserDefaults.standard.set(currentBootID, forKey: sessionBootIDKey)
-                }
-
-                // New sessionActiveKey logic: clear staging etc if no active session, to ensure clean state on fresh launch.
-                let isActive = UserDefaults.standard.bool(forKey: sessionActiveKey)
-                if !isActive {
-                    stopAttachmentPlayback()
-                    clearPersistedStagedAttachments()
-                    clearAllStagingStoreRefs()
-                    clearPersistedTasks()
-                    purgeStagedTempFiles()
-                    stagedAudio.removeAll()
-                    audioTitles.removeAll()
-                    audioAutoTitles.removeAll()
-                    audioDurations.removeAll()
-                    stagedImages.removeAll()
-                    stagedVideos.removeAll()
-                    videoThumbnails.removeAll()
-                    selectedThumbnailID = nil
-                    clearPersistedTimer()
-                    resetUIOnly()
-                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                    UserDefaults.standard.set(true, forKey: sessionActiveKey)
-                    // NEW: reset Notes / Tasks pad for this fresh session
-                    resetTasksForNewSessionContext()
-                }
-
-                instruments = fetchInstruments()
-                if instrument == nil {
-                    if let primaryName = fetchPrimaryInstrumentName(),
-                       let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
-                        instrument = match
-                        if let idx = instruments.firstIndex(of: match) { instrumentIndex = idx }
-                    } else if hasOneInstrument {
-                        instrument = instruments.first
-                        instrumentIndex = 0
-                    } else if hasMultipleInstruments {
-                        instrumentIndex = 0 // safe default
-                        instrument = instruments.first
-                    }
-                } else if let current = instrument,
-                          let idx = instruments.firstIndex(of: current) {
-                    instrumentIndex = idx
-                }
-
-                loadUserActivities()
-                applyPrimaryActivityRef()
-                syncActivityChoiceFromState()
-                do { try StagingStore.bootstrap() } catch { /* ignore */ }
+            // New sessionActiveKey logic: clear staging etc if no active session, to ensure clean state on fresh launch.
+            let isActive = UserDefaults.standard.bool(forKey: sessionActiveKey)
+            if !isActive {
+                stopAttachmentPlayback()
+                clearPersistedStagedAttachments()
+                clearAllStagingStoreRefs()
+                clearPersistedTasks()
+                purgeStagedTempFiles()
+                stagedAudio.removeAll()
+                audioTitles.removeAll()
+                audioAutoTitles.removeAll()
+                audioDurations.removeAll()
+                stagedImages.removeAll()
+                stagedVideos.removeAll()
+                videoThumbnails.removeAll()
+                selectedThumbnailID = nil
+                clearPersistedTimer()
+                resetUIOnly()
+                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                UserDefaults.standard.set(true, forKey: sessionActiveKey)
+                // NEW: reset Notes / Tasks pad for this fresh session
+                resetTasksForNewSessionContext()
             }
-            .onAppear {
-                // Always bootstrap the staging store before any hydration that depends on it
-                do { try StagingStore.bootstrap() } catch { /* ignore */ }
 
-                // Install willResignActive observer to commit title buffers immediately on app transition
-                NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
-                    commitAllAudioTitleBuffersAndPersist()
+            instruments = fetchInstruments()
+            if instrument == nil {
+                if let primaryName = fetchPrimaryInstrumentName(),
+                   let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
+                    instrument = match
+                    if let idx = instruments.firstIndex(of: match) { instrumentIndex = idx }
+                } else if hasOneInstrument {
+                    instrument = instruments.first
+                    instrumentIndex = 0
+                } else if hasMultipleInstruments {
+                    instrumentIndex = 0 // safe default
+                    instrument = instruments.first
                 }
-                NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { _ in
-                    handleAppTerminationCleanup()
-                }
+            } else if let current = instrument,
+                      let idx = instruments.firstIndex(of: current) {
+                instrumentIndex = idx
+            }
 
-                // If last session was explicitly discarded, ensure staging store is empty before hydrating
-                if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
-                    clearAllStagingStoreRefs()
-                    UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
-                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                }
+            loadUserActivities()
+            applyPrimaryActivityRef()
+            syncActivityChoiceFromState()
+            do { try StagingStore.bootstrap() } catch { /* ignore */ }
+        }
+        .onAppear {
+            // Always bootstrap the staging store before any hydration that depends on it
+            do { try StagingStore.bootstrap() } catch { /* ignore */ }
 
-                // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
-                if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
-                    persistAudioTitleImmediately(for: fid, bufferValue: buffer)
-                    audioTitleEditingBuffer.removeValue(forKey: fid)
-                }
+            // Install willResignActive observer to commit title buffers immediately on app transition
+            NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+                commitAllAudioTitleBuffersAndPersist()
+            }
+            NotificationCenter.default.addObserver(forName: UIApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+                handleAppTerminationCleanup()
+            }
 
-                // Ensure any pending title edits are committed before hydration
-                commitAudioTitleEditingBuffers()
-                // Hydrate timer and staged attachments from storage (UserDefaults + StagingStore)
+            // If last session was explicitly discarded, ensure staging store is empty before hydrating
+            if UserDefaults.standard.bool(forKey: sessionDiscardedKey) {
+                clearAllStagingStoreRefs()
+                UserDefaults.standard.set(false, forKey: sessionDiscardedKey)
+                UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+            }
+
+            // Safety net: if an editing buffer leaked from a previous instance, commit it now before hydrating
+            if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
+                persistAudioTitleImmediately(for: fid, bufferValue: buffer)
+                audioTitleEditingBuffer.removeValue(forKey: fid)
+            }
+
+            // Ensure any pending title edits are committed before hydration
+            commitAudioTitleEditingBuffers()
+            // Hydrate timer and staged attachments from storage (UserDefaults + StagingStore)
+            hydrateTimerFromStorage()
+
+            // Determine persisted state after hydration
+            let d = UserDefaults.standard
+            let hasPersistedTimer = d.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue) > 0 || d.integer(forKey: TimerDefaultsKey.accumulated.rawValue) > 0 || d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
+            let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
+            let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
+            let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
+            let audioIDs = audioIDStrings.compactMap(UUID.init)
+            let videoIDs = videoIDStrings.compactMap(UUID.init)
+            let imageIDs = imageIDStrings.compactMap(UUID.init)
+            #if DEBUG
+            print("[PracticeTimer] hydrate IDs defaults audio=\(audioIDs) video=\(videoIDs) image=\(imageIDs) store=\(StagingStore.list().map{ $0.id })")
+            #endif
+            let hasPersistedStagedIDs = (!audioIDStrings.isEmpty || !videoIDStrings.isEmpty || !imageIDStrings.isEmpty)
+
+            // Also check the staging store to avoid clearing attachments that exist on disk
+
+            startTicker()
+
+            // Deterministic reconciliation with StagingStore to avoid visual disappearance
+            do { try StagingStore.bootstrap() } catch { /* ignore */ }
+            let storeRefs = StagingStore.list()
+            let storeHas = !storeRefs.isEmpty
+            let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
+            // Build ID sets per kind for comparison
+            let localAudioIDs = Set(stagedAudio.map { $0.id })
+            let localVideoIDs = Set(stagedVideos.map { $0.id })
+            let localImageIDs = Set(stagedImages.map { $0.id })
+            let storeAudioIDs = Set(storeRefs.filter { $0.kind == .audio }.map { $0.id })
+            let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
+            let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
+            let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
+            if (localEmpty && storeHas) || idsDiffer {
+                mirrorFromStagingStore()
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            switch newPhase {
+            case .active:
+                // Ensure any leaked/debounced title edits are committed before hydration
+                commitAllAudioTitleBuffersAndPersist()
+
                 hydrateTimerFromStorage()
-
-                // Determine persisted state after hydration
-                let d = UserDefaults.standard
-                let hasPersistedTimer = d.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue) > 0 || d.integer(forKey: TimerDefaultsKey.accumulated.rawValue) > 0 || d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
-                let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
-                let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
-                let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
-                let audioIDs = audioIDStrings.compactMap(UUID.init)
-                let videoIDs = videoIDStrings.compactMap(UUID.init)
-                let imageIDs = imageIDStrings.compactMap(UUID.init)
-                #if DEBUG
-                print("[PracticeTimer] hydrate IDs defaults audio=\(audioIDs) video=\(videoIDs) image=\(imageIDs) store=\(StagingStore.list().map{ $0.id })")
-                #endif
-                let hasPersistedStagedIDs = (!audioIDStrings.isEmpty || !videoIDStrings.isEmpty || !imageIDStrings.isEmpty)
-
-                // Also check the staging store to avoid clearing attachments that exist on disk
-
                 startTicker()
-
-                // Deterministic reconciliation with StagingStore to avoid visual disappearance
+                // Reconcile with StagingStore on resume to repopulate UI if needed
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
                 let storeRefs = StagingStore.list()
                 let storeHas = !storeRefs.isEmpty
                 let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
-                // Build ID sets per kind for comparison
                 let localAudioIDs = Set(stagedAudio.map { $0.id })
                 let localVideoIDs = Set(stagedVideos.map { $0.id })
                 let localImageIDs = Set(stagedImages.map { $0.id })
@@ -766,457 +570,728 @@ struct PracticeTimerView: View {
                 if (localEmpty && storeHas) || idsDiffer {
                     mirrorFromStagingStore()
                 }
-            }
-            .onChange(of: scenePhase) { _, newPhase in
-                switch newPhase {
-                case .active:
-                    // Ensure any leaked/debounced title edits are committed before hydration
-                    commitAllAudioTitleBuffersAndPersist()
+            case .inactive, .background:
+                // Commit all buffered title edits before persisting snapshot
+                commitAllAudioTitleBuffersAndPersist()
 
-                    hydrateTimerFromStorage()
-                    startTicker()
-                    // Reconcile with StagingStore on resume to repopulate UI if needed
-                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
-                    let storeRefs = StagingStore.list()
-                    let storeHas = !storeRefs.isEmpty
-                    let localEmpty = (stagedAudio.isEmpty && stagedImages.isEmpty && stagedVideos.isEmpty)
-                    let localAudioIDs = Set(stagedAudio.map { $0.id })
-                    let localVideoIDs = Set(stagedVideos.map { $0.id })
-                    let localImageIDs = Set(stagedImages.map { $0.id })
-                    let storeAudioIDs = Set(storeRefs.filter { $0.kind == .audio }.map { $0.id })
-                    let storeVideoIDs = Set(storeRefs.filter { $0.kind == .video }.map { $0.id })
-                    let storeImageIDs = Set(storeRefs.filter { $0.kind == .image }.map { $0.id })
-                    let idsDiffer = (localAudioIDs != storeAudioIDs) || (localVideoIDs != storeVideoIDs) || (localImageIDs != storeImageIDs)
-                    if (localEmpty && storeHas) || idsDiffer {
-                        mirrorFromStagingStore()
-                    }
-                case .inactive, .background:
-                    // Commit all buffered title edits before persisting snapshot
-                    commitAllAudioTitleBuffersAndPersist()
+                do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                stopTicker()
+                persistTimerSnapshotSafely(context: "scenePhase.background")
+                UserDefaults.standard.synchronize()
+                removeAudioObserversIfNeeded()
+                purgeStagedTempFiles()
+            @unknown default:
+                break
+            }
+        }
+        .onDisappear {
+            // Remove willResignActive observer to avoid leaks
+            NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+            NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification, object: nil)
 
-                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
-                    stopTicker()
-                    persistTimerSnapshotSafely(context: "scenePhase.background")
-                    UserDefaults.standard.synchronize()
-                    removeAudioObserversIfNeeded()
-                    purgeStagedTempFiles()
-                @unknown default:
-                    break
-                }
+            // Commit any in-progress audio title edit when leaving the view (covers in-app navigation without backgrounding)
+            if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
+                // Cancel pending debounce and persist immediately
+                if let w = audioTitleDebounceWork[fid] { w.cancel() }
+                audioTitleDebounceWork[fid] = nil
+                persistAudioTitleImmediately(for: fid, bufferValue: buffer)
+                audioTitleEditingBuffer.removeValue(forKey: fid)
             }
-            .onDisappear {
-                // Remove willResignActive observer to avoid leaks
-                NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
-                NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification, object: nil)
-
-                // Commit any in-progress audio title edit when leaving the view (covers in-app navigation without backgrounding)
-                if let fid = focusedAudioTitleID, let buffer = audioTitleEditingBuffer[fid] {
-                    // Cancel pending debounce and persist immediately
-                    if let w = audioTitleDebounceWork[fid] { w.cancel() }
-                    audioTitleDebounceWork[fid] = nil
-                    persistAudioTitleImmediately(for: fid, bufferValue: buffer)
-                    audioTitleEditingBuffer.removeValue(forKey: fid)
-                }
-            }
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Quit") {
-                        #if DEBUG
-                        StorageInspector.logSandboxUsage(tag: "Before Quit")
-                        #endif
-                        // Intentional discard: purge staged items associated with this live session
-                        let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
-                        if !__discardIDs.isEmpty {
-                            StagingStore.removeMany(ids: __discardIDs)
-                            // Delete underlying files for these refs now
-                            let refsToDelete = StagingStore.list()
-                            StagingStore.deleteFiles(for: refsToDelete)
-                            #if DEBUG
-                            print("[PracticeTimer] quit — removed \(__discardIDs.count) staged items")
-                            #endif
-                        }
-                        
-                        // Purge temp surrogates while staged arrays still have IDs
-                        purgeStagedTempFiles()
-                        removeAllSessionTempSurrogates()
-
-                        // Clear persisted and in-memory staged attachments and reset timer
-                        stopAttachmentPlayback()
-                        clearPersistedStagedAttachments()
-                        clearAllStagingStoreRefs()
-                        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
-                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                        clearPersistedTasks()
-                        clearPersistedTimer()
-                        resetUIOnly()
-                        stagedAudio.removeAll()
-                        audioTitles.removeAll()
-                        audioAutoTitles.removeAll()
-                        audioDurations.removeAll()
-                        stagedImages.removeAll()
-                        stagedVideos.removeAll()
-                        videoThumbnails.removeAll()
-                        selectedThumbnailID = nil
-                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                        #if DEBUG
-                        StorageInspector.logSandboxUsage(tag: "After Quit")
-                        #endif
-
-                        // Additional full cleanup of staged and temporary media (post-UI state updates)
-                        #if DEBUG
-                        print("[EphemeralCleanup] Quit cleanup triggered")
-                        #endif
-                        // 1) Remove any remaining staging refs and files (best-effort, non-destructive to saved sessions)
-                        do { try StagingStore.bootstrap() } catch { /* ignore */ }
-                        let allRefs = StagingStore.list()
-                        var removedRefCount = 0
-                        if !allRefs.isEmpty {
-                            // Remove refs from store metadata
-                            for ref in allRefs {
-                                StagingStore.remove(ref)
-                                removedRefCount += 1
-                            }
-                            // Delete any associated files on disk
-                            StagingStore.deleteFiles(for: allRefs)
-                        }
-                        #if DEBUG
-                        print("[EphemeralCleanup] StagingStore refs removed: \(removedRefCount)")
-                        #endif
-                        // 2) Remove any temporary surrogate recorder files (audio/video/image) and posters
-                        let fm = FileManager.default
-                        var removedAudioTemps = 0
-                        var removedImageTemps = 0
-                        var removedVideoTemps = 0
-                        var removedPosterTemps = 0
-                        // Remove any temp audio surrogates
-                        for att in stagedAudio {
-                            let url = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(att.id.uuidString)
-                                .appendingPathExtension("m4a")
-                            if (try? fm.removeItem(at: url)) != nil {
-                                removedAudioTemps += 1
-                            }
-                        }
-                        // Remove any temp image surrogates
-                        for att in stagedImages {
-                            let url = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(att.id.uuidString)
-                                .appendingPathExtension("jpg")
-                            if (try? fm.removeItem(at: url)) != nil {
-                                removedImageTemps += 1
-                            }
-                        }
-                        // Remove any temp video surrogates
-                        for att in stagedVideos {
-                            let url = FileManager.default.temporaryDirectory
-                                .appendingPathComponent(att.id.uuidString)
-                                .appendingPathExtension("mov")
-                            if (try? fm.removeItem(at: url)) != nil {
-                                removedVideoTemps += 1
-                            }
-                            // Also remove any poster files generated alongside
-                            let poster = FileManager.default.temporaryDirectory
-                                .appendingPathComponent("\(att.id.uuidString)_poster")
-                                .appendingPathExtension("jpg")
-                            if (try? fm.removeItem(at: poster)) != nil {
-                                removedPosterTemps += 1
-                            }
-                        }
-                        #if DEBUG
-                        print("[EphemeralCleanup] Temp audio: \(removedAudioTemps) image: \(removedImageTemps) video: \(removedVideoTemps) posters: \(removedPosterTemps)")
-                        #endif
-                        // 3) Reset ephemeral media flag
-                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                        #if DEBUG
-                        print("[EphemeralCleanup] Quit cleanup flag reset to false")
-                        #endif
-                        isPresented = false
-                    }
-                }
-            }
-            .sheet(isPresented: $showInstrumentSheet) {
-                NavigationView {
-                    VStack {
-                        Picker("Instrument", selection: $instrumentIndex) {
-                            ForEach(instruments.indices, id: \.self) { i in
-                                Text(instruments[i].name ?? "Instrument").tag(i)
-                            }
-                        }
-                        .pickerStyle(.wheel)
-                        .labelsHidden()
-                    }
-                    .navigationTitle("Instrument")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") {
-                                applyInstrumentIndex()
-                                showInstrumentSheet = false
-                            }
-                        }
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showInstrumentSheet = false }
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showActivitySheet) {
-                NavigationView {
-                    VStack {
-                        Picker("Activity", selection: $activityChoice) {
-                            ForEach(activityChoicesPinned(), id: \.self) { choice in
-                                Text(activityDisplayName(for: choice)).tag(choice)
-                            }
-                        }
-                        .pickerStyle(.wheel)
-                        .labelsHidden()
-                        .onChange(of: activityChoice) { _, choice in
-                            applyChoice(choice)
-                            // NEW: when activity changes in the timer, reset tasks context
-                            resetTasksForNewSessionContext()
-                        }
-                    }
-                    .navigationTitle("Activity")
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { showActivitySheet = false }
-                        }
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") { showActivitySheet = false }
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showReviewSheet) {
-                PostRecordDetailsView(
-                    isPresented: $showReviewSheet,
-                    timestamp: (finalizedStartDate ?? startDate ?? Date()),
-                    durationSeconds: finalizedDuration,
-                    instrument: instrument,
-                    activityTypeRaw: activity.rawValue,
-                    activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-                    notesPrefill: composeCompletedTasksNotesString(),
-                    prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
-                    prefillAttachmentNames: audioTitles,
-                    onSaved: {
-                        didSaveFromReview = true
-                        clearPersistedTimer()
-                        clearPersistedStagedAttachments()
-                        clearPersistedTasks()
-                        resetUIOnly()
-                        stagedAudio.removeAll()
-                        audioTitles.removeAll()
-                        stagedImages.removeAll()
-                        stagedVideos.removeAll()
-                        videoThumbnails.removeAll()
-                        selectedThumbnailID = nil
-                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                        isPresented = false
-                    },
-                    onCancel: { didCancelFromReview = true }
-                )
-            }
-            .onChange(of: showReviewSheet) { oldValue, newValue in
-                // If the review sheet was closed and no save occurred, reset timer for next opening
-                if oldValue == true && newValue == false && didSaveFromReview == false {
-                    if didCancelFromReview == true {
-                        // Explicit chevron cancel: do nothing (preserve state)
-                    } else {
-                        // Intentional discard: purge staged items associated with this live session
-                        let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
-                        if !__discardIDs.isEmpty {
-                            StagingStore.removeMany(ids: __discardIDs)
-                        }
-                        
+        }
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Quit") {
+                    #if DEBUG
+                    StorageInspector.logSandboxUsage(tag: "Before Quit")
+                    #endif
+                    // Intentional discard: purge staged items associated with this live session
+                    let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+                    if !__discardIDs.isEmpty {
+                        StagingStore.removeMany(ids: __discardIDs)
+                        // Delete underlying files for these refs now
                         let refsToDelete = StagingStore.list()
-                        clearPersistedTimer()
-                        clearPersistedStagedAttachments()
-                        clearAllStagingStoreRefs()
-                        UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
-                        UserDefaults.standard.set(false, forKey: sessionActiveKey)
-                        clearPersistedTasks()
-                        resetUIOnly()
-                        stagedAudio.removeAll()
-                        audioTitles.removeAll()
-                        stagedImages.removeAll()
-                        stagedVideos.removeAll()
-                        videoThumbnails.removeAll()
-                        selectedThumbnailID = nil
                         StagingStore.deleteFiles(for: refsToDelete)
-                        purgeStagedTempFiles()
-                        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
-                        UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                        #if DEBUG
+                        print("[PracticeTimer] quit — removed \(__discardIDs.count) staged items")
+                        #endif
                     }
-                    didCancelFromReview = false
-                }
-            }
-            .onChange(of: activityChoice) { _, _ in
-                // Clear current pad contents and auto-text mappings
-                taskLines.removeAll()
-                autoTaskTexts.removeAll()
+                    
+                    // Purge temp surrogates while staged arrays still have IDs
+                    purgeStagedTempFiles()
+                    removeAllSessionTempSurrogates()
 
-                // Load the correct per-activity template (Practice, Rehearsal, Recording, etc.)
-                loadPracticeDefaultsIfNeeded()
+                    // Clear persisted and in-memory staged attachments and reset timer
+                    stopAttachmentPlayback()
+                    clearPersistedStagedAttachments()
+                    clearAllStagingStoreRefs()
+                    UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                    clearPersistedTasks()
+                    clearPersistedTimer()
+                    resetUIOnly()
+                    stagedAudio.removeAll()
+                    audioTitles.removeAll()
+                    audioAutoTitles.removeAll()
+                    audioDurations.removeAll()
+                    stagedImages.removeAll()
+                    stagedVideos.removeAll()
+                    videoThumbnails.removeAll()
+                    selectedThumbnailID = nil
+                    UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                    #if DEBUG
+                    StorageInspector.logSandboxUsage(tag: "After Quit")
+                    #endif
 
-                // Persist snapshot so the pad survives suspends/resumes
-                persistTasksSnapshot()
-            }
-            // Info sheets for recording help
-            .sheet(isPresented: $showAudioHelp) {
-                InfoSheetView(
-                    title: "Quick audio takes (for now)",
-                    bullets: [
-                        "Open Voice Memos to record.",
-                        "Share to Files when done.",
-                        "Back here, use Add Attachment to include it."
-                    ],
-                    primaryCTA: nil
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-            .sheet(isPresented: $showVideoHelp) {
-                InfoSheetView(
-                    title: "Quick video clips (for now)",
-                    bullets: [
-                        "Open Camera → Video to record.",
-                        "Save to Photos or Files.",
-                        "Back here, use Add Attachment to include it."
-                    ],
-                    primaryCTA: nil
-                )
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-            // Audio recorder sheet
-            .sheet(isPresented: $showAudioRecorder) {
-                AudioRecorderView { url in
-                    Task { await stageAudioURL(url) }
-                    showAudioRecorder = false
-                }
-                .presentationDetents([.medium])
-                .presentationDragIndicator(.visible)
-            }
-            // Attach .onChange OUTSIDE the sheet closure
-            .onChange(of: showAudioRecorder) { oldValue, newValue in
-                if newValue == true {
-                    droneEngine.stop()
-                    droneIsOn = false
-                }
-            }
-            // Video recorder fullScreenCover replacement
-            .fullScreenCover(isPresented: $showVideoRecorder) {
-                NavigationStack {
-                    VideoRecorderView { url in
-                        stageVideoURL(url)
-                        showVideoRecorder = false
+                    // Additional full cleanup of staged and temporary media (post-UI state updates)
+                    #if DEBUG
+                    print("[EphemeralCleanup] Quit cleanup triggered")
+                    #endif
+                    // 1) Remove any remaining staging refs and files (best-effort, non-destructive to saved sessions)
+                    do { try StagingStore.bootstrap() } catch { /* ignore */ }
+                    let allRefs = StagingStore.list()
+                    var removedRefCount = 0
+                    if !allRefs.isEmpty {
+                        // Remove refs from store metadata
+                        for ref in allRefs {
+                            StagingStore.remove(ref)
+                            removedRefCount += 1
+                        }
+                        // Delete any associated files on disk
+                        StagingStore.deleteFiles(for: allRefs)
                     }
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Close") { showVideoRecorder = false }
+                    #if DEBUG
+                    print("[EphemeralCleanup] StagingStore refs removed: \(removedRefCount)")
+                    #endif
+                    // 2) Remove any temporary surrogate recorder files (audio/video/image) and posters
+                    let fm = FileManager.default
+                    var removedAudioTemps = 0
+                    var removedImageTemps = 0
+                    var removedVideoTemps = 0
+                    var removedPosterTemps = 0
+                    // Remove any temp audio surrogates
+                    for att in stagedAudio {
+                        let url = FileManager.default.temporaryDirectory
+                            .appendingPathComponent(att.id.uuidString)
+                            .appendingPathExtension("m4a")
+                        if (try? fm.removeItem(at: url)) != nil {
+                            removedAudioTemps += 1
                         }
                     }
-                    .navigationBarTitleDisplayMode(.inline)
+                    // Remove any temp image surrogates
+                    for att in stagedImages {
+                        let url = FileManager.default.temporaryDirectory
+                            .appendingPathComponent(att.id.uuidString)
+                            .appendingPathExtension("jpg")
+                        if (try? fm.removeItem(at: url)) != nil {
+                            removedImageTemps += 1
+                        }
+                    }
+                    // Remove any temp video surrogates
+                    for att in stagedVideos {
+                        let url = FileManager.default.temporaryDirectory
+                            .appendingPathComponent(att.id.uuidString)
+                            .appendingPathExtension("mov")
+                        if (try? fm.removeItem(at: url)) != nil {
+                            removedVideoTemps += 1
+                        }
+                        // Also remove any poster files generated alongside
+                        let poster = FileManager.default.temporaryDirectory
+                            .appendingPathComponent("\(att.id.uuidString)_poster")
+                            .appendingPathExtension("jpg")
+                        if (try? fm.removeItem(at: poster)) != nil {
+                            removedPosterTemps += 1
+                        }
+                    }
+                    #if DEBUG
+                    print("[EphemeralCleanup] Temp audio: \(removedAudioTemps) image: \(removedImageTemps) video: \(removedVideoTemps) posters: \(removedPosterTemps)")
+                    #endif
+                    // 3) Reset ephemeral media flag
+                    UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                    #if DEBUG
+                    print("[EphemeralCleanup] Quit cleanup flag reset to false")
+                    #endif
+                    isPresented = false
                 }
             }
-            .onChange(of: showVideoRecorder) { _, newValue in
-                if newValue {
-                    killDroneAndMetronome()
-                }
-            }
-            .sheet(isPresented: $showCamera) {
-                CameraCaptureView { image in
-                    stageImage(image)
-                }
-            }
-            .onChange(of: showCamera) { oldValue, newValue in
-                if newValue == true {
-                    droneEngine.stop()
-                    droneIsOn = false
-                }
-            }
-            // Removed old VideoPlayer sheet entirely (per instructions)
-            /*
-            .sheet(isPresented: $showVideoPlayer, onDismiss: {
-                videoPlayerItem?.pause()
-                videoPlayerItem = nil
-            }) {
-                if let player = videoPlayerItem {
-                    VideoPlayer(player: player)
-                        .onAppear { player.play() }
-                        .ignoresSafeArea()
+        }
+        .sheet(isPresented: $showInstrumentSheet) {
+            instrumentPickerSheet
+        }
+        .sheet(isPresented: $showActivitySheet) {
+            activityPickerSheet
+        }
+        .sheet(isPresented: $showReviewSheet) {
+            reviewSheet
+        }
+        .onChange(of: showReviewSheet) { oldValue, newValue in
+            // If the review sheet was closed and no save occurred, reset timer for next opening
+            if oldValue == true && newValue == false && didSaveFromReview == false {
+                if didCancelFromReview == true {
+                    // Explicit chevron cancel: do nothing (preserve state)
                 } else {
-                    Text("Unable to play video")
-                        .padding()
+                    // Intentional discard: purge staged items associated with this live session
+                    let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
+                    if !__discardIDs.isEmpty {
+                        StagingStore.removeMany(ids: __discardIDs)
+                    }
+                    
+                    let refsToDelete = StagingStore.list()
+                    clearPersistedTimer()
+                    clearPersistedStagedAttachments()
+                    clearAllStagingStoreRefs()
+                    UserDefaults.standard.set(true, forKey: sessionDiscardedKey)
+                    UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                    clearPersistedTasks()
+                    resetUIOnly()
+                    stagedAudio.removeAll()
+                    audioTitles.removeAll()
+                    stagedImages.removeAll()
+                    stagedVideos.removeAll()
+                    videoThumbnails.removeAll()
+                    selectedThumbnailID = nil
+                    StagingStore.deleteFiles(for: refsToDelete)
+                    purgeStagedTempFiles()
+                    UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                    UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                 }
+                didCancelFromReview = false
             }
-            */
-            .fullScreenCover(item: $attachmentViewer) { payload in
+        }
+        .onChange(of: activityChoice) { _, _ in
+            // Clear current pad contents and auto-text mappings
+            taskLines.removeAll()
+            autoTaskTexts.removeAll()
+
+            // Load the correct per-activity template (Practice, Rehearsal, Recording, etc.)
+            loadPracticeDefaultsIfNeeded()
+
+            // Persist snapshot so the pad survives suspends/resumes
+            persistTasksSnapshot()
+        }
+        // Info sheets for recording help
+        .sheet(isPresented: $showAudioHelp) {
+            audioHelpSheet
+        }
+        .sheet(isPresented: $showVideoHelp) {
+            videoHelpSheet
+        }
+        // Audio recorder sheet
+        .sheet(isPresented: $showAudioRecorder) {
+            audioRecorderSheet
+        }
+        // Attach .onChange OUTSIDE the sheet closure
+        .onChange(of: showAudioRecorder) { oldValue, newValue in
+            if newValue == true {
+                droneEngine.stop()
+                droneIsOn = false
+            }
+        }
+        // Video recorder fullScreenCover replacement
+        .fullScreenCover(isPresented: $showVideoRecorder) {
+            videoRecorderFullScreen
+        }
+        .onChange(of: showVideoRecorder) { _, newValue in
+            if newValue {
                 killDroneAndMetronome()
-                // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
-                let imageURLs: [URL] = []
-                let audioURLs: [URL] = []
-                let videoURLs: [URL] = [payload.url]
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            cameraSheet
+        }
+        .onChange(of: showCamera) { oldValue, newValue in
+            if newValue == true {
+                droneEngine.stop()
+                droneIsOn = false
+            }
+        }
+        .fullScreenCover(item: $attachmentViewer) { payload in
+            attachmentViewerView(for: payload)
+        }
+        .alert("Camera access denied",
+               isPresented: $showCameraDeniedAlert,
+               actions: {
+                   Button("OK", role: .cancel) {}
+                   Button("Open Settings") {
+                       if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                   }
+               },
+               message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        // QA:
+        // - Long-press context menu "Trim" and inline trim buttons with scissors icon present on audio rows and video tiles
+        // - Trim buttons have ultraThinMaterial background and padding for visibility
+        // - Trim sheet opens with correct media type and URL
+        // - Trim save actions correctly add or replace staged attachments with updated metadata
+        // - No regressions in other UI or logic due to trim additions
+        .sheet(item: $trimItem, onDismiss: { trimItem = nil }) { item in
+            trimSheet(for: item)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Reconcile metronome running state with UI flag to avoid ghost instances
+            if metronomeIsOn && (metronomeEngineIsActuallyRunning() == false) {
+                metronomeIsOn = false
+            }
+            if !metronomeIsOn && (metronomeEngineIsActuallyRunning() == true) {
+                metronomeEngine.stop()
+            }
+        }
+    }
 
-                let startIndex: Int = 0
+    @ViewBuilder
+    private var mainContent: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            sessionMetaSection
+            droneSection
+            metronomeSection
+            timerSection
+            mediaRecorderSection
+            tasksPadSection
+            attachmentsSection
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.l)
+        .padding(.bottom, Theme.Spacing.xl)
+    }
 
-                AttachmentViewerView(
-                    imageURLs: imageURLs,
-                    startIndex: startIndex,
-                    themeBackground: Color(.systemBackground),
-                    videoURLs: videoURLs,
-                    audioURLs: audioURLs
+    @ViewBuilder
+    private var sessionMetaSection: some View {
+        SessionMetaCard(
+            instruments: instruments,
+            instrument: $instrument,
+            showInstrumentSheet: $showInstrumentSheet,
+            showActivitySheet: $showActivitySheet,
+            currentInstrumentName: currentInstrumentName(),
+            activityLabel: activityDisplayName(for: activityChoice)
+        )
+    }
+
+    @ViewBuilder
+    private var droneSection: some View {
+        if showDroneStrip {
+            VStack(spacing: Theme.Spacing.s) {
+                DroneControlStripCard(
+                    droneIsOn: $droneIsOn,
+                    droneVolume: $droneVolume,
+                    droneNoteIndex: $droneNoteIndex,
+                    droneFreq: $droneFreq,
+                    showDroneVolumePopover: $showDroneVolumePopover,
+                    droneNotes: droneNotes,
+                    droneEngine: droneEngine,
+                    recorderIcon: recorderIcon
                 )
             }
-            .alert("Camera access denied",
-                   isPresented: $showCameraDeniedAlert,
-                   actions: {
-                       Button("OK", role: .cancel) {}
-                       Button("Open Settings") {
-                           if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                       }
-                   },
-                   message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-            // QA:
-            // - Long-press context menu "Trim" and inline trim buttons with scissors icon present on audio rows and video tiles
-            // - Trim buttons have ultraThinMaterial background and padding for visibility
-            // - Trim sheet opens with correct media type and URL
-            // - Trim save actions correctly add or replace staged attachments with updated metadata
-            // - No regressions in other UI or logic due to trim additions
-            .sheet(item: $trimItem, onDismiss: { trimItem = nil }) { item in
-                if let url = surrogateURL(for: item) {
-                    MediaTrimView(assetURL: url, mediaType: (item.kind == .audio ? .audio : .video),
-                                  onCancel: {
-                                      trimItem = nil
-                                  },
-                                  onSaveAsNew: { newURL in
-                                      handleTrimSaveAsNew(from: newURL, basedOn: item)
-                                  }
-                                  , onReplaceOriginal: { newURL in
-                                      handleTrimReplaceOriginal(from: newURL, for: item)
-                                  }
-                    )
-                    .accessibilityLabel("Trim media")
-                    .accessibilityHint("Edit start and end of the clip")
-                } else {
-                    Text("Unable to open trimmer").padding()
-                }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .cardSurface()
+        }
+    }
+
+    @ViewBuilder
+    private var metronomeSection: some View {
+        if showMetronomeStrip {
+            VStack(spacing: Theme.Spacing.s) {
+                MetronomeControlStripCard(
+                    metronomeIsOn: $metronomeIsOn,
+                    metronomeBPM: $metronomeBPM,
+                    metronomeAccentEvery: $metronomeAccentEvery,
+                    metronomeVolume: $metronomeVolume,
+                    metronomeEngine: metronomeEngine,
+                    recorderIcon: recorderIcon
+                )
             }
-            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-                // Reconcile metronome running state with UI flag to avoid ghost instances
-                if metronomeIsOn && (metronomeEngineIsActuallyRunning() == false) {
-                    metronomeIsOn = false
+            .frame(maxWidth: .infinity, alignment: .center)
+            .cardSurface()
+        }
+    }
+
+    @ViewBuilder
+    private var timerSection: some View {
+        TimerCard(
+            elapsedLabel: formattedElapsed(elapsedSeconds),
+            isRunning: isRunning,
+            onStart: { start() },
+            onPause: { pause() },
+            onReset: { reset() },
+            onFinish: { finish() }
+        )
+    }
+
+    @ViewBuilder
+    private var mediaRecorderSection: some View {
+        MediaRecorderRowCard(
+            showAudioRecorder: $showAudioRecorder,
+            showCamera: $showCamera,
+            showVideoRecorder: $showVideoRecorder,
+            droneIsOn: $droneIsOn,
+            recorderIcon: recorderIcon,
+            droneEngine: droneEngine,
+            stopAttachmentPlayback: stopAttachmentPlayback,
+            ensureCameraAuthorized: ensureCameraAuthorized
+        )
+        .cardSurface()
+    }
+
+    @ViewBuilder
+    private var tasksPadSection: some View {
+        Group {
+            if showTasksPad {
+                VStack(alignment: .leading, spacing: 8) {
+                    // Centered header to align with rest of page
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Notes / Tasks")
+                            .sectionHeader()
+
+                        Spacer(minLength: 0)
+
+                        // Discrete "Clear all" – wipes pad, no auto-refill
+                        Button(action: {
+                            clearAllTasks()
+                        }) {
+                            Text("Clear all")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(tasksAccent)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear all tasks")
+
+                        // Chevron-up to collapse
+                        Button(action: {
+                            showTasksPad = false
+                        }) {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 6)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Hide notes and tasks")
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                    ForEach($taskLines) { $line in
+                        HStack(spacing: 8) {
+                            Button { line.isDone.toggle(); persistTasksSnapshot() } label: {
+                                Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(tasksAccent)
+                            }
+                            TextField(
+                                "Task",
+                                text: Binding(
+                                    get: { line.text },
+                                    set: { newValue in
+                                        if newValue.contains("\n") {
+                                            // Strip newline characters and treat as "return"
+                                            let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
+                                            line.text = cleaned
+                                            handleTaskReturn(for: line.id)
+                                        } else {
+                                            line.text = newValue
+                                        }
+                                    }
+                                ),
+                                axis: .vertical
+                            )
+                            .textFieldStyle(.plain)
+                            .disableAutocorrection(true)
+                            .focused($focusedTaskID, equals: line.id)
+                            .onTapGesture {
+                                focusedTaskID = line.id
+                            }
+                            .onChange(of: focusedTaskID) { _, newFocus in
+                                if newFocus == line.id {
+                                    // If current equals auto text, clear to start fresh
+                                    if let auto = autoTaskTexts[line.id], line.text == auto {
+                                        line.text = ""
+                                    }
+                                    persistTasksSnapshot()
+                                }
+                            }
+
+                            Spacer(minLength: 8)
+
+                            Button(role: .destructive) {
+                                deleteLine(line.id)
+                            } label: {
+                                Image(systemName: "trash")
+                                    .foregroundStyle(.primary.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    Button(action: { addEmptyTaskLine() }) {
+                        HStack { Image(systemName: "plus"); Text("Add line") }
+                            .foregroundStyle(tasksAccent)
+                    }
                 }
-                if !metronomeIsOn && (metronomeEngineIsActuallyRunning() == true) {
-                    metronomeEngine.stop()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 8)
+            } else {
+                Button(action: {
+                    showTasksPad = true
+                    loadPracticeDefaultsIfNeeded()
+                    loadDefaultTasksIfNeeded()
+                    persistTasksSnapshot()
+                }) {
+                    HStack(spacing: 8) {
+                        Text("Notes / Tasks")
+                            .sectionHeader()
+
+                        Spacer()
+
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Show notes and tasks")
+                .padding(.vertical, 8)
+            }
+        }
+        .cardSurface()
+    }
+
+    @ViewBuilder
+    private var attachmentsSection: some View {
+        if !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty {
+            AttachmentsCard(
+                stagedImages: $stagedImages,
+                stagedAudio: $stagedAudio,
+                stagedVideos: $stagedVideos,
+                selectedThumbnailID: $selectedThumbnailID,
+                trimItem: $trimItem,
+                audioTitleEditingBuffer: $audioTitleEditingBuffer,
+                audioTitleDidImmediatePersist: $audioTitleDidImmediatePersist,
+                audioTitles: $audioTitles,
+                audioAutoTitles: audioAutoTitles,
+                audioDurations: audioDurations,
+                videoThumbnails: $videoThumbnails,
+                stagedSizeWarning: stagedSizeWarning,
+                currentlyPlayingID: currentlyPlayingID,
+                isAudioPlaying: isAudioPlaying,
+                recorderIcon: recorderIcon,
+                focusedAudioTitleID: $focusedAudioTitleID,
+                formattedClipDuration: formattedClipDuration,
+                surrogateURL: surrogateURL(for:),
+                onPersistStagedAttachments: { persistStagedAttachments() },
+                onTogglePlay: { togglePlay($0) },
+                onDeleteAudio: { deleteAudio($0) },
+                onPersistAudioTitleImmediately: { id, buffer in
+                    persistAudioTitleImmediately(for: id, bufferValue: buffer)
+                },
+                onScheduleDebouncedAudioTitlePersist: { id, buffer in
+                    scheduleDebouncedAudioTitlePersist(for: id, bufferValue: buffer)
+                },
+                onPersistCommittedAudioTitle: { id in
+                    persistCommittedAudioTitle(for: id)
+                },
+                onPlayVideo: { playVideo($0) }
+            )
+            .cardSurface()
+        }
+    }
+
+    // MARK: - Sheet content helpers
+
+    @ViewBuilder
+    private var instrumentPickerSheet: some View {
+        NavigationView {
+            VStack {
+                Picker("Instrument", selection: $instrumentIndex) {
+                    ForEach(instruments.indices, id: \.self) { i in
+                        Text(instruments[i].name ?? "Instrument").tag(i)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+            }
+            .navigationTitle("Instrument")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        applyInstrumentIndex()
+                        showInstrumentSheet = false
+                    }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showInstrumentSheet = false }
                 }
             }
         }
     }
 
-    // MARK: - Cards (split to help the type-checker)
+    @ViewBuilder
+    private var activityPickerSheet: some View {
+        NavigationView {
+            VStack {
+                Picker("Activity", selection: $activityChoice) {
+                    ForEach(activityChoicesPinned(), id: \.self) { choice in
+                        Text(activityDisplayName(for: choice)).tag(choice)
+                    }
+                }
+                .pickerStyle(.wheel)
+                .labelsHidden()
+                .onChange(of: activityChoice) { _, choice in
+                    applyChoice(choice)
+                    // NEW: when activity changes in the timer, reset tasks context
+                    resetTasksForNewSessionContext()
+                }
+            }
+            .navigationTitle("Activity")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { showActivitySheet = false }
+                }
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { showActivitySheet = false }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var reviewSheet: some View {
+        PostRecordDetailsView(
+            isPresented: $showReviewSheet,
+            timestamp: (finalizedStartDate ?? startDate ?? Date()),
+            durationSeconds: finalizedDuration,
+            instrument: instrument,
+            activityTypeRaw: activity.rawValue,
+            activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
+            notesPrefill: composeCompletedTasksNotesString(),
+            prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
+            prefillAttachmentNames: audioTitles,
+            onSaved: {
+                didSaveFromReview = true
+                clearPersistedTimer()
+                clearPersistedStagedAttachments()
+                clearPersistedTasks()
+                resetUIOnly()
+                stagedAudio.removeAll()
+                audioTitles.removeAll()
+                stagedImages.removeAll()
+                stagedVideos.removeAll()
+                videoThumbnails.removeAll()
+                selectedThumbnailID = nil
+                UserDefaults.standard.set(false, forKey: sessionActiveKey)
+                UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+                UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
+                isPresented = false
+            },
+            onCancel: { didCancelFromReview = true }
+        )
+    }
+
+    @ViewBuilder
+    private var audioHelpSheet: some View {
+        InfoSheetView(
+            title: "Quick audio takes (for now)",
+            bullets: [
+                "Open Voice Memos to record.",
+                "Share to Files when done.",
+                "Back here, use Add Attachment to include it."
+            ],
+            primaryCTA: nil
+        )
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private var videoHelpSheet: some View {
+        InfoSheetView(
+            title: "Quick video clips (for now)",
+            bullets: [
+                "Open Camera → Video to record.",
+                "Save to Photos or Files.",
+                "Back here, use Add Attachment to include it."
+            ],
+            primaryCTA: nil
+        )
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private var audioRecorderSheet: some View {
+        AudioRecorderView { url in
+            Task { await stageAudioURL(url) }
+            showAudioRecorder = false
+        }
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+    }
+
+    @ViewBuilder
+    private var videoRecorderFullScreen: some View {
+        NavigationStack {
+            VideoRecorderView { url in
+                stageVideoURL(url)
+                showVideoRecorder = false
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { showVideoRecorder = false }
+                }
+            }
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    @ViewBuilder
+    private var cameraSheet: some View {
+        CameraCaptureView { image in
+            stageImage(image)
+        }
+    }
+
+    @ViewBuilder
+    private func attachmentViewerView(for payload: PTVViewerURL) -> some View {
+        // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
+        let imageURLs: [URL] = []
+        let audioURLs: [URL] = []
+        let videoURLs: [URL] = [payload.url]
+
+        let startIndex: Int = 0
+
+        AttachmentViewerView(
+            imageURLs: imageURLs,
+            startIndex: startIndex,
+            themeBackground: Color(.systemBackground),
+            videoURLs: videoURLs,
+            audioURLs: audioURLs
+        )
+        .onAppear {
+            killDroneAndMetronome()
+        }
+    }
+
+    @ViewBuilder
+    private func trimSheet(for item: StagedAttachment) -> some View {
+        if let url = surrogateURL(for: item) {
+            MediaTrimView(
+                assetURL: url,
+                mediaType: (item.kind == .audio ? .audio : .video),
+                onCancel: {
+                    trimItem = nil
+                },
+                onSaveAsNew: { newURL in
+                    handleTrimSaveAsNew(from: newURL, basedOn: item)
+                },
+                onReplaceOriginal: { newURL in
+                    handleTrimReplaceOriginal(from: newURL, for: item)
+                }
+            )
+            .accessibilityLabel("Trim media")
+            .accessibilityHint("Edit start and end of the clip")
+        } else {
+            Text("Unable to open trimmer").padding()
+        }
+    }
+// MARK: - Cards (split to help the type-checker)
 
    
    
