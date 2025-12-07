@@ -930,129 +930,28 @@ struct PracticeTimerView: View {
         .cardSurface()
     }
 
-    @ViewBuilder
-    private var tasksPadSection: some View {
-        Group {
-            if showTasksPad {
-                VStack(alignment: .leading, spacing: 8) {
-                    // Centered header to align with rest of page
-                    HStack(alignment: .firstTextBaseline) {
-                        Text("Notes / Tasks")
-                            .sectionHeader()
-
-                        Spacer(minLength: 0)
-
-                        // Discrete "Clear all" – wipes pad, no auto-refill
-                        Button(action: {
-                            clearAllTasks()
-                        }) {
-                            Text("Clear all")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(tasksAccent)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear all tasks")
-
-                        // Chevron-up to collapse
-                        Button(action: {
-                            showTasksPad = false
-                        }) {
-                            Image(systemName: "chevron.up")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .padding(.horizontal, 4)
-                                .padding(.vertical, 6)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Hide notes and tasks")
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    ForEach($taskLines) { $line in
-                        HStack(spacing: 8) {
-                            Button { line.isDone.toggle(); persistTasksSnapshot() } label: {
-                                Image(systemName: line.isDone ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(tasksAccent)
-                            }
-                            TextField(
-                                "Task",
-                                text: Binding(
-                                    get: { line.text },
-                                    set: { newValue in
-                                        if newValue.contains("\n") {
-                                            // Strip newline characters and treat as "return"
-                                            let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
-                                            line.text = cleaned
-                                            handleTaskReturn(for: line.id)
-                                        } else {
-                                            line.text = newValue
-                                        }
-                                    }
-                                ),
-                                axis: .vertical
-                            )
-                            .textFieldStyle(.plain)
-                            .disableAutocorrection(true)
-                            .focused($focusedTaskID, equals: line.id)
-                            .onTapGesture {
-                                focusedTaskID = line.id
-                            }
-                            .onChange(of: focusedTaskID) { _, newFocus in
-                                if newFocus == line.id {
-                                    // If current equals auto text, clear to start fresh
-                                    if let auto = autoTaskTexts[line.id], line.text == auto {
-                                        line.text = ""
-                                    }
-                                    persistTasksSnapshot()
-                                }
-                            }
-
-                            Spacer(minLength: 8)
-
-                            Button(role: .destructive) {
-                                deleteLine(line.id)
-                            } label: {
-                                Image(systemName: "trash")
-                                    .foregroundStyle(.primary.opacity(0.8))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    Button(action: { addEmptyTaskLine() }) {
-                        HStack { Image(systemName: "plus"); Text("Add line") }
-                            .foregroundStyle(tasksAccent)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 8)
-            } else {
-                Button(action: {
-                    showTasksPad = true
-                    loadPracticeDefaultsIfNeeded()
-                    loadDefaultTasksIfNeeded()
-                    persistTasksSnapshot()
-                }) {
-                    HStack(spacing: 8) {
-                        Text("Notes / Tasks")
-                            .sectionHeader()
-
-                        Spacer()
-
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Show notes and tasks")
-                .padding(.vertical, 8)
-            }
+@ViewBuilder
+private var tasksPadSection: some View {
+    TasksPadCard(
+        showTasksPad: $showTasksPad,
+        taskLines: $taskLines,
+        autoTaskTexts: $autoTaskTexts,
+        focusedTaskID: $focusedTaskID,
+        tasksAccent: tasksAccent,
+        onToggleDone: { id in toggleDone(id) },
+        onDeleteLine: { id in deleteLine(id) },
+        onClearAll: { clearAllTasks() },
+        onAddEmptyLine: { addEmptyTaskLine() },
+        onHandleReturn: { id in handleTaskReturn(for: id) },
+        onPersistSnapshot: { persistTasksSnapshot() },
+        onExpand: {
+            loadPracticeDefaultsIfNeeded()
+            loadDefaultTasksIfNeeded()
+            persistTasksSnapshot()
         }
-        .cardSurface()
-    }
+    )
+    .cardSurface()
+}
 
     @ViewBuilder
     private var attachmentsSection: some View {
