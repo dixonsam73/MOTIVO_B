@@ -38,6 +38,18 @@ struct MediaRecorderRowCard: View {
                                     .contentShape(Circle())
                             }
                             .buttonStyle(.bordered)
+                            .background(
+                                Group {
+                                    if showAudioRecorder {
+                                        Color.clear
+                                            .overlay(
+                                                Capsule(style: .continuous)
+                                                    .fill(Theme.Colors.primaryAction.opacity(0.18))
+                                            )
+                                    }
+                                }
+                            )
+                            .clipShape(Capsule(style: .continuous))
                             .accessibilityLabel("Record audio")
                             .accessibilityHint("Opens the audio recorder for this session.")
 
