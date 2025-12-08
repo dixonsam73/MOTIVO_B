@@ -777,16 +777,7 @@ struct PracticeTimerView: View {
             videoHelpSheet
         }
         // Audio recorder sheet
-        .sheet(isPresented: $showAudioRecorder) {
-            audioRecorderSheet
-        }
-        // Attach .onChange OUTSIDE the sheet closure
-        .onChange(of: showAudioRecorder) { oldValue, newValue in
-            if newValue == true {
-                audioServices.droneEngine.stop()
-                droneIsOn = false
-            }
-        }
+        
         // Video recorder fullScreenCover replacement
         .fullScreenCover(isPresented: $showVideoRecorder) {
             videoRecorderFullScreen
@@ -845,6 +836,9 @@ struct PracticeTimerView: View {
             metronomeSection
             timerSection
             mediaRecorderSection
+            if showAudioRecorder {
+                audioRecorderPanel
+            }
             tasksPadSection
             attachmentsSection
         }

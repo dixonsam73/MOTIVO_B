@@ -22,8 +22,13 @@ struct MediaRecorderRowCard: View {
         VStack(spacing: 12) {
                         HStack(spacing: Theme.Spacing.m) {
                             Button {
-                                stopAttachmentPlayback()
-                                showAudioRecorder = true
+                                if showAudioRecorder {
+                                    // Close the recorder panel when already visible
+                                    showAudioRecorder = false
+                                } else {
+                                    stopAttachmentPlayback()
+                                    showAudioRecorder = true
+                                }
                             } label: {
                                 Image(systemName: "mic.fill")
                                     .symbolRenderingMode(.monochrome)

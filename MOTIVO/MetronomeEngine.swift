@@ -148,8 +148,14 @@ final class MetronomeEngine {
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            // Aim for 44.1 kHz to match the metronome samples.
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            // If the app is already in a record-capable mode, don’t reconfigure.
+            if session.category == .playAndRecord {
+                return
+            }
+
+            try session.setCategory(.playAndRecord,
+                                    mode: .default,
+                                    options: [.mixWithOthers])
             try session.setPreferredSampleRate(44_100)
             try session.setActive(true)
         } catch {

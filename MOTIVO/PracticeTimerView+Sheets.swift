@@ -113,14 +113,12 @@ extension PracticeTimerView {
         }
 
     @ViewBuilder
-     var audioRecorderSheet: some View {
-            AudioRecorderView { url in
-                Task { await stageAudioURL(url) }
-                showAudioRecorder = false
-            }
-            .presentationDetents([.medium])
-            .presentationDragIndicator(.visible)
+    var audioRecorderPanel: some View {
+        AudioRecorderView { url in
+            Task { await stageAudioURL(url) }
+            showAudioRecorder = false
         }
+    }
 
     @ViewBuilder
      var videoRecorderFullScreen: some View {

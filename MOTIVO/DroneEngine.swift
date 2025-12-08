@@ -142,7 +142,15 @@ final class DroneEngine {
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            // If someone (e.g. AudioRecorderView) already configured a record-capable
+            // session, don’t touch it – just reuse it to avoid killing the recorder.
+            if session.category == .playAndRecord {
+                return
+            }
+
+            try session.setCategory(.playAndRecord,
+                                    mode: .default,
+                                    options: [.mixWithOthers])
             try session.setActive(true)
         } catch {
             print("[DroneEngine] Audio Session error: \(error)")
