@@ -15,13 +15,14 @@ extension PracticeTimerView {
 
         // Kill both drone and metronome before starting or resuming attachment playback
         if droneIsOn {
-            droneEngine.stop()
+            audioServices.droneEngine.stop()
             droneIsOn = false
         }
         if metronomeIsOn {
-            metronomeEngine.stop()
+            audioServices.metronomeEngine.stop()
             metronomeIsOn = false
         }
+
 
         if currentlyPlayingID == id {
             // Toggle play/pause for the same item and keep the selection so the icon flips reliably

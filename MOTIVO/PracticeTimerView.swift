@@ -95,7 +95,7 @@ struct PracticeTimerView: View {
     ]
 
     // Clean, minimal engine for soft sine-ish drone
-    let droneEngine = DroneEngine()
+    let audioServices = AudioServices.shared
     // Info-only recording helpers
     @State private var showAudioHelp = false
     @State private var showVideoHelp = false
@@ -109,7 +109,7 @@ struct PracticeTimerView: View {
 
 
     // Engine instance (local to PTV)
-   let metronomeEngine = MetronomeEngine()
+   
     // New audio recording and attachments state
     @State var showAudioRecorder: Bool = false
     @State var stagedAudio: [StagedAttachment] = []
@@ -783,7 +783,7 @@ struct PracticeTimerView: View {
         // Attach .onChange OUTSIDE the sheet closure
         .onChange(of: showAudioRecorder) { oldValue, newValue in
             if newValue == true {
-                droneEngine.stop()
+                audioServices.droneEngine.stop()
                 droneIsOn = false
             }
         }
@@ -801,7 +801,7 @@ struct PracticeTimerView: View {
         }
         .onChange(of: showCamera) { oldValue, newValue in
             if newValue == true {
-                droneEngine.stop()
+                audioServices.droneEngine.stop()
                 droneIsOn = false
             }
         }
@@ -832,7 +832,7 @@ struct PracticeTimerView: View {
                 metronomeIsOn = false
             }
             if !metronomeIsOn && (metronomeEngineIsActuallyRunning() == true) {
-                metronomeEngine.stop()
+                audioServices.metronomeEngine.stop()
             }
         }
     }
@@ -876,7 +876,7 @@ struct PracticeTimerView: View {
                     droneFreq: $droneFreq,
                     showDroneVolumePopover: $showDroneVolumePopover,
                     droneNotes: droneNotes,
-                    droneEngine: droneEngine,
+                    droneEngine: audioServices.droneEngine,
                     recorderIcon: recorderIcon
                 )
             }
@@ -894,7 +894,7 @@ struct PracticeTimerView: View {
                     metronomeBPM: $metronomeBPM,
                     metronomeAccentEvery: $metronomeAccentEvery,
                     metronomeVolume: $metronomeVolume,
-                    metronomeEngine: metronomeEngine,
+                    metronomeEngine: audioServices.metronomeEngine,
                     recorderIcon: recorderIcon
                 )
             }
@@ -923,7 +923,7 @@ struct PracticeTimerView: View {
             showVideoRecorder: $showVideoRecorder,
             droneIsOn: $droneIsOn,
             recorderIcon: recorderIcon,
-            droneEngine: droneEngine,
+            droneEngine: audioServices.droneEngine,
             stopAttachmentPlayback: stopAttachmentPlayback,
             ensureCameraAuthorized: ensureCameraAuthorized
         )
@@ -2227,11 +2227,11 @@ private var tasksPadSection: some View {
     // MARK: - New helper: killDroneAndMetronome
     func killDroneAndMetronome() {
         if droneIsOn {
-            droneEngine.stop()
+            audioServices.droneEngine.stop()
             droneIsOn = false
         }
         if metronomeIsOn {
-            metronomeEngine.stop()
+            audioServices.metronomeEngine.stop()
             metronomeIsOn = false
         }
     }
@@ -2239,7 +2239,7 @@ private var tasksPadSection: some View {
     // MARK: - New helper: metronomeEngineIsActuallyRunning
     private func metronomeEngineIsActuallyRunning() -> Bool {
         // MetronomeEngine exposes isRunning; prefer that when available
-        return metronomeEngine.isRunning
+        return audioServices.metronomeEngine.isRunning
     }
 }
  
@@ -2275,6 +2275,7 @@ struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
