@@ -1,11 +1,15 @@
 // DroneEngine.swift
 // Extracted from PracticeTimerView (drone audio engine & waveform).
-// No logic changes.
 
 import Foundation
 import AVFoundation
+
 // === DRONE ENGINE (soft sine-ish tone with smoothing) ===
 final class DroneEngine {
+
+    // Strong reference so the active drone survives view teardown / background.
+    private static var activeInstance: DroneEngine?
+
     private let engine = AVAudioEngine()
     private var sourceNode: AVAudioSourceNode?
 
@@ -31,6 +35,12 @@ final class DroneEngine {
     // MARK: - Public API
 
     func start(frequency: Double, volume: Double) {
+        // If some other DroneEngine is currently active, stop it hard first.
+        if let other = DroneEngine.activeInstance, other !== self {
+            other.hardStop()
+        }
+        DroneEngine.activeInstance = self
+
         targetFrequency = frequency
         targetVolume = volume
 
@@ -55,19 +65,16 @@ final class DroneEngine {
     }
 
     func stop() {
-        // Smooth fade-out
-        targetVolume = 0.0
+        // If a different instance is the active one, stop that instead.
+        if let other = DroneEngine.activeInstance, other !== self {
+            other.fadeStop()
+            DroneEngine.activeInstance = nil
+            return
+        }
 
-        // After a short delay, pause engine + detach node to save CPU
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
-            guard let self else { return }
-            if self.currentVolume <= 0.0001 {
-                self.engine.pause()
-                if let node = self.sourceNode {
-                    self.engine.detach(node)
-                    self.sourceNode = nil
-                }
-            }
+        fadeStop()
+        if DroneEngine.activeInstance === self {
+            DroneEngine.activeInstance = nil
         }
     }
 
@@ -79,51 +86,57 @@ final class DroneEngine {
         targetVolume = max(0, min(1, volume))
     }
 
+    // Rough “is running” helper
+    var isRunning: Bool {
+        engine.isRunning && (targetVolume > 0.0001 || currentVolume > 0.0001)
+    }
+
     // Map "A4", "Bb3" etc. → Hz using an arbitrary A4 reference
-        static func frequency(for note: String, baseA4: Double = 440) -> Double {
-            guard note.count >= 2 else { return baseA4 }
+    static func frequency(for note: String, baseA4: Double = 440) -> Double {
+        guard note.count >= 2 else { return baseA4 }
 
-            let chars = Array(note)
-            var namePart = ""
-            var octavePart = ""
+        let chars = Array(note)
+        var namePart = ""
+        var octavePart = ""
 
-            // Split into pitch name + octave (e.g. "Bb" + "4")
-            for c in chars {
-                if c.isNumber {
-                    octavePart.append(c)
-                } else if octavePart.isEmpty {
-                    namePart.append(c)
-                }
+        // Split into pitch name + octave (e.g. "Bb" + "4")
+        for c in chars {
+            if c.isNumber {
+                octavePart.append(c)
+            } else if octavePart.isEmpty {
+                namePart.append(c)
             }
-
-            let noteName = namePart
-            let octave = Int(octavePart) ?? 4
-
-            // Semitone offsets within an octave relative to C
-            let semitoneMap: [String: Int] = [
-                "C": 0, "C#": 1, "Db": 1,
-                "D": 2, "D#": 3, "Eb": 3,
-                "E": 4,
-                "F": 5, "F#": 6, "Gb": 6,
-                "G": 7, "G#": 8, "Ab": 8,
-                "A": 9, "A#": 10, "Bb": 10,
-                "B": 11
-            ]
-
-            guard let semitone = semitoneMap[noteName] else { return baseA4 }
-
-            // MIDI note number: C-1 = 0 → A4 = 69
-            let midi = (octave + 1) * 12 + semitone
-
-            // Standard equal temperament using arbitrary A4 reference
-            let freq = baseA4 * pow(2.0, Double(midi - 69) / 12.0)
-            return freq
         }
 
-        // Convenience: compute using default A=440
-        static func frequency(for note: String) -> Int {
-            Int(frequency(for: note, baseA4: 440).rounded())
-        }
+        let noteName = namePart
+        let octave = Int(octavePart) ?? 4
+
+        // Semitone offsets within an octave relative to C
+        let semitoneMap: [String: Int] = [
+            "C": 0, "C#": 1, "Db": 1,
+            "D": 2, "D#": 3, "Eb": 3,
+            "E": 4,
+            "F": 5, "F#": 6, "Gb": 6,
+            "G": 7, "G#": 8, "Ab": 8,
+            "A": 9, "A#": 10, "Bb": 10,
+            "B": 11
+        ]
+
+        guard let semitone = semitoneMap[noteName] else { return baseA4 }
+
+        // MIDI note number: C-1 = 0 → A4 = 69
+        let midi = (octave + 1) * 12 + semitone
+
+        // Standard equal temperament using arbitrary A4 reference
+        let freq = baseA4 * pow(2.0, Double(midi - 69) / 12.0)
+        return freq
+    }
+
+    // Convenience: compute using default A=440
+    static func frequency(for note: String) -> Int {
+        Int(frequency(for: note, baseA4: 440).rounded())
+    }
+
     // MARK: - Internal
 
     private func configureSession() {
@@ -181,5 +194,34 @@ final class DroneEngine {
         engine.connect(node, to: engine.mainMixerNode, format: format)
         sourceNode = node
     }
-}
 
+    // MARK: - Stop helpers
+
+    /// Fade-out stop (used for normal UI stop).
+    private func fadeStop() {
+        targetVolume = 0.0
+
+        // After a short delay, pause engine + detach node to save CPU
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self else { return }
+            if self.currentVolume <= 0.0001 {
+                self.engine.pause()
+                if let node = self.sourceNode {
+                    self.engine.detach(node)
+                    self.sourceNode = nil
+                }
+            }
+        }
+    }
+
+    /// Immediate stop used when handing off between instances.
+    private func hardStop() {
+        targetVolume = 0.0
+        currentVolume = 0.0
+        engine.pause()
+        if let node = sourceNode {
+            engine.detach(node)
+            sourceNode = nil
+        }
+    }
+}

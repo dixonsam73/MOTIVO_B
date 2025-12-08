@@ -12,6 +12,10 @@ import AVFoundation
 
 final class MetronomeEngine {
 
+    // Ensure only one metronome instance is ever “actively clicking”.
+    // Strong reference so the active engine survives view teardown / background.
+    private static var activeInstance: MetronomeEngine?
+
     // MARK: - Audio
 
     private let engine = AVAudioEngine()
@@ -37,9 +41,11 @@ final class MetronomeEngine {
     private var volume: Double = 0.7   // 0–1
 
     private(set) var isRunning: Bool = false
+
     /// Optional UI callback fired whenever a new beat starts.
     /// Called on the main queue; `isAccent` is true for accented beats.
     var onBeat: ((Bool) -> Void)?
+
     // MARK: - State (audio-thread timing)
 
     /// Sample rate of the audio graph.
@@ -84,6 +90,12 @@ final class MetronomeEngine {
 
     /// Start the metronome with the given parameters.
     func start(bpm: Int, accentEvery: Int, volume: Double) {
+        // Hand off from any previous active instance.
+        if let other = MetronomeEngine.activeInstance, other !== self {
+            other.hardStop()
+        }
+        MetronomeEngine.activeInstance = self
+
         self.bpm = max(30, Double(bpm))
         self.accentEvery = max(0, accentEvery)
         self.volume = max(0, min(1, volume))
@@ -126,6 +138,9 @@ final class MetronomeEngine {
         isRunning = false
         // We deliberately leave the AVAudioEngine running; the
         // source node will just output silence when isRunning == false.
+        if MetronomeEngine.activeInstance === self {
+            MetronomeEngine.activeInstance = nil
+        }
     }
 
     // MARK: - Session
@@ -311,5 +326,18 @@ final class MetronomeEngine {
         }
 
         return noErr
+    }
+
+    // MARK: - Hard stop helper
+
+    /// Used when handing off between instances: stop immediately and tear down node.
+    private func hardStop() {
+        isRunning = false
+        engine.pause()
+        if engine.attachedNodes.contains(sourceNode) {
+            engine.detach(sourceNode)
+        }
+        normalClickBuffer = nil
+        accentClickBuffer = nil
     }
 }

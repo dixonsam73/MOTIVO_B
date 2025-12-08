@@ -159,7 +159,7 @@ struct MetronomeControlStripCard: View {
                     if showMetronomeVolumePopover {
                         MetronomeVolumePopover(
                             value: $metronomeVolume,
-                            onChanged: { newVal in
+                            onChanged: { _ in
                                 if metronomeIsOn {
                                     metronomeEngine.update(
                                         bpm: metronomeBPM,
@@ -187,6 +187,9 @@ struct MetronomeControlStripCard: View {
             .frame(maxWidth: .infinity, alignment: .center)
         }
         .onAppear {
+            // Ensure UI flag matches the real engine state on entry/return
+            metronomeIsOn = metronomeEngine.isRunning
+
             metronomeEngine.onBeat = { isAccent in
                 let beatDuration = 60.0 / Double(metronomeBPM)
 
@@ -221,15 +224,19 @@ struct MetronomeControlStripCard: View {
     // MARK: - Actions
 
     private func toggleMetronome() {
-        metronomeIsOn.toggle()
-        if metronomeIsOn {
+        // Use the engine as the source of truth, then sync the binding.
+        let currentlyRunning = metronomeEngine.isRunning
+
+        if currentlyRunning {
+            metronomeEngine.stop()
+            metronomeIsOn = false
+        } else {
             metronomeEngine.start(
                 bpm: metronomeBPM,
                 accentEvery: metronomeAccentEvery,
                 volume: metronomeVolume
             )
-        } else {
-            metronomeEngine.stop()
+            metronomeIsOn = true
         }
     }
 
