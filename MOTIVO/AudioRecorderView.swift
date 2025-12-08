@@ -401,6 +401,7 @@ struct AudioRecorderView: View {
             state = .playing
         case .idle, .pausedRecording, .recording:
             do {
+                clearWaveform()
                 stopAll()
                 player = try AVAudioPlayer(contentsOf: url)
                 player?.isMeteringEnabled = true
