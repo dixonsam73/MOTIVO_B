@@ -54,15 +54,15 @@ struct AudioRecorderView: View {
 
     // MARK: - Body
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 16) {
             // Status
             VStack(spacing: 8) {
                 Text(titleForState)
-                    .font(.title3).fontWeight(.semibold)
+                    .font(.headline).fontWeight(.semibold)
                     .foregroundStyle(.primary)
                 Text(timeString)
                     .monospacedDigit()
-                    .font(.system(size: 32, weight: .medium, design: .rounded))
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
                     .foregroundStyle(state == .recording ? .red : .secondary)
                     .accessibilityLabel("Elapsed time \(timeString)")
             }
@@ -90,7 +90,7 @@ struct AudioRecorderView: View {
             let tintPlay = Color(red: 0.36, green: 0.60, blue: 0.52)         // desaturated mint / slate green
             let tintConfirm = Color(red: 0.38, green: 0.48, blue: 0.62)      // slate blue-gray
 
-            HStack(spacing: 20) {
+            HStack(spacing: 16) {
                 // Delete
                 ControlButton(systemName: "trash", tint: tintStopDelete, role: .destructive, isEnabled: recordingURL != nil && state.isIdleLike) {
                     deleteRecording()
@@ -137,7 +137,7 @@ struct AudioRecorderView: View {
                 .accessibilityLabel("Save recording")
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
 
             // Waveform
             WaveformView(
@@ -145,7 +145,7 @@ struct AudioRecorderView: View {
                 isRecording: state == .recording,
                 isPlaying: state == .playing
             )
-            .frame(height: 80)
+            .frame(height: 56)
             .padding(.top, 8)
             .accessibilityHidden(true)
 
@@ -702,14 +702,14 @@ private struct ControlButton: View {
             }
         } label: {
             Image(systemName: systemName)
-                .font(.system(size: 36, weight: .regular))
+                .font(.system(size: 30, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(isEnabled ? tint : tint.opacity(0.3))
-                .frame(width: 56, height: 56)
+                .frame(width: 48, height: 48)
                 .background(
                     Circle()
                         .fill(.ultraThinMaterial)
-                        .shadow(radius: 4, y: 2)
+                        .shadow(radius: 3, y: 1)
                 )
         }
         .buttonStyle(.plain)

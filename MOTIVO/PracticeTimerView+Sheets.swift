@@ -120,6 +120,7 @@ extension PracticeTimerView {
         }
     }
 
+
     @ViewBuilder
      var videoRecorderFullScreen: some View {
             NavigationStack {
