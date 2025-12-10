@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251124_170600-attachment-viewer-debug
-// SCOPE: Add debug logging for media handoff into AttachmentViewerView + audio waveform playback indicator
+// CHANGE-ID: 20251210_AttachmentViewerView_RenameHook_v2
+// SCOPE: Add optional rename hook for audio/video and show filename on audio viewer page. No behaviour changes to callers yet.
 
 import SwiftUI
 import AVKit
@@ -35,6 +35,9 @@ struct AttachmentViewerView: View {
 
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
     @State private var tempFilesToCleanup: Set<URL> = []
+    @State private var isRenaming: Bool = false
+    @State private var renameTargetURL: URL? = nil
+    @State private var renameText: String = ""
 
     private func registerTemp(_ url: URL?) {
         guard let url else { return }
@@ -55,6 +58,7 @@ struct AttachmentViewerView: View {
     }
 
     var onDelete: ((URL) -> Void)? = nil
+    var onRename: ((URL, String) -> Void)? = nil
     var onFavourite: ((URL) -> Void)? = nil
     var isFavourite: ((URL) -> Bool)? = nil
     var onTogglePrivacy: ((URL) -> Void)? = nil
@@ -72,6 +76,7 @@ struct AttachmentViewerView: View {
          videoURLs: [URL] = [],
          audioURLs: [URL] = [],
          onDelete: ((URL) -> Void)? = nil,
+         onRename: ((URL, String) -> Void)? = nil,
          onFavourite: ((URL) -> Void)? = nil,
          isFavourite: ((URL) -> Bool)? = nil,
          onTogglePrivacy: ((URL) -> Void)? = nil,
@@ -90,6 +95,7 @@ struct AttachmentViewerView: View {
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
         self.onDelete = onDelete
+        self.onRename = onRename
         self.onFavourite = onFavourite
         self.isFavourite = isFavourite
         self.onTogglePrivacy = onTogglePrivacy
@@ -292,6 +298,34 @@ struct AttachmentViewerView: View {
                                 isPriv ? "Make attachment visible to others" : "Hide attachment from others"
                             )
 
+                            if (currentKind == .video || currentKind == .audio), onRename != nil {
+                                Button {
+                                    let url = currentURL
+                                    renameTargetURL = url
+                                    renameText = url.deletingPathExtension().lastPathComponent
+                                    isRenaming = true
+                                    stopAllPlayersToggle.toggle()
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(
+                                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                                radius: 2,
+                                                y: 1
+                                            )
+                                        Image(systemName: "pencil")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Rename attachment")
+                            }
+
                             if currentKind == .video || currentKind == .audio {
                                 Button {
                                     trimURL = currentURL
@@ -401,6 +435,53 @@ struct AttachmentViewerView: View {
             // Storage Safety: Ensure any temp surrogates created by the viewer are removed on dismiss
             cleanupTempFiles()
         }
+        .sheet(isPresented: $isRenaming, onDismiss: {
+            renameTargetURL = nil
+            renameText = ""
+        }) {
+            NavigationStack {
+                VStack(spacing: Theme.Spacing.m) {
+                    Text("Rename attachment")
+                        .font(.headline)
+                        .padding(.top, Theme.Spacing.l)
+
+                    TextField("Name", text: $renameText)
+                        .textFieldStyle(.roundedBorder)
+                        .padding(.horizontal, Theme.Spacing.l)
+
+                    Spacer()
+
+                    HStack(spacing: Theme.Spacing.m) {
+                        Button("Cancel") {
+                            isRenaming = false
+                            renameTargetURL = nil
+                            renameText = ""
+                        }
+                        .buttonStyle(.borderless)
+
+                        Spacer()
+
+                        Button("Save") {
+                            let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !trimmed.isEmpty, let target = renameTargetURL else {
+                                isRenaming = false
+                                renameTargetURL = nil
+                                renameText = ""
+                                return
+                            }
+                            onRename?(target, trimmed)
+                            isRenaming = false
+                            renameTargetURL = nil
+                            renameText = ""
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .padding(.horizontal, Theme.Spacing.l)
+                    .padding(.bottom, Theme.Spacing.l)
+                }
+            }
+        }
+
         .sheet(isPresented: $isShowingTrimmer, onDismiss: {
             isShowingTrimmer = false
             trimURL = nil
@@ -1162,6 +1243,13 @@ private struct AudioPage: View {
 
     var body: some View {
         VStack(spacing: 16) {
+
+            Text(url.deletingPathExtension().lastPathComponent)
+                .font(.callout)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.horizontal, Theme.Spacing.l)
 
             AttachmentWaveformView(
                 samples: renderBars(),
