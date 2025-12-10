@@ -148,12 +148,13 @@ final class MetronomeEngine {
     private func configureSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            // If the app is already in a record-capable mode, don’t reconfigure.
+            // If a recorder has already put us into a record-capable mode, don’t touch it.
             if session.category == .playAndRecord {
                 return
             }
 
-            try session.setCategory(.playAndRecord,
+            // Prefer playback for click-only operation (louder, speaker-friendly).
+            try session.setCategory(.playback,
                                     mode: .default,
                                     options: [.mixWithOthers])
             try session.setPreferredSampleRate(44_100)

@@ -148,7 +148,8 @@ final class DroneEngine {
                 return
             }
 
-            try session.setCategory(.playAndRecord,
+            // For standalone drone playback, prefer playback (louder route).
+            try session.setCategory(.playback,
                                     mode: .default,
                                     options: [.mixWithOthers])
             try session.setActive(true)
