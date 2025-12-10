@@ -604,6 +604,13 @@ struct PracticeTimerView: View {
                     #if DEBUG
                     StorageInspector.logSandboxUsage(tag: "Before Quit")
                     #endif
+                    
+                    // Stop all practice audio engines (drone + metronome)
+                       audioServices.droneEngine.stop()
+                       audioServices.metronomeEngine.stop()
+                       droneIsOn = false
+                       metronomeIsOn = false
+
                     // Intentional discard: purge staged items associated with this live session
                     let __discardIDs: [UUID] = stagedAudio.map { $0.id } + stagedImages.map { $0.id } + stagedVideos.map { $0.id }
                     if !__discardIDs.isEmpty {
