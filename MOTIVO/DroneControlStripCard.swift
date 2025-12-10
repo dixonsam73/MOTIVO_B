@@ -117,24 +117,23 @@ struct DroneControlStripCard: View {
                     }
                 }
 
-                // Volume button with anchored vertical slider overlay
-                ZStack(alignment: .top) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showDroneVolumePopover.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(recorderIcon)
-                            .frame(width: 36, height: 36)
-                            .contentShape(Circle())
+                // Volume button with anchored vertical slider overlay (as an overlay to avoid resizing the row)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showDroneVolumePopover.toggle()
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Drone volume")
-                    .accessibilityHint("Adjusts the volume of the tuning tone.")
-
+                } label: {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(recorderIcon)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Drone volume")
+                .accessibilityHint("Adjusts the volume of the tuning tone.")
+                .overlay(alignment: .top) {
                     if showDroneVolumePopover {
                         DroneVolumePopover(
                             value: $droneVolume,
@@ -149,13 +148,14 @@ struct DroneControlStripCard: View {
                                 }
                             }
                         )
-                        .offset(y: -6)
+                        .offset(y: -24)   // match the metronome centering
                         .transition(
                             .asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)),
                                 removal: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom))
                             )
                         )
+                        .zIndex(1)
                     }
                 }
             }

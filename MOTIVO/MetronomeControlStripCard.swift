@@ -139,23 +139,22 @@ struct MetronomeControlStripCard: View {
                 }
                 .accessibilityLabel("Accent every N beats")
 
-                // Volume button with anchored vertical slider overlay
-                ZStack(alignment: .top) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showMetronomeVolumePopover.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "speaker.wave.2.fill")
-                            .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(recorderIcon)
-                            .frame(width: 36, height: 36)
-                            .contentShape(Circle())
+                // Volume button with anchored vertical slider overlay (as an overlay to avoid resizing the row)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showMetronomeVolumePopover.toggle()
                     }
-                    .buttonStyle(.bordered)
-                    .accessibilityLabel("Metronome volume")
-
+                } label: {
+                    Image(systemName: "speaker.wave.2.fill")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(recorderIcon)
+                        .frame(width: 36, height: 36)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .accessibilityLabel("Metronome volume")
+                .overlay(alignment: .top) {
                     if showMetronomeVolumePopover {
                         MetronomeVolumePopover(
                             value: $metronomeVolume,
@@ -174,13 +173,14 @@ struct MetronomeControlStripCard: View {
                                 }
                             }
                         )
-                        .offset(y: -6)
+                        .offset(y: -24)
                         .transition(
                             .asymmetric(
                                 insertion: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom)),
                                 removal: .opacity.combined(with: .scale(scale: 0.95, anchor: .bottom))
                             )
                         )
+                        .zIndex(1)
                     }
                 }
             }

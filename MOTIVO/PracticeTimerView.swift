@@ -875,7 +875,8 @@ struct PracticeTimerView: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .cardSurface()
+            .cardSurfaceNonClipping()
+            .zIndex(5) 
         }
     }
 
@@ -893,7 +894,8 @@ struct PracticeTimerView: View {
                 )
             }
             .frame(maxWidth: .infinity, alignment: .center)
-            .cardSurface()
+            .cardSurfaceNonClipping()
+            .zIndex(5)  
         }
     }
 

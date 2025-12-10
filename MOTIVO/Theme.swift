@@ -110,7 +110,24 @@ private struct CardSurface: ViewModifier {
             )
     }
 }
+private struct CardSurfaceNonClipping: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    var padding: CGFloat? = nil
 
+    func body(content: Content) -> some View {
+        content
+            .padding(padding ?? Theme.Spacing.card)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                    .fill(Theme.Colors.surface(scheme))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
+                    )
+            )
+            // NOTE: no clipShape here – the rounded rect is purely visual
+    }
+}
 private struct AppBackground: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
@@ -123,6 +140,12 @@ private struct AppBackground: ViewModifier {
 extension View {
     func sectionHeader() -> some View { modifier(SectionHeader()) }
     func cardSurface(padding: CGFloat? = nil) -> some View { modifier(CardSurface(padding: padding)) }
+
+    // New: card surface that does NOT clip its children (for popovers/overlays)
+    func cardSurfaceNonClipping(padding: CGFloat? = nil) -> some View {
+        modifier(CardSurfaceNonClipping(padding: padding))
+    }
+
     func appBackground() -> some View { modifier(AppBackground()) }
 }
 
