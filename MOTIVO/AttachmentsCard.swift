@@ -226,36 +226,12 @@ struct AttachmentsCard: View {
                     
                     Spacer(minLength: 8)
                     
-                    // Inline Trim Button
-                    Button(action: {
-                        if let url = surrogateURL(att) {
-                            try? att.data.write(to: url, options: .atomic)
-                            trimItem = att
-                        }
-                    }) {
-                        Image(systemName: "scissors")
-                            .font(.system(size: 16, weight: .semibold))
-                            .padding(8)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Trim audio")
-                    .accessibilityHint("Open the trim editor for this audio clip")
-                    
                     Button(role: .destructive, action: { onDeleteAudio(att.id) }) {
                         Image(systemName: "trash")
                     }
                     .buttonStyle(.plain)
                 }
                 .zIndex(1)
-                .contextMenu {
-                    Button("Trim", systemImage: "scissors") {
-                        if let url = surrogateURL(att) {
-                            try? att.data.write(to: url, options: .atomic)
-                            trimItem = att
-                        }
-                    }
-                }
             }
             
             // Videos grid (placeholder thumbs)
@@ -302,32 +278,13 @@ struct AttachmentsCard: View {
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                             )
-                            .contextMenu {
-                                Button("Trim", systemImage: "scissors") {
-                                    if let url = surrogateURL(att) {
-                                        try? att.data.write(to: url, options: .atomic)
-                                        trimItem = att
-                                    }
-                                }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                onPlayVideo(att.id)
                             }
                             
-                            // Trim + delete buttons
+                            // Delete button
                             VStack(spacing: 6) {
-                                Button {
-                                    if let url = surrogateURL(att) {
-                                        try? att.data.write(to: url, options: .atomic)
-                                        trimItem = att
-                                    }
-                                } label: {
-                                    Image(systemName: "scissors")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .padding(8)
-                                        .background(.ultraThinMaterial, in: Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Trim video")
-                                .accessibilityHint("Open the trim editor for this video clip")
-                                
                                 Button {
                                     // Remove surrogate temp file best-effort
                                     let tmp = FileManager.default.temporaryDirectory
