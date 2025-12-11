@@ -146,19 +146,27 @@ extension PracticeTimerView {
 
 
     func attachmentViewerView(for payload: PTVViewerURL) -> some View {
-        let imageURLs: [URL] = []
-        let startIndex: Int = 0
-
-        let videoURLs: [URL]
-        let audioURLs: [URL]
+        var imageURLs: [URL] = []
+        var videoURLs: [URL] = []
+        var audioURLs: [URL] = []
+        var startIndex: Int = 0
 
         switch payload.kind {
+        case .image:
+            imageURLs = [payload.url]
+            videoURLs = []
+            audioURLs = []
+            startIndex = 0
         case .video:
             videoURLs = [payload.url]
             audioURLs = []
+            imageURLs = []
+            startIndex = 0
         case .audio:
             videoURLs = []
             audioURLs = [payload.url]
+            imageURLs = []
+            startIndex = 0
         }
 
         return AttachmentViewerView(

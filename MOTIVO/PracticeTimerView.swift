@@ -148,6 +148,7 @@ struct PracticeTimerView: View {
         enum MediaKind {
             case video
             case audio
+            case image
         }
         let id = UUID()
         let url: URL
@@ -995,7 +996,8 @@ private var tasksPadSection: some View {
                 onPersistCommittedAudioTitle: { id in
                     persistCommittedAudioTitle(for: id)
                 },
-                onPlayVideo: { playVideo($0) }
+                onPlayVideo: { playVideo($0) },
+                onViewImage: { openImageViewer($0) }
             )
             .cardSurface()
         }
@@ -1953,6 +1955,22 @@ private var tasksPadSection: some View {
         }
     }
 
+
+    // New helper function added per instructions
+    private func openImageViewer(_ id: UUID) {
+        guard let att = stagedImages.first(where: { $0.id == id }) else { return }
+        // Ensure a temp surrogate exists for AttachmentViewerView
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(id.uuidString)
+            .appendingPathExtension("jpg")
+        do {
+            try att.data.write(to: url, options: .atomic)
+            attachmentViewer = PTVViewerURL(url: url, kind: .image)
+        } catch {
+            print("Failed to prepare image for viewer: \(error)")
+        }
+    }
+    
     // Generate a thumbnail image for a video from raw Data by writing a temp file and using AVAssetImageGenerator
     private func generateVideoThumbnail(from data: Data, id: UUID) -> UIImage? {
         // Write to a temporary surrogate URL so AVAsset can read it
@@ -2317,6 +2335,9 @@ struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
+
+
 
 
 

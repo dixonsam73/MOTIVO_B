@@ -39,6 +39,7 @@ struct AttachmentsCard: View {
     let onScheduleDebouncedAudioTitlePersist: (UUID, String) -> Void
     let onPersistCommittedAudioTitle: (UUID) -> Void
     let onPlayVideo: (UUID) -> Void
+    let onViewImage: (UUID) -> Void
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -61,6 +62,8 @@ struct AttachmentsCard: View {
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                                             .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                                     )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture { onViewImage(att.id) }
                             } else {
                                 ZStack {
                                     RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -70,6 +73,8 @@ struct AttachmentsCard: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 .frame(width: 128, height: 128)
+                                .contentShape(Rectangle())
+                                .onTapGesture { onViewImage(att.id) }
                             }
                             
                             // Controls: star to set thumbnail, delete
@@ -336,3 +341,4 @@ struct AttachmentsCard: View {
         }
     }
 }
+
