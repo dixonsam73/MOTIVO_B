@@ -145,8 +145,13 @@ struct PracticeTimerView: View {
 
     // Attachment viewer routing state
     struct PTVViewerURL: Identifiable, Equatable {
+        enum MediaKind {
+            case video
+            case audio
+        }
         let id = UUID()
         let url: URL
+        let kind: MediaKind
     }
     @State private var attachmentViewer: PTVViewerURL? = nil
 
@@ -979,7 +984,7 @@ private var tasksPadSection: some View {
                 formattedClipDuration: formattedClipDuration,
                 surrogateURL: surrogateURL(for:),
                 onPersistStagedAttachments: { persistStagedAttachments() },
-                onTogglePlay: { togglePlay($0) },
+                onTogglePlay: { openAudioViewer($0) },
                 onDeleteAudio: { deleteAudio($0) },
                 onPersistAudioTitleImmediately: { id, buffer in
                     persistAudioTitleImmediately(for: id, bufferValue: buffer)
@@ -1908,9 +1913,43 @@ private var tasksPadSection: some View {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
         do {
             try att.data.write(to: url, options: .atomic)
-            attachmentViewer = PTVViewerURL(url: url)
+            attachmentViewer = PTVViewerURL(url: url, kind: .video)
         } catch {
             print("Failed to prepare video for viewer: \(error)")
+        }
+    }
+
+    private func openAudioViewer(_ id: UUID) {
+        guard let att = stagedAudio.first(where: { $0.id == id }) else { return }
+
+        // Prefer user-entered title, then auto-title, then fallback to UUID
+        let explicitTitle = audioTitles[att.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let autoTitle = audioAutoTitles[att.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let rawTitle: String = {
+            if let t = explicitTitle, !t.isEmpty { return t }
+            if let t = autoTitle, !t.isEmpty { return t }
+            return att.id.uuidString
+        }()
+
+        // Sanitize into a safe, not-crazy-long filename
+        let safeBase = rawTitle
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: "-")
+            .replacingOccurrences(of: "\n", with: " ")
+            .prefix(60)
+
+        let fileName = safeBase.isEmpty ? att.id.uuidString : String(safeBase)
+
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent(fileName)
+            .appendingPathExtension("m4a")   // matches our recorder’s format
+
+        do {
+            try att.data.write(to: url, options: .atomic)
+            attachmentViewer = PTVViewerURL(url: url, kind: .audio)
+        } catch {
+            print("Failed to prepare audio for viewer: \(error)")
         }
     }
 

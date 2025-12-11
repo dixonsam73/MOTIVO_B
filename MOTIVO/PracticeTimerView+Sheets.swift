@@ -144,27 +144,34 @@ extension PracticeTimerView {
             }
         }
 
-    @ViewBuilder
-     func attachmentViewerView(for payload: PTVViewerURL) -> some View {
-            // Build media URLs for the viewer. For this page, always launch the viewer for a single tapped video.
-            let imageURLs: [URL] = []
-            let audioURLs: [URL] = []
-            let videoURLs: [URL] = [payload.url]
 
-            let startIndex: Int = 0
+    func attachmentViewerView(for payload: PTVViewerURL) -> some View {
+        let imageURLs: [URL] = []
+        let startIndex: Int = 0
 
-            AttachmentViewerView(
-                imageURLs: imageURLs,
-                startIndex: startIndex,
-                themeBackground: Color(.systemBackground),
-                videoURLs: videoURLs,
-                audioURLs: audioURLs
-            )
-            .onAppear {
-                killDroneAndMetronome()
-            }
+        let videoURLs: [URL]
+        let audioURLs: [URL]
+
+        switch payload.kind {
+        case .video:
+            videoURLs = [payload.url]
+            audioURLs = []
+        case .audio:
+            videoURLs = []
+            audioURLs = [payload.url]
         }
 
+        return AttachmentViewerView(
+            imageURLs: imageURLs,
+            startIndex: startIndex,
+            themeBackground: Color(.systemBackground),
+            videoURLs: videoURLs,
+            audioURLs: audioURLs
+        )
+        .onAppear {
+            killDroneAndMetronome()
+        }
+    }
     @ViewBuilder
      func trimSheet(for item: StagedAttachment) -> some View {
             if let url = surrogateURL(for: item) {
