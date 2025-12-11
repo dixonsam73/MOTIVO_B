@@ -652,36 +652,142 @@ struct PostRecordDetailsView: View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Attachments").sectionHeader()
             if !stagedAttachments.isEmpty {
-                let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(stagedAttachments) { att in
-                        ZStack(alignment: .topTrailing) {
-                            AttachmentThumbCell(
-                                att: att,
-                                isThumbnail: selectedThumbnailID == att.id,
-                                onMakeThumbnail: { selectedThumbnailID = att.id },
-                                onRemove: { removeStagedAttachment(att) },
-                                isPrivate: { id, url in
-                                    return isPrivate(id: id, url: url)
-                                },
-                                setPrivate: { id, url, value in
-                                    setPrivate(id: id, url: url, value)
+                let nonAudio = stagedAttachments.filter { $0.kind != .audio }
+                let audioOnly = stagedAttachments.filter { $0.kind == .audio }
+
+                if !nonAudio.isEmpty {
+                    let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                    LazyVGrid(columns: columns, spacing: 12) {
+                        ForEach(nonAudio) { att in
+                            ZStack(alignment: .topTrailing) {
+                                AttachmentThumbCell(
+                                    att: att,
+                                    isThumbnail: selectedThumbnailID == att.id,
+                                    onMakeThumbnail: { selectedThumbnailID = att.id },
+                                    onRemove: { removeStagedAttachment(att) },
+                                    isPrivate: { id, url in
+                                        return isPrivate(id: id, url: url)
+                                    },
+                                    setPrivate: { id, url, value in
+                                        setPrivate(id: id, url: url, value)
+                                    }
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    let index = stagedIndexForAttachment(att)
+                                    if index >= 0 {
+                                        viewerStartIndex = index
+                                        // Ensure temp surrogate files exist for images/videos/audios before presenting the viewer
+                                        ensureSurrogateFilesExistForViewer()
+                                        isShowingAttachmentViewer = true
+                                    }
                                 }
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                if !audioOnly.isEmpty {
+                    // Use the same temporary title map as PracticeTimerView (keyed by staged id UUID string)
+                    let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(audioOnly) { att in
+                            let rawDisplay = namesDict[att.id.uuidString] ?? ""
+                            let trimmedDisplay = rawDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+                            let title = trimmedDisplay.isEmpty ? "Audio clip" : trimmedDisplay
+
+                            let url = surrogateURL(for: att)
+                            let durationText: String? = {
+                                guard let url = url else { return nil }
+                                let fm = FileManager.default
+                                if !fm.fileExists(atPath: url.path) {
+                                    try? att.data.write(to: url, options: .atomic)
+                                }
+                                let asset = AVURLAsset(url: url)
+                                let seconds = CMTimeGetSeconds(asset.duration)
+                                guard seconds.isFinite, seconds > 0 else { return nil }
+                                return formatClipDuration(seconds)
+                            }()
+
+                            HStack(alignment: .center, spacing: 12) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "waveform")
+                                        .font(.system(size: 16, weight: .semibold))
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(title)
+                                            .font(.footnote)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+
+                                        if let durationText {
+                                            Text(durationText)
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+
+                                Spacer(minLength: 8)
+
+                                VStack(spacing: 6) {
+                                    // Star (use audio clip as session thumbnail)
+                                    Button {
+                                        selectedThumbnailID = att.id
+                                    } label: {
+                                        Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(selectedThumbnailID == att.id ? "Unset as thumbnail" : "Set as thumbnail")
+
+                                    // Privacy toggle
+                                    let privURL = url
+                                    Button {
+                                        let current = isPrivate(id: att.id, url: privURL)
+                                        setPrivate(id: att.id, url: privURL, !current)
+                                    } label: {
+                                        let current = isPrivate(id: att.id, url: privURL)
+                                        Image(systemName: current ? "eye.slash" : "eye")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
+
+                                    // Delete
+                                    Button(role: .destructive) {
+                                        removeStagedAttachment(att)
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 16, weight: .semibold))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel("Delete attachment")
+                                }
+                            }
+                            .padding(12)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                             )
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 let index = stagedIndexForAttachment(att)
                                 if index >= 0 {
                                     viewerStartIndex = index
-                                    // Ensure temp surrogate files exist for images/videos/audios before presenting the viewer
                                     ensureSurrogateFilesExistForViewer()
                                     isShowingAttachmentViewer = true
                                 }
                             }
                         }
                     }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
             if let warn = stagedSizeWarning {
                 Text(warn)
@@ -691,8 +797,6 @@ struct PostRecordDetailsView: View {
             }
         }
     }
-
-    @ViewBuilder
     private var addAttachmentsControlsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(spacing: 32) {
@@ -957,7 +1061,13 @@ struct PostRecordDetailsView: View {
     }
 
     // MARK: - Helpers
-
+    private func formatClipDuration(_ seconds: Double) -> String {
+        // Simple mm:ss formatter
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let secs = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
     private func activityDisplayName(for choice: String) -> String {
         if choice.hasPrefix("core:") {
             if let raw = Int(choice.split(separator: ":").last ?? "0"),
@@ -1469,6 +1579,7 @@ fileprivate struct AttachmentThumbCell: View {
 
     @State private var videoPoster: UIImage? = nil
     @State private var isPresentingVideo = false
+    @State private var audioDuration: Double? = nil
 
     private let tile: CGFloat = 128
 
@@ -1553,18 +1664,34 @@ fileprivate struct AttachmentThumbCell: View {
                 placeholder(system: "photo")
             }
         case .audio:
-            VStack(spacing: 6) {
-                placeholder(system: "waveform")
-                // Read display name from temp names map if present; else show filename stem
-                let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                let display = namesDict[att.id.uuidString] ?? ""
-                if !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(display)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .padding(.horizontal, 6)
+            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            let rawDisplay = namesDict[att.id.uuidString] ?? ""
+            let trimmedDisplay = rawDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 8) {
+                    Image(systemName: "waveform")
+                        .font(.system(size: 16, weight: .semibold))
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        if !trimmedDisplay.isEmpty {
+                            Text(trimmedDisplay)
+                                .font(.footnote)
+                                .foregroundStyle(.primary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        } else {
+                            Text("Audio clip")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if let secs = audioDuration {
+                            Text(formatClipDuration(secs))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             .onAppear {
@@ -1572,7 +1699,17 @@ fileprivate struct AttachmentThumbCell: View {
                 if let url = resolvedURL, !FileManager.default.fileExists(atPath: url.path) {
                     try? att.data.write(to: url, options: .atomic)
                 }
+
+                // Lazily compute audio duration once
+                if audioDuration == nil, let url = resolvedURL {
+                    let asset = AVURLAsset(url: url)
+                    let seconds = CMTimeGetSeconds(asset.duration)
+                    if seconds.isFinite && seconds > 0 {
+                        audioDuration = seconds
+                    }
+                }
             }
+
         case .video:
             ZStack {
                 if let poster = videoPoster {
@@ -1613,6 +1750,14 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(24)
     }
 
+
+    private func formatClipDuration(_ seconds: Double) -> String {
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let secs = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
+
     private func generatePosterIfNeeded(for url: URL) async {
         if videoPoster != nil { return }
         await withCheckedContinuation { continuation in
@@ -1644,7 +1789,6 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
 
 
 
