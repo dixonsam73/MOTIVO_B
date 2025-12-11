@@ -169,12 +169,88 @@ extension PracticeTimerView {
             startIndex = 0
         }
 
+        func resolveStagedID(from url: URL) -> UUID? {
+            let stem = url.deletingPathExtension().lastPathComponent
+            if let uuid = UUID(uuidString: stem) { return uuid }
+            // Fallback for audio: filename may be a sanitized title, not the UUID
+            // Try to match by data size first, then by byte equality as a tie-breaker.
+            guard let fileData = try? Data(contentsOf: url) else { return nil }
+            // Prefer matching among stagedAudio
+            if let match = stagedAudio.first(where: { $0.data.count == fileData.count }) {
+                return match.id
+            }
+            if let exact = stagedAudio.first(where: { $0.data == fileData }) {
+                return exact.id
+            }
+            // As a last resort, try videos/images by size (unlikely for audio but harmless)
+            if let vm = stagedVideos.first(where: { $0.data.count == fileData.count }) { return vm.id }
+            if let im = stagedImages.first(where: { $0.data.count == fileData.count }) { return im.id }
+            return nil
+        }
+
         return AttachmentViewerView(
             imageURLs: imageURLs,
             startIndex: startIndex,
             themeBackground: Color(.systemBackground),
             videoURLs: videoURLs,
-            audioURLs: audioURLs
+            audioURLs: audioURLs,
+            onDelete: { url in
+                if let uuid = resolveStagedID(from: url) {
+                    // Remove from matching staged arrays and caches
+                    if let idx = stagedImages.firstIndex(where: { $0.id == uuid }) {
+                        let removed = stagedImages.remove(at: idx)
+                        if selectedThumbnailID == removed.id {
+                            selectedThumbnailID = stagedImages.first(where: { $0.kind == .image })?.id
+                        }
+                        persistStagedAttachments()
+                        return
+                    }
+                    if let idx = stagedVideos.firstIndex(where: { $0.id == uuid }) {
+                        let removed = stagedVideos.remove(at: idx)
+                        videoThumbnails.removeValue(forKey: removed.id)
+                        if selectedThumbnailID == removed.id {
+                            selectedThumbnailID = stagedImages.first?.id
+                        }
+                        persistStagedAttachments()
+                        return
+                    }
+                    if let idx = stagedAudio.firstIndex(where: { $0.id == uuid }) {
+                        let removed = stagedAudio.remove(at: idx)
+                        audioTitles.removeValue(forKey: removed.id)
+                        audioAutoTitles.removeValue(forKey: removed.id)
+                        audioDurations.removeValue(forKey: removed.id)
+                        if selectedThumbnailID == removed.id {
+                            selectedThumbnailID = stagedImages.first?.id
+                        }
+                        persistStagedAttachments()
+                        return
+                    }
+                }
+            },
+            onFavourite: { url in
+                if let uuid = resolveStagedID(from: url) {
+                    selectedThumbnailID = uuid
+                    persistStagedAttachments()
+                }
+            },
+            isFavourite: { url in
+                if let uuid = resolveStagedID(from: url) {
+                    return selectedThumbnailID == uuid
+                }
+                return false
+            },
+            onTogglePrivacy: { url in
+                if let uuid = resolveStagedID(from: url) {
+                    let current = AttachmentPrivacy.isPrivate(id: uuid, url: url)
+                    AttachmentPrivacy.setPrivate(id: uuid, url: url, !current)
+                }
+            },
+            isPrivate: { url in
+                if let uuid = resolveStagedID(from: url) {
+                    return AttachmentPrivacy.isPrivate(id: uuid, url: url)
+                }
+                return false
+            }
         )
         .onAppear {
             killDroneAndMetronome()
