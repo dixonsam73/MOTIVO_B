@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251212_122000-prdv-viewerreq-03
-// SCOPE: Step 3 — Wire PRDV visual attachment taps to viewerRequest (images+videos only)
+// CHANGE-ID: 20251212_122700-prdv-viewerreq-04
+// SCOPE: Step 4 — Wire PRDV audio attachment row taps to viewerRequest (audio-only viewer)
 
 //  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
@@ -800,7 +800,25 @@ struct PostRecordDetailsView: View {
                             }()
 
                             HStack(alignment: .center, spacing: 12) {
-                                HStack(spacing: 8) {
+                                Button {
+                                    ensureSurrogateFilesExistForViewer()
+
+                                    let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
+                                        guard let url = surrogateURL(for: item) else { return nil }
+                                        return (item.id, url)
+                                    }
+                                    let audioURLs: [URL] = audioItems.map { $0.1 }
+                                    let startIndex = audioItems.firstIndex(where: { $0.0 == att.id }) ?? 0
+
+                                    viewerRequest = AttachmentViewerRequest(
+                                        mode: .audio,
+                                        startIndex: startIndex,
+                                        imageURLs: [],
+                                        videoURLs: [],
+                                        audioURLs: audioURLs
+                                    )
+                                } label: {
+                                    HStack(spacing: 8) {
                                     Image(systemName: "waveform")
                                         .font(.system(size: 16, weight: .semibold))
 
@@ -817,7 +835,11 @@ struct PostRecordDetailsView: View {
                                                 .foregroundStyle(.secondary)
                                         }
                                     }
+                                    }
                                 }
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                                .accessibilityLabel("Open audio clip \(title)")
 
                                 Spacer(minLength: 8)
 
