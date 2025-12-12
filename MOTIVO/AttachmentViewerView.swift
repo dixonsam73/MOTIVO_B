@@ -6,6 +6,7 @@ import AVKit
 import AVFoundation
 
 struct AttachmentViewerView: View {
+    let audioTitles: [String]?
     @Environment(\.colorScheme) private var colorScheme
 
     private let topButtonSize: CGFloat = 40
@@ -75,6 +76,7 @@ struct AttachmentViewerView: View {
          themeBackground: Color = Color.clear,
          videoURLs: [URL] = [],
          audioURLs: [URL] = [],
+         audioTitles: [String]? = nil,
          onDelete: ((URL) -> Void)? = nil,
          onRename: ((URL, String) -> Void)? = nil,
          onFavourite: ((URL) -> Void)? = nil,
@@ -91,6 +93,7 @@ struct AttachmentViewerView: View {
         self.imageURLs = imageURLs
         self._videoURLs = State(initialValue: videoURLs)
         self._audioURLs = State(initialValue: audioURLs)
+        self.audioTitles = audioTitles
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
@@ -645,8 +648,8 @@ struct AttachmentViewerView: View {
 private final class _ImageCache {
     static let shared = _ImageCache()
     let cache = NSCache<NSURL, UIImage>()
-    private init() {}
-}
+    }
+
 
 // MARK: - Async URL Image Loader (no blocking on main)
 private struct URLImageView: View {
