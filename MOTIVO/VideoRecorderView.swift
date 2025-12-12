@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251212-VIDREC-PENDINGBUF-004
-// SCOPE: Buffer early video frames when writer backpressures; flush pending buffers before appending current frame.
+// CHANGE-ID: 20251212-VIDREC-COLDWARM-005
+// SCOPE: Preserve first-shot video cadence: warmup gate for first writer arm + keep upstream discard disabled; pending FIFO retained (drop-newest, capped).
 
 import SwiftUI
 import AVFoundation
@@ -259,7 +259,7 @@ final class VideoRecorderController: NSObject,
     
     // Pending video frames when writer back-pressures (cold-start / intermittent stalls)
     private var pendingVideoBuffers: [CMSampleBuffer] = []
-    private let maxPendingVideoBuffers = 90 // ~3–4s at ~20–30fps
+    private let maxPendingVideoBuffers = 180 // ~3s @ 60fps, ~6s @ 30fps
     
     private var recordingStartTime: CMTime?
     private var writerStatusObservation: NSKeyValueObservation?
@@ -273,6 +273,10 @@ final class VideoRecorderController: NSObject,
     private var shouldResumeAfterInterruption = false
     private var shouldResumeAfterRouteChange = false
     private var shouldResumeAfterResignActive = false
+
+    // Cold-start warmup: ensure capture session has been running briefly before arming the first writer.
+    private var captureSessionBecameRunningAt: Date?
+    private var pendingStartRecordingToken: UUID?
     
     private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
     
@@ -613,6 +617,9 @@ final class VideoRecorderController: NSObject,
             session.commitConfiguration()
             self.isConfiguringSession = false
             if !session.isRunning { session.startRunning() }
+            if self.captureSessionBecameRunningAt == nil {
+                self.captureSessionBecameRunningAt = Date()
+            }
             
             // Fade back in on main
             DispatchQueue.main.async {
@@ -734,6 +741,28 @@ final class VideoRecorderController: NSObject,
     
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
+
+        // Cold-start fix: if the capture session has only just started running, wait briefly before arming the first writer.
+        // This avoids the common first-run video cadence stall that bakes a ~1s freeze into the exported file.
+        if let runningAt = captureSessionBecameRunningAt {
+            let elapsed = Date().timeIntervalSince(runningAt)
+            let minWarmup: TimeInterval = 0.9
+            if elapsed < minWarmup {
+                if pendingStartRecordingToken == nil {
+                    let token = UUID()
+                    pendingStartRecordingToken = token
+                    DispatchQueue.main.asyncAfter(deadline: .now() + (minWarmup - elapsed)) { [weak self] in
+                        guard let self = self else { return }
+                        guard self.pendingStartRecordingToken == token else { return }
+                        self.pendingStartRecordingToken = nil
+                        self.startRecording()
+                    }
+                }
+                return
+            }
+        }
+        pendingStartRecordingToken = nil
+
         configureAudioSession()
         sessionQueue.async {
             self.configureSessionIfNeeded()
@@ -763,6 +792,7 @@ final class VideoRecorderController: NSObject,
         elapsedRecordingTime = 0
         elapsedPausedTime = 0
         recordingWallClockStart = nil
+        pendingStartRecordingToken = nil
         state = .recording
         isShowingLivePreview = true
         startTimer()
@@ -770,6 +800,7 @@ final class VideoRecorderController: NSObject,
     
     private func stopRecording() {
         guard state == .recording || state == .pausedRecording else { return }
+        pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
         
@@ -1175,16 +1206,22 @@ final class VideoRecorderController: NSObject,
                 _ = vInput.append(sampleBuffer)
             } else {
                 // Writer back-pressured mid-flush: queue the current frame for later.
-                pendingVideoBuffers.append(sampleBuffer)
-                if pendingVideoBuffers.count > maxPendingVideoBuffers {
-                    pendingVideoBuffers.removeFirst(pendingVideoBuffers.count - maxPendingVideoBuffers)
+                if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                    pendingVideoBuffers.append(sampleBuffer)
+                } else {
+                    // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
+                    // (Alternative: keep "fresh" by overwriting the last slot)
+                    // pendingVideoBuffers[maxPendingVideoBuffers - 1] = sampleBuffer
                 }
             }
         } else {
-            // Not ready: enqueue current buffer (drop oldest if over max).
-            pendingVideoBuffers.append(sampleBuffer)
-            if pendingVideoBuffers.count > maxPendingVideoBuffers {
-                pendingVideoBuffers.removeFirst(pendingVideoBuffers.count - maxPendingVideoBuffers)
+            // Not ready: enqueue current buffer (drop newest if over max to preserve the earliest frames).
+            if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                pendingVideoBuffers.append(sampleBuffer)
+            } else {
+                // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
+                // (Alternative: keep "fresh" by overwriting the last slot)
+                // pendingVideoBuffers[maxPendingVideoBuffers - 1] = sampleBuffer
             }
         }
     }
