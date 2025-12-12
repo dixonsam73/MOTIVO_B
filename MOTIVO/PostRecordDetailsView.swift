@@ -490,12 +490,21 @@ struct PostRecordDetailsView: View {
 
                 let startIndex = min(max(request.startIndex, 0), max(combined.count - 1, 0))
 
+                let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                let audioTitles: [String] = audioURLs.map { u in
+                    let stem = u.deletingPathExtension().lastPathComponent
+                    let raw = namesDict[stem] ?? stem
+                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return trimmed.isEmpty ? stem : trimmed
+                }
+
                 AttachmentViewerView(
                     imageURLs: imageURLs,
                     startIndex: startIndex,
                     themeBackground: Color(.systemBackground),
                     videoURLs: videoURLs,
                     audioURLs: audioURLs,
+                    audioTitles: audioTitles,
                     onDelete: { _ in /* Deletion remains managed by existing overlay button in grid; no-op here */ },
                     onFavourite: { _ in /* Not applicable in staging */ },
                     isFavourite: { _ in false },
@@ -1874,6 +1883,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

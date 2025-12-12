@@ -6,6 +6,7 @@ import AVKit
 import AVFoundation
 
 struct AttachmentViewerView: View {
+    let imageURLs: [URL]
     let audioTitles: [String]?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -14,7 +15,6 @@ struct AttachmentViewerView: View {
     private let fillOpacityDark: CGFloat = 0.88
     private let headerSpacing: CGFloat = Theme.Spacing.l
 
-    let imageURLs: [URL]
     @State var videoURLs: [URL]
     @State var audioURLs: [URL]
     @State var startIndex: Int
@@ -131,6 +131,14 @@ struct AttachmentViewerView: View {
         }
     }
 
+    // Proxy to resolve audio title from arrays passed into the viewer
+    static func resolvedAudioTitleProxy(url: URL, audioURLs: [URL], audioTitles: [String]?) -> String? {
+        guard let titles = audioTitles, titles.count == audioURLs.count,
+              let idx = audioURLs.firstIndex(of: url) else { return nil }
+        let t = titles[idx].trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
     var body: some View {
         #if DEBUG
         let _ = {
@@ -150,7 +158,9 @@ struct AttachmentViewerView: View {
                             attachment: media[i],
                             isAnyPlayerActive: $isAnyPlayerActive,
                             onRequestStopAll: $stopAllPlayersToggle,
-                            background: themeBackground
+                            background: themeBackground,
+                            audioURLs: audioURLs,
+                            audioTitles: audioTitles
                         )
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
@@ -722,6 +732,8 @@ private struct MediaPage: View {
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
     var background: Color
+    let audioURLs: [URL]
+    let audioTitles: [String]?
 
     var body: some View {
         switch attachment.kind {
@@ -737,7 +749,8 @@ private struct MediaPage: View {
             AudioPage(
                 url: attachment.url,
                 isAnyPlayerActive: $isAnyPlayerActive,
-                onRequestStopAll: $onRequestStopAll
+                onRequestStopAll: $onRequestStopAll,
+                displayTitle: AttachmentViewerView.resolvedAudioTitleProxy(url: attachment.url, audioURLs: audioURLs, audioTitles: audioTitles)
             )
         }
     }
@@ -1236,6 +1249,7 @@ private struct AudioPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
+    let displayTitle: String?
     @StateObject private var audioController = AudioPlayerController()
 
     // Waveform ring buffer
@@ -1247,7 +1261,7 @@ private struct AudioPage: View {
     var body: some View {
         VStack(spacing: 16) {
 
-            Text(url.deletingPathExtension().lastPathComponent)
+            Text(displayTitle ?? url.deletingPathExtension().lastPathComponent)
                 .font(.callout)
                 .foregroundStyle(Theme.Colors.secondaryText)
                 .lineLimit(1)
@@ -1404,3 +1418,4 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+
