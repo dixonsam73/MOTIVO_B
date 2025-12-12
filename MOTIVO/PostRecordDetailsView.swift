@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251012_202320-tasks-pad-a2
-// SCOPE: Add optional notesPrefill parameter and init notes from it
+// CHANGE-ID: 20251212_122000-prdv-viewerreq-03
+// SCOPE: Step 3 — Wire PRDV visual attachment taps to viewerRequest (images+videos only)
 
 //  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
@@ -13,6 +13,27 @@ import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
 import UIKit
+
+
+// MARK: - Attachment Viewer Request (Step 1)
+// Atomic presentation payload for AttachmentViewerView (used starting Step 2).
+// Defined here (PRDV-only scope) to keep this step compiling without touching other files.
+private struct AttachmentViewerRequest: Identifiable {
+    enum Mode {
+        case visual   // images + videos
+        case audio    // audio clips only
+    }
+
+    let id = UUID()
+    let mode: Mode
+    let startIndex: Int
+
+    // Pass-through arrays; actual usage will filter by mode when presented (Step 2+).
+    let imageURLs: [URL]
+    let videoURLs: [URL]
+    let audioURLs: [URL]
+}
+
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -63,6 +84,9 @@ struct PostRecordDetailsView: View {
 
     @State private var isShowingAttachmentViewer: Bool = false
     @State private var viewerStartIndex: Int = 0
+
+    // Step 1: New atomic request state (unused until Step 2).
+    @State private var viewerRequest: AttachmentViewerRequest? = nil
 
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
 
@@ -437,6 +461,33 @@ struct PostRecordDetailsView: View {
                     }
                     .accessibilityLabel("Back to Timer")
                 }
+#if DEBUG
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Viewer Test") {
+                        let arrays = viewerURLArrays()
+                        let visualURLs = arrays.images + arrays.videos
+
+                        if !visualURLs.isEmpty {
+                            viewerRequest = AttachmentViewerRequest(
+                                mode: .visual,
+                                startIndex: 0,
+                                imageURLs: arrays.images,
+                                videoURLs: arrays.videos,
+                                audioURLs: arrays.audios
+                            )
+                        } else if !arrays.audios.isEmpty {
+                            viewerRequest = AttachmentViewerRequest(
+                                mode: .audio,
+                                startIndex: 0,
+                                imageURLs: [],
+                                videoURLs: [],
+                                audioURLs: arrays.audios
+                            )
+                        }
+                    }
+                }
+#endif
+
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
                         saveToCoreData()
@@ -448,13 +499,21 @@ struct PostRecordDetailsView: View {
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
             }
-            .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
-                let arrays = viewerURLArrays()
-                let imageURLs = arrays.images
-                let videoURLs = arrays.videos
-                let audioURLs = arrays.audios
-                let combined = imageURLs + videoURLs + audioURLs
-                let startIndex = min(max(viewerStartIndex, 0), max(combined.count - 1, 0))
+            .fullScreenCover(item: $viewerRequest) { request in
+                let imageURLs = (request.mode == .visual) ? request.imageURLs : []
+                let videoURLs = (request.mode == .visual) ? request.videoURLs : []
+                let audioURLs = (request.mode == .audio) ? request.audioURLs : []
+
+                let combined: [URL] = {
+                    switch request.mode {
+                    case .visual:
+                        return imageURLs + videoURLs
+                    case .audio:
+                        return audioURLs
+                    }
+                }()
+
+                let startIndex = min(max(request.startIndex, 0), max(combined.count - 1, 0))
 
                 AttachmentViewerView(
                     imageURLs: imageURLs,
@@ -674,13 +733,42 @@ struct PostRecordDetailsView: View {
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    let index = stagedIndexForAttachment(att)
-                                    if index >= 0 {
-                                        viewerStartIndex = index
-                                        // Ensure temp surrogate files exist for images/videos/audios before presenting the viewer
-                                        ensureSurrogateFilesExistForViewer()
-                                        isShowingAttachmentViewer = true
+                                    // Step 3: Visual taps (images + videos) present via viewerRequest only.
+                                    // Ordering matches the PRDV visual grid (non-audio attachments in stagedAttachments order).
+                                    ensureSurrogateFilesExistForViewer()
+
+                                    let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file }
+
+                                    let imageURLs: [URL] = visuals.compactMap { item in
+                                        guard item.kind == .image else { return nil }
+                                        return surrogateURL(for: item)
                                     }
+
+                                    let videoURLs: [URL] = visuals.compactMap { item in
+                                        guard item.kind == .video else { return nil }
+                                        return surrogateURL(for: item)
+                                    }
+
+                                    let startIndex: Int = {
+                                        switch att.kind {
+                                        case .image:
+                                            let idx = visuals.filter { $0.kind == .image }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                            return idx
+                                        case .video:
+                                            let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                            return imageURLs.count + idx
+                                        default:
+                                            return 0
+                                        }
+                                    }()
+
+                                    viewerRequest = AttachmentViewerRequest(
+                                        mode: .visual,
+                                        startIndex: startIndex,
+                                        imageURLs: imageURLs,
+                                        videoURLs: videoURLs,
+                                        audioURLs: []
+                                    )
                                 }
                             }
                         }
