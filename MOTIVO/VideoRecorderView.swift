@@ -172,8 +172,6 @@ public struct VideoRecorderView: View {
         }
         .onAppear {
             controller.onAppear()
-            controller.isShowingLivePreview = true
-            controller.startCaptureSession()
         }
         .onDisappear {
             controller.onDisappear()
@@ -262,6 +260,7 @@ final class VideoRecorderController: NSObject,
     private var writerStatusObservation: NSKeyValueObservation?
 
     private let captureQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.captureQueue")
+    private let sessionQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.sessionQueue")
 
     private var isSessionConfigured = false
     private var shouldResumeAfterInterruption = false
@@ -287,17 +286,23 @@ final class VideoRecorderController: NSObject,
     // MARK: - Lifecycle hooks
 
     func onAppear() {
-        configureSessionIfNeeded()
-        isShowingLivePreview = true
-        startCaptureSession()
         installNotifications()
+        DispatchQueue.main.async {
+            self.isShowingLivePreview = true
+        }
+        sessionQueue.async {
+            self.configureSessionIfNeeded()
+            self.startCaptureSession()
+        }
     }
 
     func onDisappear() {
         stopTimer()
         removeNotifications()
-        stopCaptureSession()
-        cleanupRecordingFile()
+        sessionQueue.async {
+            self.stopCaptureSession()
+            self.cleanupRecordingFile()
+        }
     }
 
     // MARK: - UI Computed
@@ -459,6 +464,7 @@ final class VideoRecorderController: NSObject,
     // MARK: - Session & Recording
 
     private func configureSessionIfNeeded() {
+        precondition(!Thread.isMainThread, "configureSessionIfNeeded must be called on sessionQueue")
         guard !isSessionConfigured else { return }
 
         let session = AVCaptureSession()
@@ -518,7 +524,7 @@ final class VideoRecorderController: NSObject,
                 self.currentVideoOrientation = conn.videoOrientation
             }
             if conn.isVideoMirroringSupported {
-                conn.isVideoMirrored = (preferredPosition == .front)
+                conn.automaticallyAdjustsVideoMirroring = true
             }
         }
 
@@ -532,27 +538,31 @@ final class VideoRecorderController: NSObject,
     }
 
     func flipCamera() {
-        // Ensure session exists
-        configureSessionIfNeeded()
-        guard let session = captureSession else { return }
-
-        // Compute next position and update preference
-        let nextPosition: AVCaptureDevice.Position = (preferredPosition == .front) ? .back : .front
-
         // If currently recording, ignore flip (button is disabled in UI)
         if state == .recording { return }
 
-        // Briefly fade out the preview for a smooth transition
+        // Fade out preview on main for smooth transition
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.15)) {
                 self.isShowingLivePreview = false
             }
         }
 
+        let nextPosition: AVCaptureDevice.Position = (preferredPosition == .front) ? .back : .front
         preferredPosition = nextPosition
 
-        // Reconfigure inputs on a high-priority queue
-        DispatchQueue.global(qos: .userInitiated).async {
+        sessionQueue.async {
+            // Ensure session exists
+            self.configureSessionIfNeeded()
+            guard let session = self.captureSession else {
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        self.isShowingLivePreview = true
+                    }
+                }
+                return
+            }
+
             self.isConfiguringSession = true
             session.beginConfiguration()
             // Remove existing video inputs only
@@ -579,7 +589,6 @@ final class VideoRecorderController: NSObject,
                session.canAddInput(audioIn) {
                 session.addInput(audioIn)
             }
-
             // Update orientation/mirroring
             if let vOutput = self.videoOutput,
                let conn = vOutput.connection(with: .video) {
@@ -588,10 +597,9 @@ final class VideoRecorderController: NSObject,
                     self.currentVideoOrientation = conn.videoOrientation
                 }
                 if conn.isVideoMirroringSupported {
-                    conn.isVideoMirrored = (nextPosition == .front)
+                    conn.automaticallyAdjustsVideoMirroring = true
                 }
             }
-
             session.commitConfiguration()
             self.isConfiguringSession = false
             if !session.isRunning { session.startRunning() }
@@ -606,14 +614,45 @@ final class VideoRecorderController: NSObject,
     }
 
     func startCaptureSession() {
-        if isConfiguringSession { return }
-        guard let session = captureSession, !session.isRunning else { return }
-        DispatchQueue.global(qos: .background).async { session.startRunning() }
+        sessionQueue.async {
+            if self.isConfiguringSession { return }
+            guard let session = self.captureSession, !session.isRunning else { return }
+            session.startRunning()
+
+            // After session is running, refresh preview orientation on main
+            DispatchQueue.main.async {
+                // Find any visible PreviewContainerView and ask it to refresh
+                // SwiftUI will re-run updateUIView when state changes; we also force a refresh here for reliability
+                // by posting a layout pass on key window's root view
+                if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+                   let window = scene.windows.first,
+                   let rootView = window.rootViewController?.view {
+                    rootView.setNeedsLayout()
+                    rootView.layoutIfNeeded()
+                }
+                // One-time nudge: briefly hide/show live preview to force re-bind
+                self.isShowingLivePreview = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+                    self.isShowingLivePreview = true
+                }
+            }
+
+            // Also update the video output connection orientation/mirroring now that the session is running
+            if let conn = self.videoOutput?.connection(with: .video) {
+                if conn.isVideoOrientationSupported {
+                    conn.videoOrientation = PreviewContainerView.currentOrientation()
+                    self.currentVideoOrientation = conn.videoOrientation
+                }
+                if conn.isVideoMirroringSupported {
+                    conn.automaticallyAdjustsVideoMirroring = true
+                }
+            }
+        }
     }
 
     private func stopCaptureSession() {
         if let session = captureSession, session.isRunning {
-            DispatchQueue.global(qos: .background).async { session.stopRunning() }
+            session.stopRunning()
         }
         captureSession = nil
         videoOutput = nil
@@ -686,12 +725,14 @@ final class VideoRecorderController: NSObject,
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
         configureAudioSession()
-        configureSessionIfNeeded()
-        if let conn = videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
-            conn.videoOrientation = PreviewContainerView.currentOrientation()
-            currentVideoOrientation = conn.videoOrientation
+        sessionQueue.async {
+            self.configureSessionIfNeeded()
+            if let conn = self.videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
+                conn.videoOrientation = PreviewContainerView.currentOrientation()
+                self.currentVideoOrientation = conn.videoOrientation
+            }
+            self.startCaptureSession()
         }
-        startCaptureSession()
 
         isReadyToSave = false
         let url = newRecordingURL()
@@ -1129,7 +1170,7 @@ private struct CameraPreview: UIViewRepresentable {
             l.session = session
             l.videoGravity = .resizeAspectFill
             uiView.isHidden = !(isLive && session != nil)
-            uiView.setNeedsLayout()
+            uiView.refreshOrientation()
         }
     }
 }
@@ -1146,6 +1187,18 @@ private final class PreviewContainerView: UIView {
                 conn.videoOrientation = PreviewContainerView.currentOrientation()
             }
         }
+    }
+
+    func refreshOrientation() {
+        if let l = self.layer as? AVCaptureVideoPreviewLayer,
+           let conn = l.connection, conn.isVideoOrientationSupported {
+            conn.videoOrientation = PreviewContainerView.currentOrientation()
+            if conn.isVideoMirroringSupported {
+                conn.automaticallyAdjustsVideoMirroring = true
+            }
+        }
+        setNeedsLayout()
+        layoutIfNeeded()
     }
 
     static func currentOrientation() -> AVCaptureVideoOrientation {
@@ -1209,3 +1262,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
