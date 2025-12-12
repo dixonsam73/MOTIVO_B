@@ -261,6 +261,23 @@ final class VideoRecorderController: NSObject,
     private var pendingVideoBuffers: [CMSampleBuffer] = []
     private let maxPendingVideoBuffers = 180 // ~3s @ 60fps, ~6s @ 30fps
     
+    // MARK: - Fresh-install warm-up (one-time)
+    // Warms the capture + writer pipeline once per fresh install to avoid first-run stutter.
+    // Writes to a temp file, appends a minimum number of real video frames, then deletes the file.
+    private static let freshInstallWarmupCompletedKey = "videoRecorder_freshInstallWarmupCompleted_v1"
+    private let freshInstallWarmupMinimumVideoFrames: Int = 40
+    
+    private var isFreshInstallWarmupArmed: Bool = false
+    private var isFreshInstallWarmupInProgress: Bool = false
+    private var isFreshInstallWarmupCompleted: Bool = false
+    private var queuedUserStartRecordingAfterWarmup: Bool = false
+    
+    private var warmupAssetWriter: AVAssetWriter?
+    private var warmupVideoInput: AVAssetWriterInput?
+    private var warmupTempURL: URL?
+    private var warmupVideoFrameCount: Int = 0
+    private var warmupStartPTS: CMTime?
+    
     private var recordingStartTime: CMTime?
     private var writerStatusObservation: NSKeyValueObservation?
     
@@ -298,6 +315,7 @@ final class VideoRecorderController: NSObject,
     
     func onAppear() {
         installNotifications()
+        armFreshInstallWarmupIfNeeded()
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
         }
@@ -737,10 +755,158 @@ final class VideoRecorderController: NSObject,
         self.recordingStartTime = nil
     }
     
+
+    // MARK: - Fresh-install warm-up helpers
+
+    private func armFreshInstallWarmupIfNeeded() {
+        // Cache the flag in-memory so we don't hit UserDefaults on every frame.
+        let completed = UserDefaults.standard.bool(forKey: Self.freshInstallWarmupCompletedKey)
+        isFreshInstallWarmupCompleted = completed
+        if completed { return }
+        isFreshInstallWarmupArmed = true
+    }
+
+    private func warmupRecordingURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("motivo_vid_warmup_\(UUID().uuidString).mov")
+    }
+
+    private func setupWarmupWriter(for url: URL) throws {
+        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+
+        // Match the main writer's canvas calculation for consistency.
+        let isLandscape = (currentVideoOrientation == .landscapeLeft || currentVideoOrientation == .landscapeRight)
+        let width: Int
+        let height: Int
+        if isLandscape {
+            width = 1920
+            height = 1080
+        } else {
+            width = 1080
+            height = 1920
+        }
+
+        let videoSettings: [String: Any] = [
+            AVVideoCodecKey: AVVideoCodecType.hevc,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 5_000_000,
+                AVVideoAllowFrameReorderingKey: false
+            ]
+        ]
+
+        let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
+        vInput.expectsMediaDataInRealTime = true
+
+        // Mirror for front camera (same as main writer).
+        var transform = CGAffineTransform.identity
+        if preferredPosition == .front {
+            let mirror = CGAffineTransform(scaleX: -1, y: 1)
+            let translate = CGAffineTransform(translationX: CGFloat(width), y: 0)
+            transform = mirror.concatenating(translate)
+        }
+        vInput.transform = transform
+
+        if writer.canAdd(vInput) { writer.add(vInput) }
+
+        warmupAssetWriter = writer
+        warmupVideoInput = vInput
+        warmupVideoFrameCount = 0
+        warmupStartPTS = nil
+    }
+
+    private func completeFreshInstallWarmupIfNeeded() {
+        guard isFreshInstallWarmupInProgress else { return }
+        guard let writer = warmupAssetWriter else { return }
+
+        // Prevent re-entry while finishWriting is in-flight.
+        isFreshInstallWarmupInProgress = false
+        isFreshInstallWarmupArmed = false
+        isFreshInstallWarmupCompleted = true
+        UserDefaults.standard.set(true, forKey: Self.freshInstallWarmupCompletedKey)
+
+        let urlToDelete = warmupTempURL
+
+        warmupAssetWriter = nil
+        warmupVideoInput = nil
+        warmupTempURL = nil
+        warmupStartPTS = nil
+        warmupVideoFrameCount = 0
+
+        writer.finishWriting { [weak self] in
+            if let url = urlToDelete {
+                try? FileManager.default.removeItem(at: url)
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                if self.queuedUserStartRecordingAfterWarmup {
+                    self.queuedUserStartRecordingAfterWarmup = false
+                    self.startRecording()
+                }
+            }
+        }
+    }
+
+    private func handleFreshInstallWarmupVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        if isFreshInstallWarmupCompleted { return }
+        if !isFreshInstallWarmupArmed { return }
+
+        // Lazily create a warmup writer on the first video frame after activation.
+        if !isFreshInstallWarmupInProgress {
+            isFreshInstallWarmupInProgress = true
+            warmupVideoFrameCount = 0
+            warmupStartPTS = nil
+
+            let url = warmupRecordingURL()
+            warmupTempURL = url
+            try? FileManager.default.removeItem(at: url)
+            do {
+                try setupWarmupWriter(for: url)
+            } catch {
+                // If warmup setup fails, disarm to avoid blocking recording.
+                isFreshInstallWarmupInProgress = false
+                isFreshInstallWarmupArmed = false
+                return
+            }
+        }
+
+        guard let writer = warmupAssetWriter,
+              let vInput = warmupVideoInput else {
+            return
+        }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        if writer.status == .unknown {
+            writer.startWriting()
+            writer.startSession(atSourceTime: pts)
+            warmupStartPTS = pts
+        }
+
+        guard writer.status == .writing else { return }
+
+        if vInput.isReadyForMoreMediaData {
+            if vInput.append(sampleBuffer) {
+                warmupVideoFrameCount += 1
+            }
+        }
+
+        if warmupVideoFrameCount >= freshInstallWarmupMinimumVideoFrames {
+            completeFreshInstallWarmupIfNeeded()
+        }
+    }
+
     // MARK: - Recording Control
     
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
+        armFreshInstallWarmupIfNeeded()
+        if !isFreshInstallWarmupCompleted {
+            // Gate recording until the one-time fresh-install warm-up has appended real video frames.
+            queuedUserStartRecordingAfterWarmup = true
+            return
+        }
+
 
         // Cold-start fix: if the capture session has only just started running, wait briefly before arming the first writer.
         // This avoids the common first-run video cadence stall that bakes a ~1s freeze into the exported file.
@@ -1170,7 +1336,13 @@ final class VideoRecorderController: NSObject,
     
     private func handleVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer,
                                          from connection: AVCaptureConnection) {
+        // Fresh-install warm-up runs while idle to prime the pipeline.
+        if isFreshInstallWarmupArmed && !isFreshInstallWarmupCompleted {
+            handleFreshInstallWarmupVideoSampleBuffer(sampleBuffer)
+        }
+        
         guard state == .recording else { return }
+        
         guard let writer = assetWriter,
               let vInput = videoInput else { return }
         
