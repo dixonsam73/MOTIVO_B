@@ -461,32 +461,7 @@ struct PostRecordDetailsView: View {
                     }
                     .accessibilityLabel("Back to Timer")
                 }
-#if DEBUG
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Viewer Test") {
-                        let arrays = viewerURLArrays()
-                        let visualURLs = arrays.images + arrays.videos
 
-                        if !visualURLs.isEmpty {
-                            viewerRequest = AttachmentViewerRequest(
-                                mode: .visual,
-                                startIndex: 0,
-                                imageURLs: arrays.images,
-                                videoURLs: arrays.videos,
-                                audioURLs: arrays.audios
-                            )
-                        } else if !arrays.audios.isEmpty {
-                            viewerRequest = AttachmentViewerRequest(
-                                mode: .audio,
-                                startIndex: 0,
-                                imageURLs: [],
-                                videoURLs: [],
-                                audioURLs: arrays.audios
-                            )
-                        }
-                    }
-                }
-#endif
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
