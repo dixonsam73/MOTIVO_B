@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251212-VIDREC-WRITERQ-001
-// SCOPE: VideoRecorderView — serialize writer ops + align timer start with writer session start
+// CHANGE-ID: 20251212-VIDREC-PENDINGBUF-004
+// SCOPE: Buffer early video frames when writer backpressures; flush pending buffers before appending current frame.
 
 import SwiftUI
 import AVFoundation
@@ -256,6 +256,10 @@ final class VideoRecorderController: NSObject,
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
+    
+    // Pending video frames when writer back-pressures (cold-start / intermittent stalls)
+    private var pendingVideoBuffers: [CMSampleBuffer] = []
+    private let maxPendingVideoBuffers = 90 // ~3–4s at ~20–30fps
     
     private var recordingStartTime: CMTime?
     private var writerStatusObservation: NSKeyValueObservation?
@@ -1159,9 +1163,29 @@ final class VideoRecorderController: NSObject,
         }
         
         guard writer.status == .writing else { return }
-        
+
         if vInput.isReadyForMoreMediaData {
-            _ = vInput.append(sampleBuffer)
+            // First, flush any buffered frames (oldest first) before writing the current frame.
+            while !pendingVideoBuffers.isEmpty, vInput.isReadyForMoreMediaData {
+                let buffered = pendingVideoBuffers.removeFirst()
+                _ = vInput.append(buffered)
+            }
+
+            if vInput.isReadyForMoreMediaData {
+                _ = vInput.append(sampleBuffer)
+            } else {
+                // Writer back-pressured mid-flush: queue the current frame for later.
+                pendingVideoBuffers.append(sampleBuffer)
+                if pendingVideoBuffers.count > maxPendingVideoBuffers {
+                    pendingVideoBuffers.removeFirst(pendingVideoBuffers.count - maxPendingVideoBuffers)
+                }
+            }
+        } else {
+            // Not ready: enqueue current buffer (drop oldest if over max).
+            pendingVideoBuffers.append(sampleBuffer)
+            if pendingVideoBuffers.count > maxPendingVideoBuffers {
+                pendingVideoBuffers.removeFirst(pendingVideoBuffers.count - maxPendingVideoBuffers)
+            }
         }
     }
     
