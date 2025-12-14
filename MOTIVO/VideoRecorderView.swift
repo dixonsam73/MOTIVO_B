@@ -116,7 +116,7 @@ public struct VideoRecorderView: View {
                     VStack(spacing: isLandscape ? 2 : 6) {
                         // In landscape we hide the title to save vertical space.
                         if !isLandscape {
-                            Text(controller.title)
+                            Text(controller.state == .idle && !controller.isRecorderReady ? "Preparing…" : controller.title)
                                 .font(.headline)
                                 .accessibilityIdentifier("VideoRecorderView_Title")
                                 .lineLimit(1)
@@ -138,7 +138,7 @@ public struct VideoRecorderView: View {
                                           color: tintRecord,
                                           accessibilityLabel: controller.recordingButtonAccessibilityLabel,
                                           action: { controller.recordPauseResumeTapped() },
-                                          isDisabled: controller.recordingButtonDisabled)
+                                          isDisabled: controller.recordingButtonDisabled || !controller.isRecorderReady)
                             ControlButton(systemName: "stop.fill",
                                           color: tintStopDelete,
                                           accessibilityLabel: "Stop",
@@ -251,6 +251,21 @@ final class VideoRecorderController: NSObject,
 
     // Track if showing live camera preview
     @Published var isShowingLivePreview: Bool = true
+    
+    // New warmup readiness gate and counters per instructions:
+    @Published private(set) var isRecorderReady: Bool = false
+    private let warmupFrameCount: Int = 120
+    private var warmupVideoFramesSeen: Int = 0
+
+    // Added warm-up cadence stability fields:
+    private var warmupConsecutiveStable: Int = 0
+    private let warmupRequiredConsecutiveStable: Int = 30
+    private var warmupLastPTS: CMTime? = nil
+    private let warmupMinDelta: Double = 0.020
+    private let warmupMaxDelta: Double = 0.050
+    private let warmupMinFramesAbsolute: Int = 90
+
+    private var isArmedToRecord: Bool = false
 
     // Poster thumbnail image
     @Published var previewImage: UIImage? = nil
@@ -346,6 +361,12 @@ final class VideoRecorderController: NSObject,
             self.configureSessionIfNeeded()
             self.startCaptureSession()
         }
+        // Reset warmup counters and readiness on init
+        warmupVideoFramesSeen = 0
+        warmupConsecutiveStable = 0
+        warmupLastPTS = nil
+        isRecorderReady = false
+        isArmedToRecord = false
     }
 
     deinit {
@@ -361,6 +382,13 @@ final class VideoRecorderController: NSObject,
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
         }
+        // Reset warmup counters and readiness on appear
+        warmupVideoFramesSeen = 0
+        warmupConsecutiveStable = 0
+        warmupLastPTS = nil
+        isRecorderReady = false
+        isArmedToRecord = false
+
         sessionQueue.async {
             self.configureSessionIfNeeded()
             self.startCaptureSession()
@@ -380,7 +408,11 @@ final class VideoRecorderController: NSObject,
 
     var title: String {
         switch state {
-        case .idle: return "Ready to Record"
+        case .idle:
+            if !isRecorderReady {
+                return "Preparing…"
+            }
+            return "Ready to Record"
         case .recording: return "Recording"
         case .pausedRecording: return "Paused Recording"
         case .playing: return "Playing"
@@ -1040,32 +1072,28 @@ final class VideoRecorderController: NSObject,
             self.startCaptureSession()
         }
 
+        // Arm to record on first accepted frame
+        isArmedToRecord = true
+        
+        // Reset warmup counters if needed (already reset on appear/init)
+        
         isReadyToSave = false
-        let url = newRecordingURL()
-        recordingURL = url
-        try? FileManager.default.removeItem(at: url)
-
-        do {
-            try setupWriter(for: url)
-        } catch {
-            print("[RecorderDebug] setupWriter failed: \(error)")
-            recordingURL = nil
-            assetWriter = nil
-            videoInput = nil
-            audioInput = nil
-            return
+        
+        // Create URL now, but do NOT create writer or start writing here - will be deferred to first accepted frame
+        if recordingURL == nil {
+            let url = newRecordingURL()
+            recordingURL = url
+        }
+        if let url = recordingURL {
+            try? FileManager.default.removeItem(at: url)
         }
 
-        // Prime assetWriter.startWriting() on record tap so the first-run cost isn't paid on the first video frame callback.
-        // Session start (startSession) remains video-PTS anchored and will be started when the first buffered video buffer is available.
-        writerQueue.async { [weak self] in
-            guard let self else { return }
-            guard let writer = self.assetWriter else { return }
-            if writer.status == .unknown {
-                writer.startWriting()
-            }
-            self.startWriterSessionFromBufferedIfPossible()
-        }
+        // Clear any prior writer in case
+        assetWriter = nil
+        videoInput = nil
+        audioInput = nil
+        recordingStartTime = nil
+        lastVideoPTS = nil
 
         // Remove immediate UI/timer start semantics on tap:
         // recordingWallClockStart = Date()
@@ -1082,6 +1110,7 @@ final class VideoRecorderController: NSObject,
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
+        isArmedToRecord = false
 
         guard let writer = assetWriter else {
             state = .idle
@@ -1095,7 +1124,7 @@ final class VideoRecorderController: NSObject,
 
         writer.finishWriting { [weak self] in
             DispatchQueue.main.async {
-                guard let self else { return }
+                guard let self = self else { return }
                 if writer.status == .completed, let url = finishURL {
                     self.handleRecordingFinishedSuccessfully(url: url)
                 } else {
@@ -1220,6 +1249,8 @@ final class VideoRecorderController: NSObject,
         lastVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
+        isArmedToRecord = false
+        // Note: Do not reset isRecorderReady here to avoid breaking readiness mid-session.
     }
 
     // MARK: - Playback
@@ -1470,14 +1501,98 @@ final class VideoRecorderController: NSObject,
             handleFreshInstallWarmupVideoSampleBuffer(sampleBuffer)
         }
 
-        guard state == .recording || state == .idle || state == .pausedRecording else { return }
+        // --- New warm-up readiness gating with stable frame cadence + min frame count ---
+        if !isRecorderReady {
+            warmupVideoFramesSeen += 1
 
-        if !dbgSawFirstVideoSample {
-            dbgSawFirstVideoSample = true
             let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            dbg("first VIDEO sample received; pts=\(pts.seconds)s; writer.status=\(assetWriter?.status.rawValue ?? -1)")
+            if let last = warmupLastPTS {
+                let delta = CMTimeGetSeconds(CMTimeSubtract(pts, last))
+                if delta >= warmupMinDelta && delta <= warmupMaxDelta {
+                    warmupConsecutiveStable += 1
+                } else {
+                    warmupConsecutiveStable = 0
+                }
+            }
+            warmupLastPTS = pts
+
+            if warmupVideoFramesSeen >= warmupMinFramesAbsolute && warmupConsecutiveStable >= warmupRequiredConsecutiveStable {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if !self.isRecorderReady {
+                        self.isRecorderReady = true
+                        print("[RecorderDebug] Warm-up readiness achieved: framesSeen=\(self.warmupVideoFramesSeen) consecutiveStable=\(self.warmupConsecutiveStable)")
+                    }
+                }
+            }
+            // Early return: do not append or buffer any frames until ready
+            if !isRecorderReady {
+                return
+            }
         }
 
+        // If armed to record and not yet initialized writer, lazily create writer now
+        if isArmedToRecord && assetWriter == nil {
+            guard let url = recordingURL ?? {
+                let newURL = newRecordingURL()
+                recordingURL = newURL
+                return newURL
+            }() else {
+                // Should never happen
+                return
+            }
+
+            do {
+                try FileManager.default.removeItem(at: url)
+            } catch {
+                // ignore error
+            }
+
+            do {
+                try setupWriter(for: url)
+            } catch {
+                print("[RecorderDebug] setupWriter failed: \(error)")
+                recordingURL = nil
+                assetWriter = nil
+                videoInput = nil
+                audioInput = nil
+                isArmedToRecord = false
+                return
+            }
+
+            guard let writer = assetWriter else {
+                isArmedToRecord = false
+                return
+            }
+
+            if writer.status == .unknown {
+                dbg("writer.startWriting() called lazily on first accepted frame; status=\(writer.status.rawValue)")
+                writer.startWriting()
+            }
+
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            ensureSessionStarted(with: pts)
+            if recordingStartTime == nil {
+                // Waiting for cold-start stabilization; do not start session yet.
+                return
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if self.state != .recording {
+                    self.state = .recording
+                }
+                if self.recordingWallClockStart == nil {
+                    self.recordingWallClockStart = Date()
+                }
+                if self.timer == nil {
+                    self.startTimer()
+                }
+            }
+            isArmedToRecord = false
+        }
+
+        guard state == .recording || state == .idle || state == .pausedRecording else { return }
         guard let writer = assetWriter,
               let vInput = videoInput else { return }
 
