@@ -856,13 +856,9 @@ final class VideoRecorderController: NSObject,
         }
 
         writer.startSession(atSourceTime: startPTS)
-        dbg("[VidRec \(dbgID)] startSession at pts=\(startPTS.seconds, default: "%.3f") pendingVideo=\(pendingVideoBuffers.count) pendingAudio=\(pendingAudioBuffers.count)")
+        dbg(String(format: "startSession at pts=%.3f pendingVideo=%d pendingAudio=%d", startPTS.seconds.isFinite ? startPTS.seconds : 0.0, pendingVideoBuffers.count, pendingAudioBuffers.count))
 
-        // Start UI timer now that the writer session is actually running.
-        if recordingWallClockStart == nil {
-            recordingWallClockStart = Date()
-            startTimer()
-        }
+        // Note: timer start logic moved to handleVideoSampleBuffer to unify start timing.
     }
 
     private func canAppendVideo(_ pts: CMTime) -> Bool {
@@ -1071,13 +1067,12 @@ final class VideoRecorderController: NSObject,
             self.startWriterSessionFromBufferedIfPossible()
         }
 
-        elapsedRecordingTime = 0
-        elapsedPausedTime = 0
-        recordingWallClockStart = Date()
-        pendingStartRecordingToken = nil
-        state = .recording
+        // Remove immediate UI/timer start semantics on tap:
+        // recordingWallClockStart = Date()
+        // state = .recording
+        // startTimer()
+        // Keep isShowingLivePreview true as-is
         isShowingLivePreview = true
-        startTimer()
     }
 
     private func stopRecording() {
@@ -1475,7 +1470,7 @@ final class VideoRecorderController: NSObject,
             handleFreshInstallWarmupVideoSampleBuffer(sampleBuffer)
         }
 
-        guard state == .recording else { return }
+        guard state == .recording || state == .idle || state == .pausedRecording else { return }
 
         if !dbgSawFirstVideoSample {
             dbgSawFirstVideoSample = true
@@ -1503,8 +1498,8 @@ final class VideoRecorderController: NSObject,
 
             ensureSessionStarted(with: pts)
             if recordingStartTime == nil {
-        // Waiting for cold-start stabilization; do not start session yet.
-        return
+                // Waiting for cold-start stabilization; do not start session yet.
+                return
             }
 
             // DEBUG timing: print once on first video frame that starts the writer session
@@ -1514,10 +1509,17 @@ final class VideoRecorderController: NSObject,
                 print(String(format: "[RecorderTiming] firstVideoFrame→writerStart %.0f ms", deltaMs))
             }
 
-            // Start the UI timer when the writer session actually starts (not on button tap).
+            // Start the UI timer and set state here now that the writer session actually starts (not on button tap).
             DispatchQueue.main.async { [weak self] in
-                if self?.recordingWallClockStart == nil {
-                    self?.recordingWallClockStart = Date()
+                guard let self = self else { return }
+                if self.state != .recording {
+                    self.state = .recording
+                }
+                if self.recordingWallClockStart == nil {
+                    self.recordingWallClockStart = Date()
+                }
+                if self.timer == nil {
+                    self.startTimer()
                 }
             }
         }
@@ -1527,8 +1529,20 @@ final class VideoRecorderController: NSObject,
             dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
             ensureSessionStarted(with: pts)
             if recordingStartTime == nil {
-        // Waiting for cold-start stabilization; do not start session yet.
-        return
+                // Waiting for cold-start stabilization; do not start session yet.
+                return
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if self.state != .recording {
+                    self.state = .recording
+                }
+                if self.recordingWallClockStart == nil {
+                    self.recordingWallClockStart = Date()
+                }
+                if self.timer == nil {
+                    self.startTimer()
+                }
             }
         }
 
@@ -1592,8 +1606,8 @@ final class VideoRecorderController: NSObject,
         dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
         ensureSessionStarted(with: pts)
         if recordingStartTime == nil {
-        // Waiting for cold-start stabilization; do not start session yet.
-        return
+            // Waiting for cold-start stabilization; do not start session yet.
+            return
         }
 
         // Single timing line: record tap → writer session start
@@ -1601,6 +1615,19 @@ final class VideoRecorderController: NSObject,
             let ms = Int((CACurrentMediaTime() - tap) * 1000.0)
             debugDidPrintFirstFrameTiming = true
             print("[RecorderTiming] recordTap→writerSessionStart \(ms) ms")
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if self.state != .recording {
+                self.state = .recording
+            }
+            if self.recordingWallClockStart == nil {
+                self.recordingWallClockStart = Date()
+            }
+            if self.timer == nil {
+                self.startTimer()
+            }
         }
     }
 
@@ -1750,3 +1777,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
