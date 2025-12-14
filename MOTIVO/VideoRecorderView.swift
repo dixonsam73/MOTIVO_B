@@ -1,9 +1,10 @@
-// CHANGE-ID: 20251212-VIDREC-COLDWARM-005
-// SCOPE: Preserve first-shot video cadence: warmup gate for first writer arm + keep upstream discard disabled; pending FIFO retained (drop-newest, capped).
+// CHANGE-ID: 20251214-VIDREC-MONOTONIC-STRUCTFIX-001
+// SCOPE: Repair structure (helpers at type scope) + re-apply monotonic video PTS guard. No other behavior/UI changes intended.
 
 import SwiftUI
 import AVFoundation
 import AVKit
+import QuartzCore
 
 @MainActor
 final class StagingStoreObject: ObservableObject {
@@ -208,14 +209,22 @@ public struct VideoRecorderView: View {
 }
 
 /// AVAssetWriter-based video recorder with HEVC 1080p output.
-///
-/// NOTE: This is a best-effort implementation based on your existing state machine and UI contract.
-/// It may need iterative refinement in Xcode with live device testing.
 final class VideoRecorderController: NSObject,
                                      ObservableObject,
                                      AVCaptureVideoDataOutputSampleBufferDelegate,
                                      AVCaptureAudioDataOutputSampleBufferDelegate {
-    
+
+    // MARK: - Debug logging (logging-only; no behavior change)
+    private let dbgID = String(UUID().uuidString.prefix(6))
+    private var dbgSawFirstVideoSample = false
+    private var dbgSawFirstAudioSample = false
+
+    private func dbg(_ msg: String) {
+        let t = String(format: "%.3f", CACurrentMediaTime())
+        let thread = Thread.isMainThread ? "main" : "bg"
+        print("[VidRec \(dbgID)] [\(t)] [\(thread)] \(msg)")
+    }
+
     enum RecordingState {
         case idle
         case recording
@@ -223,69 +232,75 @@ final class VideoRecorderController: NSObject,
         case playing
         case paused
     }
-    
+
     // MARK: - Published State
-    
+
     @Published var state: RecordingState = .idle
     @Published var elapsedRecordingTime: TimeInterval = 0
     @Published var elapsedPausedTime: TimeInterval = 0
     @Published var playerCurrentTime: TimeInterval = 0
-    
+
     @Published var recordingURL: URL?
     @Published private(set) var isReadyToSave: Bool = false
     @Published var preferredPosition: AVCaptureDevice.Position = .front
-    
+
     // Track if showing live camera preview
     @Published var isShowingLivePreview: Bool = true
-    
+
     // Poster thumbnail image
     @Published var previewImage: UIImage? = nil
-    
+
     // MARK: - Private AV State
-    
+
     private var timer: Timer?
     private var recordingWallClockStart: Date?
     private var player: AVPlayer?
     private var playerItemObserver: Any?
-    
+
     private(set) var captureSession: AVCaptureSession?
     private var videoOutput: AVCaptureVideoDataOutput?
     private var audioOutput: AVCaptureAudioDataOutput?
-    
+
     // Writer pipeline
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
     private var audioInput: AVAssetWriterInput?
-    
+
     // Pending video frames when writer back-pressures (cold-start / intermittent stalls)
     private var pendingVideoBuffers: [CMSampleBuffer] = []
     private let maxPendingVideoBuffers = 180 // ~3s @ 60fps, ~6s @ 30fps
-    
+
+    // Pending audio frames until writer session start time is established (keeps A/V aligned)
+    private var pendingAudioBuffers: [CMSampleBuffer] = []
+    private let maxPendingAudioBuffers = 240 // bounded buffer during writer startup
+
     // MARK: - Fresh-install warm-up (one-time)
     // Warms the capture + writer pipeline once per fresh install to avoid first-run stutter.
     // Writes to a temp file, appends a minimum number of real video frames, then deletes the file.
     private static let freshInstallWarmupCompletedKey = "videoRecorder_freshInstallWarmupCompleted_v1"
     private let freshInstallWarmupMinimumVideoFrames: Int = 40
-    
+
     private var isFreshInstallWarmupArmed: Bool = false
     private var isFreshInstallWarmupInProgress: Bool = false
     private var isFreshInstallWarmupCompleted: Bool = false
     private var queuedUserStartRecordingAfterWarmup: Bool = false
-    
+
     private var warmupAssetWriter: AVAssetWriter?
     private var warmupVideoInput: AVAssetWriterInput?
     private var warmupTempURL: URL?
     private var warmupVideoFrameCount: Int = 0
     private var warmupStartPTS: CMTime?
-    
+
     private var recordingStartTime: CMTime?
+    // --- Monotonic/session guards (injected) ---
+    private var lastVideoPTS: CMTime?
     private var writerStatusObservation: NSKeyValueObservation?
-    
+
     private let videoCaptureQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.videoCaptureQueue")
     private let audioCaptureQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.audioCaptureQueue")
     private let writerQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.writerQueue")
     private let sessionQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.sessionQueue")
-    
+
     private var isSessionConfigured = false
     private var shouldResumeAfterInterruption = false
     private var shouldResumeAfterRouteChange = false
@@ -294,25 +309,35 @@ final class VideoRecorderController: NSObject,
     // Cold-start warmup: ensure capture session has been running briefly before arming the first writer.
     private var captureSessionBecameRunningAt: Date?
     private var pendingStartRecordingToken: UUID?
-    
+
+    // DEBUG timing (single-line print once per app launch)
+    private var debugRecordTapMonotonic: CFTimeInterval?
+    private var debugDidPrintFirstFrameTiming: Bool = false
+
     private var currentVideoOrientation: AVCaptureVideoOrientation = .portrait
-    
+
     private let onSave: (URL) -> Void
-    
+
     private var isConfiguringSession: Bool = false
-    
+
     init(onSave: @escaping (URL) -> Void) {
         self.onSave = onSave
         super.init()
+        // Pre-start capture session ASAP to avoid first-run latency on record tap.
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.configureSessionIfNeeded()
+            self.startCaptureSession()
+        }
     }
-    
+
     deinit {
         removePlayerObserver()
         NotificationCenter.default.removeObserver(self)
     }
-    
+
     // MARK: - Lifecycle hooks
-    
+
     func onAppear() {
         installNotifications()
         armFreshInstallWarmupIfNeeded()
@@ -324,7 +349,7 @@ final class VideoRecorderController: NSObject,
             self.startCaptureSession()
         }
     }
-    
+
     func onDisappear() {
         stopTimer()
         removeNotifications()
@@ -333,9 +358,9 @@ final class VideoRecorderController: NSObject,
             self.cleanupRecordingFile()
         }
     }
-    
+
     // MARK: - UI Computed
-    
+
     var title: String {
         switch state {
         case .idle: return "Ready to Record"
@@ -345,7 +370,7 @@ final class VideoRecorderController: NSObject,
         case .paused: return "Paused"
         }
     }
-    
+
     var formattedTime: String {
         let time: TimeInterval
         switch state {
@@ -358,7 +383,7 @@ final class VideoRecorderController: NSObject,
         }
         return Self.formatTime(time)
     }
-    
+
     static func formatTime(_ time: TimeInterval) -> String {
         guard time.isFinite && time >= 0 else { return "00:00.0" }
         let totalTenths = Int(time * 10)
@@ -367,13 +392,13 @@ final class VideoRecorderController: NSObject,
         let tenths = totalTenths % 10
         return String(format: "%02d:%02d.%d", minutes, seconds, tenths)
     }
-    
+
     var recordingButtonSystemName: String {
         return "record.circle.fill"
     }
-    
+
     var recordingButtonColor: Color { .red }
-    
+
     var recordingButtonAccessibilityLabel: String {
         switch state {
         case .recording: return "Record (disabled)"
@@ -381,9 +406,9 @@ final class VideoRecorderController: NSObject,
         default: return "Record"
         }
     }
-    
+
     var recordingButtonDisabled: Bool { state == .recording }
-    
+
     var playPauseButtonSystemName: String {
         switch state {
         case .playing: return "pause.circle.fill"
@@ -391,7 +416,7 @@ final class VideoRecorderController: NSObject,
         default: return "play.circle.fill"
         }
     }
-    
+
     var playPauseButtonAccessibilityLabel: String {
         switch state {
         case .playing: return "Pause"
@@ -399,9 +424,9 @@ final class VideoRecorderController: NSObject,
         default: return "Play"
         }
     }
-    
+
     // MARK: - Actions
-    
+
     func recordPauseResumeTapped() {
         switch state {
         case .idle, .pausedRecording:
@@ -413,7 +438,7 @@ final class VideoRecorderController: NSObject,
             break
         }
     }
-    
+
     func stopTapped() {
         switch state {
         case .recording, .pausedRecording:
@@ -422,7 +447,7 @@ final class VideoRecorderController: NSObject,
             break
         }
     }
-    
+
     func playPauseTapped() {
         switch state {
         case .playing:
@@ -433,7 +458,7 @@ final class VideoRecorderController: NSObject,
             if recordingURL != nil { playRecording() }
         }
     }
-    
+
     func saveTapped() {
         guard isReadyToSave, let url = recordingURL else { return }
         // [RecorderDebug] saveTapped
@@ -443,22 +468,22 @@ final class VideoRecorderController: NSObject,
         print("  exists=\(existsAtSave)")
         let sizeAtSave = getFileSize(url: url)
         print("  size=\(sizeAtSave) bytes")
-        
+
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
         onSave(url)
         resetState()
     }
-    
+
     func deleteTapped() {
         stopPlaybackIfNeeded()
         cleanupRecordingFile()
         resetState()
         isReadyToSave = false
     }
-    
+
     // MARK: - Timer
-    
+
     private func startTimer() {
         stopTimer()
         let t = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
@@ -467,12 +492,12 @@ final class VideoRecorderController: NSObject,
         RunLoop.main.add(t, forMode: .common)
         timer = t
     }
-    
+
     private func stopTimer() {
         timer?.invalidate()
         timer = nil
     }
-    
+
     private func timerFired() {
         switch state {
         case .recording:
@@ -492,13 +517,13 @@ final class VideoRecorderController: NSObject,
             break
         }
     }
-    
+
     // MARK: - Session & Recording
-    
+
     private func configureSessionIfNeeded() {
         precondition(!Thread.isMainThread, "configureSessionIfNeeded must be called on sessionQueue")
         guard !isSessionConfigured else { return }
-        
+
         let session = AVCaptureSession()
         isConfiguringSession = true
         session.beginConfiguration()
@@ -508,13 +533,13 @@ final class VideoRecorderController: NSObject,
         } else {
             session.sessionPreset = .high
         }
-        
+
         // Video input using preferredPosition (front default); fallback to opposite
         let desired = preferredPosition
         let fallback: AVCaptureDevice.Position = (desired == .front ? .back : .front)
         let desiredDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: desired)
         ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: fallback)
-        
+
         guard let vDev = desiredDevice,
               let videoInput = try? AVCaptureDeviceInput(device: vDev),
               session.canAddInput(videoInput) else {
@@ -523,14 +548,14 @@ final class VideoRecorderController: NSObject,
             return
         }
         session.addInput(videoInput)
-        
+
         // Audio input - ensure always added
         if let audioDevice = AVCaptureDevice.default(for: .audio),
            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
            session.canAddInput(audioInput) {
             session.addInput(audioInput)
         }
-        
+
         // Video data output
         let vOutput = AVCaptureVideoDataOutput()
         vOutput.videoSettings = [
@@ -541,14 +566,14 @@ final class VideoRecorderController: NSObject,
         if session.canAddOutput(vOutput) {
             session.addOutput(vOutput)
         }
-        
+
         // Audio data output
         let aOutput = AVCaptureAudioDataOutput()
         aOutput.setSampleBufferDelegate(self, queue: audioCaptureQueue)
         if session.canAddOutput(aOutput) {
             session.addOutput(aOutput)
         }
-        
+
         // Match orientation & mirroring to preview
         if let conn = vOutput.connection(with: .video) {
             if conn.isVideoOrientationSupported {
@@ -559,30 +584,30 @@ final class VideoRecorderController: NSObject,
                 conn.automaticallyAdjustsVideoMirroring = true
             }
         }
-        
+
         session.commitConfiguration()
         isConfiguringSession = false
-        
+
         self.captureSession = session
         self.videoOutput = vOutput
         self.audioOutput = aOutput
         self.isSessionConfigured = true
     }
-    
+
     func flipCamera() {
         // If currently recording, ignore flip (button is disabled in UI)
         if state == .recording { return }
-        
+
         // Fade out preview on main for smooth transition
         DispatchQueue.main.async {
             withAnimation(.easeInOut(duration: 0.15)) {
                 self.isShowingLivePreview = false
             }
         }
-        
+
         let nextPosition: AVCaptureDevice.Position = (preferredPosition == .front) ? .back : .front
         preferredPosition = nextPosition
-        
+
         sessionQueue.async {
             // Ensure session exists
             self.configureSessionIfNeeded()
@@ -594,7 +619,7 @@ final class VideoRecorderController: NSObject,
                 }
                 return
             }
-            
+
             self.isConfiguringSession = true
             session.beginConfiguration()
             // Remove existing video inputs only
@@ -638,7 +663,7 @@ final class VideoRecorderController: NSObject,
             if self.captureSessionBecameRunningAt == nil {
                 self.captureSessionBecameRunningAt = Date()
             }
-            
+
             // Fade back in on main
             DispatchQueue.main.async {
                 withAnimation(.easeInOut(duration: 0.15)) {
@@ -647,31 +672,27 @@ final class VideoRecorderController: NSObject,
             }
         }
     }
-    
+
     func startCaptureSession() {
         sessionQueue.async {
             if self.isConfiguringSession { return }
             guard let session = self.captureSession, !session.isRunning else { return }
             session.startRunning()
-            
+
             // After session is running, refresh preview orientation on main
             DispatchQueue.main.async {
-                // Find any visible PreviewContainerView and ask it to refresh
-                // SwiftUI will re-run updateUIView when state changes; we also force a refresh here for reliability
-                // by posting a layout pass on key window's root view
                 if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let window = scene.windows.first,
                    let rootView = window.rootViewController?.view {
                     rootView.setNeedsLayout()
                     rootView.layoutIfNeeded()
                 }
-                // One-time nudge: briefly hide/show live preview to force re-bind
                 self.isShowingLivePreview = false
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
                     self.isShowingLivePreview = true
                 }
             }
-            
+
             // Also update the video output connection orientation/mirroring now that the session is running
             if let conn = self.videoOutput?.connection(with: .video) {
                 if conn.isVideoOrientationSupported {
@@ -684,7 +705,7 @@ final class VideoRecorderController: NSObject,
             }
         }
     }
-    
+
     private func stopCaptureSession() {
         if let session = captureSession, session.isRunning {
             session.stopRunning()
@@ -694,12 +715,12 @@ final class VideoRecorderController: NSObject,
         audioOutput = nil
         isSessionConfigured = false
     }
-    
+
     // MARK: - Writer Setup
-    
+
     private func setupWriter(for url: URL) throws {
         let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
-        
+
         // Determine canvas dimensions based on orientation (we encode upright for the chosen orientation)
         let isLandscape = (currentVideoOrientation == .landscapeLeft || currentVideoOrientation == .landscapeRight)
         let width: Int
@@ -711,7 +732,7 @@ final class VideoRecorderController: NSObject,
             width = 1080
             height = 1920
         }
-        
+
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.hevc,
             AVVideoWidthKey: width,
@@ -721,10 +742,10 @@ final class VideoRecorderController: NSObject,
                 AVVideoAllowFrameReorderingKey: false
             ]
         ]
-        
+
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
-        
+
         // Do not rotate; choose width/height above to match orientation. Only mirror for front camera.
         var transform = CGAffineTransform.identity
         if preferredPosition == .front {
@@ -733,9 +754,9 @@ final class VideoRecorderController: NSObject,
             let translate = CGAffineTransform(translationX: CGFloat(width), y: 0)
             transform = mirror.concatenating(translate)
         }
-        
+
         vInput.transform = transform
-        
+
         // Audio settings: AAC 44.1kHz mono
         let audioSettings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
@@ -745,16 +766,37 @@ final class VideoRecorderController: NSObject,
         ]
         let aInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
         aInput.expectsMediaDataInRealTime = true
-        
+
         if writer.canAdd(vInput) { writer.add(vInput) }
         if writer.canAdd(aInput) { writer.add(aInput) }
-        
+
         self.assetWriter = writer
         self.videoInput = vInput
         self.audioInput = aInput
         self.recordingStartTime = nil
+        self.lastVideoPTS = nil
     }
-    
+
+    // MARK: - Monotonic/session helpers (type-scope)
+
+    private func ensureSessionStarted(with pts: CMTime) {
+        if recordingStartTime == nil {
+            assetWriter?.startSession(atSourceTime: pts)
+            recordingStartTime = pts
+            lastVideoPTS = nil
+        }
+    }
+
+    private func canAppendVideo(_ pts: CMTime) -> Bool {
+        if let last = lastVideoPTS {
+            return pts >= last
+        }
+        return true
+    }
+
+    private func recordVideoAppend(_ pts: CMTime) {
+        lastVideoPTS = pts
+    }
 
     // MARK: - Fresh-install warm-up helpers
 
@@ -877,10 +919,16 @@ final class VideoRecorderController: NSObject,
         }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if writer.status == .unknown {
-            writer.startWriting()
-            writer.startSession(atSourceTime: pts)
-            warmupStartPTS = pts
+        if warmupStartPTS == nil {
+            if writer.status == .unknown {
+                writer.startWriting()
+            }
+            if writer.status == .writing {
+                writer.startSession(atSourceTime: pts)
+                warmupStartPTS = pts
+            } else {
+                return
+            }
         }
 
         guard writer.status == .writing else { return }
@@ -897,38 +945,13 @@ final class VideoRecorderController: NSObject,
     }
 
     // MARK: - Recording Control
-    
+
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
-        armFreshInstallWarmupIfNeeded()
-        if !isFreshInstallWarmupCompleted {
-            // Gate recording until the one-time fresh-install warm-up has appended real video frames.
-            queuedUserStartRecordingAfterWarmup = true
-            return
-        }
-
-
-        // Cold-start fix: if the capture session has only just started running, wait briefly before arming the first writer.
-        // This avoids the common first-run video cadence stall that bakes a ~1s freeze into the exported file.
-        if let runningAt = captureSessionBecameRunningAt {
-            let elapsed = Date().timeIntervalSince(runningAt)
-            let minWarmup: TimeInterval = 0.9
-            if elapsed < minWarmup {
-                if pendingStartRecordingToken == nil {
-                    let token = UUID()
-                    pendingStartRecordingToken = token
-                    DispatchQueue.main.asyncAfter(deadline: .now() + (minWarmup - elapsed)) { [weak self] in
-                        guard let self = self else { return }
-                        guard self.pendingStartRecordingToken == token else { return }
-                        self.pendingStartRecordingToken = nil
-                        self.startRecording()
-                    }
-                }
-                return
-            }
-        }
-        pendingStartRecordingToken = nil
-
+        dbg("startRecording() tap; state=\(state)")
+        // DEBUG: mark record tap time (monotonic) for first-frame timing line
+        debugRecordTapMonotonic = CACurrentMediaTime()
+        debugDidPrintFirstFrameTiming = false
         configureAudioSession()
         sessionQueue.async {
             self.configureSessionIfNeeded()
@@ -938,12 +961,12 @@ final class VideoRecorderController: NSObject,
             }
             self.startCaptureSession()
         }
-        
+
         isReadyToSave = false
         let url = newRecordingURL()
         recordingURL = url
         try? FileManager.default.removeItem(at: url)
-        
+
         do {
             try setupWriter(for: url)
         } catch {
@@ -954,32 +977,44 @@ final class VideoRecorderController: NSObject,
             audioInput = nil
             return
         }
-        
+
+        // Prime assetWriter.startWriting() on record tap so the first-run cost isn't paid on the first video frame callback.
+        // Session start (startSession) remains video-PTS anchored and will be started when the first buffered video buffer is available.
+        writerQueue.async { [weak self] in
+            guard let self else { return }
+            guard let writer = self.assetWriter else { return }
+            if writer.status == .unknown {
+                writer.startWriting()
+            }
+            self.startWriterSessionFromBufferedIfPossible()
+        }
+
         elapsedRecordingTime = 0
         elapsedPausedTime = 0
-        recordingWallClockStart = nil
+        recordingWallClockStart = Date()
         pendingStartRecordingToken = nil
         state = .recording
         isShowingLivePreview = true
         startTimer()
     }
-    
+
     private func stopRecording() {
         guard state == .recording || state == .pausedRecording else { return }
+        dbg("stopRecording() called; writer.status=\(assetWriter?.status.rawValue ?? -1); startTimeSet=\(recordingStartTime != nil)")
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
-        
+
         guard let writer = assetWriter else {
             state = .idle
             finishRecordingWithError()
             return
         }
-        
+
         let finishURL = recordingURL
         videoInput?.markAsFinished()
         audioInput?.markAsFinished()
-        
+
         writer.finishWriting { [weak self] in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -990,10 +1025,10 @@ final class VideoRecorderController: NSObject,
                 }
             }
         }
-        
+
         state = .idle
     }
-    
+
     private func handleRecordingFinishedSuccessfully(url: URL) {
         // [RecorderDebug] didFinishRecordingTo (writer-based)
         print("[RecorderDebug] didFinishRecordingTo (writer)")
@@ -1002,41 +1037,44 @@ final class VideoRecorderController: NSObject,
         print("  exists=\(existsAtFinish)")
         let sizeAtFinish = getFileSize(url: url)
         print("  size=\(sizeAtFinish) bytes")
-        
+
         guard existsAtFinish else {
             finishRecordingWithError()
             return
         }
-        
+
         recordingURL = url
         player = AVPlayer(url: url)
         playerCurrentTime = 0
-        
+
         // Generate poster thumbnail from midpoint
         generateMidpointThumbnail(for: url) { [weak self] image in
             self?.previewImage = image
         }
-        
+
         isReadyToSave = true
         state = .idle
         isShowingLivePreview = false
-        
+
         Task {
             try? await StagingStore.bootstrap()
         }
-        
+
         // Tear down writer state
         assetWriter = nil
         videoInput = nil
         audioInput = nil
         recordingStartTime = nil
+        lastVideoPTS = nil
+        pendingVideoBuffers.removeAll(keepingCapacity: true)
+        pendingAudioBuffers.removeAll(keepingCapacity: true)
     }
-    
+
     private func finishRecordingWithError() {
         cleanupRecordingFile()
         resetState()
     }
-    
+
     private func cleanupRecordingIfJunk() {
         guard let url = recordingURL else { return }
         let duration = getVideoDuration(url: url)
@@ -1048,7 +1086,7 @@ final class VideoRecorderController: NSObject,
             previewImage = nil
         }
     }
-    
+
     private func cleanupRecordingFile() {
         guard let url = recordingURL else {
             print("[RecorderDebug] cleanupRecordingFile: no recordingURL set.")
@@ -1068,14 +1106,17 @@ final class VideoRecorderController: NSObject,
         recordingURL = nil
         isReadyToSave = false
         previewImage = nil
-        
+
         // Tear down writer state if any
         assetWriter = nil
         videoInput = nil
         audioInput = nil
         recordingStartTime = nil
+        lastVideoPTS = nil
+        pendingVideoBuffers.removeAll(keepingCapacity: true)
+        pendingAudioBuffers.removeAll(keepingCapacity: true)
     }
-    
+
     private func resetState() {
         elapsedRecordingTime = 0
         elapsedPausedTime = 0
@@ -1086,15 +1127,18 @@ final class VideoRecorderController: NSObject,
         isReadyToSave = false
         isShowingLivePreview = true
         previewImage = nil
-        
+
         assetWriter = nil
         videoInput = nil
         audioInput = nil
         recordingStartTime = nil
+        lastVideoPTS = nil
+        pendingVideoBuffers.removeAll(keepingCapacity: true)
+        pendingAudioBuffers.removeAll(keepingCapacity: true)
     }
-    
+
     // MARK: - Playback
-    
+
     private func ensurePlaybackSessionActive() {
         let session = AVAudioSession.sharedInstance()
         do {
@@ -1105,7 +1149,7 @@ final class VideoRecorderController: NSObject,
             // ignore
         }
     }
-    
+
     private func playRecording() {
         ensurePlaybackSessionActive()
         guard let url = recordingURL else { return }
@@ -1117,19 +1161,19 @@ final class VideoRecorderController: NSObject,
         isShowingLivePreview = false
         startTimer()
     }
-    
+
     private func pausePlayback() {
         player?.pause()
         state = .paused
         stopTimer()
     }
-    
+
     private func resumePlayback() {
         player?.play()
         state = .playing
         startTimer()
     }
-    
+
     private func stopPlaybackIfNeeded() {
         if state == .playing || state == .paused {
             player?.pause()
@@ -1139,22 +1183,22 @@ final class VideoRecorderController: NSObject,
             isShowingLivePreview = true
         }
     }
-    
+
     func exposePlayer() -> AVPlayer? {
         player
     }
-    
+
     // MARK: - Helpers
-    
+
     private func getFileSize(url: URL) -> Int {
         (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
     }
-    
+
     private func getVideoDuration(url: URL) -> Double {
         let asset = AVAsset(url: url)
         return CMTimeGetSeconds(asset.duration)
     }
-    
+
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
@@ -1165,7 +1209,7 @@ final class VideoRecorderController: NSObject,
             // Ignore silently
         }
     }
-    
+
     private func addPlayerObserver() {
         removePlayerObserver()
         playerItemObserver = NotificationCenter.default.addObserver(
@@ -1176,20 +1220,20 @@ final class VideoRecorderController: NSObject,
             self?.playbackDidFinish()
         }
     }
-    
+
     private func removePlayerObserver() {
         if let obs = playerItemObserver {
             NotificationCenter.default.removeObserver(obs)
             playerItemObserver = nil
         }
     }
-    
+
     private func playbackDidFinish() {
         stopPlaybackIfNeeded()
     }
-    
+
     // MARK: - Generate Midpoint Thumbnail
-    
+
     private func generateMidpointThumbnail(for url: URL, completion: @escaping (UIImage?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
             let asset = AVAsset(url: url)
@@ -1212,9 +1256,9 @@ final class VideoRecorderController: NSObject,
             }
         }
     }
-    
+
     // MARK: - Notifications
-    
+
     private func installNotifications() {
         NotificationCenter.default.addObserver(self,
                                                selector: #selector(handleAudioInterruption(_:)),
@@ -1233,11 +1277,11 @@ final class VideoRecorderController: NSObject,
                                                name: UIApplication.didBecomeActiveNotification,
                                                object: nil)
     }
-    
+
     private func removeNotifications() {
         NotificationCenter.default.removeObserver(self)
     }
-    
+
     @objc private func handleAudioInterruption(_ notif: Notification) {
         guard let userInfo = notif.userInfo,
               let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -1262,7 +1306,7 @@ final class VideoRecorderController: NSObject,
             break
         }
     }
-    
+
     @objc private func handleAudioRouteChange(_ notif: Notification) {
         guard let userInfo = notif.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
@@ -1277,7 +1321,7 @@ final class VideoRecorderController: NSObject,
             }
         }
     }
-    
+
     @objc private func handleWillResignActive() {
         if state == .recording {
             stopRecording()
@@ -1287,76 +1331,95 @@ final class VideoRecorderController: NSObject,
             shouldResumeAfterResignActive = true
         }
     }
-    
+
     @objc private func handleDidBecomeActive() {
         if shouldResumeAfterResignActive {
             if state == .paused { resumePlayback() }
             shouldResumeAfterResignActive = false
         }
     }
-    
+
     // MARK: - File URL Helpers
-    
+
     private func documentsDirectory() -> URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-    
+
     private func newRecordingURL() -> URL {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
         let filename = "motivo_vid_\(formatter.string(from: Date())).mov"
         return documentsDirectory().appendingPathComponent(filename)
     }
-    
+
     // MARK: - Sample Buffer Delegates
-    
+
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         let mediaType = CMSampleBufferGetFormatDescription(sampleBuffer)
             .flatMap { CMFormatDescriptionGetMediaType($0) }
-        
+
         switch mediaType {
         case kCMMediaType_Video:
             // Funnel ALL writer work through a single serial queue to avoid races on cold start.
             writerQueue.async { [weak self] in
                 self?.handleVideoSampleBuffer(sampleBuffer, from: connection)
             }
-            
+
         case kCMMediaType_Audio:
             // Funnel ALL writer work through a single serial queue to avoid races on cold start.
             writerQueue.async { [weak self] in
                 self?.handleAudioSampleBuffer(sampleBuffer)
             }
-            
+
         default:
             break
         }
     }
-    
+
     private func handleVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer,
                                          from connection: AVCaptureConnection) {
         // Fresh-install warm-up runs while idle to prime the pipeline.
         if isFreshInstallWarmupArmed && !isFreshInstallWarmupCompleted {
             handleFreshInstallWarmupVideoSampleBuffer(sampleBuffer)
         }
-        
+
         guard state == .recording else { return }
-        
+
+        if !dbgSawFirstVideoSample {
+            dbgSawFirstVideoSample = true
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            dbg("first VIDEO sample received; pts=\(pts.seconds)s; writer.status=\(assetWriter?.status.rawValue ?? -1)")
+        }
+
         guard let writer = assetWriter,
               let vInput = videoInput else { return }
-        
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
         if writer.status == .unknown {
             // Lock orientation at first frame if needed
             if let conn = videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
                 currentVideoOrientation = conn.videoOrientation
             }
-            
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+
+            dbg("startWriting() begin")
+            let __t0 = CACurrentMediaTime()
             writer.startWriting()
-            writer.startSession(atSourceTime: pts)
-            recordingStartTime = pts
-            
+            let __dt = (CACurrentMediaTime() - __t0) * 1000.0
+            dbg(String(format: "startWriting() end %.1f ms; status=\(writer.status.rawValue)", __dt))
+            dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+
+            ensureSessionStarted(with: pts)
+
+            // DEBUG timing: print once on first video frame that starts the writer session
+            if !debugDidPrintFirstFrameTiming, let tap = debugRecordTapMonotonic {
+                debugDidPrintFirstFrameTiming = true
+                let deltaMs = (CACurrentMediaTime() - tap) * 1000.0
+                print(String(format: "[RecorderTiming] firstVideoFrame→writerStart %.0f ms", deltaMs))
+            }
+
             // Start the UI timer when the writer session actually starts (not on button tap).
             DispatchQueue.main.async { [weak self] in
                 if self?.recordingWallClockStart == nil {
@@ -1364,26 +1427,44 @@ final class VideoRecorderController: NSObject,
                 }
             }
         }
-        
+
+        // Ensure we start a writer session before any append when startWriting() has been primed earlier.
+        if recordingStartTime == nil, writer.status == .writing {
+            dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+            ensureSessionStarted(with: pts)
+        }
+
         guard writer.status == .writing else { return }
 
         if vInput.isReadyForMoreMediaData {
             // First, flush any buffered frames (oldest first) before writing the current frame.
             while !pendingVideoBuffers.isEmpty, vInput.isReadyForMoreMediaData {
                 let buffered = pendingVideoBuffers.removeFirst()
-                _ = vInput.append(buffered)
+                let bpts = CMSampleBufferGetPresentationTimeStamp(buffered)
+
+                // Monotonic guard
+                if !canAppendVideo(bpts) { continue }
+
+                dbg("append VIDEO buffered; pts=\(bpts.seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue)")
+                if vInput.append(buffered) {
+                    recordVideoAppend(bpts)
+                }
             }
 
             if vInput.isReadyForMoreMediaData {
-                _ = vInput.append(sampleBuffer)
+                // Monotonic guard
+                if canAppendVideo(pts) {
+                    dbg("append VIDEO current; pts=\(pts.seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue); ready=\(vInput.isReadyForMoreMediaData)")
+                    if vInput.append(sampleBuffer) {
+                        recordVideoAppend(pts)
+                    }
+                }
             } else {
                 // Writer back-pressured mid-flush: queue the current frame for later.
                 if pendingVideoBuffers.count < maxPendingVideoBuffers {
                     pendingVideoBuffers.append(sampleBuffer)
                 } else {
                     // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
-                    // (Alternative: keep "fresh" by overwriting the last slot)
-                    // pendingVideoBuffers[maxPendingVideoBuffers - 1] = sampleBuffer
                 }
             }
         } else {
@@ -1392,39 +1473,79 @@ final class VideoRecorderController: NSObject,
                 pendingVideoBuffers.append(sampleBuffer)
             } else {
                 // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
-                // (Alternative: keep "fresh" by overwriting the last slot)
-                // pendingVideoBuffers[maxPendingVideoBuffers - 1] = sampleBuffer
             }
         }
     }
-    
-    private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        guard state == .recording else { return }
+
+    private func startWriterSessionFromBufferedIfPossible() {
+        // Must be called on writerQueue
         guard let writer = assetWriter,
-              let aInput = audioInput else { return }
-        
-        // Ensure we have a video start time before appending audio to keep A/V aligned.
-        guard recordingStartTime != nil else { return }
-        
-        if writer.status == .writing, aInput.isReadyForMoreMediaData {
-            _ = aInput.append(sampleBuffer)
+              let _ = videoInput else { return }
+        guard recordingStartTime == nil else { return }
+        guard writer.status == .writing else { return }
+        guard let first = pendingVideoBuffers.first else { return }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(first)
+        dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+        ensureSessionStarted(with: pts)
+
+        // Single timing line: record tap → writer session start
+        if !debugDidPrintFirstFrameTiming, let tap = debugRecordTapMonotonic {
+            let ms = Int((CACurrentMediaTime() - tap) * 1000.0)
+            debugDidPrintFirstFrameTiming = true
+            print("[RecorderTiming] recordTap→writerSessionStart \(ms) ms")
         }
     }
 
+    private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        guard state == .recording else { return }
+        if !dbgSawFirstAudioSample {
+            dbgSawFirstAudioSample = true
+            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            dbg("first AUDIO sample received; pts=\(pts.seconds)s; writer.status=\(assetWriter?.status.rawValue ?? -1)")
+        }
+
+        guard let writer = assetWriter,
+              let aInput = audioInput else { return }
+
+        // Ensure we have a video start time before appending audio to keep A/V aligned.
+        if recordingStartTime == nil {
+            if pendingAudioBuffers.count < maxPendingAudioBuffers {
+                pendingAudioBuffers.append(sampleBuffer)
+            }
+            return
+        }
+        // If we just started the session, flush any buffered audio that is >= start time.
+        if !pendingAudioBuffers.isEmpty, let start = recordingStartTime {
+            while !pendingAudioBuffers.isEmpty {
+                let b = pendingAudioBuffers.removeFirst()
+                let pts = CMSampleBufferGetPresentationTimeStamp(b)
+                if pts >= start {
+                    if aInput.isReadyForMoreMediaData {
+                        dbg("append AUDIO buffered; pts=\(pts.seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue)")
+                        _ = aInput.append(b)
+                    }
+                }
+            }
+        }
+
+        if writer.status == .writing, aInput.isReadyForMoreMediaData {
+            dbg("append AUDIO current; pts=\(CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue); ready=\(aInput.isReadyForMoreMediaData)")
+            _ = aInput.append(sampleBuffer)
+        }
+    }
 }
-
-
 
 // MARK: - Preview & Player Views
 
 private struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession?
     let isLive: Bool
-    
+
     func makeUIView(context: Context) -> PreviewContainerView {
         PreviewContainerView()
     }
-    
+
     func updateUIView(_ uiView: PreviewContainerView, context: Context) {
         if let l = uiView.layer as? AVCaptureVideoPreviewLayer {
             l.session = session
@@ -1437,7 +1558,7 @@ private struct CameraPreview: UIViewRepresentable {
 
 private final class PreviewContainerView: UIView {
     override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
-    
+
     override func layoutSubviews() {
         super.layoutSubviews()
         if let l = self.layer as? AVCaptureVideoPreviewLayer {
@@ -1448,7 +1569,7 @@ private final class PreviewContainerView: UIView {
             }
         }
     }
-    
+
     func refreshOrientation() {
         if let l = self.layer as? AVCaptureVideoPreviewLayer,
            let conn = l.connection, conn.isVideoOrientationSupported {
@@ -1460,7 +1581,7 @@ private final class PreviewContainerView: UIView {
         setNeedsLayout()
         layoutIfNeeded()
     }
-    
+
     static func currentOrientation() -> AVCaptureVideoOrientation {
         // Ensure UIKit APIs are always accessed from the main thread.
         if Thread.isMainThread {
@@ -1471,12 +1592,12 @@ private final class PreviewContainerView: UIView {
             }
         }
     }
-    
+
     private static func currentOrientationOnMain() -> AVCaptureVideoOrientation {
         let o = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
             .first?.interfaceOrientation
-        
+
         switch o {
         case .landscapeLeft:
             return .landscapeLeft
@@ -1492,9 +1613,9 @@ private final class PreviewContainerView: UIView {
 
 private struct PlayerPreview: UIViewRepresentable {
     let player: AVPlayer?
-    
+
     func makeUIView(context: Context) -> PlayerContainerView { PlayerContainerView() }
-    
+
     func updateUIView(_ uiView: PlayerContainerView, context: Context) {
         if let l = uiView.layer as? AVPlayerLayer {
             l.player = player
@@ -1505,7 +1626,7 @@ private struct PlayerPreview: UIViewRepresentable {
 
 private final class PlayerContainerView: UIView {
     override class var layerClass: AnyClass { AVPlayerLayer.self }
-    
+
     override func layoutSubviews() {
         super.layoutSubviews()
         if let l = self.layer as? AVPlayerLayer {
@@ -1515,7 +1636,6 @@ private final class PlayerContainerView: UIView {
     }
 }
 
-
 #if DEBUG
 #Preview {
     VideoRecorderView { url in
@@ -1523,4 +1643,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-
