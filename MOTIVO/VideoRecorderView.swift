@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251214-VIDREC-MONOTONIC-STRUCTFIX-001
-// SCOPE: Repair structure (helpers at type scope) + re-apply monotonic video PTS guard. No other behavior/UI changes intended.
+// CHANGE-ID: 20251214-VIDREC-LOGS-001
+// SCOPE: Add diagnostic logs for first-run jitter (writer start/timer/buffering); no logic/UI changes.
 
 import SwiftUI
 import AVFoundation
@@ -217,6 +217,11 @@ final class VideoRecorderController: NSObject,
     // MARK: - Debug logging (logging-only; no behavior change)
     private let dbgID = String(UUID().uuidString.prefix(6))
     private var dbgSawFirstVideoSample = false
+    private var dbgDidLogFirstTimerTick: Bool = false
+    private var dbgLastElapsedSeconds: Double? = nil
+    private var dbgDidLogWriterStartWriting: Bool = false
+    private var dbgDidLogWriterInputsCreated: Bool = false
+    private var dbgDidLogFirstBufferedFlush: Bool = false
     private var dbgSawFirstAudioSample = false
 
     private func dbg(_ msg: String) {
@@ -274,10 +279,22 @@ final class VideoRecorderController: NSObject,
     private var pendingAudioBuffers: [CMSampleBuffer] = []
     private let maxPendingAudioBuffers = 240 // bounded buffer during writer startup
 
+    // Cold-start stabilization (fresh install): wait for N consecutive "stable" video frame intervals
+    // before starting the writer session. This drops the initial stuttery frames from the saved file.
+    private var coldStartStabilizationActive: Bool = false
+    private var coldStartStableVideoCount: Int = 0
+    private var coldStartFirstStableVideoPTS: CMTime? = nil
+    private var coldStartLastVideoPTS: CMTime? = nil
+    private let coldStartStableFramesRequired: Int = 10
+    private let coldStartMinFrameDelta: Double = 0.020   // seconds
+    private let coldStartMaxFrameDelta: Double = 0.050   // seconds
+
+
     // MARK: - Fresh-install warm-up (one-time)
     // Warms the capture + writer pipeline once per fresh install to avoid first-run stutter.
     // Writes to a temp file, appends a minimum number of real video frames, then deletes the file.
     private static let freshInstallWarmupCompletedKey = "videoRecorder_freshInstallWarmupCompleted_v1"
+    private static let freshInstallFirstRecordingCompletedKey = "videoRecorder_freshInstallFirstRecordingCompleted_v1"
     private let freshInstallWarmupMinimumVideoFrames: Int = 40
 
     private var isFreshInstallWarmupArmed: Bool = false
@@ -471,6 +488,7 @@ final class VideoRecorderController: NSObject,
 
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
+        UserDefaults.standard.set(true, forKey: Self.freshInstallFirstRecordingCompletedKey)
         onSave(url)
         resetState()
     }
@@ -485,6 +503,7 @@ final class VideoRecorderController: NSObject,
     // MARK: - Timer
 
     private func startTimer() {
+        dbg("UI timer startTimer() invoked; state=\(state)")
         stopTimer()
         let t = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.timerFired()
@@ -504,6 +523,18 @@ final class VideoRecorderController: NSObject,
             guard recordingWallClockStart != nil else { return }
             if let start = recordingWallClockStart {
                 elapsedRecordingTime = Date().timeIntervalSince(start)
+
+            if !dbgDidLogFirstTimerTick {
+                dbgDidLogFirstTimerTick = true
+                dbg("UI timer first tick; elapsed=\(String(format: "%.3f", elapsedRecordingTime))s; recordingWallClockStart=\(recordingWallClockStart != nil)")
+            }
+            if let last = dbgLastElapsedSeconds {
+                // If elapsed time ever moves backwards, capture it (this matches the 'erratic timer' symptom).
+                if elapsedRecordingTime + 0.050 < last {
+                    dbg("UI timer anomaly: elapsed moved backwards; last=\(String(format: "%.3f", last))s now=\(String(format: "%.3f", elapsedRecordingTime))s")
+                }
+            }
+            dbgLastElapsedSeconds = elapsedRecordingTime
             }
             if elapsedRecordingTime >= 15 * 60 { stopRecording() }
         case .pausedRecording:
@@ -769,6 +800,10 @@ final class VideoRecorderController: NSObject,
 
         if writer.canAdd(vInput) { writer.add(vInput) }
         if writer.canAdd(aInput) { writer.add(aInput) }
+            if !dbgDidLogWriterInputsCreated {
+                dbgDidLogWriterInputsCreated = true
+                dbg("writer inputs created+added; videoSettings=\(String(describing: vInput.outputSettings)); audioSettings=\(String(describing: aInput.outputSettings))")
+            }
 
         self.assetWriter = writer
         self.videoInput = vInput
@@ -780,10 +815,53 @@ final class VideoRecorderController: NSObject,
     // MARK: - Monotonic/session helpers (type-scope)
 
     private func ensureSessionStarted(with pts: CMTime) {
-        if recordingStartTime == nil {
-            assetWriter?.startSession(atSourceTime: pts)
-            recordingStartTime = pts
-            lastVideoPTS = nil
+        guard let writer = assetWriter else { return }
+        guard recordingStartTime == nil else { return }
+
+        // Cold-start stabilization (fresh install): wait for a short run of stable video frame cadence
+        // before starting the writer session, so the saved file doesn't include the initial stutter.
+        if coldStartStabilizationActive {
+            if let last = coldStartLastVideoPTS {
+                let delta = CMTimeGetSeconds(CMTimeSubtract(pts, last))
+                if delta >= coldStartMinFrameDelta && delta <= coldStartMaxFrameDelta {
+                    if coldStartStableVideoCount == 0 {
+                        coldStartFirstStableVideoPTS = pts
+                    }
+                    coldStartStableVideoCount += 1
+                } else {
+                    coldStartStableVideoCount = 0
+                    coldStartFirstStableVideoPTS = nil
+                }
+            } else {
+                coldStartStableVideoCount = 1
+                coldStartFirstStableVideoPTS = pts
+            }
+            coldStartLastVideoPTS = pts
+
+            if coldStartStableVideoCount < coldStartStableFramesRequired {
+                return
+            }
+        }
+
+        let startPTS = coldStartFirstStableVideoPTS ?? pts
+
+        recordingStartTime = startPTS
+        lastVideoPTS = startPTS
+
+        // Drop any buffered samples earlier than the chosen start time (keeps A/V aligned).
+        if coldStartStabilizationActive {
+            pendingVideoBuffers = pendingVideoBuffers.filter { CMSampleBufferGetPresentationTimeStamp($0) >= startPTS }
+            pendingAudioBuffers = pendingAudioBuffers.filter { CMSampleBufferGetPresentationTimeStamp($0) >= startPTS }
+            coldStartStabilizationActive = false
+        }
+
+        writer.startSession(atSourceTime: startPTS)
+        dbg("[VidRec \(dbgID)] startSession at pts=\(startPTS.seconds, default: "%.3f") pendingVideo=\(pendingVideoBuffers.count) pendingAudio=\(pendingAudioBuffers.count)")
+
+        // Start UI timer now that the writer session is actually running.
+        if recordingWallClockStart == nil {
+            recordingWallClockStart = Date()
+            startTimer()
         }
     }
 
@@ -922,6 +1000,10 @@ final class VideoRecorderController: NSObject,
         if warmupStartPTS == nil {
             if writer.status == .unknown {
                 writer.startWriting()
+            if !dbgDidLogWriterStartWriting {
+                dbgDidLogWriterStartWriting = true
+                dbg("writer.startWriting() called; status=\(writer.status.rawValue); error=\(String(describing: writer.error))")
+            }
             }
             if writer.status == .writing {
                 writer.startSession(atSourceTime: pts)
@@ -1001,6 +1083,7 @@ final class VideoRecorderController: NSObject,
     private func stopRecording() {
         guard state == .recording || state == .pausedRecording else { return }
         dbg("stopRecording() called; writer.status=\(assetWriter?.status.rawValue ?? -1); startTimeSet=\(recordingStartTime != nil)")
+        dbg("stopRecording debug snapshot; state=\(state); elapsed=\(String(format: "%.3f", elapsedRecordingTime))s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
@@ -1068,6 +1151,13 @@ final class VideoRecorderController: NSObject,
         lastVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
+
+        // Fresh install: the very first recording can have a cold-start stutter. We stabilize by
+        // delaying writer session start until we observe a short run of stable video frame cadence.
+        coldStartStabilizationActive = !UserDefaults.standard.bool(forKey: Self.freshInstallFirstRecordingCompletedKey)
+        coldStartStableVideoCount = 0
+        coldStartFirstStableVideoPTS = nil
+        coldStartLastVideoPTS = nil
     }
 
     private func finishRecordingWithError() {
@@ -1412,6 +1502,10 @@ final class VideoRecorderController: NSObject,
             dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
 
             ensureSessionStarted(with: pts)
+            if recordingStartTime == nil {
+        // Waiting for cold-start stabilization; do not start session yet.
+        return
+            }
 
             // DEBUG timing: print once on first video frame that starts the writer session
             if !debugDidPrintFirstFrameTiming, let tap = debugRecordTapMonotonic {
@@ -1432,12 +1526,21 @@ final class VideoRecorderController: NSObject,
         if recordingStartTime == nil, writer.status == .writing {
             dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
             ensureSessionStarted(with: pts)
+            if recordingStartTime == nil {
+        // Waiting for cold-start stabilization; do not start session yet.
+        return
+            }
         }
 
         guard writer.status == .writing else { return }
 
         if vInput.isReadyForMoreMediaData {
             // First, flush any buffered frames (oldest first) before writing the current frame.
+            if !dbgDidLogFirstBufferedFlush {
+                dbgDidLogFirstBufferedFlush = true
+                dbg("flush buffered video starting; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count); writer.status=\(writer.status.rawValue)")
+            }
+            dbg("flush buffered video done; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
             while !pendingVideoBuffers.isEmpty, vInput.isReadyForMoreMediaData {
                 let buffered = pendingVideoBuffers.removeFirst()
                 let bpts = CMSampleBufferGetPresentationTimeStamp(buffered)
@@ -1488,6 +1591,10 @@ final class VideoRecorderController: NSObject,
         let pts = CMSampleBufferGetPresentationTimeStamp(first)
         dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
         ensureSessionStarted(with: pts)
+        if recordingStartTime == nil {
+        // Waiting for cold-start stabilization; do not start session yet.
+        return
+        }
 
         // Single timing line: record tap → writer session start
         if !debugDidPrintFirstFrameTiming, let tap = debugRecordTapMonotonic {

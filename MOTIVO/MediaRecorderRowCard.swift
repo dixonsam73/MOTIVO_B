@@ -2,6 +2,9 @@
 // Extracted from PracticeTimerView as part of refactor step 2.
 // Visual/interaction row for audio, photo, and video recorders.
 // No logic moves; all state/behaviour stays in PracticeTimerView.
+//
+// CHANGE-ID: 20251214-VIDPERM-GATE-001
+// SCOPE: Gate “Record video” launch on camera + microphone permissions (one-file, button-action only).
 
 import SwiftUI
 import AVFoundation
@@ -75,11 +78,56 @@ struct MediaRecorderRowCard: View {
                 Button {
                     stopAttachmentPlayback()
 
-                    // Stop drone before opening video recorder
-                    droneEngine.stop()
-                    droneIsOn = false
+                    func presentVideoRecorder() {
+                        // Stop drone before opening video recorder (only once we're actually presenting)
+                        droneEngine.stop()
+                        droneIsOn = false
+                        showVideoRecorder = true
+                    }
 
-                    showVideoRecorder = true
+                    func checkMicrophoneThenPresent() {
+                        let micPerm = AVAudioSession.sharedInstance().recordPermission
+                        switch micPerm {
+                        case .granted:
+                            presentVideoRecorder()
+                        case .undetermined:
+                            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                                DispatchQueue.main.async {
+                                    if granted {
+                                        presentVideoRecorder()
+                                    } else {
+                                        // denied: do nothing (per scope)
+                                    }
+                                }
+                            }
+                        case .denied:
+                            // denied: do nothing (per scope)
+                            break
+                        @unknown default:
+                            break
+                        }
+                    }
+
+                    let camStatus = AVCaptureDevice.authorizationStatus(for: .video)
+                    switch camStatus {
+                    case .authorized:
+                        checkMicrophoneThenPresent()
+                    case .notDetermined:
+                        AVCaptureDevice.requestAccess(for: .video) { granted in
+                            DispatchQueue.main.async {
+                                if granted {
+                                    checkMicrophoneThenPresent()
+                                } else {
+                                    // denied: do nothing (per scope)
+                                }
+                            }
+                        }
+                    case .denied, .restricted:
+                        // denied/restricted: do nothing (per scope)
+                        break
+                    @unknown default:
+                        break
+                    }
                 } label: {
                     Image(systemName: "video.fill")
                         .symbolRenderingMode(.monochrome)
@@ -98,4 +146,3 @@ struct MediaRecorderRowCard: View {
         
     }
 }
-
