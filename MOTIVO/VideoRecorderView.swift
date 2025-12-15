@@ -304,6 +304,8 @@ final class VideoRecorderController: NSObject,
     private let coldStartMinFrameDelta: Double = 0.020   // seconds
     private let coldStartMaxFrameDelta: Double = 0.050   // seconds
 
+    // Added: Track last appended video PTS for monotonicity enforcement
+    private var lastAppendedVideoPTS: CMTime? = nil
 
     // MARK: - Fresh-install warm-up (one-time)
     // Warms the capture + writer pipeline once per fresh install to avoid first-run stutter.
@@ -842,6 +844,7 @@ final class VideoRecorderController: NSObject,
         self.audioInput = aInput
         self.recordingStartTime = nil
         self.lastVideoPTS = nil
+        self.lastAppendedVideoPTS = nil
     }
 
     // MARK: - Monotonic/session helpers (type-scope)
@@ -1094,6 +1097,7 @@ final class VideoRecorderController: NSObject,
         audioInput = nil
         recordingStartTime = nil
         lastVideoPTS = nil
+        lastAppendedVideoPTS = nil
 
         // Remove immediate UI/timer start semantics on tap:
         // recordingWallClockStart = Date()
@@ -1173,6 +1177,7 @@ final class VideoRecorderController: NSObject,
         audioInput = nil
         recordingStartTime = nil
         lastVideoPTS = nil
+        lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
 
@@ -1227,6 +1232,7 @@ final class VideoRecorderController: NSObject,
         audioInput = nil
         recordingStartTime = nil
         lastVideoPTS = nil
+        lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
     }
@@ -1247,6 +1253,7 @@ final class VideoRecorderController: NSObject,
         audioInput = nil
         recordingStartTime = nil
         lastVideoPTS = nil
+        lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
         isArmedToRecord = false
@@ -1494,6 +1501,28 @@ final class VideoRecorderController: NSObject,
         }
     }
 
+    // Helper to drain pending video buffers with monotonic check and logging
+    private func drainPendingVideo(_ vInput: AVAssetWriterInput) {
+        var drained = 0
+        while !pendingVideoBuffers.isEmpty, vInput.isReadyForMoreMediaData {
+            let buffered = pendingVideoBuffers.removeFirst()
+            let bpts = CMSampleBufferGetPresentationTimeStamp(buffered)
+            // Monotonic check
+            if let last = lastAppendedVideoPTS, bpts < last {
+                dbg("NON_MONOTONIC_VIDEO_PTS drop buffered; last=\(last.seconds) pts=\(bpts.seconds)")
+                continue
+            }
+            if vInput.append(buffered) {
+                lastAppendedVideoPTS = bpts
+                recordVideoAppend(bpts)
+                drained += 1
+            }
+        }
+        if drained > 0 {
+            dbg("drain video: drained=\(drained) pending=\(pendingVideoBuffers.count)")
+        }
+    }
+
     private func handleVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer,
                                          from connection: AVCaptureConnection) {
         // Fresh-install warm-up runs while idle to prime the pipeline.
@@ -1637,6 +1666,29 @@ final class VideoRecorderController: NSObject,
                     self.startTimer()
                 }
             }
+
+            // After session start, append this first frame, then drain
+            if vInput.isReadyForMoreMediaData {
+                // Monotonic check for the first frame
+                if let last = lastAppendedVideoPTS, pts < last {
+                    dbg("NON_MONOTONIC_VIDEO_PTS drop first; last=\(last.seconds) pts=\(pts.seconds)")
+                } else {
+                    if vInput.append(sampleBuffer) {
+                        lastAppendedVideoPTS = pts
+                        recordVideoAppend(pts)
+                    }
+                }
+                // Drain any pending immediately after the first append
+                drainPendingVideo(vInput)
+            } else {
+                // Not ready: enqueue and log
+                if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                    pendingVideoBuffers.append(sampleBuffer)
+                    dbg("enqueue video (first-after-start backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
+                }
+                return
+            }
+            return
         }
 
         // Ensure we start a writer session before any append when startWriting() has been primed earlier.
@@ -1659,54 +1711,59 @@ final class VideoRecorderController: NSObject,
                     self.startTimer()
                 }
             }
+
+            // After session start, append this first frame, then drain
+            if vInput.isReadyForMoreMediaData {
+                // Monotonic check for the first frame
+                if let last = lastAppendedVideoPTS, pts < last {
+                    dbg("NON_MONOTONIC_VIDEO_PTS drop first; last=\(last.seconds) pts=\(pts.seconds)")
+                } else {
+                    if vInput.append(sampleBuffer) {
+                        lastAppendedVideoPTS = pts
+                        recordVideoAppend(pts)
+                    }
+                }
+                // Drain any pending immediately after the first append
+                drainPendingVideo(vInput)
+            } else {
+                // Not ready: enqueue and log
+                if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                    pendingVideoBuffers.append(sampleBuffer)
+                    dbg("enqueue video (first-after-start backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
+                }
+                return
+            }
+            return
         }
 
         guard writer.status == .writing else { return }
 
-        if vInput.isReadyForMoreMediaData {
-            // First, flush any buffered frames (oldest first) before writing the current frame.
-            if !dbgDidLogFirstBufferedFlush {
-                dbgDidLogFirstBufferedFlush = true
-                dbg("flush buffered video starting; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count); writer.status=\(writer.status.rawValue)")
-            }
-            dbg("flush buffered video done; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
-            while !pendingVideoBuffers.isEmpty, vInput.isReadyForMoreMediaData {
-                let buffered = pendingVideoBuffers.removeFirst()
-                let bpts = CMSampleBufferGetPresentationTimeStamp(buffered)
+        // Always drain pending before considering current
+        drainPendingVideo(vInput)
 
-                // Monotonic guard
-                if !canAppendVideo(bpts) { continue }
+        // Monotonic invariant for current
+        if let last = lastAppendedVideoPTS, pts < last {
+            dbg("NON_MONOTONIC_VIDEO_PTS drop current; last=\(last.seconds) pts=\(pts.seconds)")
+            return
+        }
 
-                dbg("append VIDEO buffered; pts=\(bpts.seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue)")
-                if vInput.append(buffered) {
-                    recordVideoAppend(bpts)
-                }
-            }
-
-            if vInput.isReadyForMoreMediaData {
-                // Monotonic guard
-                if canAppendVideo(pts) {
-                    dbg("append VIDEO current; pts=\(pts.seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue); ready=\(vInput.isReadyForMoreMediaData)")
-                    if vInput.append(sampleBuffer) {
-                        recordVideoAppend(pts)
-                    }
-                }
-            } else {
-                // Writer back-pressured mid-flush: queue the current frame for later.
-                if pendingVideoBuffers.count < maxPendingVideoBuffers {
-                    pendingVideoBuffers.append(sampleBuffer)
-                } else {
-                    // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
-                }
-            }
-        } else {
-            // Not ready: enqueue current buffer (drop newest if over max to preserve the earliest frames).
+        // Queue discipline: if not ready, enqueue current and return
+        if !vInput.isReadyForMoreMediaData {
             if pendingVideoBuffers.count < maxPendingVideoBuffers {
                 pendingVideoBuffers.append(sampleBuffer)
-            } else {
-                // FIFO full: drop newest (this frame) to preserve earliest continuity and avoid a start-gap.
+                dbg("enqueue video (backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
             }
+            return
         }
+
+        // Append current
+        if vInput.append(sampleBuffer) {
+            lastAppendedVideoPTS = pts
+            recordVideoAppend(pts)
+        }
+
+        // Drain any remaining pending frames if the input is still ready
+        drainPendingVideo(vInput)
     }
 
     private func startWriterSessionFromBufferedIfPossible() {
