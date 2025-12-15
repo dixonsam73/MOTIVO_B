@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251215-VIDREC-SOLA-007
-// SCOPE: Fix brace mismatch causing missing type symbols; close VideoRecorderController before preview/player helper views. No logic changes.
+// CHANGE-ID: 20251215-VIDREC-ORIENT-008
+// SCOPE: Fix landscape orientation regressions (front preview snap + squashed output) and rear-camera crash on Stop by syncing orientation at writer setup and serializing stop/finish on writerQueue. Preserve cadence-gated start + retimed commit.
 
 import SwiftUI
 import AVFoundation
@@ -961,6 +961,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         isStoppingRecording = false
         debugDidPrintFirstFrameTiming = false
         configureAudioSession()
+        // Latch current interface orientation immediately on main to avoid race with async session connection updates.
+        // This ensures writer canvas/orientation is correct for first frames in landscape.
+        self.currentVideoOrientation = PreviewContainerView.currentOrientation()
         sessionQueue.async {
             self.configureSessionIfNeeded()
             if let conn = self.videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
@@ -1016,34 +1019,64 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     private func stopRecording() {
         guard state == .recording || state == .pausedRecording else { return }
+
+        // Stop must be serialized against ongoing sample appends to avoid races/crashes (especially rear camera in landscape).
+        // We stop accepting new samples immediately, then finish the writer on writerQueue.
         dbg("stopRecording() called; writer.status=\(assetWriter?.status.rawValue ?? -1); startTimeSet=\(recordingStartTime != nil)")
-        dbg("stopRecording debug snapshot; state=\(state); elapsed=\(String(format: "%.3f", elapsedRecordingTime))s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
-        isArmedToRecord = false
 
-        guard let writer = assetWriter else {
+        // Prevent any further sample processing as early as possible.
+        isArmedToRecord = false
+        writerQueue.async { [weak self] in
+            self?.isStoppingRecording = true
+        }
+
+        guard let finishURL = recordingURL else {
             state = .idle
             finishRecordingWithError()
             return
         }
 
-        let finishURL = recordingURL
-        videoInput?.markAsFinished()
-        audioInput?.markAsFinished()
+        // Finish on writerQueue to avoid calling markAsFinished/finishWriting concurrently with append on writerQueue.
+        writerQueue.async { [weak self] in
+            guard let self = self else { return }
 
-        writer.finishWriting { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if writer.status == .completed, let url = finishURL {
-                    self.handleRecordingFinishedSuccessfully(url: url)
-                } else {
+            guard let writer = self.assetWriter else {
+                DispatchQueue.main.async {
+                    self.state = .idle
                     self.finishRecordingWithError()
+                }
+                return
+            }
+
+            self.dbg("stopRecording finishing on writerQueue; pendingVideo=\(self.pendingVideoBuffers.count); pendingAudio=\(self.pendingAudioBuffers.count)")
+
+            // Best effort: drain any buffered video that can still be appended before closing.
+            if let vInput = self.videoInput {
+                self.drainPendingVideo(vInput)
+                vInput.markAsFinished()
+            }
+            if let aInput = self.audioInput {
+                aInput.markAsFinished()
+            }
+
+            writer.finishWriting { [weak self] in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    if writer.status == .completed {
+                        self.handleRecordingFinishedSuccessfully(url: finishURL)
+                    } else {
+                        self.finishRecordingWithError()
+                    }
+                    self.state = .idle
                 }
             }
         }
 
+        // Immediately reflect stopped state in UI.
         state = .idle
     }
 
@@ -1447,7 +1480,16 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         // Only process writer logic when recording is armed (button tap occurred).
         guard isArmedToRecord else { return }
 
+        // If a stop is in progress, ignore any late-arriving samples to avoid races with finishWriting().
+        if isStoppingRecording { return }
+
         // Lazily create writer on first observed frame after arming.
+        // Keep our latched orientation in sync with the actual capture connection.
+        // This avoids writing a portrait canvas when the UI is in landscape (race during session reconfiguration).
+        if connection.isVideoOrientationSupported {
+            self.currentVideoOrientation = connection.videoOrientation
+        }
+
         if assetWriter == nil {
             guard let url = recordingURL else {
                 isArmedToRecord = false
