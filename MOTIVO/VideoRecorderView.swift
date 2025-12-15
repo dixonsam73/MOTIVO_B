@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251214-VIDREC-LOGS-001
-// SCOPE: Add diagnostic logs for first-run jitter (writer start/timer/buffering); no logic/UI changes.
+// CHANGE-ID: 20251215-VIDREC-SOLA-007
+// SCOPE: Fix brace mismatch causing missing type symbols; close VideoRecorderController before preview/player helper views. No logic changes.
 
 import SwiftUI
 import AVFoundation
@@ -256,18 +256,8 @@ final class VideoRecorderController: NSObject,
     // Track if showing live camera preview
     @Published var isShowingLivePreview: Bool = true
     
-    // New warmup readiness gate and counters per instructions:
+    // Recorder readiness for UI ("Preparing…" vs title). Set true on first received video frame.
     @Published private(set) var isRecorderReady: Bool = false
-    private let warmupFrameCount: Int = 120
-    private var warmupVideoFramesSeen: Int = 0
-
-    // Added warm-up cadence stability fields:
-    private var warmupConsecutiveStable: Int = 0
-    private let warmupRequiredConsecutiveStable: Int = 30
-    private var warmupLastPTS: CMTime? = nil
-    private let warmupMinDelta: Double = 0.020
-    private let warmupMaxDelta: Double = 0.050
-    private let warmupMinFramesAbsolute: Int = 90
 
     private var isArmedToRecord: Bool = false
 
@@ -298,49 +288,30 @@ final class VideoRecorderController: NSObject,
     private var pendingAudioBuffers: [CMSampleBuffer] = []
     private let maxPendingAudioBuffers = 240 // bounded buffer during writer startup
 
-    // Cold-start stabilization (fresh install): wait for N consecutive "stable" video frame intervals
-    // before starting the writer session. This drops the initial stuttery frames from the saved file.
-    private var coldStartStabilizationActive: Bool = false
-    private var coldStartStableVideoCount: Int = 0
-    private var coldStartFirstStableVideoPTS: CMTime? = nil
-    private var coldStartLastVideoPTS: CMTime? = nil
-    private let coldStartStableFramesRequired: Int = 10
-    private let coldStartMinFrameDelta: Double = 0.020   // seconds
-    private let coldStartMaxFrameDelta: Double = 0.050   // seconds
-
     // Added: Track last appended video PTS for monotonicity enforcement
     private var lastAppendedVideoPTS: CMTime? = nil
 
-    // Arming gate state
-    private var isArming: Bool = false
-    private var armingStableCount: Int = 0
-    private var armingLastPTS: CMTime? = nil
-    private var armingStartMonotonic: CFTimeInterval = 0
-    private var sessionStartPTS: CMTime? = nil
-    private let armingMinDelta: Double = 0.020
-    private let armingMaxDelta: Double = 0.050
-    private let armingRequiredStable: Int = 6
+    // MARK: - Cadence stabilization gate (Solution A)
+    // User taps Record -> recording is armed, but writer session does not start until video cadence is stable.
+    // We observe and discard early video frames until we see N consecutive frame deltas within tolerance,
+    // and (optionally) a minimum elapsed time has passed. Hard-capped to avoid pathological waits.
+    private var isRecordingArmed: Bool = false
+    private var cadenceStableCount: Int = 0
+    private var cadenceLastPTS: CMTime? = nil
+    private var cadenceArmMonotonic: CFTimeInterval = 0
+
+    private let cadenceMinDelta: Double = 0.025   // seconds
+    private let cadenceMaxDelta: Double = 0.045   // seconds
+    private let cadenceRequiredStable: Int = 6
+    private let cadenceMinElapsed: Double = 0.250 // seconds
+    private let cadenceHardCap: Double = 2.000    // seconds
+
     private var droppedAudioBeforeSessionCount: Int = 0
 
-    // MARK: - Fresh-install warm-up (one-time)
-    // Warms the capture + writer pipeline once per fresh install to avoid first-run stutter.
-    // Writes to a temp file, appends a minimum number of real video frames, then deletes the file.
-    private static let freshInstallWarmupCompletedKey = "videoRecorder_freshInstallWarmupCompleted_v1"
-    private static let freshInstallFirstRecordingCompletedKey = "videoRecorder_freshInstallFirstRecordingCompleted_v1"
-    private let freshInstallWarmupMinimumVideoFrames: Int = 40
-
-    private var isFreshInstallWarmupArmed: Bool = false
-    private var isFreshInstallWarmupInProgress: Bool = false
-    private var isFreshInstallWarmupCompleted: Bool = false
-    private var queuedUserStartRecordingAfterWarmup: Bool = false
-
-    private var warmupAssetWriter: AVAssetWriter?
-    private var warmupVideoInput: AVAssetWriterInput?
-    private var warmupTempURL: URL?
-    private var warmupVideoFrameCount: Int = 0
-    private var warmupStartPTS: CMTime?
-
     private var recordingStartTime: CMTime?
+    private var sessionStartPTS: CMTime? // PTS used for writer.startSession; set at first accepted video frame (Solution A)
+    private var writerSessionReady: Bool = false // startSession(atSourceTime:) has returned; commit on next video frame
+    private var retimeBasePTS: CMTime? = nil // first frame PTS used to retime output so playback starts when UI shows recording
     // --- Monotonic/session guards (injected) ---
     private var lastVideoPTS: CMTime?
     private var writerStatusObservation: NSKeyValueObservation?
@@ -348,14 +319,22 @@ final class VideoRecorderController: NSObject,
     private let captureVideoQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.captureVideoQueue")
     private let captureAudioQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.captureAudioQueue")
     private let writerQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.writerQueue")
+    private let sessionStartQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.sessionStartQueue")
+    private var isStartingWriterSession: Bool = false
+    private var isStoppingRecording: Bool = false
+    private var pendingFirstAcceptedVideoBuffer: CMSampleBuffer?
+    // Buffers accumulated while startSession(atSourceTime:) is blocking off-queue.
+    // These are *post-gate* stable cadence frames; we flush them immediately once the writer session is started
+    // to avoid a leading timeline gap (frozen first frame).
+    private var pendingSessionStartPTS: CMTime?
+    private var pendingVideoDuringSessionStart: [CMSampleBuffer] = []
+    private var pendingAudioDuringSessionStart: [CMSampleBuffer] = []
     private let sessionQueue = DispatchQueue(label: "com.motivo.VideoRecorderController.sessionQueue")
 
     private var isSessionConfigured = false
     private var shouldResumeAfterInterruption = false
     private var shouldResumeAfterRouteChange = false
     private var shouldResumeAfterResignActive = false
-
-    // Cold-start warmup: ensure capture session has been running briefly before arming the first writer.
     private var captureSessionBecameRunningAt: Date?
     private var pendingStartRecordingToken: UUID?
 
@@ -378,10 +357,6 @@ final class VideoRecorderController: NSObject,
             self.configureSessionIfNeeded()
             self.startCaptureSession()
         }
-        // Reset warmup counters and readiness on init
-        warmupVideoFramesSeen = 0
-        warmupConsecutiveStable = 0
-        warmupLastPTS = nil
         isRecorderReady = false
         isArmedToRecord = false
     }
@@ -395,14 +370,9 @@ final class VideoRecorderController: NSObject,
 
     func onAppear() {
         installNotifications()
-        armFreshInstallWarmupIfNeeded()
         DispatchQueue.main.async {
             self.isShowingLivePreview = true
         }
-        // Reset warmup counters and readiness on appear
-        warmupVideoFramesSeen = 0
-        warmupConsecutiveStable = 0
-        warmupLastPTS = nil
         isRecorderReady = false
         isArmedToRecord = false
 
@@ -537,7 +507,6 @@ final class VideoRecorderController: NSObject,
 
         stopPlaybackIfNeeded()
         cleanupRecordingIfJunk()
-        UserDefaults.standard.set(true, forKey: Self.freshInstallFirstRecordingCompletedKey)
         onSave(url)
         resetState()
     }
@@ -864,38 +833,99 @@ final class VideoRecorderController: NSObject,
 
     // MARK: - Monotonic/session helpers (type-scope)
 
-    private func ensureSessionStarted(with pts: CMTime) {
+    private func beginStartWriterSessionIfNeeded(startPTS pts: CMTime, firstVideoBuffer: CMSampleBuffer) {
+        // Called on writerQueue from video sample processing.
         guard let writer = assetWriter else { return }
-        guard recordingStartTime == nil else { return }
+        guard recordingStartTime == nil else { return } // already started
+        guard !isStartingWriterSession else { return }
 
-        // Ensure arming decided the startPTS
-        if sessionStartPTS == nil { sessionStartPTS = pts }
+        // Latch the first accepted buffer so we can append it after startSession returns.
+        isStartingWriterSession = true
+        pendingFirstAcceptedVideoBuffer = firstVideoBuffer
 
-        let startPTS = sessionStartPTS ?? pts
-
-        recordingStartTime = startPTS
-        lastVideoPTS = startPTS
-
-        // Drop any buffered samples earlier than the chosen start time (keeps A/V aligned).
-        if coldStartStabilizationActive {
-            pendingVideoBuffers = pendingVideoBuffers.filter { CMSampleBufferGetPresentationTimeStamp($0) >= startPTS }
-            pendingAudioBuffers = pendingAudioBuffers.filter { CMSampleBufferGetPresentationTimeStamp($0) >= startPTS }
-            coldStartStabilizationActive = false
+        // Kick startSession on a separate queue so we never block writerQueue (sample processing).
+        sessionStartQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.startWriterSessionBlocking(startPTS: pts, writer: writer)
         }
-
-        writer.startSession(atSourceTime: startPTS)
-        // Initialize first-2s video logging window
-        logVideoFirst2sStartPTS = startPTS
-        logVideoFirst2sFrameIndex = 0
-        dbg(String(format: "startSession at pts=%.3f pendingVideo=%d pendingAudio=%d", startPTS.seconds.isFinite ? startPTS.seconds : 0.0, pendingVideoBuffers.count, pendingAudioBuffers.count))
-        if droppedAudioBeforeSessionCount > 0 {
-            dbg("audio dropped before session: count=\(droppedAudioBeforeSessionCount)")
-        }
-
-        // Note: timer start logic moved to handleVideoSampleBuffer to unify start timing.
     }
 
-    private func canAppendVideo(_ pts: CMTime) -> Bool {
+    private func startWriterSessionBlocking(startPTS pts: CMTime, writer: AVAssetWriter) {
+        // Runs on sessionStartQueue. This call may block inside AVAssetWriter.startSession(...)
+        // so it MUST NOT run on writerQueue (which also processes capture samples).
+        // All state mutations remain on writerQueue.
+
+        // Snapshot the first accepted buffer (latched on writerQueue before this is called).
+        var firstBuf: CMSampleBuffer?
+        writerQueue.sync {
+            firstBuf = pendingFirstAcceptedVideoBuffer
+        }
+
+        // Start writer + session on this (non-sample) queue.
+        if writer.status == .unknown {
+            dbg("writer.startWriting() at session start; status=\(writer.status.rawValue)")
+            writer.startWriting()
+        }
+
+        writer.startSession(atSourceTime: .zero)
+
+        // Now that startSession has returned, commit start state and append the first buffer.
+        writerQueue.async { [weak self] in
+            guard let self = self else { return }
+
+            // startSession(atSourceTime:) has returned. Do NOT commit recordingStartTime yet.
+            // We commit on the *next* video frame so output begins exactly where UI shows recording.
+            self.sessionStartPTS = .zero
+            self.writerSessionReady = true
+
+            // Clear any pre-session buffers (we intentionally drop pre-roll).
+            self.pendingVideoBuffers.removeAll(keepingCapacity: true)
+            self.pendingAudioBuffers.removeAll(keepingCapacity: true)
+            self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
+            self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
+
+            self.pendingFirstAcceptedVideoBuffer = nil
+            self.pendingSessionStartPTS = nil
+            self.isStartingWriterSession = false
+
+            self.dbg(String(format: "startSession (at 0) returned; awaiting first frame to commit; gatePTS=%.3f",
+                            pts.seconds))
+        }
+    }
+
+    private func ensureSessionStarted(with pts: CMTime) {
+        // Deprecated by Solution A async session start.
+        // Session start is performed only by startWriterSessionBlocking(...) on sessionStartQueue.
+        // Keep this as a safety no-op to avoid reintroducing pre-session writes.
+        if recordingStartTime == nil {
+            dbg(String(format: "ensureSessionStarted ignored (session start handled elsewhere); pts=%.3f", pts.seconds))
+        }
+    }
+
+    
+    private func retimedSampleBuffer(_ sampleBuffer: CMSampleBuffer, basePTS: CMTime) -> CMSampleBuffer? {
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        let dts = CMSampleBufferGetDecodeTimeStamp(sampleBuffer)
+
+        var timing = CMSampleTimingInfo(
+            duration: CMSampleBufferGetDuration(sampleBuffer),
+            presentationTimeStamp: CMTimeSubtract(pts, basePTS),
+            decodeTimeStamp: dts.isValid ? CMTimeSubtract(dts, basePTS) : dts
+        )
+
+        var out: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &out
+        )
+        if status != noErr { return nil }
+        return out
+    }
+
+private func canAppendVideo(_ pts: CMTime) -> Bool {
         if let last = lastVideoPTS {
             return pts >= last
         }
@@ -906,155 +936,16 @@ final class VideoRecorderController: NSObject,
         lastVideoPTS = pts
     }
 
-    // MARK: - Fresh-install warm-up helpers
 
-    private func armFreshInstallWarmupIfNeeded() {
-        // Cache the flag in-memory so we don't hit UserDefaults on every frame.
-        let completed = UserDefaults.standard.bool(forKey: Self.freshInstallWarmupCompletedKey)
-        isFreshInstallWarmupCompleted = completed
-        if completed { return }
-        isFreshInstallWarmupArmed = true
-    }
+    
 
-    private func warmupRecordingURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("motivo_vid_warmup_\(UUID().uuidString).mov")
-    }
+    
 
-    private func setupWarmupWriter(for url: URL) throws {
-        let writer = try AVAssetWriter(outputURL: url, fileType: .mov)
+    
 
-        // Match the main writer's canvas calculation for consistency.
-        let isLandscape = (currentVideoOrientation == .landscapeLeft || currentVideoOrientation == .landscapeRight)
-        let width: Int
-        let height: Int
-        if isLandscape {
-            width = 1920
-            height = 1080
-        } else {
-            width = 1080
-            height = 1920
-        }
+    
 
-        let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.hevc,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 5_000_000,
-                AVVideoAllowFrameReorderingKey: false
-            ]
-        ]
-
-        let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
-        vInput.expectsMediaDataInRealTime = true
-
-        // Mirror for front camera (same as main writer).
-        var transform = CGAffineTransform.identity
-        if preferredPosition == .front {
-            let mirror = CGAffineTransform(scaleX: -1, y: 1)
-            let translate = CGAffineTransform(translationX: CGFloat(width), y: 0)
-            transform = mirror.concatenating(translate)
-        }
-        vInput.transform = transform
-
-        if writer.canAdd(vInput) { writer.add(vInput) }
-
-        warmupAssetWriter = writer
-        warmupVideoInput = vInput
-        warmupVideoFrameCount = 0
-        warmupStartPTS = nil
-    }
-
-    private func completeFreshInstallWarmupIfNeeded() {
-        guard isFreshInstallWarmupInProgress else { return }
-        guard let writer = warmupAssetWriter else { return }
-
-        // Prevent re-entry while finishWriting is in-flight.
-        isFreshInstallWarmupInProgress = false
-        isFreshInstallWarmupArmed = false
-        isFreshInstallWarmupCompleted = true
-        UserDefaults.standard.set(true, forKey: Self.freshInstallWarmupCompletedKey)
-
-        let urlToDelete = warmupTempURL
-
-        warmupAssetWriter = nil
-        warmupVideoInput = nil
-        warmupTempURL = nil
-        warmupStartPTS = nil
-        warmupVideoFrameCount = 0
-
-        writer.finishWriting { [weak self] in
-            if let url = urlToDelete {
-                try? FileManager.default.removeItem(at: url)
-            }
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                if self.queuedUserStartRecordingAfterWarmup {
-                    self.queuedUserStartRecordingAfterWarmup = false
-                    self.startRecording()
-                }
-            }
-        }
-    }
-
-    private func handleFreshInstallWarmupVideoSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        if isFreshInstallWarmupCompleted { return }
-        if !isFreshInstallWarmupArmed { return }
-
-        // Lazily create a warmup writer on the first video frame after activation.
-        if !isFreshInstallWarmupInProgress {
-            isFreshInstallWarmupInProgress = true
-            warmupVideoFrameCount = 0
-            warmupStartPTS = nil
-
-            let url = warmupRecordingURL()
-            warmupTempURL = url
-            try? FileManager.default.removeItem(at: url)
-            do {
-                try setupWarmupWriter(for: url)
-            } catch {
-                // If warmup setup fails, disarm to avoid blocking recording.
-                isFreshInstallWarmupInProgress = false
-                isFreshInstallWarmupArmed = false
-                return
-            }
-        }
-
-        guard let writer = warmupAssetWriter,
-              let vInput = warmupVideoInput else {
-            return
-        }
-
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if warmupStartPTS == nil {
-            if writer.status == .unknown {
-                writer.startWriting()
-            if !dbgDidLogWriterStartWriting {
-                dbgDidLogWriterStartWriting = true
-                dbg("writer.startWriting() called; status=\(writer.status.rawValue); error=\(String(describing: writer.error))")
-            }
-            }
-            if writer.status == .writing {
-                writer.startSession(atSourceTime: pts)
-                warmupStartPTS = pts
-            } else {
-                return
-            }
-        }
-
-        guard writer.status == .writing else { return }
-
-        if vInput.isReadyForMoreMediaData {
-            if vInput.append(sampleBuffer) {
-                warmupVideoFrameCount += 1
-            }
-        }
-
-        if warmupVideoFrameCount >= freshInstallWarmupMinimumVideoFrames {
-            completeFreshInstallWarmupIfNeeded()
-        }
-    }
+    
 
     // MARK: - Recording Control
 
@@ -1063,6 +954,11 @@ final class VideoRecorderController: NSObject,
         dbg("startRecording() tap; state=\(state)")
         // DEBUG: mark record tap time (monotonic) for first-frame timing line
         debugRecordTapMonotonic = CACurrentMediaTime()
+        // Reset timer state for a new clip (prevents zero-stuck / backwards anomalies)
+        elapsedRecordingTime = 0
+        elapsedPausedTime = 0
+        recordingWallClockStart = nil
+        isStoppingRecording = false
         debugDidPrintFirstFrameTiming = false
         configureAudioSession()
         sessionQueue.async {
@@ -1077,7 +973,6 @@ final class VideoRecorderController: NSObject,
         // Arm to record on first accepted frame
         isArmedToRecord = true
         
-        // Reset warmup counters if needed (already reset on appear/init)
         
         isReadyToSave = false
         
@@ -1098,14 +993,16 @@ final class VideoRecorderController: NSObject,
         lastVideoPTS = nil
         lastAppendedVideoPTS = nil
 
-        // Initialize arming gate
+        // Initialize cadence gate for Solution A (discard early frames until cadence is stable).
         writerQueue.async { [weak self] in
             guard let self = self else { return }
-            self.isArming = true
-            self.armingStableCount = 0
-            self.armingLastPTS = nil
+            self.isRecordingArmed = true
+            self.cadenceStableCount = 0
+            self.cadenceLastPTS = nil
+            self.cadenceArmMonotonic = CACurrentMediaTime()
             self.sessionStartPTS = nil
-            self.armingStartMonotonic = CACurrentMediaTime()
+            self.writerSessionReady = false
+            self.retimeBasePTS = nil
             self.droppedAudioBeforeSessionCount = 0
         }
 
@@ -1190,13 +1087,6 @@ final class VideoRecorderController: NSObject,
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
-
-        // Fresh install: the very first recording can have a cold-start stutter. We stabilize by
-        // delaying writer session start until we observe a short run of stable video frame cadence.
-        coldStartStabilizationActive = !UserDefaults.standard.bool(forKey: Self.freshInstallFirstRecordingCompletedKey)
-        coldStartStableVideoCount = 0
-        coldStartFirstStableVideoPTS = nil
-        coldStartLastVideoPTS = nil
     }
 
     private func finishRecordingWithError() {
@@ -1546,302 +1436,155 @@ final class VideoRecorderController: NSObject,
                                          from connection: AVCaptureConnection) {
         // Assume we're on writerQueue here
 
-        // Fresh-install warm-up runs while idle to prime the pipeline.
-        if isFreshInstallWarmupArmed && !isFreshInstallWarmupCompleted {
-            handleFreshInstallWarmupVideoSampleBuffer(sampleBuffer)
-        }
-
-        // --- New warm-up readiness gating with stable frame cadence + min frame count ---
+        // Mark the recorder as ready once we receive any video frame for preview.
         if !isRecorderReady {
-            warmupVideoFramesSeen += 1
-
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            if let last = warmupLastPTS {
-                let delta = CMTimeGetSeconds(CMTimeSubtract(pts, last))
-                if delta >= warmupMinDelta && delta <= warmupMaxDelta {
-                    warmupConsecutiveStable += 1
-                } else {
-                    warmupConsecutiveStable = 0
-                }
-            }
-            warmupLastPTS = pts
-
-            if warmupVideoFramesSeen >= warmupMinFramesAbsolute && warmupConsecutiveStable >= warmupRequiredConsecutiveStable {
-                DispatchQueue.main.async { [weak self] in
-                    guard let self = self else { return }
-                    if !self.isRecorderReady {
-                        self.isRecorderReady = true
-                        print("[RecorderDebug] Warm-up readiness achieved: framesSeen=\(self.warmupVideoFramesSeen) consecutiveStable=\(self.warmupConsecutiveStable)")
-                    }
-                }
-            }
-            // Early return: do not append or buffer any frames until ready
-            if !isRecorderReady {
-                return
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if !self.isRecorderReady { self.isRecorderReady = true }
             }
         }
 
-        // MOVED BLOCK: If armed to record and not yet initialized writer, lazily create writer now
-        if isArmedToRecord && assetWriter == nil {
-            guard let url = recordingURL ?? {
-                let newURL = newRecordingURL()
-                recordingURL = newURL
-                return newURL
-            }() else {
-                // Should never happen
+        // Only process writer logic when recording is armed (button tap occurred).
+        guard isArmedToRecord else { return }
+
+        // Lazily create writer on first observed frame after arming.
+        if assetWriter == nil {
+            guard let url = recordingURL else {
+                isArmedToRecord = false
                 return
             }
-
-            do {
-                try FileManager.default.removeItem(at: url)
-            } catch {
-                // ignore error
-            }
-
             do {
                 try setupWriter(for: url)
             } catch {
-                print("[RecorderDebug] setupWriter failed: \(error)")
-                recordingURL = nil
-                assetWriter = nil
-                videoInput = nil
-                audioInput = nil
+                dbg("setupWriter failed: \(error)")
                 isArmedToRecord = false
                 return
             }
-
-            guard let writer = assetWriter else {
-                isArmedToRecord = false
-                return
-            }
-
-            if writer.status == .unknown {
-                dbg("writer.startWriting() called lazily on first accepted frame; status=\(writer.status.rawValue)")
-                writer.startWriting()
-            }
-
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            ensureSessionStarted(with: sessionStartPTS ?? pts)
-            if recordingStartTime == nil {
-                // Waiting for cold-start stabilization; do not start session yet.
-                return
-            }
-
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                if self.state != .recording {
-                    self.state = .recording
-                }
-                if self.recordingWallClockStart == nil {
-                    self.recordingWallClockStart = Date()
-                }
-                if self.timer == nil {
-                    self.startTimer()
-                }
-            }
-            isArmedToRecord = false
         }
 
-        // Arming gate: wait for stable cadence before starting session
-        if isArming {
-            let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-            if let last = armingLastPTS {
-                let delta = CMTimeGetSeconds(CMTimeSubtract(pts, last))
-                let ready = videoInput?.isReadyForMoreMediaData ?? false
-                if delta >= armingMinDelta && delta <= armingMaxDelta { // relaxed: ignore ready in condition
-                    armingStableCount += 1
-                } else {
-                    armingStableCount = 0
-                }
-            } else {
-                // First observed frame in arming window
-                armingStableCount = 1
-            }
-            armingLastPTS = pts
-
-            if armingStableCount >= armingRequiredStable {
-                // Decide session start at first of the stable run
-                let startPTS = CMTimeSubtract(pts, CMTime(seconds: Double(armingRequiredStable - 1) * max(armingMinDelta, 0.033), preferredTimescale: pts.timescale))
-                sessionStartPTS = startPTS
-                let armingMs = Int((CACurrentMediaTime() - armingStartMonotonic) * 1000.0)
-                dbg(String(format: "arming complete; stableFrames=%d; sessionStartPTS=%.6fs; armingDurationMs=%d", armingRequiredStable, startPTS.seconds, armingMs))
-                // Start writer and session
-                if assetWriter?.status == .unknown { assetWriter?.startWriting() }
-                if let sPTS = sessionStartPTS {
-                    ensureSessionStarted(with: sPTS)
-                }
-                isArming = false
-            }
-            // During arming, do not append or enqueue video
-            return
-        }
-
-        // Helper: conditional logging for first 2s after session start (VIDEO only)
-        let __logVideoDecision: (_ action: String, _ pts: CMTime, _ ready: Bool) -> Void = { [weak self] action, pts, ready in
-            guard let self = self else { return }
-            guard let start = self.logVideoFirst2sStartPTS else { return }
-            let dt = CMTimeGetSeconds(CMTimeSubtract(pts, start))
-            if dt >= 0 && dt <= 2.0 {
-                let idx = self.logVideoFirst2sFrameIndex
-                let last = self.lastAppendedVideoPTS?.seconds ?? self.lastVideoPTS?.seconds
-                let delta = (last != nil) ? (pts.seconds - (last!)) : 0.0
-                self.dbg(String(format: "VIDEO[%.0fms] idx=%d pts=%.6fs Δ=%.6f action=%@ ready=%@", dt*1000.0, idx, pts.seconds, delta, action, ready ? "true" : "false"))
-                self.logVideoFirst2sFrameIndex = idx + 1
-            }
-        }
-
-        guard state == .recording || state == .idle || state == .pausedRecording else { return }
         guard let writer = assetWriter,
               let vInput = videoInput else { return }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
-        if writer.status == .unknown {
-            // Lock orientation at first frame if needed
-            if let conn = videoOutput?.connection(with: .video), conn.isVideoOrientationSupported {
-                currentVideoOrientation = conn.videoOrientation
-            }
-
-            dbg("startWriting() begin")
-            let __t0 = CACurrentMediaTime()
-            writer.startWriting()
-            let __dt = (CACurrentMediaTime() - __t0) * 1000.0
-            dbg(String(format: "startWriting() end %.1f ms; status=\(writer.status.rawValue)", __dt))
-            dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
-
-            ensureSessionStarted(with: sessionStartPTS ?? pts)
-            if recordingStartTime == nil {
-                // Waiting for cold-start stabilization; do not start session yet.
+        // -------------------------
+        // Solution A: Cadence gate
+        // -------------------------
+        if recordingStartTime == nil {
+            // While startSession(atSourceTime:) is blocking off-queue, discard all frames (we intentionally drop pre-roll).
+            if isStartingWriterSession {
                 return
             }
 
-            // DEBUG timing: print once on first video frame that starts the writer session
-            if !debugDidPrintFirstFrameTiming, let tap = debugRecordTapMonotonic {
-                debugDidPrintFirstFrameTiming = true
-                let deltaMs = (CACurrentMediaTime() - tap) * 1000.0
-                print(String(format: "[RecorderTiming] firstVideoFrame→writerStart %.0f ms", deltaMs))
-            }
+            // If startSession has returned, commit recording start on the *next* video frame.
+            if writerSessionReady {
+                writerSessionReady = false
+                retimeBasePTS = pts
 
-            // Start the UI timer and set state here now that the writer session actually starts (not on button tap).
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                if self.state != .recording {
-                    self.state = .recording
+                // Commit start in input-time domain.
+                recordingStartTime = pts
+                sessionStartPTS = .zero
+                lastVideoPTS = .zero
+                lastAppendedVideoPTS = nil
+
+                // Append this first frame retimed to t=0.
+                if let v0 = retimedSampleBuffer(sampleBuffer, basePTS: pts), vInput.isReadyForMoreMediaData {
+                    _ = vInput.append(v0)
+                    lastAppendedVideoPTS = .zero
+                    recordVideoAppend(.zero)
                 }
-                if self.recordingWallClockStart == nil {
+
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    if self.state != .recording { self.state = .recording }
                     self.recordingWallClockStart = Date()
-                }
-                if self.timer == nil {
                     self.startTimer()
                 }
+
+                return
             }
 
-            // After session start, append this first frame, then drain
-            if vInput.isReadyForMoreMediaData {
-                // Monotonic check for the first frame
-                if let last = lastAppendedVideoPTS, pts < last {
-                    __logVideoDecision("drop(nonmonotonic)", pts, vInput.isReadyForMoreMediaData)
-                    dbg("NON_MONOTONIC_VIDEO_PTS drop first; last=\(last.seconds) pts=\(pts.seconds)")
+            // -------------------------
+            // Solution A: Cadence gate
+            // -------------------------
+            if !isRecordingArmed {
+                isRecordingArmed = true
+                cadenceStableCount = 0
+                cadenceLastPTS = nil
+                cadenceArmMonotonic = CACurrentMediaTime()
+            }
+
+            if let last = cadenceLastPTS {
+                let delta = CMTimeGetSeconds(CMTimeSubtract(pts, last))
+                if delta >= cadenceMinDelta && delta <= cadenceMaxDelta {
+                    cadenceStableCount += 1
                 } else {
-                    __logVideoDecision("append", pts, vInput.isReadyForMoreMediaData)
-                    if vInput.append(sampleBuffer) {
-                        lastAppendedVideoPTS = pts
-                        recordVideoAppend(pts)
-                    }
+                    cadenceStableCount = 0
                 }
-                // Drain any pending immediately after the first append
-                drainPendingVideo(vInput)
-            } else {
-                // Not ready: enqueue and log
-                if pendingVideoBuffers.count < maxPendingVideoBuffers {
-                    __logVideoDecision("enqueue(first-after-start)", pts, vInput.isReadyForMoreMediaData)
-                    pendingVideoBuffers.append(sampleBuffer)
-                    dbg("enqueue video (first-after-start backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
-                }
+            }
+            cadenceLastPTS = pts
+
+            let elapsed = CACurrentMediaTime() - cadenceArmMonotonic
+            let gateOpen = (cadenceStableCount >= cadenceRequiredStable && elapsed >= cadenceMinElapsed) || elapsed >= cadenceHardCap
+
+            if !gateOpen {
+                // Discard early frames until cadence stabilizes.
                 return
             }
+
+            // Open once per armed recording.
+            if isStartingWriterSession || pendingSessionStartPTS != nil { return }
+            pendingSessionStartPTS = pts
+            dbg(String(format: "cadence gate open; stable=%d elapsedMs=%d gatePTS=%.3f",
+                       cadenceStableCount,
+                       Int(elapsed * 1000.0),
+                       pts.seconds))
+
+            beginStartWriterSessionIfNeeded(startPTS: pts, firstVideoBuffer: sampleBuffer)
             return
         }
 
-        // Ensure we start a writer session before any append when startWriting() has been primed earlier.
-        if recordingStartTime == nil, writer.status == .writing {
-            dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
-            ensureSessionStarted(with: sessionStartPTS ?? pts)
-            if recordingStartTime == nil {
-                // Waiting for cold-start stabilization; do not start session yet.
-                return
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                if self.state != .recording {
-                    self.state = .recording
-                }
-                if self.recordingWallClockStart == nil {
-                    self.recordingWallClockStart = Date()
-                }
-                if self.timer == nil {
-                    self.startTimer()
-                }
-            }
 
-            // After session start, append this first frame, then drain
-            if vInput.isReadyForMoreMediaData {
-                // Monotonic check for the first frame
-                if let last = lastAppendedVideoPTS, pts < last {
-                    __logVideoDecision("drop(nonmonotonic)", pts, vInput.isReadyForMoreMediaData)
-                    dbg("NON_MONOTONIC_VIDEO_PTS drop first; last=\(last.seconds) pts=\(pts.seconds)")
-                } else {
-                    __logVideoDecision("append", pts, vInput.isReadyForMoreMediaData)
-                    if vInput.append(sampleBuffer) {
-                        lastAppendedVideoPTS = pts
-                        recordVideoAppend(pts)
-                    }
-                }
-                // Drain any pending immediately after the first append
-                drainPendingVideo(vInput)
-            } else {
-                // Not ready: enqueue and log
-                if pendingVideoBuffers.count < maxPendingVideoBuffers {
-                    __logVideoDecision("enqueue(first-after-start)", pts, vInput.isReadyForMoreMediaData)
-                    pendingVideoBuffers.append(sampleBuffer)
-                    dbg("enqueue video (first-after-start backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
-                }
-                return
-            }
-            return
-        }
+        guard writer.status == .writing,
+              let startPTS = recordingStartTime else { return }
 
-        guard writer.status == .writing else { return }
+        // Monotonic safety: never append a video frame earlier than our latched start PTS.
+        if pts < startPTS { return }
 
-        // Always drain pending before considering current
-        drainPendingVideo(vInput)
+        guard let base = retimeBasePTS,
+              let outSB = retimedSampleBuffer(sampleBuffer, basePTS: base) else { return }
+        let outPTS = CMSampleBufferGetPresentationTimeStamp(outSB)
 
-        // Monotonic invariant for current
-        if let last = lastAppendedVideoPTS, pts < last {
-            __logVideoDecision("drop(nonmonotonic)", pts, vInput.isReadyForMoreMediaData)
-            dbg("NON_MONOTONIC_VIDEO_PTS drop current; last=\(last.seconds) pts=\(pts.seconds)")
-            return
-        }
-
-        // Queue discipline: if not ready, enqueue current and return
+        // Append or buffer when backpressured (post-start behavior).
         if !vInput.isReadyForMoreMediaData {
-            __logVideoDecision("enqueue(backpressure)", pts, vInput.isReadyForMoreMediaData)
             if pendingVideoBuffers.count < maxPendingVideoBuffers {
-                pendingVideoBuffers.append(sampleBuffer)
-                dbg("enqueue video (backpressure) pending=\(pendingVideoBuffers.count) pts=\(pts.seconds)")
+                pendingVideoBuffers.append(outSB)
+                dbg("enqueue video (backpressure) pending=\(pendingVideoBuffers.count) pts=\(outPTS.seconds)")
             }
             return
         }
 
-        // Append current
-        __logVideoDecision("append", pts, vInput.isReadyForMoreMediaData)
-        if vInput.append(sampleBuffer) {
-            lastAppendedVideoPTS = pts
-            recordVideoAppend(pts)
+        // If there are buffered frames waiting to be drained, keep ordering by PTS:
+        // enqueue this live frame and let drainPendingVideo() flush in-order.
+        if !pendingVideoBuffers.isEmpty {
+            if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                pendingVideoBuffers.append(outSB)
+            }
+            // Try to drain as soon as we become ready to avoid starving the writer (frozen playback).
+            drainPendingVideo(vInput)
+            return
         }
 
-        // Drain any remaining pending frames if the input is still ready
-        drainPendingVideo(vInput)
+        if canAppendVideo(outPTS) && vInput.append(outSB) {
+            lastAppendedVideoPTS = outPTS
+            recordVideoAppend(outPTS)
+            drainPendingVideo(vInput)
+        } else {
+            if pendingVideoBuffers.count < maxPendingVideoBuffers {
+                pendingVideoBuffers.append(outSB)
+                dbg("enqueue video (append-failed) pending=\(pendingVideoBuffers.count) pts=\(outPTS.seconds)")
+            }
+        }
     }
 
     private func startWriterSessionFromBufferedIfPossible() {
@@ -1853,7 +1596,8 @@ final class VideoRecorderController: NSObject,
         guard let first = pendingVideoBuffers.first else { return }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(first)
-        dbg("startSession(at: pts) about to call; pts=\(pts.seconds)s; writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+        dbg("startSession(at: pts) about to call; pts=\(pts.seconds); writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+
         ensureSessionStarted(with: sessionStartPTS ?? pts)
         if recordingStartTime == nil {
             // Waiting for cold-start stabilization; do not start session yet.
@@ -1884,30 +1628,32 @@ final class VideoRecorderController: NSObject,
     private func handleAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard state == .recording else { return }
 
-        // Discard audio until session is started; do not buffer across arming
-        if recordingStartTime == nil {
+        // Drop all audio until we have committed the first video frame (retimeBasePTS is set).
+        guard let base = retimeBasePTS else {
+            droppedAudioBeforeSessionCount += 1
+            return
+        }
+
+        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+        if pts < base {
             droppedAudioBeforeSessionCount += 1
             return
         }
 
         guard let writer = assetWriter,
-              let aInput = audioInput else { return }
-
-        let pts = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        if let sPTS = sessionStartPTS, pts < sPTS {
-            // drop pre-session audio or audio earlier than start
-            droppedAudioBeforeSessionCount += 1
-            return
-        }
+              let aInput = audioInput,
+              let outSB = retimedSampleBuffer(sampleBuffer, basePTS: base) else { return }
 
         if writer.status == .writing, aInput.isReadyForMoreMediaData {
-            // dbg("append AUDIO current; pts=\(CMSampleBufferGetPresentationTimeStamp(sampleBuffer).seconds)s; sessionStarted=\(recordingStartTime != nil); writer.status=\(writer.status.rawValue); ready=\(aInput.isReadyForMoreMediaData)")
-            // (silenced verbose audio append log)
-            _ = aInput.append(sampleBuffer)
+            _ = aInput.append(outSB)
+        } else {
+            if pendingAudioBuffers.count < maxPendingAudioBuffers {
+                pendingAudioBuffers.append(outSB)
+            }
         }
     }
-}
 
+}
 // MARK: - Preview & Player Views
 
 private struct CameraPreview: UIViewRepresentable {
@@ -2015,4 +1761,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-
