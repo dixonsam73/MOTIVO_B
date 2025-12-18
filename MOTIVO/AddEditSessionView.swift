@@ -568,7 +568,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             ensureSurrogateFilesExistForViewer_edit()
 
                                             let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
-                                                guard let url = guaranteedSurrogateURL_edit(for: item) else { return nil }
+                                                guard let url = viewerResolvedURL_edit(for: item) else { return nil }
                                                 return (item.id, url)
                                             }
                                             let audioURLs: [URL] = audioItems.map { $0.1 }
@@ -1959,6 +1959,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
