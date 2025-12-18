@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251218_221800-aesv-scopec-realurls-32f6
+// SCOPE: Scope C — For edit-from-SessionDetailView, resolve existing audio/video/image URLs (no empty surrogates) + pass audioTitles into AttachmentViewerView
 // CHANGE-ID: 20251218_211500-aesv-attachviewerfixAB-7bbd
 // SCOPE: Scope A+B — Harden viewer URL population for staged audio/video + wire audio row controls
 // CHANGE-ID: 20251008_172540_aa2f1
@@ -100,6 +102,9 @@ struct AddEditSessionView: View {
 
     // Track which staged attachments came from Core Data (existing) to prevent duplication on save
     @State private var existingAttachmentIDs: Set<UUID> = []
+
+    // Map existing (Core Data) attachment IDs to their resolved on-disk URLs so the viewer can play audio/video without relying on staged bytes.
+    @State private var existingAttachmentURLMap: [UUID: URL] = [:]
 
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
@@ -510,12 +515,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                                                                     let imageURLs: [URL] = visuals.compactMap { item in
                                                                         guard item.kind == .image else { return nil }
-                                                                        return guaranteedSurrogateURL_edit(for: item)
+                                                                        return viewerResolvedURL_edit(for: item)
                                                                     }
 
                                                                     let videoURLs: [URL] = visuals.compactMap { item in
                                                                         guard item.kind == .video else { return nil }
-                                                                        return guaranteedSurrogateURL_edit(for: item)
+                                                                        return viewerResolvedURL_edit(for: item)
                                                                     }
 
                                                                     let startIndex: Int = {
@@ -767,12 +772,21 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             let combined = imageURLs + videoURLs + audioURLs
             let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
 
-            AttachmentViewerView(
+                        let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            let audioTitles: [String] = audioURLs.map { u in
+                let stem = u.deletingPathExtension().lastPathComponent
+                let raw = namesDict[stem] ?? stem
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? stem : trimmed
+            }
+
+AttachmentViewerView(
                             imageURLs: imageURLs,
                             startIndex: startIndex,
                             themeBackground: Color(.systemBackground),
                             videoURLs: videoURLs,
                             audioURLs: audioURLs,
+                            audioTitles: audioTitles,
                             onDelete: { url in
                                 // Map by staged id from surrogate URL stem
                                 let stem = url.deletingPathExtension().lastPathComponent
@@ -1450,6 +1464,13 @@ private var instrumentPicker: some View {
             let kind = AttachmentKind(rawValue: kindStr) ?? .file
             let id = (a.value(forKey: "id") as? UUID) ?? UUID()
 
+            if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                if let url = resolveStoredFileURL(at: path) {
+                    existingAttachmentURLMap[id] = url
+                }
+            }
+
+
             // For audio attachments, populate the temporary names map used for captions
             if kind == .audio {
                 if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
@@ -1480,7 +1501,40 @@ private var instrumentPicker: some View {
         }
     }
 
-    /// Attempts to read image bytes from: absolute path → file:// URL → relative path in Documents directory.
+    
+    /// Resolves a stored Attachment.fileURL string into a valid on-disk file URL.
+    /// Mirrors the resolution strategy used by loadImageData(at:), but returns URL without loading bytes.
+    private func resolveStoredFileURL(at pathOrURLString: String) -> URL? {
+        let trimmed = pathOrURLString.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let fm = FileManager.default
+
+        // Case A: absolute filesystem path
+        if trimmed.hasPrefix("/") {
+            if fm.fileExists(atPath: trimmed) { return URL(fileURLWithPath: trimmed) }
+            if let filename = URL(fileURLWithPath: trimmed).pathComponents.last, !filename.isEmpty {
+                let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
+                if let hit = docs?.appendingPathComponent(filename), fm.fileExists(atPath: hit.path) { return hit }
+            }
+        }
+
+        // Case B: URL string (e.g., "file:///...")
+        if let url = URL(string: trimmed), url.isFileURL, fm.fileExists(atPath: url.path) {
+            return url
+        }
+
+        // Case C: relative path previously stored (resolve against Documents directory)
+        if !trimmed.contains(":"), !trimmed.hasPrefix("/") {
+            if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
+                let hit = docs.appendingPathComponent(trimmed)
+                if fm.fileExists(atPath: hit.path) { return hit }
+            }
+        }
+
+        return nil
+    }
+
+/// Attempts to read image bytes from: absolute path → file:// URL → relative path in Documents directory.
     private func loadImageData(at pathOrURLString: String) -> Data? {
         let trimmed = pathOrURLString.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1638,16 +1692,17 @@ private var instrumentPicker: some View {
 
     private func ensureSurrogateFilesExistForViewer_edit() {
         for att in stagedAttachments {
-            _ = guaranteedSurrogateURL_edit(for: att)
+            // Only create a surrogate when we don't already have a real on-disk URL (existing attachments).
+            if existingAttachmentURLMap[att.id] == nil {
+                _ = guaranteedSurrogateURL_edit(for: att)
+            }
         }
     }
-          
-    
 
     private func viewerURLArrays_edit() -> (images: [URL], videos: [URL], audios: [URL]) {
-        let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
-        let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
-        let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
+        let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { viewerResolvedURL_edit(for: $0) }
+        let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { viewerResolvedURL_edit(for: $0) }
+        let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { viewerResolvedURL_edit(for: $0) }
         return (imageURLs, videoURLs, audioURLs)
     }
 
@@ -1776,7 +1831,17 @@ private var instrumentPicker: some View {
 
     // Step 6A — Viewer population hardening:
     // Ensure a real file exists at the surrogate URL before passing it into AttachmentViewerView.
-    private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
+    
+    // Step 6C — Viewer URL resolution for AESV edit mode:
+    // Prefer the persisted on-disk file URL for existing attachments; fall back to a guaranteed surrogate for staged bytes.
+    private func viewerResolvedURL_edit(for att: StagedAttachment) -> URL? {
+        if let existing = existingAttachmentURLMap[att.id], FileManager.default.fileExists(atPath: existing.path) {
+            return existing
+        }
+        return guaranteedSurrogateURL_edit(for: att)
+    }
+
+private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
         guard let url = surrogateURL(for: att) else { return nil }
         let fm = FileManager.default
         if !fm.fileExists(atPath: url.path) {
