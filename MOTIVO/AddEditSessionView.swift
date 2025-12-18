@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251010_161159_autodesc_fix_edit
-// SCOPE: Edit-mode auto-description restoration; load userActivityLabel; reconcile auto vs custom; preserve ordering fix; no other changes
+// CHANGE-ID: 20251218_180500-aesv-attachparity-2a775f2b
+// SCOPE: AESV attachment card parity with PRDV: visual/audio separation + startIndex resolution + viewerRequest launch contract (viewer internals untouched)
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
@@ -20,6 +20,27 @@ import PhotosUI
 import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
+
+
+// MARK: - Attachment Viewer Request (AESV)
+// Atomic presentation payload for AttachmentViewerView.
+// This is AESV-scoped and matches PRDV’s launch contract: visual (images+videos) vs audio-only.
+private struct AttachmentViewerRequest: Identifiable {
+    enum Mode {
+        case visual
+        case audio
+    }
+
+    let id = UUID()
+    let mode: Mode
+    let startIndex: Int
+
+    let imageURLs: [URL]
+    let videoURLs: [URL]
+    let audioURLs: [URL]
+}
+
+
 
 struct AddEditSessionView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -71,8 +92,7 @@ struct AddEditSessionView: View {
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
 
-    @State private var isShowingAttachmentViewer: Bool = false
-    @State private var viewerStartIndex: Int = 0
+    @State private var viewerRequest: AttachmentViewerRequest? = nil
 
     // UI stability (instruments empty-state)
     @State private var instrumentsGateArmed = false
@@ -389,51 +409,204 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 // NEW — State card (read/write)
                 stateStripCard_edit
 
+                
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
                     if !stagedAttachments.isEmpty {
-                        let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
-                        LazyVGrid(columns: columns, spacing: 12) {
-                            ForEach(stagedAttachments) { att in
-                                ZStack(alignment: .topTrailing) {
-                                    // Tile content
-                                    AttachmentTileContent(att: att)
-                                        .frame(width: 128, height: 128)
-                                        .background(Color.secondary.opacity(0.08))
-                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file }
+                        let audioOnly = stagedAttachments.filter { $0.kind == .audio }
+
+                        if !visuals.isEmpty {
+                            let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
+                            LazyVGrid(columns: columns, spacing: 12) {
+                                                            ForEach(visuals) { att in
+                                                                ZStack(alignment: .topTrailing) {
+                                                                    // Tile content
+                                                                    AttachmentTileContent(att: att)
+                                                                        .frame(width: 128, height: 128)
+                                                                        .background(Color.secondary.opacity(0.08))
+                                                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                                        .overlay(
+                                                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                                                .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                                                                        )
+
+                                                                    // Right-side vertical controls: Star, Privacy, Delete
+                                                                    VStack(spacing: 6) {
+                                                                        if att.kind == .image || att.kind == .audio || att.kind == .video {
+                                                                            Text(selectedThumbnailID == att.id ? "★" : "☆")
+                                                                                .font(.system(size: 16))
+                                                                                .padding(8)
+                                                                                .background(.ultraThinMaterial, in: Circle())
+                                                                                .onTapGesture { selectedThumbnailID = att.id }
+                                                                                .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
+                                                                        }
+
+                                                                        let fileURL: URL? = surrogateURL(for: att)
+                                                                        let priv: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                        Button {
+                                                                            setPrivate(id: att.id, url: fileURL, !priv)
+                                                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                                        } label: {
+                                                                            Image(systemName: priv ? "eye.slash" : "eye")
+                                                                                .font(.system(size: 16, weight: .semibold))
+                                                                                .padding(8)
+                                                                                .background(.ultraThinMaterial, in: Circle())
+                                                                        }
+                                                                        .buttonStyle(.plain)
+                                                                        .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+
+                                                                        Button {
+                                                                            // Preserve existing persistent delete behavior for items sourced from Core Data
+                                                                            if existingAttachmentIDs.contains(att.id), let s = session {
+                                                                                let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                                                                req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                                                                req.fetchLimit = 1
+                                                                                if let match = try? viewContext.fetch(req).first {
+                                                                                    if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
+                                                                                        AttachmentStore.deleteAttachmentFile(atPath: path)
+                                                                                    }
+                                                                                    viewContext.delete(match)
+                                                                                    do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                                                                                }
+                                                                            }
+                                                                            removeStagedAttachment(att)
+                                                                        } label: {
+                                                                            Image(systemName: "trash")
+                                                                                .font(.system(size: 16, weight: .semibold))
+                                                                                .padding(8)
+                                                                                .background(.ultraThinMaterial, in: Circle())
+                                                                        }
+                                                                        .buttonStyle(.plain)
+                                                                        .accessibilityLabel("Delete attachment")
+                                                                    }
+                                                                    .padding(6)
+                                                                }
+                                                                .contextMenu {
+                                                                    if att.kind == .image || att.kind == .audio || att.kind == .video {
+                                                                        Button("Set as Thumbnail") { selectedThumbnailID = att.id }
+                                                                    }
+                                                                    Button(role: .destructive) {
+                                                                        if existingAttachmentIDs.contains(att.id), let s = session {
+                                                                            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                                                            req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                                                            req.fetchLimit = 1
+                                                                            if let match = try? viewContext.fetch(req).first {
+                                                                                if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
+                                                                                    AttachmentStore.deleteAttachmentFile(atPath: path)
+                                                                                }
+                                                                                viewContext.delete(match)
+                                                                                do { try viewContext.save() } catch { print("Delete save error: \(error)") }
+                                                                            }
+                                                                        }
+                                                                        removeStagedAttachment(att)
+                                                                    } label: { Text("Remove") }
+                                                                }
+                                                                .contentShape(Rectangle())
+                                                                .onTapGesture {
+                                                                    // Visual gallery: images + videos (audio excluded)
+                                                                    ensureSurrogateFilesExistForViewer_edit()
+
+                                                                    let imageURLs: [URL] = visuals.compactMap { item in
+                                                                        guard item.kind == .image else { return nil }
+                                                                        return surrogateURL(for: item)
+                                                                    }
+
+                                                                    let videoURLs: [URL] = visuals.compactMap { item in
+                                                                        guard item.kind == .video else { return nil }
+                                                                        return surrogateURL(for: item)
+                                                                    }
+
+                                                                    let startIndex: Int = {
+                                                                        switch att.kind {
+                                                                        case .image:
+                                                                            let idx = visuals.filter { $0.kind == .image }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                            return idx
+                                                                        case .video:
+                                                                            let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                            return imageURLs.count + idx
+                                                                        default:
+                                                                            return 0
+                                                                        }
+                                                                    }()
+
+                                                                    viewerRequest = AttachmentViewerRequest(
+                                                                        mode: .visual,
+                                                                        startIndex: startIndex,
+                                                                        imageURLs: imageURLs,
+                                                                        videoURLs: videoURLs,
+                                                                        audioURLs: []
+                                                                    )
+                                                                }
+                                                            }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        if !audioOnly.isEmpty {
+                            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                ForEach(audioOnly) { att in
+                                    let rawDisplay = namesDict[att.id.uuidString] ?? ""
+                                    let trimmedDisplay = rawDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let title = trimmedDisplay.isEmpty ? "Audio clip" : trimmedDisplay
+
+                                    Button {
+                                        ensureSurrogateFilesExistForViewer_edit()
+
+                                        let audioURLs: [URL] = audioOnly.compactMap { item in
+                                            guard item.kind == .audio else { return nil }
+                                            return surrogateURL(for: item)
+                                        }
+
+                                        let startIndex = audioOnly.firstIndex(where: { $0.id == att.id }) ?? 0
+
+                                        viewerRequest = AttachmentViewerRequest(
+                                            mode: .audio,
+                                            startIndex: startIndex,
+                                            imageURLs: [],
+                                            videoURLs: [],
+                                            audioURLs: audioURLs
+                                        )
+                                    } label: {
+                                        HStack(spacing: 10) {
+                                            Image(systemName: "waveform")
+                                                .font(.system(size: 16, weight: .semibold))
+
+                                            Text(title)
+                                                .font(.footnote)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+
+                                            Spacer(minLength: 0)
+
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: 12, weight: .semibold))
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .padding(.vertical, 10)
+                                        .padding(.horizontal, 12)
+                                        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                                         .overlay(
                                             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                                                .stroke(.secondary.opacity(0.12), lineWidth: 1)
                                         )
-
-                                    // Right-side vertical controls: Star, Privacy, Delete
-                                    VStack(spacing: 6) {
-                                        if att.kind == .image || att.kind == .audio || att.kind == .video {
-                                            Text(selectedThumbnailID == att.id ? "★" : "☆")
-                                                .font(.system(size: 16))
-                                                .padding(8)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                                .onTapGesture { selectedThumbnailID = att.id }
-                                                .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .contextMenu {
+                                        if let url = surrogateURL(for: att) {
+                                            Button {
+                                                let current = isPrivate(id: att.id, url: url)
+                                                setPrivate(id: att.id, url: url, !current)
+                                            } label: {
+                                                Text(isPrivate(id: att.id, url: url) ? "Make Public" : "Make Private")
+                                            }
                                         }
 
-                                        let fileURL: URL? = surrogateURL(for: att)
-                                        let priv: Bool = isPrivate(id: att.id, url: fileURL)
-                                        Button {
-                                            setPrivate(id: att.id, url: fileURL, !priv)
-                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                        } label: {
-                                            Image(systemName: priv ? "eye.slash" : "eye")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .padding(8)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
-
-                                        Button {
-                                            // Preserve existing persistent delete behavior for items sourced from Core Data
+                                        Button(role: .destructive) {
                                             if existingAttachmentIDs.contains(att.id), let s = session {
                                                 let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
                                                 req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
@@ -447,49 +620,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 }
                                             }
                                             removeStagedAttachment(att)
-                                        } label: {
-                                            Image(systemName: "trash")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .padding(8)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                        }
-                                        .buttonStyle(.plain)
-                                        .accessibilityLabel("Delete attachment")
-                                    }
-                                    .padding(6)
-                                }
-                                .contextMenu {
-                                    if att.kind == .image || att.kind == .audio || att.kind == .video {
-                                        Button("Set as Thumbnail") { selectedThumbnailID = att.id }
-                                    }
-                                    Button(role: .destructive) {
-                                        if existingAttachmentIDs.contains(att.id), let s = session {
-                                            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-                                            req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
-                                            req.fetchLimit = 1
-                                            if let match = try? viewContext.fetch(req).first {
-                                                if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
-                                                    AttachmentStore.deleteAttachmentFile(atPath: path)
-                                                }
-                                                viewContext.delete(match)
-                                                do { try viewContext.save() } catch { print("Delete save error: \(error)") }
-                                            }
-                                        }
-                                        removeStagedAttachment(att)
-                                    } label: { Text("Remove") }
-                                }
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    let index = stagedIndexForAttachment_edit(att)
-                                    if index >= 0 {
-                                        viewerStartIndex = index
-                                        ensureSurrogateFilesExistForViewer_edit()
-                                        isShowingAttachmentViewer = true
+                                        } label: { Text("Remove") }
                                     }
                                 }
                             }
+                            .padding(.top, 10)
                         }
-                        .padding(.vertical, 4)
                     }
                 }
                 .cardSurface()
@@ -604,93 +740,92 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                    }
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
-            let arrays = viewerURLArrays_edit()
-            let imageURLs = arrays.images
-            let videoURLs = arrays.videos
-            let audioURLs = arrays.audios
+        .fullScreenCover(item: $viewerRequest) { req in
+            let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
+            let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
+            let audioURLs: [URL] = (req.mode == .audio) ? req.audioURLs : []
             let combined = imageURLs + videoURLs + audioURLs
-            let startIndex = min(max(viewerStartIndex, 0), max(combined.count - 1, 0))
+            let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
 
             AttachmentViewerView(
-                imageURLs: imageURLs,
-                startIndex: startIndex,
-                themeBackground: Color(.systemBackground),
-                videoURLs: videoURLs,
-                audioURLs: audioURLs,
-                onDelete: { url in
-                    // Map by staged id from surrogate URL stem
-                    let stem = url.deletingPathExtension().lastPathComponent
-                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                        let removed = stagedAttachments.remove(at: idx)
-                        existingAttachmentIDs.remove(removed.id)
-                        if selectedThumbnailID == removed.id {
-                            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
-                        }
-                    }
-                },
-                onFavourite: { url in
-                    // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
-                    let stem = url.deletingPathExtension().lastPathComponent
-                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                        selectedThumbnailID = att.id
-                    }
-                },
-                isFavourite: { url in
-                    let stem = url.deletingPathExtension().lastPathComponent
-                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                        return selectedThumbnailID == att.id
-                    }
-                    return false
-                },
-                onTogglePrivacy: { url in
-                    let stem = url.deletingPathExtension().lastPathComponent
-                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                        let priv = isPrivate(id: att.id, url: url)
-                        setPrivate(id: att.id, url: url, !priv)
-                    }
-                },
-                isPrivate: { url in
-                    let stem = url.deletingPathExtension().lastPathComponent
-                    if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                        return isPrivate(id: att.id, url: url)
-                    }
-                    return false
-                },
-                onReplaceAttachment: { originalURL, newURL, kind in
-                    // Replace staged data by matching surrogate stem
-                    let stem = originalURL.deletingPathExtension().lastPathComponent
-                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                        if let data = try? Data(contentsOf: newURL) {
-                            let old = stagedAttachments[idx]
-                            stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
-                        }
-                    }
-                },
-                onSaveAsNewAttachment: { newURL, kind in
-                    // Append a new staged item of provided kind after current index section-wise
-                    let newID = UUID()
-                    let data = (try? Data(contentsOf: newURL)) ?? Data()
-                    let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
-                    // Insert by section: images, then videos, then audios
-                    switch kind {
-                    case .image:
-                        if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
-                            stagedAttachments.insert(newAtt, at: splitIndex)
-                        } else { stagedAttachments.append(newAtt) }
-                    case .video:
-                        let lastVideoIndex = stagedAttachments.lastIndex(where: { $0.kind == .video })
-                        if let lastVideoIndex { stagedAttachments.insert(newAtt, at: lastVideoIndex + 1) }
-                        else if let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image }) { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) }
-                        else { stagedAttachments.append(newAtt) }
-                    case .audio:
-                        let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
-                        if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
-                    case .file:
-                        stagedAttachments.append(newAtt)
-                    }
-                }
-            )
+                            imageURLs: imageURLs,
+                            startIndex: startIndex,
+                            themeBackground: Color(.systemBackground),
+                            videoURLs: videoURLs,
+                            audioURLs: audioURLs,
+                            onDelete: { url in
+                                // Map by staged id from surrogate URL stem
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                                    let removed = stagedAttachments.remove(at: idx)
+                                    existingAttachmentIDs.remove(removed.id)
+                                    if selectedThumbnailID == removed.id {
+                                        selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+                                    }
+                                }
+                            },
+                            onFavourite: { url in
+                                // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                    selectedThumbnailID = att.id
+                                }
+                            },
+                            isFavourite: { url in
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                    return selectedThumbnailID == att.id
+                                }
+                                return false
+                            },
+                            onTogglePrivacy: { url in
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                    let priv = isPrivate(id: att.id, url: url)
+                                    setPrivate(id: att.id, url: url, !priv)
+                                }
+                            },
+                            isPrivate: { url in
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                    return isPrivate(id: att.id, url: url)
+                                }
+                                return false
+                            },
+                            onReplaceAttachment: { originalURL, newURL, kind in
+                                // Replace staged data by matching surrogate stem
+                                let stem = originalURL.deletingPathExtension().lastPathComponent
+                                if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                                    if let data = try? Data(contentsOf: newURL) {
+                                        let old = stagedAttachments[idx]
+                                        stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                                    }
+                                }
+                            },
+                            onSaveAsNewAttachment: { newURL, kind in
+                                // Append a new staged item of provided kind after current index section-wise
+                                let newID = UUID()
+                                let data = (try? Data(contentsOf: newURL)) ?? Data()
+                                let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+                                // Insert by section: images, then videos, then audios
+                                switch kind {
+                                case .image:
+                                    if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
+                                        stagedAttachments.insert(newAtt, at: splitIndex)
+                                    } else { stagedAttachments.append(newAtt) }
+                                case .video:
+                                    let lastVideoIndex = stagedAttachments.lastIndex(where: { $0.kind == .video })
+                                    if let lastVideoIndex { stagedAttachments.insert(newAtt, at: lastVideoIndex + 1) }
+                                    else if let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image }) { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) }
+                                    else { stagedAttachments.append(newAtt) }
+                                case .audio:
+                                    let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
+                                    if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
+                                case .file:
+                                    stagedAttachments.append(newAtt)
+                                }
+                            }
+                        )
         }
         .task { hydrate() } // unified first-appearance init
         .onAppear {
