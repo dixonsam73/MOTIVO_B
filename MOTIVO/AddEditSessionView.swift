@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251218_211900-aesv-audioRowUIParity-noopflat
-// SCOPE: Option A polish — match PRDV audio row controls (remove circle backgrounds; visual-only)
+// CHANGE-ID: 20251218_211500-aesv-attachviewerfixAB-7bbd
+// SCOPE: Scope A+B — Harden viewer URL population for staged audio/video + wire audio row controls
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
@@ -510,12 +510,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                                                                     let imageURLs: [URL] = visuals.compactMap { item in
                                                                         guard item.kind == .image else { return nil }
-                                                                        return surrogateURL(for: item)
+                                                                        return guaranteedSurrogateURL_edit(for: item)
                                                                     }
 
                                                                     let videoURLs: [URL] = visuals.compactMap { item in
                                                                         guard item.kind == .video else { return nil }
-                                                                        return surrogateURL(for: item)
+                                                                        return guaranteedSurrogateURL_edit(for: item)
                                                                     }
 
                                                                     let startIndex: Int = {
@@ -563,7 +563,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             ensureSurrogateFilesExistForViewer_edit()
 
                                             let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
-                                                guard let url = surrogateURL(for: item) else { return nil }
+                                                guard let url = guaranteedSurrogateURL_edit(for: item) else { return nil }
                                                 return (item.id, url)
                                             }
                                             let audioURLs: [URL] = audioItems.map { $0.1 }
@@ -604,28 +604,35 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                                         // PRDV-parity control stack (Option A: present, no-op)
                                         VStack(spacing: 6) {
-                                            Button { } label: {
+                                            Button {
+                                                selectedThumbnailID = att.id
+                                            } label: {
                                                 Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
                                                     .font(.system(size: 16, weight: .semibold))
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel("Favourite (not yet wired)")
+                                            .accessibilityLabel("Set as thumbnail")
 
                                             let privURL = url
                                             let isPriv = isPrivate(id: att.id, url: privURL)
-                                            Button { } label: {
+                                            Button {
+                                                let current = isPrivate(id: att.id, url: privURL)
+                                                setPrivate(id: att.id, url: privURL, !current)
+                                            } label: {
                                                 Image(systemName: isPriv ? "eye.slash" : "eye")
                                                     .font(.system(size: 16, weight: .semibold))
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel("Privacy (not yet wired)")
+                                            .accessibilityLabel("Toggle privacy")
 
-                                            Button(role: .destructive) { } label: {
+                                            Button(role: .destructive) {
+                                                removeStagedAttachment(att)
+                                            } label: {
                                                 Image(systemName: "trash")
                                                     .font(.system(size: 16, weight: .semibold))
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel("Delete (not yet wired)")
+                                            .accessibilityLabel("Delete attachment")
                                         }
                                     }
                                     .padding(12)
@@ -1630,24 +1637,17 @@ private var instrumentPicker: some View {
     }
 
     private func ensureSurrogateFilesExistForViewer_edit() {
-        let fm = FileManager.default
         for att in stagedAttachments {
-            guard let url = surrogateURL(for: att) else { continue }
-            if !fm.fileExists(atPath: url.path) {
-                switch att.kind {
-                case .image, .video, .audio:
-                    try? att.data.write(to: url, options: .atomic)
-                case .file:
-                    break
-                }
-            }
+            _ = guaranteedSurrogateURL_edit(for: att)
         }
     }
+          
+    
 
     private func viewerURLArrays_edit() -> (images: [URL], videos: [URL], audios: [URL]) {
-        let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { surrogateURL(for: $0) }
-        let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { surrogateURL(for: $0) }
-        let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { surrogateURL(for: $0) }
+        let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
+        let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
+        let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { guaranteedSurrogateURL_edit(for: $0) }
         return (imageURLs, videoURLs, audioURLs)
     }
 
@@ -1771,6 +1771,23 @@ private var instrumentPicker: some View {
         return FileManager.default.temporaryDirectory
             .appendingPathComponent(att.id.uuidString)
             .appendingPathExtension(ext)
+    }
+
+
+    // Step 6A — Viewer population hardening:
+    // Ensure a real file exists at the surrogate URL before passing it into AttachmentViewerView.
+    private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
+        guard let url = surrogateURL(for: att) else { return nil }
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: url.path) {
+            switch att.kind {
+            case .image, .video, .audio:
+                do { try att.data.write(to: url, options: .atomic) } catch { return nil }
+            case .file:
+                return nil
+            }
+        }
+        return fm.fileExists(atPath: url.path) ? url : nil
     }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
