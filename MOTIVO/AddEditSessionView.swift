@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251218_180500-aesv-attachparity-2a775f2b
-// SCOPE: AESV attachment card parity with PRDV: visual/audio separation + startIndex resolution + viewerRequest launch contract (viewer internals untouched)
+// CHANGE-ID: 20251218_210900-aesv-audioRowUIParity-noopfix2-90323dde
+// SCOPE: Option A — PRDV audio row UI parity in AESV + compile fix (add formatClipDuration + simplify duration calc); no viewer or mutation semantics changes.
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
@@ -545,6 +545,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         }
 
                         if !audioOnly.isEmpty {
+                            // Titles for staged audio (keyed by staged id UUID string)
                             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
 
                             VStack(alignment: .leading, spacing: 8) {
@@ -553,75 +554,93 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                     let trimmedDisplay = rawDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
                                     let title = trimmedDisplay.isEmpty ? "Audio clip" : trimmedDisplay
 
-                                    Button {
-                                        ensureSurrogateFilesExistForViewer_edit()
+                                    let url = surrogateURL(for: att)
+                                    let durationText: String? = audioDurationText_edit(for: att)
 
-                                        let audioURLs: [URL] = audioOnly.compactMap { item in
-                                            guard item.kind == .audio else { return nil }
-                                            return surrogateURL(for: item)
-                                        }
+                                    HStack(alignment: .center, spacing: 12) {
+                                        // Main tap target: open audio-only viewer starting on this clip
+                                        Button {
+                                            ensureSurrogateFilesExistForViewer_edit()
 
-                                        let startIndex = audioOnly.firstIndex(where: { $0.id == att.id }) ?? 0
-
-                                        viewerRequest = AttachmentViewerRequest(
-                                            mode: .audio,
-                                            startIndex: startIndex,
-                                            imageURLs: [],
-                                            videoURLs: [],
-                                            audioURLs: audioURLs
-                                        )
-                                    } label: {
-                                        HStack(spacing: 10) {
-                                            Image(systemName: "waveform")
-                                                .font(.system(size: 16, weight: .semibold))
-
-                                            Text(title)
-                                                .font(.footnote)
-                                                .foregroundStyle(.primary)
-                                                .lineLimit(1)
-                                                .truncationMode(.tail)
-
-                                            Spacer(minLength: 0)
-
-                                            Image(systemName: "chevron.right")
-                                                .font(.system(size: 12, weight: .semibold))
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        .padding(.vertical, 10)
-                                        .padding(.horizontal, 12)
-                                        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                .stroke(.secondary.opacity(0.12), lineWidth: 1)
-                                        )
-                                    }
-                                    .buttonStyle(.plain)
-                                    .contextMenu {
-                                        if let url = surrogateURL(for: att) {
-                                            Button {
-                                                let current = isPrivate(id: att.id, url: url)
-                                                setPrivate(id: att.id, url: url, !current)
-                                            } label: {
-                                                Text(isPrivate(id: att.id, url: url) ? "Make Public" : "Make Private")
+                                            let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
+                                                guard let url = surrogateURL(for: item) else { return nil }
+                                                return (item.id, url)
                                             }
-                                        }
+                                            let audioURLs: [URL] = audioItems.map { $0.1 }
+                                            let startIndex = audioItems.firstIndex(where: { $0.0 == att.id }) ?? 0
 
-                                        Button(role: .destructive) {
-                                            if existingAttachmentIDs.contains(att.id), let s = session {
-                                                let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-                                                req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
-                                                req.fetchLimit = 1
-                                                if let match = try? viewContext.fetch(req).first {
-                                                    if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
-                                                        AttachmentStore.deleteAttachmentFile(atPath: path)
+                                            viewerRequest = AttachmentViewerRequest(
+                                                mode: .audio,
+                                                startIndex: startIndex,
+                                                imageURLs: [],
+                                                videoURLs: [],
+                                                audioURLs: audioURLs
+                                            )
+                                        } label: {
+                                            HStack(spacing: 10) {
+                                                Image(systemName: "waveform")
+                                                    .font(.system(size: 16, weight: .semibold))
+
+                                                VStack(alignment: .leading, spacing: 2) {
+                                                    Text(title)
+                                                        .font(.footnote)
+                                                        .foregroundStyle(.primary)
+                                                        .lineLimit(1)
+                                                        .truncationMode(.tail)
+
+                                                    if let durationText {
+                                                        Text(durationText)
+                                                            .font(.caption2)
+                                                            .foregroundStyle(.secondary)
                                                     }
-                                                    viewContext.delete(match)
-                                                    do { try viewContext.save() } catch { print("Delete save error: \(error)") }
                                                 }
                                             }
-                                            removeStagedAttachment(att)
-                                        } label: { Text("Remove") }
+                                        }
+                                        .buttonStyle(.plain)
+                                        .contentShape(Rectangle())
+                                        .accessibilityLabel("Open audio clip \(title)")
+
+                                        Spacer(minLength: 8)
+
+                                        // PRDV-parity control stack (Option A: present, no-op)
+                                        VStack(spacing: 6) {
+                                            Button { } label: {
+                                                Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .padding(8)
+                                                    .background(.ultraThinMaterial, in: Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Favourite (not yet wired)")
+
+                                            let privURL = url
+                                            let isPriv = isPrivate(id: att.id, url: privURL)
+                                            Button { } label: {
+                                                Image(systemName: isPriv ? "eye.slash" : "eye")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .padding(8)
+                                                    .background(.ultraThinMaterial, in: Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Privacy (not yet wired)")
+
+                                            Button(role: .destructive) { } label: {
+                                                Image(systemName: "trash")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .padding(8)
+                                                    .background(.ultraThinMaterial, in: Circle())
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Delete (not yet wired)")
+                                        }
                                     }
+                                    .padding(12)
+                                    .background(Color.secondary.opacity(0.08))
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                    )
                                 }
                             }
                             .padding(.top, 10)
@@ -1682,6 +1701,26 @@ private var instrumentPicker: some View {
         return h > 0 ? "\(h)h \(m)m" : "\(m)m"
     }
 
+    private func formatClipDuration(_ seconds: Double) -> String {
+        let totalSeconds = Int(seconds.rounded())
+        let minutes = totalSeconds / 60
+        let secs = totalSeconds % 60
+        return String(format: "%d:%02d", minutes, secs)
+    }
+
+    private func audioDurationText_edit(for att: StagedAttachment) -> String? {
+        guard let url = surrogateURL(for: att) else { return nil }
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: url.path) {
+            try? att.data.write(to: url, options: .atomic)
+        }
+        let asset = AVURLAsset(url: url)
+        let seconds = CMTimeGetSeconds(asset.duration)
+        guard seconds.isFinite, seconds > 0 else { return nil }
+        return formatClipDuration(seconds)
+    }
+
+
     private func ensureCameraAuthorized(onAuthorized: @escaping () -> Void) {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
         switch status {
@@ -1844,8 +1883,6 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
 
 
 
