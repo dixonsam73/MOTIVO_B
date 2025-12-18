@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251218_210900-aesv-audioRowUIParity-noopfix2-90323dde
-// SCOPE: Option A — PRDV audio row UI parity in AESV + compile fix (add formatClipDuration + simplify duration calc); no viewer or mutation semantics changes.
+// CHANGE-ID: 20251218_211900-aesv-audioRowUIParity-noopflat
+// SCOPE: Option A polish — match PRDV audio row controls (remove circle backgrounds; visual-only)
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
 //  AddEditSessionView.swift
@@ -607,8 +607,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             Button { } label: {
                                                 Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
                                                     .font(.system(size: 16, weight: .semibold))
-                                                    .padding(8)
-                                                    .background(.ultraThinMaterial, in: Circle())
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Favourite (not yet wired)")
@@ -618,8 +616,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             Button { } label: {
                                                 Image(systemName: isPriv ? "eye.slash" : "eye")
                                                     .font(.system(size: 16, weight: .semibold))
-                                                    .padding(8)
-                                                    .background(.ultraThinMaterial, in: Circle())
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Privacy (not yet wired)")
@@ -627,8 +623,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             Button(role: .destructive) { } label: {
                                                 Image(systemName: "trash")
                                                     .font(.system(size: 16, weight: .semibold))
-                                                    .padding(8)
-                                                    .background(.ultraThinMaterial, in: Circle())
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Delete (not yet wired)")
