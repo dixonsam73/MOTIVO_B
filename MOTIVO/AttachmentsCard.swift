@@ -45,65 +45,153 @@ struct AttachmentsCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Attachments").sectionHeader()
             
-            // Images grid
-            if !stagedImages.isEmpty {
+            if !stagedImages.isEmpty || !stagedVideos.isEmpty {
+                let visuals = stagedImages + stagedVideos
                 let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
                 LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(stagedImages, id: \.id) { att in
-                        ZStack(alignment: .topTrailing) {
-                            if let ui = UIImage(data: att.data) {
-                                Image(uiImage: ui)
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 128, height: 128)
-                                    .background(Color.secondary.opacity(0.08))
-                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .overlay(
+                    ForEach(visuals, id: \.id) { att in
+                        if stagedImages.contains(where: { $0.id == att.id }) {
+                            // Image tile
+                            ZStack(alignment: .topTrailing) {
+                                if let ui = UIImage(data: att.data) {
+                                    Image(uiImage: ui)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 128, height: 128)
+                                        .background(Color.secondary.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                        )
+                                        .contentShape(Rectangle())
+                                        .onTapGesture { onViewImage(att.id) }
+                                } else {
+                                    ZStack {
                                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                            .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-                                    )
+                                            .fill(Color.secondary.opacity(0.08))
+                                        Image(systemName: "photo")
+                                            .imageScale(.large)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .frame(width: 128, height: 128)
                                     .contentShape(Rectangle())
                                     .onTapGesture { onViewImage(att.id) }
-                            } else {
-                                ZStack {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.secondary.opacity(0.08))
-                                    Image(systemName: "photo")
-                                        .imageScale(.large)
-                                        .foregroundStyle(.secondary)
                                 }
-                                .frame(width: 128, height: 128)
-                                .contentShape(Rectangle())
-                                .onTapGesture { onViewImage(att.id) }
-                            }
-                            
-                            // Controls: star to set thumbnail, delete
-                            VStack(spacing: 6) {
-                                Text(selectedThumbnailID == att.id ? "★" : "☆")
-                                    .font(.system(size: 16))
-                                    .padding(8)
-                                    .background(.ultraThinMaterial, in: Circle())
-                                    .onTapGesture { selectedThumbnailID = att.id }
                                 
-                                Button {
-                                    stagedImages.removeAll { $0.id == att.id }
-                                    if selectedThumbnailID == att.id {
-                                        selectedThumbnailID = stagedImages.first?.id
-                                    }
-                                    onPersistStagedAttachments()
-                                    // Mirror delete to staging store
-                                    if let ref = StagingStore.list().first(where: { $0.id == att.id }) {
-                                        StagingStore.remove(ref)
-                                    }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 16, weight: .semibold))
+                                // Controls: star to set thumbnail, delete
+                                VStack(spacing: 6) {
+                                    Text(selectedThumbnailID == att.id ? "★" : "☆")
+                                        .font(.system(size: 16))
                                         .padding(8)
                                         .background(.ultraThinMaterial, in: Circle())
+                                        .onTapGesture { selectedThumbnailID = att.id }
+                                    
+                                    Button {
+                                        stagedImages.removeAll { $0.id == att.id }
+                                        if selectedThumbnailID == att.id {
+                                            selectedThumbnailID = stagedImages.first?.id
+                                        }
+                                        onPersistStagedAttachments()
+                                        // Mirror delete to staging store
+                                        if let ref = StagingStore.list().first(where: { $0.id == att.id }) {
+                                            StagingStore.remove(ref)
+                                        }
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .padding(8)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
                                 }
-                                .buttonStyle(.plain)
+                                .padding(6)
                             }
-                            .padding(6)
+                        } else if stagedVideos.contains(where: { $0.id == att.id }) {
+                            // Video tile
+                            ZStack(alignment: .topTrailing) {
+                                // Ensure video tiles sit behind audio rows in hit testing
+                                // so audio play buttons remain responsive when regions overlap.
+                                // (Audio rows use .zIndex(1).)
+                                
+                                ZStack {
+                                    if let thumb = videoThumbnails[att.id] {
+                                        Image(uiImage: thumb)
+                                            .resizable()
+                                            .scaledToFill()
+                                            .frame(width: 128, height: 128)
+                                            .clipped()
+                                    } else {
+                                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                            .fill(Color.secondary.opacity(0.08))
+                                            .frame(width: 128, height: 128)
+                                        Image(systemName: "film")
+                                            .imageScale(.large)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    // Center play overlay button
+                                    Button(action: { onPlayVideo(att.id) }) {
+                                        ZStack {
+                                            Circle()
+                                                .fill(.ultraThinMaterial)
+                                                .frame(width: 44, height: 44)
+                                            Image(systemName: "play.fill")
+                                                .font(.system(size: 18, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                        }
+                                    }
+                                }
+                                .frame(width: 128, height: 128)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                        .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    onPlayVideo(att.id)
+                                }
+                                
+                                // Delete button
+                                VStack(spacing: 6) {
+                                    Button {
+                                        // Remove surrogate temp file best-effort
+                                        let tmp = FileManager.default.temporaryDirectory
+                                            .appendingPathComponent(att.id.uuidString)
+                                            .appendingPathExtension("mov")
+                                        try? FileManager.default.removeItem(at: tmp)
+                                        
+                                        // Also remove any stray copies created in Documents by older replace paths
+                                        if let docs = FileManager.default.urls(for: .documentDirectory,
+                                                                               in: .userDomainMask).first {
+                                            let docMov = docs
+                                                .appendingPathComponent(att.id.uuidString)
+                                                .appendingPathExtension("mov")
+                                            let docMp4 = docs
+                                                .appendingPathComponent(att.id.uuidString)
+                                                .appendingPathExtension("mp4")
+                                            try? FileManager.default.removeItem(at: docMov)
+                                            try? FileManager.default.removeItem(at: docMp4)
+                                        }
+                                        
+                                        stagedVideos.removeAll { $0.id == att.id }
+                                        videoThumbnails.removeValue(forKey: att.id)
+                                        onPersistStagedAttachments()
+                                        // Mirror delete to staging store
+                                        if let ref = StagingStore.list().first(where: { $0.id == att.id }) {
+                                            StagingStore.remove(ref)
+                                        }
+                                    } label: {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .padding(8)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(6)
+                            }
                         }
                     }
                 }
@@ -237,99 +325,6 @@ struct AttachmentsCard: View {
                     .buttonStyle(.plain)
                 }
                 .zIndex(1)
-            }
-            
-            // Videos grid (placeholder thumbs)
-            if !stagedVideos.isEmpty {
-                let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(stagedVideos, id: \.id) { att in
-                        ZStack(alignment: .topTrailing) {
-                            // Ensure video tiles sit behind audio rows in hit testing
-                            // so audio play buttons remain responsive when regions overlap.
-                            // (Audio rows use .zIndex(1).)
-                            
-                            ZStack {
-                                if let thumb = videoThumbnails[att.id] {
-                                    Image(uiImage: thumb)
-                                        .resizable()
-                                        .scaledToFill()
-                                        .frame(width: 128, height: 128)
-                                        .clipped()
-                                } else {
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .fill(Color.secondary.opacity(0.08))
-                                        .frame(width: 128, height: 128)
-                                    Image(systemName: "film")
-                                        .imageScale(.large)
-                                        .foregroundStyle(.secondary)
-                                }
-                                // Center play overlay button
-                                Button(action: { onPlayVideo(att.id) }) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(.ultraThinMaterial)
-                                            .frame(width: 44, height: 44)
-                                        Image(systemName: "play.fill")
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundStyle(.primary)
-                                    }
-                                }
-                            }
-                            .frame(width: 128, height: 128)
-                            .background(Color.secondary.opacity(0.08))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                onPlayVideo(att.id)
-                            }
-                            
-                            // Delete button
-                            VStack(spacing: 6) {
-                                Button {
-                                    // Remove surrogate temp file best-effort
-                                    let tmp = FileManager.default.temporaryDirectory
-                                        .appendingPathComponent(att.id.uuidString)
-                                        .appendingPathExtension("mov")
-                                    try? FileManager.default.removeItem(at: tmp)
-                                    
-                                    // Also remove any stray copies created in Documents by older replace paths
-                                    if let docs = FileManager.default.urls(for: .documentDirectory,
-                                                                           in: .userDomainMask).first {
-                                        let docMov = docs
-                                            .appendingPathComponent(att.id.uuidString)
-                                            .appendingPathExtension("mov")
-                                        let docMp4 = docs
-                                            .appendingPathComponent(att.id.uuidString)
-                                            .appendingPathExtension("mp4")
-                                        try? FileManager.default.removeItem(at: docMov)
-                                        try? FileManager.default.removeItem(at: docMp4)
-                                    }
-                                    
-                                    stagedVideos.removeAll { $0.id == att.id }
-                                    videoThumbnails.removeValue(forKey: att.id)
-                                    onPersistStagedAttachments()
-                                    // Mirror delete to staging store
-                                    if let ref = StagingStore.list().first(where: { $0.id == att.id }) {
-                                        StagingStore.remove(ref)
-                                    }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 16, weight: .semibold))
-                                        .padding(8)
-                                        .background(.ultraThinMaterial, in: Circle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(6)
-                        }
-                    }
-                }
-                .padding(.vertical, 4)
             }
             
             if let warn = stagedSizeWarning {
