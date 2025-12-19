@@ -878,7 +878,12 @@ fileprivate struct AttachmentRow: View {
     }
     private func fileName(of a: Attachment) -> String {
         guard let path = a.fileURL, !path.isEmpty else { return "file" }
-        return URL(fileURLWithPath: path).lastPathComponent
+        let url = URL(fileURLWithPath: path)
+        let stem = url.deletingPathExtension().lastPathComponent
+        let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty { return trimmed }
+        let last = url.lastPathComponent
+        return last.isEmpty ? "file" : last
     }
 }
 
