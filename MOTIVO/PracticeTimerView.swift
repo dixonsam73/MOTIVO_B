@@ -889,7 +889,7 @@ struct PracticeTimerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .cardSurfaceNonClipping()
-            .zIndex(5) 
+            .zIndex(5)
         }
     }
 
@@ -908,7 +908,7 @@ struct PracticeTimerView: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .cardSurfaceNonClipping()
-            .zIndex(5)  
+            .zIndex(5)
         }
     }
 
@@ -2144,11 +2144,31 @@ private var tasksPadSection: some View {
         if let data = try? Data(contentsOf: newURL) {
             let newID = UUID()
             let newItem = StagedAttachment(id: newID, data: data, kind: item.kind)
+
+            // Ensure a real on-disk file exists at the surrogate URL for playback / thumbnails / viewer routing.
+            if let surrogate = surrogateURL(for: newItem) {
+                let fm = FileManager.default
+                if surrogate != newURL {
+                    _ = try? fm.removeItem(at: surrogate)
+                    do {
+                        try fm.copyItem(at: newURL, to: surrogate)
+                        #if DEBUG
+                        print("[Trim] saveAsNew seeded surrogate at \(surrogate.path)")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("[Trim] saveAsNew failed to seed surrogate: \(error)")
+                        #endif
+                    }
+                }
+            }
+
             if item.kind == .audio {
                 stagedAudio.append(newItem)
                 if let player = try? AVAudioPlayer(data: data) {
                     audioDurations[newID] = max(0, Int(player.duration.rounded()))
                 }
+                // Seed title metadata so viewer/UI doesn't fall back to generic labels.
                 let title = formattedAutoTitle(from: Date())
                 audioAutoTitles[newID] = title
                 audioTitles[newID] = title
@@ -2158,7 +2178,9 @@ private var tasksPadSection: some View {
                     videoThumbnails[newID] = thumb
                 }
             }
+
             persistStagedAttachments()
+
             do {
                 try FileManager.default.removeItem(at: newURL)
                 #if DEBUG
@@ -2182,6 +2204,7 @@ private var tasksPadSection: some View {
             #endif
             return
         }
+
         let existingAbsURL = StagingStore.absoluteURL(for: ref)
         let existingPath = existingAbsURL.path
         #if DEBUG
@@ -2198,8 +2221,26 @@ private var tasksPadSection: some View {
         _ = try? fm.removeItem(at: finalURL)
 
         // Move the trimmed temp over the original path atomically
-         do {
+        do {
             try fm.moveItem(at: newURL, to: finalURL)
+
+            // Ensure the surrogate file for THIS original item is refreshed to the new bytes.
+            if let surrogate = surrogateURL(for: item) {
+                if surrogate != finalURL {
+                    _ = try? fm.removeItem(at: surrogate)
+                    do {
+                        try fm.copyItem(at: finalURL, to: surrogate)
+                        #if DEBUG
+                        print("[Trim] replaceOriginal refreshed surrogate at \(surrogate.path)")
+                        #endif
+                    } catch {
+                        #if DEBUG
+                        print("[Trim] replaceOriginal failed to refresh surrogate: \(error)")
+                        #endif
+                    }
+                }
+            }
+
             if let newData = try? Data(contentsOf: finalURL) {
                 if item.kind == .audio {
                     if let idx = stagedAudio.firstIndex(where: { $0.id == item.id }) {
@@ -2219,18 +2260,20 @@ private var tasksPadSection: some View {
                     }
                 }
             }
+
             persistStagedAttachments()
             trimItem = nil
+
             #if DEBUG
             let finalSize = AttachmentStore.fileSize(atPath: finalURL.path)
             print("[Trim] replaceOriginal done (in-place)\n  final=\(finalURL.path) size=\(finalSize)")
             #endif
-         } catch {
+        } catch {
             try? FileManager.default.removeItem(at: newURL)
             #if DEBUG
             print("[Trim] replaceOriginal failed (in-place): \(error). Cleaned temp at \(newURL.path)")
             #endif
-         }
+        }
     }
 
     // MARK: - App Termination Cleanup
@@ -2335,7 +2378,6 @@ struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
-
 
 
 

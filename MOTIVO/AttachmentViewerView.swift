@@ -66,6 +66,7 @@ struct AttachmentViewerView: View {
     var isPrivate: ((URL) -> Bool)? = nil
     var onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil
     var onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil
+    var onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil
 
     private func currentURL() -> URL? {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
@@ -84,7 +85,8 @@ struct AttachmentViewerView: View {
          onTogglePrivacy: ((URL) -> Void)? = nil,
          isPrivate: ((URL) -> Bool)? = nil,
          onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
-         onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil
+         onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
+         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil
     ) {
         #if DEBUG
         print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
@@ -105,6 +107,7 @@ struct AttachmentViewerView: View {
         self.isPrivate = isPrivate
         self.onReplaceAttachment = onReplaceAttachment
         self.onSaveAsNewAttachment = onSaveAsNewAttachment
+        self.onSaveAsNewAttachmentFromSource = onSaveAsNewAttachmentFromSource
     }
 
     enum MediaKind { case image, video, audio }
@@ -565,6 +568,9 @@ struct AttachmentViewerView: View {
                             #endif
                             mediaMutationTick += 1
 
+                            if let cb2 = onSaveAsNewAttachmentFromSource {
+                                cb2(url, newURL, globalKind)
+                            }
                             if let cb = onSaveAsNewAttachment {
                                 cb(newURL, globalKind)
                             }

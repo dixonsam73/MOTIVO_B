@@ -253,6 +253,24 @@ extension PracticeTimerView {
                     return AttachmentPrivacy.isPrivate(id: uuid, url: url)
                 }
                 return false
+            },
+            onReplaceAttachment: { oldURL, newURL, _ in
+                if let uuid = resolveStagedID(from: oldURL) {
+                    if let item = stagedVideos.first(where: { $0.id == uuid })
+                        ?? stagedAudio.first(where: { $0.id == uuid })
+                        ?? stagedImages.first(where: { $0.id == uuid }) {
+                        handleTrimReplaceOriginal(from: newURL, for: item)
+                    }
+                }
+            },
+            onSaveAsNewAttachmentFromSource: { sourceURL, newURL, _ in
+                if let uuid = resolveStagedID(from: sourceURL) {
+                    if let item = stagedVideos.first(where: { $0.id == uuid })
+                        ?? stagedAudio.first(where: { $0.id == uuid })
+                        ?? stagedImages.first(where: { $0.id == uuid }) {
+                        handleTrimSaveAsNew(from: newURL, basedOn: item)
+                    }
+                }
             }
         )
         .onAppear {
