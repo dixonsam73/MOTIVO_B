@@ -1525,6 +1525,14 @@ struct PostRecordDetailsView: View {
         let newID = UUID()
         let data = (try? Data(contentsOf: newURL)) ?? Data()
         let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+        // Phase 2: Seed a reasonable display title for new audio trims so UI doesn't fall back to "Audio clip".
+        if kind == .audio {
+            let stem = newURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = stem.isEmpty ? "Audio clip" : stem
+            var dict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            dict[newID.uuidString] = title
+            UserDefaults.standard.set(dict, forKey: "stagedAudioNames_temp")
+        }
         // Compute gallery ordering position: after the tapped item within its section
         let images = stagedAttachments.filter { $0.kind == .image }
         let videos = stagedAttachments.filter { $0.kind == .video }

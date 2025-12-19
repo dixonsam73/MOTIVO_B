@@ -1,12 +1,9 @@
-// CHANGE-ID: 20251210_AttachmentViewerView_RenameHook_v2
-// SCOPE: Add optional rename hook for audio/video and show filename on audio viewer page. No behaviour changes to callers yet.
+// CHANGE-ID: 20251219_153500-avv-trimsigfix-01
+// SCOPE: Compiler fix — align MediaTrimView call-site with new callback labels/signatures (no UI/logic changes).
 
 import SwiftUI
 import AVKit
 import AVFoundation
-// CHANGE-ID: 20251219_090845-trim-unify-01
-// SCOPE: Route MediaTrimView outputs through explicit callbacks; keep Replace=overwrite, Save-as-new=new attachment (no UI changes)
-
 
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
@@ -512,19 +509,18 @@ struct AttachmentViewerView: View {
                         trimURL = nil
                         trimKind = nil
                     },
-                    onSaveAsNewAttachment: { tempURL, mediaType in
+                    onSaveAsNewAttachment: { tempURL, _ in
                         guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }) else {
                             isShowingTrimmer = false
                             trimURL = nil
                             trimKind = nil
                             return
                         }
-                        let resolvedKind: MediaKind = (mediaType == .audio) ? .audio : .video
                         let suggestedName = url
                             .deletingPathExtension()
                             .lastPathComponent
                             .isEmpty ? "Trimmed" : url.deletingPathExtension().lastPathComponent
-                        let attachmentKind = mediaKindToAttachmentKind(resolvedKind)
+                        let attachmentKind = mediaKindToAttachmentKind(kind)
                         let globalKind: AttachmentKind
                         switch attachmentKind {
                         case .image: globalKind = .image
@@ -537,7 +533,7 @@ struct AttachmentViewerView: View {
                             kind: globalKind
                         ) {
                             let newURL = URL(fileURLWithPath: newPath)
-                            switch resolvedKind {
+                            switch kind {
                             case .video:
                                 var newVideos = videoURLs
                                 let insertIndex = currentMediaIndex - imageURLs.count
@@ -563,7 +559,7 @@ struct AttachmentViewerView: View {
                             cachedURL = newURL
                             stopAllPlayersToggle.toggle()
                             #if canImport(UIKit)
-                            if resolvedKind == .video {
+                            if kind == .video {
                                 _ = AttachmentStore.generateVideoPoster(url: newURL)
                             }
                             #endif
@@ -577,7 +573,7 @@ struct AttachmentViewerView: View {
                         trimURL = nil
                         trimKind = nil
                     },
-                    onReplaceAttachment: { originalURL, tempURL, mediaType in
+                    onReplaceAttachment: { originalURL, tempURL, _ in
                         guard let currentMediaIndex = media.firstIndex(where: { $0.url == originalURL }),
                               originalURL.isFileURL else {
                             isShowingTrimmer = false
@@ -586,8 +582,7 @@ struct AttachmentViewerView: View {
                             return
                         }
                         let originalPath = originalURL.path
-                        let resolvedKind: MediaKind = (mediaType == .audio) ? .audio : .video
-                        let attachmentKind = mediaKindToAttachmentKind(resolvedKind)
+                        let attachmentKind = mediaKindToAttachmentKind(kind)
                         let globalKind: AttachmentKind
                         switch attachmentKind {
                         case .image: globalKind = .image
@@ -600,7 +595,7 @@ struct AttachmentViewerView: View {
                             kind: globalKind
                         ) {
                             let finalURL = URL(fileURLWithPath: finalPath)
-                            switch resolvedKind {
+                            switch kind {
                             case .video:
                                 var newVideos = videoURLs
                                 let videoIndex = currentMediaIndex - imageURLs.count
@@ -624,10 +619,10 @@ struct AttachmentViewerView: View {
                             case .image: break
                             }
                             cachedURL = finalURL
-                            onReplaceAttachment?(originalURL, finalURL, globalKind)
+                            onReplaceAttachment?(url, finalURL, globalKind)
                             stopAllPlayersToggle.toggle()
                             #if canImport(UIKit)
-                            if resolvedKind == .video {
+                            if kind == .video {
                                 _ = AttachmentStore.generateVideoPoster(url: finalURL)
                             }
                             #endif

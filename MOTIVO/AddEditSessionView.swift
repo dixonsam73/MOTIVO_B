@@ -1,7 +1,5 @@
-// CHANGE-ID: 20251219_093900-aesv-trimReplaceURLMap-01
-// SCOPE: Phase 1 fix — Replace trims in AESV: update existingAttachmentURLMap instead of loading full bytes (prevents empty viewer)
-// CHANGE-ID: 20251218_221800-aesv-scopec-realurls-32f6
-// SCOPE: Scope C — For edit-from-SessionDetailView, resolve existing audio/video/image URLs (no empty surrogates) + pass audioTitles into AttachmentViewerView
+// CHANGE-ID: 20251219_160900-aesv-replace-urlmap-01
+// SCOPE: Fix Replace mapping for existing attachments (update Core Data fileURL + URL map); no UI changes.
 // CHANGE-ID: 20251218_211500-aesv-attachviewerfixAB-7bbd
 // SCOPE: Scope A+B — Harden viewer URL population for staged audio/video + wire audio row controls
 // CHANGE-ID: 20251008_172540_aa2f1
@@ -829,13 +827,37 @@ AttachmentViewerView(
                                 return false
                             },
                             onReplaceAttachment: { originalURL, newURL, kind in
-                                // Replace = preserve attachment identity. Update persisted-URL map so playback uses the new on-disk file.
-                                // Do NOT pull full media bytes into memory here.
-                                let stem = originalURL.deletingPathExtension().lastPathComponent
-                                if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                                    let attID = stagedAttachments[idx].id
+                                // Replace should preserve attachment identity.
+                                // AttachmentViewerView has already written the replacement file to disk and passes
+                                // the final on-disk URL here as newURL.
+                                if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == originalURL.standardizedFileURL }) {
                                     existingAttachmentURLMap[attID] = newURL
+
+                                    // Persist the new file path to Core Data so future loads resolve correctly.
+                                    let req = NSFetchRequest<Attachment>(entityName: "Attachment")
+                                    req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
+                                    req.fetchLimit = 1
+                                    if let hit = try? viewContext.fetch(req).first {
+                                        hit.fileURL = newURL.path
+                                        viewContext.processPendingChanges()
+                                    }
+
+                                    #if canImport(UIKit)
+                                    if kind == .video {
+                                        _ = AttachmentStore.generateVideoPoster(url: newURL)
+                                    }
+                                    #endif
+                                } else {
+                                    // Fallback: this may be a newly-staged (not-yet-persisted) item. Update staged bytes by id-stem.
+                                    let stem = originalURL.deletingPathExtension().lastPathComponent
+                                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                                        if let data = try? Data(contentsOf: newURL) {
+                                            let old = stagedAttachments[idx]
+                                            stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                                        }
+                                    }
                                 }
+
                             },
                             onSaveAsNewAttachment: { newURL, kind in
                                 // Append a new staged item of provided kind after current index section-wise
@@ -1960,6 +1982,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
