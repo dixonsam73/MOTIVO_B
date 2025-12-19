@@ -502,8 +502,9 @@ struct SessionDetailView: View {
             if !(images.isEmpty && videos.isEmpty && others.isEmpty) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
-                    if !images.isEmpty {
+                    if !images.isEmpty || !videos.isEmpty {
                         LazyVGrid(columns: grid, spacing: 12) {
+                            // Images first
                             ForEach(Array(images.enumerated()), id: \.element.objectID) { (idx, a) in
                                 let img = loadImage(a)
                                 let starred = (a.value(forKey: "isThumbnail") as? Bool) == true
@@ -522,11 +523,7 @@ struct SessionDetailView: View {
                                     isShowingAttachmentViewer = true
                                 }
                             }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    if !videos.isEmpty {
-                        LazyVGrid(columns: grid, spacing: 12) {
+                            // Then videos
                             ForEach(Array(videos.enumerated()), id: \.element.objectID) { (idx, a) in
                                 let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
                                 VideoThumbCell(fileURL: url, attachment: a)
@@ -1137,4 +1134,5 @@ fileprivate struct SessionIdentityHeader: View {
         .padding(.bottom, 2)
     }
 }
+
 
