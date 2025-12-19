@@ -17,6 +17,7 @@ import CoreData
 import UIKit
 import Combine
 import CryptoKit
+import AVFoundation
 
 private func privacyMap() -> [String: Bool] {
     UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool] ?? [:]
@@ -543,11 +544,54 @@ struct SessionDetailView: View {
                     ForEach(others, id: \.objectID) { a in
                         let kind = (a.kind ?? "")
                         if kind == "audio" {
-                            AttachmentRow(attachment: a) {
-                                let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
-                                viewerTappedURL = url
-                                isShowingAttachmentViewer = true
+                            let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+                            let path = (a.value(forKey: "fileURL") as? String) ?? ""
+                            let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
+                            let title = stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Audio clip" : stem
+                            let durationText: String? = {
+                                guard let u = url else { return nil }
+                                let asset = AVURLAsset(url: u)
+                                let seconds = CMTimeGetSeconds(asset.duration)
+                                guard seconds.isFinite, seconds > 0 else { return nil }
+                                let total = Int(seconds.rounded())
+                                let minutes = total / 60
+                                let secs = total % 60
+                                return String(format: "%d:%02d", minutes, secs)
+                            }()
+                            HStack(alignment: .center, spacing: 12) {
+                                Button {
+                                    viewerTappedURL = url
+                                    isShowingAttachmentViewer = true
+                                } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "waveform")
+                                            .font(.system(size: 16, weight: .semibold))
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(title)
+                                                .font(.footnote)
+                                                .foregroundStyle(.primary)
+                                                .lineLimit(1)
+                                                .truncationMode(.tail)
+                                            if let durationText {
+                                                Text(durationText)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                                .accessibilityLabel("Open audio clip \(title)")
+                                Spacer(minLength: 8)
                             }
+                            .padding(12)
+                            .background(Color.secondary.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                            )
                         } else {
                             AttachmentRow(attachment: a) { openQuickLook(a) }
                         }
