@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251219_093900-aesv-trimReplaceURLMap-01
+// SCOPE: Phase 1 fix — Replace trims in AESV: update existingAttachmentURLMap instead of loading full bytes (prevents empty viewer)
 // CHANGE-ID: 20251218_221800-aesv-scopec-realurls-32f6
 // SCOPE: Scope C — For edit-from-SessionDetailView, resolve existing audio/video/image URLs (no empty surrogates) + pass audioTitles into AttachmentViewerView
 // CHANGE-ID: 20251218_211500-aesv-attachviewerfixAB-7bbd
@@ -827,13 +829,12 @@ AttachmentViewerView(
                                 return false
                             },
                             onReplaceAttachment: { originalURL, newURL, kind in
-                                // Replace staged data by matching surrogate stem
+                                // Replace = preserve attachment identity. Update persisted-URL map so playback uses the new on-disk file.
+                                // Do NOT pull full media bytes into memory here.
                                 let stem = originalURL.deletingPathExtension().lastPathComponent
                                 if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                                    if let data = try? Data(contentsOf: newURL) {
-                                        let old = stagedAttachments[idx]
-                                        stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
-                                    }
+                                    let attID = stagedAttachments[idx].id
+                                    existingAttachmentURLMap[attID] = newURL
                                 }
                             },
                             onSaveAsNewAttachment: { newURL, kind in
@@ -1959,8 +1960,6 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
 
 
 

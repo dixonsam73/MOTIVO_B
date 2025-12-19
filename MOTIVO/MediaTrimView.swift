@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+// CHANGE-ID: 20251219_090845-trim-unify-01
+// SCOPE: Unify trim callbacks: explicit Replace vs Save-as-new contract (no UI/feature changes)
+
 
 // MARK: - MediaTrimView
 
@@ -16,21 +19,21 @@ public struct MediaTrimView: View {
     public let assetURL: URL
     public let mediaType: MediaType
     public let onCancel: () -> Void
-    public let onSaveAsNew: (URL) -> Void
-    public let onReplaceOriginal: (URL) -> Void
+    public let onSaveAsNewAttachment: (URL, MediaType) -> Void
+    public let onReplaceAttachment: (URL, URL, MediaType) -> Void
 
     @StateObject private var model = Model()
 
     public init(assetURL: URL,
                 mediaType: MediaType,
                 onCancel: @escaping () -> Void,
-                onSaveAsNew: @escaping (URL) -> Void,
-                onReplaceOriginal: @escaping (URL) -> Void) {
+                onSaveAsNewAttachment: @escaping (URL, MediaType) -> Void,
+                onReplaceAttachment: @escaping (URL, URL, MediaType) -> Void) {
         self.assetURL = assetURL
         self.mediaType = mediaType
         self.onCancel = onCancel
-        self.onSaveAsNew = onSaveAsNew
-        self.onReplaceOriginal = onReplaceOriginal
+        self.onSaveAsNewAttachment = onSaveAsNewAttachment
+        self.onReplaceAttachment = onReplaceAttachment
     }
 
     public var body: some View {
@@ -153,7 +156,7 @@ public struct MediaTrimView: View {
 
             HStack {
                 HStack(spacing: Theme.Spacing.m) {
-                    Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNew(url) } }) {
+                    Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNewAttachment(url, mediaType) } }) {
                         Text("Save as new")
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(accent)
@@ -166,7 +169,7 @@ public struct MediaTrimView: View {
                     .accessibilityLabel("Save as new")
                     .accessibilityHint("Export a trimmed duplicate and keep the original")
 
-                    Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceOriginal(url) } }) {
+                    Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceAttachment(assetURL, url, mediaType) } }) {
                         Text("Replace")
                             .frame(maxWidth: .infinity, minHeight: 44)
                             .foregroundStyle(accent)
@@ -1121,12 +1124,11 @@ extension MediaTrimView {
 struct MediaTrimView_Previews: PreviewProvider {
     static var previews: some View {
         VStack {
-            MediaTrimView(assetURL: URL(fileURLWithPath: "/dev/null"), mediaType: .audio, onCancel: {}, onSaveAsNew: { _ in }, onReplaceOriginal: { _ in })
+            MediaTrimView(assetURL: URL(fileURLWithPath: "/dev/null"), mediaType: .audio, onCancel: {}, onSaveAsNewAttachment: { _, _ in }, onReplaceAttachment: { _, _, _ in })
                 .frame(height: 480)
-            MediaTrimView(assetURL: URL(fileURLWithPath: "/dev/null"), mediaType: .video, onCancel: {}, onSaveAsNew: { _ in }, onReplaceOriginal: { _ in })
+            MediaTrimView(assetURL: URL(fileURLWithPath: "/dev/null"), mediaType: .video, onCancel: {}, onSaveAsNewAttachment: { _, _ in }, onReplaceAttachment: { _, _, _ in })
                 .frame(height: 480)
         }
         .padding()
     }
 }
-

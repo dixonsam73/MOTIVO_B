@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251219_092152-ptv-sheets-trimSig-01
+// SCOPE: Phase 1 follow-up — update MediaTrimView callsite to new callback contract (signature-only; no logic/UI changes).
+
 import SwiftUI
 import AVFoundation
 import AVKit
@@ -265,10 +268,10 @@ extension PracticeTimerView {
                     onCancel: {
                         trimItem = nil
                     },
-                    onSaveAsNew: { newURL in
+                    onSaveAsNewAttachment: { newURL, _ in
                         handleTrimSaveAsNew(from: newURL, basedOn: item)
                     },
-                    onReplaceOriginal: { newURL in
+                    onReplaceAttachment: { _, newURL, _ in
                         handleTrimReplaceOriginal(from: newURL, for: item)
                     }
                 )
