@@ -864,6 +864,42 @@ AttachmentViewerView(
                                 let newID = UUID()
                                 let data = (try? Data(contentsOf: newURL)) ?? Data()
                                 let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+                                // Ensure a real file exists at a stable URL for poster generation + playback.
+                                // (VideoPosterView relies on a file URL; temp exports can disappear.)
+                                if kind == .video, let sur = guaranteedSurrogateURL_edit(for: newAtt) {
+                                    
+                                    // Write the trimmed output to the surrogate URL so poster generation has a real file.
+                                    do {
+                                        // Ensure tmp folder exists
+                                        try FileManager.default.createDirectory(
+                                            at: sur.deletingLastPathComponent(),
+                                            withIntermediateDirectories: true,
+                                            attributes: nil
+                                        )
+                                        // Prefer copy for large files; fall back to write if needed.
+                                        if FileManager.default.fileExists(atPath: sur.path) {
+                                            try FileManager.default.removeItem(at: sur)
+                                        }
+                                        try FileManager.default.copyItem(at: newURL, to: sur)
+                                        existingAttachmentURLMap[newID] = sur
+                                    } catch {
+                                        // Fallback: keep using the export temp URL
+                                        existingAttachmentURLMap[newID] = newURL
+                                    }
+                                } else {
+                                    existingAttachmentURLMap[newID] = newURL
+                                }
+
+                                // Seed audio title for save-as-new so we don't fall back to "audio clip"
+                                if kind == .audio {
+                                    let key = "stagedAudioNames_temp"
+                                    var dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+                                    let stem = newURL.deletingPathExtension().lastPathComponent
+                                    if !stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        dict[newID.uuidString] = stem
+                                        UserDefaults.standard.set(dict, forKey: key)
+                                    }
+                                }
                                 // Insert by section: images, then videos, then audios
                                 switch kind {
                                 case .image:
