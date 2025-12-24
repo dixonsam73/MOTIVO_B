@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
 import AVKit
-// CHANGE-ID: 20251219_090845-trim-unify-01
-// SCOPE: Unify trim callbacks: explicit Replace vs Save-as-new contract (no UI/feature changes)
+// CHANGE-ID: 20251224_141000-mediatrim-waveform-portrait-fit
+// SCOPE: Fix waveform rendering to scale to available width (portrait/landscape parity); no logic/export/video changes
 
 
 // MARK: - MediaTrimView
@@ -337,10 +337,11 @@ private struct WaveformRenderer: View {
                 Canvas { ctx, size in
                     let baseY = yCenter
                     var path = Path()
-                    let columnWidth = max(size.width / CGFloat(samples.count), 1)
+                    let count = max(samples.count, 1)
+                    let denom = max(count - 1, 1)
                     for (i, v) in samples.enumerated() {
                         let amp = CGFloat(v) * (height / 2)
-                        let x = CGFloat(i) * columnWidth + columnWidth / 2
+                        let x = (CGFloat(i) / CGFloat(denom)) * size.width
                         path.move(to: CGPoint(x: x, y: baseY - amp))
                         path.addLine(to: CGPoint(x: x, y: baseY + amp))
                     }
@@ -932,72 +933,117 @@ extension MediaTrimView {
                 }
             }
         }
-
         private func decodeSamples(asset: AVAsset) async throws -> [CGFloat] {
-            let track = try await asset.loadTracks(withMediaType: .audio).first ?? { throw NSError(domain: "Waveform", code: -1, userInfo: [NSLocalizedDescriptionKey: "No audio track"]) }()
-
-            let reader = try AVAssetReader(asset: asset)
-            let outputSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatLinearPCM,
-                AVLinearPCMIsBigEndianKey: false,
-                AVLinearPCMIsFloatKey: true,
-                AVLinearPCMBitDepthKey: 32,
-                AVNumberOfChannelsKey: 1,
-                AVSampleRateKey: 44100
-            ]
-            let output = AVAssetReaderTrackOutput(track: track, outputSettings: outputSettings)
-            output.alwaysCopiesSampleData = false
-            reader.add(output)
-
-            guard reader.startReading() else {
-                throw reader.error ?? NSError(domain: "Waveform", code: -2, userInfo: [NSLocalizedDescriptionKey: "Reader failed to start"])
+            // We need a real file URL for AVAudioFile
+            guard let urlAsset = asset as? AVURLAsset else {
+                throw NSError(domain: "Waveform", code: -10, userInfo: [NSLocalizedDescriptionKey: "Asset is not URL-backed"])
             }
 
-            // Accumulate floats
-            var floats: [Float] = []
-            while reader.status == .reading {
-                if let buffer = output.copyNextSampleBuffer(), let block = CMSampleBufferGetDataBuffer(buffer) {
-                    let length = CMBlockBufferGetDataLength(block)
-                    var data = Data(count: length)
-                    data.withUnsafeMutableBytes { ptr in
-                        _ = CMBlockBufferCopyDataBytes(block, atOffset: 0, dataLength: length, destination: ptr.baseAddress!)
+            let audioFile = try AVAudioFile(forReading: urlAsset.url)
+            let format = audioFile.processingFormat
+            let sampleRate = format.sampleRate
+            let channels = Int(format.channelCount)
+            guard channels > 0 else {
+                throw NSError(domain: "Waveform", code: -11, userInfo: [NSLocalizedDescriptionKey: "Invalid channel count"])
+            }
+
+            // Time-faithful envelope: choose a window size in seconds.
+            // 0.01s = 10ms windows gives good “editor” detail without being huge.
+            let windowSeconds: Double = 0.01
+            let framesPerWindow = max(1, Int(sampleRate * windowSeconds))
+
+            // We’ll compute RMS per window across the whole file.
+            var rmsValues: [CGFloat] = []
+            rmsValues.reserveCapacity(Int(audioFile.length) / framesPerWindow + 1)
+
+            // Read in chunks to avoid memory spikes
+            let chunkFrames: AVAudioFrameCount = 8192
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: chunkFrames) else {
+                throw NSError(domain: "Waveform", code: -12, userInfo: [NSLocalizedDescriptionKey: "Failed to allocate PCM buffer"])
+            }
+
+            // Rolling window accumulator (works across chunk boundaries)
+            var windowSumSq: Double = 0
+            var windowCount: Int = 0
+
+            audioFile.framePosition = 0
+
+            while audioFile.framePosition < audioFile.length {
+                try audioFile.read(into: buffer, frameCount: chunkFrames)
+                let framesRead = Int(buffer.frameLength)
+                if framesRead == 0 { break }
+
+                // Access channel data (Float32)
+                guard let channelData = buffer.floatChannelData else { break }
+
+                for f in 0..<framesRead {
+                    // Downmix to mono (average channels)
+                    var mono: Float = 0
+                    if channels == 1 {
+                        mono = channelData[0][f]
+                    } else {
+                        var sum: Float = 0
+                        for c in 0..<channels {
+                            sum += channelData[c][f]
+                        }
+                        mono = sum / Float(channels)
                     }
-                    let count = length / MemoryLayout<Float>.size
-                    data.withUnsafeBytes { rawPtr in
-                        let floatPtr = rawPtr.bindMemory(to: Float.self)
-                        floats.append(contentsOf: UnsafeBufferPointer(start: floatPtr.baseAddress, count: count))
+
+                    let v = Double(mono)
+                    windowSumSq += v * v
+                    windowCount += 1
+
+                    if windowCount >= framesPerWindow {
+                        let rms = sqrt(windowSumSq / Double(windowCount))
+                        rmsValues.append(CGFloat(rms))
+                        windowSumSq = 0
+                        windowCount = 0
                     }
-                    CMSampleBufferInvalidate(buffer)
-                } else {
-                    break
                 }
             }
 
-            if reader.status == .failed { throw reader.error ?? NSError(domain: "Waveform", code: -3, userInfo: [NSLocalizedDescriptionKey: "Reader failed"]) }
+            // Flush last partial window
+            if windowCount > 0 {
+                let rms = sqrt(windowSumSq / Double(windowCount))
+                rmsValues.append(CGFloat(rms))
+            }
 
-            // Downsample to N buckets based on an assumed width range (~400-800)
-            let targetColumns = 600
-            let bucketSize = max(1, floats.count / targetColumns)
-            var buckets: [CGFloat] = []
-            buckets.reserveCapacity(targetColumns)
-
-            var i = 0
-            while i < floats.count {
-                let end = min(i + bucketSize, floats.count)
-                let slice = floats[i..<end]
-                // RMS
-                let rms = sqrt(slice.reduce(0) { $0 + Double($1 * $1) } / Double(slice.count))
-                buckets.append(CGFloat(rms))
-                i = end
+            // If somehow empty, return flat line
+            guard !rmsValues.isEmpty else {
+                return Array(repeating: 0, count: 600)
             }
 
             // Normalize 0..1
-            if let maxVal = buckets.max(), maxVal > 0 {
+            if let maxVal = rmsValues.max(), maxVal > 0 {
                 let inv = 1 / maxVal
-                for j in buckets.indices { buckets[j] *= inv }
+                for i in rmsValues.indices { rmsValues[i] *= inv }
             }
-            return buckets
+
+            // Now resample to a stable column count for your Canvas renderer.
+            // IMPORTANT: columns should scale with duration so short clips don’t under-represent events.
+            let duration = max(asset.duration.seconds, 0.001)
+            let columnsPerSecond: Double = 80 // editor-friendly; adjust 60–120 if desired
+            let targetColumns = max(200, min(2400, Int(duration * columnsPerSecond)))
+
+            if rmsValues.count == targetColumns { return rmsValues }
+
+            // Simple resample: map each output column to a source index range and take max (keeps transients visible)
+            var out: [CGFloat] = []
+            out.reserveCapacity(targetColumns)
+
+            for i in 0..<targetColumns {
+                let start = Int(Double(i) * Double(rmsValues.count) / Double(targetColumns))
+                let end = Int(Double(i + 1) * Double(rmsValues.count) / Double(targetColumns))
+                let s = max(0, min(start, rmsValues.count - 1))
+                let e = max(s + 1, min(end, rmsValues.count))
+                var m: CGFloat = 0
+                for j in s..<e { m = max(m, rmsValues[j]) }
+                out.append(m)
+            }
+
+            return out
         }
+
 
         // MARK: Export
         enum ExportMode { case saveAsNew, replaceOriginal }
