@@ -138,7 +138,7 @@ public struct VideoRecorderView: View {
                                           color: tintRecord,
                                           accessibilityLabel: controller.recordingButtonAccessibilityLabel,
                                           action: { controller.recordPauseResumeTapped() },
-                                          isDisabled: controller.recordingButtonDisabled || !controller.isRecorderReady)
+                                          isDisabled: controller.recordingButtonDisabled || !controller.isRecorderReady || controller.state == .playing || controller.state == .paused)
                             ControlButton(systemName: "stop.fill",
                                           color: tintStopDelete,
                                           accessibilityLabel: "Stop",
@@ -148,7 +148,7 @@ public struct VideoRecorderView: View {
                                           color: tintPlay,
                                           accessibilityLabel: controller.playPauseButtonAccessibilityLabel,
                                           action: { controller.playPauseTapped() },
-                                          isDisabled: controller.recordingURL == nil)
+                                          isDisabled: controller.state == .recording || controller.state == .pausedRecording || controller.recordingURL == nil)
                             ControlButton(systemName: "checkmark.circle.fill",
                                           color: tintConfirm,
                                           accessibilityLabel: "Save",
@@ -1803,3 +1803,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
