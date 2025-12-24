@@ -40,6 +40,10 @@ struct AttachmentViewerView: View {
     @State private var renameTargetURL: URL? = nil
     @State private var renameText: String = ""
 
+    // New enum for replace strategy
+    enum ReplaceStrategy { case immediate, deferred }
+    var replaceStrategy: ReplaceStrategy = .immediate
+
     private func registerTemp(_ url: URL?) {
         guard let url else { return }
         if url.isFileURL { tempFilesToCleanup.insert(url) }
@@ -86,7 +90,8 @@ struct AttachmentViewerView: View {
          isPrivate: ((URL) -> Bool)? = nil,
          onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
          onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
-         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil
+         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
+         replaceStrategy: ReplaceStrategy = .immediate
     ) {
         #if DEBUG
         print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
@@ -108,6 +113,7 @@ struct AttachmentViewerView: View {
         self.onReplaceAttachment = onReplaceAttachment
         self.onSaveAsNewAttachment = onSaveAsNewAttachment
         self.onSaveAsNewAttachmentFromSource = onSaveAsNewAttachmentFromSource
+        self.replaceStrategy = replaceStrategy
     }
 
     enum MediaKind { case image, video, audio }
@@ -595,12 +601,50 @@ struct AttachmentViewerView: View {
                         case .video: globalKind = .video
                         case .audio: globalKind = .audio
                         }
-                        if let finalPath = try? AttachmentStore.replaceAttachmentFile(
-                            withTempURL: tempURL,
-                            forExistingPath: originalPath,
-                            kind: globalKind
-                        ) {
-                            let finalURL = URL(fileURLWithPath: finalPath)
+
+                        switch replaceStrategy {
+                        case .immediate:
+                            if let finalPath = try? AttachmentStore.replaceAttachmentFile(
+                                withTempURL: tempURL,
+                                forExistingPath: originalPath,
+                                kind: globalKind
+                            ) {
+                                let finalURL = URL(fileURLWithPath: finalPath)
+                                switch kind {
+                                case .video:
+                                    var newVideos = videoURLs
+                                    let videoIndex = currentMediaIndex - imageURLs.count
+                                    if videoIndex >= 0 && videoIndex < newVideos.count {
+                                        newVideos[videoIndex] = finalURL
+                                    }
+                                    self.videoURLs = newVideos
+                                    let upper = media.count - 1
+                                    currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                                case .audio:
+                                    var newAudios = audioURLs
+                                    if currentMediaIndex - imageURLs.count - videoURLs.count < newAudios.count {
+                                        let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                        if audioIndex >= 0 && audioIndex < newAudios.count {
+                                            newAudios[audioIndex] = finalURL
+                                        }
+                                    }
+                                    self.audioURLs = newAudios
+                                    let upper = media.count - 1
+                                    currentIndex = min(max(currentIndex, 0), max(upper, 0))
+                                case .image: break
+                                }
+                                cachedURL = finalURL
+                                onReplaceAttachment?(url, finalURL, globalKind)
+                                stopAllPlayersToggle.toggle()
+                                #if canImport(UIKit)
+                                if kind == .video {
+                                    _ = AttachmentStore.generateVideoPoster(url: finalURL)
+                                }
+                                #endif
+                                mediaMutationTick += 1
+                            }
+                        case .deferred:
+                            let finalURL = tempURL
                             switch kind {
                             case .video:
                                 var newVideos = videoURLs
@@ -609,19 +653,13 @@ struct AttachmentViewerView: View {
                                     newVideos[videoIndex] = finalURL
                                 }
                                 self.videoURLs = newVideos
-                                let upper = media.count - 1
-                                currentIndex = min(max(currentIndex, 0), max(upper, 0))
                             case .audio:
                                 var newAudios = audioURLs
-                                if currentMediaIndex - imageURLs.count - videoURLs.count < newAudios.count {
-                                    let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
-                                    if audioIndex >= 0 && audioIndex < newAudios.count {
-                                        newAudios[audioIndex] = finalURL
-                                    }
+                                let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                                if audioIndex >= 0 && audioIndex < newAudios.count {
+                                    newAudios[audioIndex] = finalURL
                                 }
                                 self.audioURLs = newAudios
-                                let upper = media.count - 1
-                                currentIndex = min(max(currentIndex, 0), max(upper, 0))
                             case .image: break
                             }
                             cachedURL = finalURL
@@ -634,6 +672,7 @@ struct AttachmentViewerView: View {
                             #endif
                             mediaMutationTick += 1
                         }
+
                         isShowingTrimmer = false
                         trimURL = nil
                         trimKind = nil
@@ -1424,3 +1463,4 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+

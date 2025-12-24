@@ -920,7 +920,8 @@ AttachmentViewerView(
                                 case .file:
                                     stagedAttachments.append(newAtt)
                                 }
-                            }
+                            },
+                            replaceStrategy: .deferred
                         )
         }
         .task { hydrate() } // unified first-appearance init
@@ -2037,6 +2038,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
