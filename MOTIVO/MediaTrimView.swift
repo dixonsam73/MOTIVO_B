@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
 import AVKit
-// CHANGE-ID: 20251224_141000-mediatrim-waveform-portrait-fit
-// SCOPE: Fix waveform rendering to scale to available width (portrait/landscape parity); no logic/export/video changes
+// CHANGE-ID: 20251224_171800-mediatrim-landscape-scroll-keep-portrait
+// SCOPE: Landscape-only scroll + dismiss disable; keep portrait layout unchanged; stabilize video sizing in landscape
 
 
 // MARK: - MediaTrimView
@@ -51,6 +51,24 @@ public struct MediaTrimView: View {
 
     @ViewBuilder
     private var content: some View {
+        GeometryReader { geo in
+            let isLandscapePhone = (UIDevice.current.userInterfaceIdiom == .phone) && (geo.size.width > geo.size.height)
+
+            Group {
+                if isLandscapePhone {
+                    ScrollView(.vertical) {
+                        mainContent(isLandscapePhone: true)
+                    }
+                } else {
+                    mainContent(isLandscapePhone: false)
+                }
+            }
+            .interactiveDismissDisabled(isLandscapePhone)
+        }
+    }
+
+    @ViewBuilder
+    private func mainContent(isLandscapePhone: Bool) -> some View {
         // QA (visual only):
         // 1) Video sits in rounded card; pillar bars feel subdued.
         // 2) Handles are outline-only, readable over video.
@@ -104,17 +122,35 @@ public struct MediaTrimView: View {
                             .fill(.regularMaterial)
                             .cardSurface()
                         if let player = model.player {
-                            VideoPlayer(player: player)
+                            if isLandscapePhone {
+                                VideoPlayer(player: player)
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .padding(Theme.Spacing.m)
+                                    .onDisappear { player.pause() }
+                            } else {
+                                VideoPlayer(player: player)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                    .padding(Theme.Spacing.m)
+                                    .onDisappear { player.pause() }
+                            }
+                        } else {
+                            if isLandscapePhone {
+                                ZStack {
+                                    Color(UIColor.secondarySystemBackground)
+                                    ProgressView()
+                                }
+                                .aspectRatio(16/9, contentMode: .fit)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                 .padding(Theme.Spacing.m)
-                                .onDisappear { player.pause() }
-                        } else {
-                            ZStack {
-                                Color(UIColor.secondarySystemBackground)
-                                ProgressView()
+                            } else {
+                                ZStack {
+                                    Color(UIColor.secondarySystemBackground)
+                                    ProgressView()
+                                }
+                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                .padding(Theme.Spacing.m)
                             }
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                            .padding(Theme.Spacing.m)
                         }
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
