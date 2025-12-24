@@ -833,6 +833,8 @@ AttachmentViewerView(
                                 if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == originalURL.standardizedFileURL }) {
                                     existingAttachmentURLMap[attID] = newURL
 
+                                    // Persistence deferred to save() to avoid SessionDetailView dismissal.
+                                    /*
                                     // Persist the new file path to Core Data so future loads resolve correctly.
                                     let req = NSFetchRequest<Attachment>(entityName: "Attachment")
                                     req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
@@ -847,6 +849,7 @@ AttachmentViewerView(
                                         _ = AttachmentStore.generateVideoPoster(url: newURL)
                                     }
                                     #endif
+                                    */
                                 } else {
                                     // Fallback: this may be a newly-staged (not-yet-persisted) item. Update staged bytes by id-stem.
                                     let stem = originalURL.deletingPathExtension().lastPathComponent
@@ -1318,6 +1321,22 @@ private var instrumentPicker: some View {
 #endif
         if let uid = __effectiveUID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
+        }
+        
+        // Apply pending replacements for existing attachments (defer persistence to save-time).
+        // This avoids SessionDetailView dismissal caused by intermediate saves on replacement.
+        do {
+            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+            req.predicate = NSPredicate(format: "session == %@", s.objectID)
+            let attachments = try viewContext.fetch(req)
+            for attachment in attachments {
+                if let id = attachment.value(forKey: "id") as? UUID,
+                   let newURL = existingAttachmentURLMap[id] {
+                    attachment.fileURL = newURL.path
+                }
+            }
+        } catch {
+            print("Failed to apply replacement URLs before save: \(error)")
         }
 
         // Commit staged attachments (skip existing to avoid duplicates; update thumbnail flags)
@@ -2018,6 +2037,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
