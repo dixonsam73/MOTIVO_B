@@ -57,9 +57,6 @@ struct AudioRecorderView: View {
         VStack(spacing: 16) {
             // Status
             VStack(spacing: 8) {
-                Text(titleForState)
-                    .font(.headline).fontWeight(.semibold)
-                    .foregroundStyle(.primary)
                 Text(timeString)
                     .monospacedDigit()
                     .font(.system(size: 26, weight: .semibold, design: .rounded))
@@ -770,3 +767,4 @@ struct AudioRecorderView_Previews: PreviewProvider {
         .previewLayout(.sizeThatFits)
     }
 }
+
