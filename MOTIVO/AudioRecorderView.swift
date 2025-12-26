@@ -51,6 +51,7 @@ struct AudioRecorderView: View {
     @State private var wasPlayingBeforeInterruption: Bool = false
     @State private var observersInstalled: Bool = false
     @State private var meteringTimer: Timer?
+    @State private var postStopLock: Bool = false // When true: only delete, play, save are enabled until delete
 
     // MARK: - Body
     var body: some View {
@@ -98,7 +99,7 @@ struct AudioRecorderView: View {
                 ControlButton(
                     systemName: (state == .recording) ? "pause.circle.fill" : "record.circle.fill",
                     tint: tintRecord,
-                    isEnabled: state.canRecord || state == .recording
+                    isEnabled: (state == .recording) || (!postStopLock && state.canRecord)
                 ) {
                     Task {
                         if state == .recording {
@@ -332,6 +333,7 @@ struct AudioRecorderView: View {
         finalRecordedTime = accumulatedRecordedTime
         displayTime = finalRecordedTime
         state = .idle
+        postStopLock = true
     }
 
     func stopPlayback() {
@@ -381,6 +383,7 @@ struct AudioRecorderView: View {
         finalRecordedTime = 0
         state = .idle
         errorMessage = nil
+        postStopLock = false
         clearWaveform()
     }
 
