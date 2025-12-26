@@ -1240,6 +1240,14 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
 
     private var player: AVAudioPlayer?
 
+    var duration: TimeInterval { player?.duration ?? 0 }
+    var currentTime: TimeInterval { player?.currentTime ?? 0 }
+    func setCurrentTime(_ time: TimeInterval) {
+        guard let player else { return }
+        let clamped = max(0, min(time, player.duration))
+        player.currentTime = clamped
+    }
+
     func play(url: URL) {
         stop()
         do {
@@ -1303,6 +1311,12 @@ private struct AudioPage: View {
     @State private var waveformHasWrapped: Bool = false
     @State private var waveformTimer: Timer?
 
+    // New state for scrubbing and playback progress
+    @State private var audioDuration: TimeInterval = 0
+    @State private var audioCurrentTime: TimeInterval = 0
+    @State private var wasPlayingBeforeScrub: Bool = false
+    @State private var isScrubbing: Bool = false
+
     var body: some View {
         VStack(spacing: 16) {
 
@@ -1320,11 +1334,13 @@ private struct AudioPage: View {
             .frame(height: 60)
             .padding(.horizontal, Theme.Spacing.l)
             .accessibilityHidden(true)
+            .highPriorityGesture(scrubGesture())
 
             HStack(spacing: 16) {
                 Button(action: {
                     if audioController.isPlaying {
                         audioController.stop()
+                        audioCurrentTime = 0
                         stopWaveform()
                         isAnyPlayerActive = false
                     } else {
@@ -1332,6 +1348,7 @@ private struct AudioPage: View {
                             return
                         }
                         audioController.play(url: resolvedURL)
+                        audioDuration = audioController.duration
                         isAnyPlayerActive = true
                         startWaveform()
                     }
@@ -1348,13 +1365,21 @@ private struct AudioPage: View {
         .contentShape(Rectangle())
         .onChange(of: onRequestStopAll) { _, _ in
             audioController.stop()
+            audioCurrentTime = 0
             stopWaveform()
             isAnyPlayerActive = false
         }
         .onDisappear {
             audioController.stop()
+            audioCurrentTime = 0
             stopWaveform()
             isAnyPlayerActive = false
+        }
+        .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
+            if audioController.isPlaying && !isScrubbing {
+                audioDuration = audioController.duration
+                audioCurrentTime = audioController.currentTime
+            }
         }
     }
 
@@ -1413,6 +1438,49 @@ private struct AudioPage: View {
         } else {
             return waveformSamples
         }
+    }
+
+    private func scrubGesture() -> some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .local)
+            .onChanged { value in
+                // On first change, enter scrubbing mode
+                if !isScrubbing {
+                    isScrubbing = true
+                    wasPlayingBeforeScrub = audioController.isPlaying
+                    // Pause metering updates while scrubbing (visual stability)
+                    stopWaveform()
+                    // Cache duration and current time
+                    audioDuration = audioController.duration
+                    audioCurrentTime = audioController.currentTime
+                }
+                guard audioDuration > 0 else { return }
+                // Map horizontal translation to seconds using a slower, more precise scaling
+                // 1 point of drag = duration / 1000 seconds (tweakable)
+                let secondsPerPoint = audioDuration / 900.0
+                let delta = TimeInterval(value.translation.width) * secondsPerPoint
+                let target = (audioCurrentTime + delta)
+                let clamped = max(0, min(target, audioDuration))
+                // Seek the player without updating state to avoid waveform redraws during drag
+                audioController.setCurrentTime(clamped)
+            }
+            .onEnded { _ in
+                // Commit: capture final time once, resume metering, and resume playback if needed
+                audioCurrentTime = audioController.currentTime
+                isScrubbing = false
+                startWaveform()
+                // If it was playing before, ensure playback continues from the new time; if not, remain paused at new position.
+                if wasPlayingBeforeScrub {
+                    // If a player exists and is playing, we just keep going; if it paused itself, restart.
+                    // Restart from currentTime without resetting to beginning.
+                    if let resolvedURL = resolveAudioURL(url), !audioController.isPlaying {
+                        audioController.play(url: resolvedURL)
+                        audioController.setCurrentTime(audioCurrentTime)
+                    } else {
+                        // Ensure we're at the committed time
+                        audioController.setCurrentTime(audioCurrentTime)
+                    }
+                }
+            }
     }
 }
 
