@@ -1,3 +1,5 @@
+// CHANGE-ID: 20251227_163900-aesv-renamewire-audioAliasURL-01
+// SCOPE: Wire AttachmentViewer rename callbacks for AESV staged audio/video titles (UserDefaults temp maps) + refresh tick; no other UI/logic changes.
 // CHANGE-ID: 20251219_160900-aesv-replace-urlmap-01
 // SCOPE: Fix Replace mapping for existing attachments (update Core Data fileURL + URL map); no UI changes.
 // CHANGE-ID: 20251218_211500-aesv-attachviewerfixAB-7bbd
@@ -95,6 +97,7 @@ struct AddEditSessionView: View {
     @State private var showCameraDeniedAlert = false
 
     @State private var viewerRequest: AttachmentViewerRequest? = nil
+    @State private var attachmentTitlesRefreshTick: Int = 0
 
     // UI stability (instruments empty-state)
     @State private var instrumentsGateArmed = false
@@ -160,6 +163,12 @@ struct AddEditSessionView: View {
         AttachmentPrivacy.setPrivate(id: id, url: url, value)
     }
     // ---- end privacy helpers ----
+
+    // Persisted audio title overrides (existing store)
+    private let persistedAudioTitlesKey = "persistedAudioTitles_v1"
+    private func loadPersistedAudioTitles() -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
+    }
 
     /// Remove the `FocusDotIndex:` and `StateIndex:` lines from `notes` for clean UI display.
     private func stripFocusTokensFromNotes_edit() {
@@ -551,13 +560,16 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                         if !audioOnly.isEmpty {
                             // Titles for staged audio (keyed by staged id UUID string)
+                            let _ = attachmentTitlesRefreshTick
                             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                            let persistedTitles = loadPersistedAudioTitles()
 
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(audioOnly) { att in
-                                    let rawDisplay = namesDict[att.id.uuidString] ?? ""
-                                    let trimmedDisplay = rawDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    let title = trimmedDisplay.isEmpty ? "Audio clip" : trimmedDisplay
+                                    // Prefer persisted override by attachment UUID; fallback to staged map; then default label
+                                    let persisted = (persistedTitles[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let staged = (namesDict[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let displayTitle = !persisted.isEmpty ? persisted : (!staged.isEmpty ? staged : "Audio clip")
 
                                     let url = surrogateURL(for: att)
                                     let durationText: String? = audioDurationText_edit(for: att)
@@ -568,7 +580,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             ensureSurrogateFilesExistForViewer_edit()
 
                                             let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
-                                                guard let url = viewerResolvedURL_edit(for: item) else { return nil }
+                                                guard let url = viewerAliasURLForAudio_edit(for: item) else { return nil }
                                                 return (item.id, url)
                                             }
                                             let audioURLs: [URL] = audioItems.map { $0.1 }
@@ -587,7 +599,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                     .font(.system(size: 16, weight: .semibold))
 
                                                 VStack(alignment: .leading, spacing: 2) {
-                                                    Text(title)
+                                                    Text(displayTitle)
                                                         .font(.footnote)
                                                         .foregroundStyle(.primary)
                                                         .lineLimit(1)
@@ -603,7 +615,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                         }
                                         .buttonStyle(.plain)
                                         .contentShape(Rectangle())
-                                        .accessibilityLabel("Open audio clip \(title)")
+                                        .accessibilityLabel("Open audio clip \(displayTitle)")
 
                                         Spacer(minLength: 8)
 
@@ -772,12 +784,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             let combined = imageURLs + videoURLs + audioURLs
             let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
 
-                        let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            let persistedTitles = loadPersistedAudioTitles()
             let audioTitles: [String] = audioURLs.map { u in
                 let stem = u.deletingPathExtension().lastPathComponent
-                let raw = namesDict[stem] ?? stem
-                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? stem : trimmed
+                // Prefer persisted override; then staged map; finally fall back to stem
+                let persisted = (persistedTitles[stem] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !persisted.isEmpty { return persisted }
+                let staged = (namesDict[stem] ?? stem).trimmingCharacters(in: .whitespacesAndNewlines)
+                return staged.isEmpty ? stem : staged
             }
 
 AttachmentViewerView(
@@ -796,6 +811,60 @@ AttachmentViewerView(
                                     if selectedThumbnailID == removed.id {
                                         selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
                                     }
+                                }
+                            },
+                            titleForURL: { url, kind in
+                                let _ = attachmentTitlesRefreshTick
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                switch kind {
+                                case .audio:
+                                    let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                                    let persistedTitles = loadPersistedAudioTitles()
+                                    if let persisted = persistedTitles[stem] {
+                                        let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        if !t.isEmpty { return t }
+                                    }
+                                    if let raw = namesDict[stem] {
+                                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        return t.isEmpty ? nil : t
+                                    }
+                                    return nil
+                                case .video:
+                                    let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                    if let raw = videoDict[stem] {
+                                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        return t.isEmpty ? nil : t
+                                    }
+                                    return nil
+                                case .image, .file:
+                                    return nil
+                                }
+                            },
+                            onRename: { url, newTitle, kind in
+                                let stem = url.deletingPathExtension().lastPathComponent
+                                let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                                switch kind {
+                                case .audio:
+                                    guard !trimmed.isEmpty else { return }
+                                    var namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                                    guard let id = UUID(uuidString: stem) else { return }
+                                    namesDict[id.uuidString] = trimmed
+                                    UserDefaults.standard.set(namesDict, forKey: "stagedAudioNames_temp")
+
+                                    // Also persist audio titles for existing attachments (no file rename / no Core Data change)
+                                    var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
+                                    persisted[id.uuidString] = trimmed
+                                    UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
+
+                                    attachmentTitlesRefreshTick &+= 1
+                                case .video:
+                                    var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                    if trimmed.isEmpty { videoDict.removeValue(forKey: stem) } else { guard let id = UUID(uuidString: stem) else { return }
+                                    videoDict[id.uuidString] = trimmed }
+                                    UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                    attachmentTitlesRefreshTick &+= 1
+                                case .image, .file:
+                                    return
                                 }
                             },
                             onFavourite: { url in
@@ -1711,6 +1780,9 @@ private var instrumentPicker: some View {
 
     /// Adds only newly staged attachments (not those that originated from Core Data) and updates thumbnail flags for all.
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        // Persist renamed audio stems from the viewer (if any)
+        let audioNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+
         // Determine chosen thumbnail (if any)
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
@@ -1724,7 +1796,19 @@ private var instrumentPicker: some View {
         for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
                 let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: att.id.uuidString, ext: ext)
+                let suggestedName: String = {
+                    switch att.kind {
+                    case .audio:
+                        // Use renamed audio stem from UserDefaults if provided, otherwise fallback to UUID.
+                        let raw = audioNamesDict[att.id.uuidString] ?? ""
+                        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? att.id.uuidString : trimmed
+                    case .image, .video, .file:
+                        // Keep existing behavior for non-audio kinds: use UUID stem
+                        return att.id.uuidString
+                    }
+                }()
+                let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: suggestedName, ext: ext)
                 rollbacks.append(result.rollback)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 let created = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
@@ -1755,6 +1839,7 @@ private var instrumentPicker: some View {
         }
 
         // Clear the staging area after successful commit creation (actual persistence depends on context.save())
+        UserDefaults.standard.removeObject(forKey: "stagedAudioNames_temp")
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
     }
@@ -1877,8 +1962,12 @@ private var instrumentPicker: some View {
                 Image(systemName: "waveform").imageScale(.large).foregroundStyle(.secondary)
                 // Use the same temporary names map seeded during review/timer if present
                 let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                if let display = namesDict[att.id.uuidString], !display.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(display)
+                let persistedTitles = loadPersistedAudioTitles()
+                let override = (persistedTitles[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let staged = (namesDict[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let caption = !override.isEmpty ? override : staged
+                if !caption.isEmpty {
+                    Text(caption)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -1911,7 +2000,44 @@ private var instrumentPicker: some View {
     // Step 6A — Viewer population hardening:
     // Ensure a real file exists at the surrogate URL before passing it into AttachmentViewerView.
     
-    // Step 6C — Viewer URL resolution for AESV edit mode:
+    
+    // Step 6D — Viewer alias URL for AESV audio rename contract:
+    // AttachmentViewerView maps URL → UUID via URL stem. Existing persisted audio file names may not be UUIDs,
+    // so we provide a stable temp alias named <att.id>.m4a that points to the real on-disk file.
+    // This is INTERNAL ONLY and must not affect displayed titles.
+    private func viewerAliasURLForAudio_edit(for att: StagedAttachment) -> URL? {
+        guard att.kind == .audio else { return viewerResolvedURL_edit(for: att) }
+        guard let source = viewerResolvedURL_edit(for: att) else { return nil }
+
+        let fm = FileManager.default
+        let alias = FileManager.default.temporaryDirectory
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension("m4a")
+
+        // If alias already exists and is non-empty, reuse it.
+        if fm.fileExists(atPath: alias.path) {
+            if let attrs = try? fm.attributesOfItem(atPath: alias.path),
+               let n = attrs[.size] as? NSNumber,
+               n.intValue > 0 {
+                return alias
+            }
+            try? fm.removeItem(at: alias)
+        }
+
+        // If the source is already the alias, we're done.
+        if source.standardizedFileURL == alias.standardizedFileURL { return alias }
+
+        // Best-effort copy to the alias path so the viewer URL stem remains the staged UUID.
+        do {
+            try fm.copyItem(at: source, to: alias)
+            return alias
+        } catch {
+            // Fallback: allow playback from the real URL, but rename mapping may not work.
+            return source
+        }
+    }
+
+// Step 6C — Viewer URL resolution for AESV edit mode:
     // Prefer the persisted on-disk file URL for existing attachments; fall back to a guaranteed surrogate for staged bytes.
     private func viewerResolvedURL_edit(for att: StagedAttachment) -> URL? {
         if let existing = existingAttachmentURLMap[att.id], FileManager.default.fileExists(atPath: existing.path) {
@@ -2038,10 +2164,6 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
-
-
 
 
 

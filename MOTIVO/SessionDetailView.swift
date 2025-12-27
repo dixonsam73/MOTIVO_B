@@ -10,8 +10,8 @@
 //  v7.8 Stage 2 — Fix AddEditSessionView initializer call
 //  - Replace outdated initializer that passed isPresented / onSaved with current form.
 //
-// CHANGE-ID: 20251101_090203_adbc25
-// SCOPE: v7.10H Visual unify — SessionDetailView meta text uses Theme.Text.meta; no logic changes.
+// CHANGE-ID: 20251227_212500-e51e0181
+// SCOPE: Type-checker fix (extract subviews + AnyView erasure) + compile errors fix (DEBUG block + AttachmentViewerView arg order)
 import SwiftUI
 import CoreData
 import UIKit
@@ -37,6 +37,18 @@ private func setPrivacy(_ isPrivate: Bool, id: UUID?, url: URL?) {
 
 private func togglePrivacy(id: UUID?, url: URL?) {
     AttachmentPrivacy.toggle(id: id, url: url)
+}
+
+private let persistedAudioTitlesKey = "persistedAudioTitles_v1"
+
+private func loadPersistedAudioTitles() -> [String: String] {
+    (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
+}
+
+private func persistedAudioTitle(for attachmentID: UUID) -> String? {
+    let raw = loadPersistedAudioTitles()[attachmentID.uuidString] ?? ""
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
 }
 
 struct SessionDetailView: View {
@@ -151,55 +163,15 @@ struct SessionDetailView: View {
         return "Check out my session: \(title) — via Motivo"
     }
 
-    var body: some View {
-        ScrollView {
-            mainContent()
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.top, Theme.Spacing.l)
-                .padding(.bottom, Theme.Spacing.xl)
-        }
-        .navigationTitle("Session")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                HStack(spacing: 12) {
-                    Button("Edit") {
-                        editWasPresented = true
-                        showEdit = true
-                    }
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel("Delete session")
-                    .accessibilityIdentifier("button.deleteSession")
-                }
-            }
-        }
-        // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
-        .fullScreenCover(isPresented: $showEdit) {
-            // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
-            AddEditSessionView(session: session)
-        }
-        .onChange(of: showEdit) { _, newValue in
-            if newValue == false {
-                // Editor dismissed; if no save occurred, stop auto-pop behavior
-                // We will also clear this flag on successful save when we dismiss below
-                // (handled by the context change observer)
-            }
-        }
-        .sheet(isPresented: $isShowingPreview) {
-            if let url = previewURL { QuickLookPreview(url: url) }
-        }
-        .sheet(isPresented: $isCommentsPresented) {
-            if let id = sessionIDForComments {
-                CommentsView(sessionID: id, placeholderAuthor: "You")
-            } else {
-                Text("Comments unavailable for this item.")
-                    .padding()
-            }
-        }
-        #if DEBUG
-        .sheet(isPresented: $isDebugPresented) {
-            NavigationStack {
+
+    // Type-erased wrappers to help Xcode's type-checker on large view trees.
+    private func mainContentErased() -> AnyView {
+        AnyView(mainContent())
+    }
+
+    #if DEBUG
+    private func debugSheetErased() -> AnyView {
+        AnyView(NavigationStack {
                 DebugViewerView(title: debugTitle, jsonString: $_debugJSONBuffer)
                     .onAppear {
                         guard let s = debugSessionRef else {
@@ -212,10 +184,17 @@ struct SessionDetailView: View {
                             _debugJSONBuffer = json
                         }
                     }
-            }
-        }
-        #endif
-        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
+            })
+    }
+    #endif
+
+    private func attachmentViewerSheetErased() -> AnyView {
+        AnyView(attachmentViewerSheet())
+    }
+
+    // Extracted sheet content (kept identical) so it can be type-erased for compiler performance.
+    private func attachmentViewerSheet() -> some View {
+
             // Build URLs from the same source-of-truth order as thumbnails
             let split = splitAttachments()
             let images = split.images
@@ -248,7 +227,7 @@ struct SessionDetailView: View {
                 return idx
             }()
 
-            AttachmentViewerView(
+            return AttachmentViewerView(
                 imageURLs: imageURLs,
                 startIndex: startIndex,
                 themeBackground: Color(.systemBackground),
@@ -265,6 +244,27 @@ struct SessionDetailView: View {
                         do { try viewContext.save() } catch { print("Attachment delete error: \(error)") }
                     } else {
                         print("[AttachmentViewer] No matching attachment found for URL: \(url)")
+                    }
+                },
+                titleForURL: { url, kind in
+                    switch kind {
+                    case .audio:
+                        // Resolve the attachment by matching resolved fileURL strings as SDV already does elsewhere
+                        let set = (session.attachments as? Set<Attachment>) ?? []
+                        if let match = set.first(where: { att in
+                            guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                            return resolveAttachmentURL(from: stored) == url
+                        }), let attID = match.value(forKey: "id") as? UUID {
+                            if let persisted = persistedAudioTitle(for: attID) {
+                                return persisted
+                            }
+                        }
+                        // Fallback to existing behavior: use filename stem
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? nil : trimmed
+                    case .video, .image, .file:
+                        return nil
                     }
                 },
                 onFavourite: { url in
@@ -342,6 +342,61 @@ struct SessionDetailView: View {
                 }
             )
             .onDisappear { _refreshTick &+= 1 }
+    }
+
+    var body: some View {
+        ScrollView {
+            mainContentErased()
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.xl)
+        }
+        .navigationTitle("Session")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                HStack(spacing: 12) {
+                    Button("Edit") {
+                        editWasPresented = true
+                        showEdit = true
+                    }
+                    Button(role: .destructive) { showDeleteConfirm = true } label: {
+                        Image(systemName: "trash")
+                    }
+                    .accessibilityLabel("Delete session")
+                    .accessibilityIdentifier("button.deleteSession")
+                }
+            }
+        }
+        // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
+        .fullScreenCover(isPresented: $showEdit) {
+            // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
+            AddEditSessionView(session: session)
+        }
+        .onChange(of: showEdit) { _, newValue in
+            if newValue == false {
+                // Editor dismissed; if no save occurred, stop auto-pop behavior
+                // We will also clear this flag on successful save when we dismiss below
+                // (handled by the context change observer)
+            }
+        }
+        .sheet(isPresented: $isShowingPreview) {
+            if let url = previewURL { QuickLookPreview(url: url) }
+        }
+        .sheet(isPresented: $isCommentsPresented) {
+            if let id = sessionIDForComments {
+                CommentsView(sessionID: id, placeholderAuthor: "You")
+            } else {
+                Text("Comments unavailable for this item.")
+                    .padding()
+            }
+        }
+        #if DEBUG
+        .sheet(isPresented: $isDebugPresented) {
+            debugSheetErased()
+        }
+        #endif
+        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
+            attachmentViewerSheetErased()
         }
         .alert("Delete Session?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) { deleteSession() }
@@ -449,53 +504,7 @@ struct SessionDetailView: View {
             }
 
             if let dot = focusDotIndex {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Focus").sectionHeader()
-                    GeometryReader { geo in
-                        let totalWidth = geo.size.width
-                        let spacing: CGFloat = 8
-                        let count = stateDotsCountDetail
-                        let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
-                        let ringDot = max(0, min(count - 1, dot))
-                        HStack(spacing: spacing) {
-                            ForEach(0..<count, id: \.self) { i in
-                                let isRinged = (i == ringDot)
-                                let baseScale: CGFloat = isRinged ? 1.18 : 1.0
-                                Circle()
-                                    .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
-                                    .overlay(
-                                        Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
-                                    )
-                                    .overlay(
-                                        Group {
-                                            if i == ringDot {
-                                                Circle().stroke(
-                                                    FocusDotStyle.ringColor(for: colorScheme),
-                                                    lineWidth: FocusDotStyle.ringWidth
-                                                )
-                                            }
-                                        }
-                                    )
-                                    .frame(width: diameter, height: diameter)
-                                    .scaleEffect(baseScale)
-                                    .accessibilityHidden(true)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    .frame(height: 44)
-                    .accessibilityLabel({
-                        let bucket: String
-                        switch (dot / 3) {
-                        case 0: bucket = "State: Searching"
-                        case 1: bucket = "State: Working"
-                        case 2: bucket = "State: Flowing"
-                        default: bucket = "State: Breakthrough"
-                        }
-                        return bucket
-                    }())
-                }
-                .cardSurface()
+                FocusSectionCard(dotIndex: dot, colorScheme: colorScheme)
             }
 
             let (images, videos, others) = splitAttachments()
@@ -544,7 +553,14 @@ struct SessionDetailView: View {
                             let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
                             let path = (a.value(forKey: "fileURL") as? String) ?? ""
                             let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
-                            let title = stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Audio clip" : stem
+                            // Prefer persisted title if available for this attachment ID
+                            let id = a.value(forKey: "id") as? UUID
+                            let persisted = id.flatMap { persistedAudioTitle(for: $0) }
+                            let title: String = {
+                                if let t = persisted, !t.isEmpty { return t }
+                                let trimmedStem = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+                                return trimmedStem.isEmpty ? "Audio clip" : trimmedStem
+                            }()
                             let durationText: String? = {
                                 guard let u = url else { return nil }
                                 let asset = AVURLAsset(url: u)
@@ -696,7 +712,82 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
 
     // MARK: - Attachments split & preview
 
-    private func splitAttachments() -> (images: [Attachment], videos: [Attachment], others: [Attachment]) {
+    
+    // MARK: - Type-checker assist (Focus strip extraction)
+    private struct FocusSectionCard: View {
+        let dotIndex: Int
+        let colorScheme: ColorScheme
+
+        private let count: Int = 12
+        private let spacing: CGFloat = 8
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Focus").sectionHeader()
+                FocusDotStripView(dotIndex: dotIndex, count: count, spacing: spacing, colorScheme: colorScheme)
+                    .frame(height: 44)
+                    .accessibilityLabel(Text(bucketLabel(for: dotIndex)))
+            }
+            .cardSurface()
+        }
+
+        private func bucketLabel(for dot: Int) -> String {
+            switch (dot / 3) {
+            case 0: return "State: Searching"
+            case 1: return "State: Working"
+            case 2: return "State: Flowing"
+            default: return "State: Breakthrough"
+            }
+        }
+    }
+
+    private struct FocusDotStripView: View {
+        let dotIndex: Int
+        let count: Int
+        let spacing: CGFloat
+        let colorScheme: ColorScheme
+
+        var body: some View {
+            GeometryReader { geo in
+                let totalWidth = geo.size.width
+                let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(max(0, count - 1))) / CGFloat(max(1, count))))
+                let ringDot = max(0, min(count - 1, dotIndex))
+
+                HStack(spacing: spacing) {
+                    ForEach(0..<count, id: \.self) { i in
+                        dotView(index: i, ringDot: ringDot, diameter: diameter)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+
+        @ViewBuilder
+        private func dotView(index i: Int, ringDot: Int, diameter: CGFloat) -> some View {
+            let isRinged = (i == ringDot)
+            let baseScale: CGFloat = isRinged ? 1.18 : 1.0
+
+            Circle()
+                .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
+                .overlay(Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth))
+                .overlay(ringOverlay(isRinged: isRinged))
+                .frame(width: diameter, height: diameter)
+                .scaleEffect(baseScale)
+                .accessibilityHidden(true)
+        }
+
+        @ViewBuilder
+        private func ringOverlay(isRinged: Bool) -> some View {
+            if isRinged {
+                Circle().stroke(
+                    FocusDotStyle.ringColor(for: colorScheme),
+                    lineWidth: FocusDotStyle.ringWidth
+                )
+            }
+        }
+    }
+
+private func splitAttachments() -> (images: [Attachment], videos: [Attachment], others: [Attachment]) {
         let set = (session.attachments as? Set<Attachment>) ?? []
         let images = set.filter { ($0.kind ?? "") == "image" }.sorted { (a, b) in
             let da = (a.value(forKey: "createdAt") as? Date) ?? .distantPast
@@ -1134,5 +1225,4 @@ fileprivate struct SessionIdentityHeader: View {
         .padding(.bottom, 2)
     }
 }
-
 

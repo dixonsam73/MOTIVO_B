@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251219_153500-avv-trimsigfix-01
-// SCOPE: Compiler fix — align MediaTrimView call-site with new callback labels/signatures (no UI/logic changes).
+// CHANGE-ID: 20251227_125700-avv-renamewire-fix3-10366580
+// SCOPE: Fix convenience init call (remove duplicate titleForURL), add currentAttachmentKind, keep viewer rename/title contract. No other logic/UI changes.
 
 import SwiftUI
 import AVKit
@@ -31,7 +31,7 @@ struct AttachmentViewerView: View {
     @State private var stopAllPlayersToggle = false
     @State private var isShowingTrimmer: Bool = false
     @State private var trimURL: URL? = nil
-    @State private var trimKind: MediaKind? = nil
+    @State private var trimKind: AttachmentKind? = nil
     @State private var mediaMutationTick: Int = 0
 
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
@@ -39,6 +39,9 @@ struct AttachmentViewerView: View {
     @State private var isRenaming: Bool = false
     @State private var renameTargetURL: URL? = nil
     @State private var renameText: String = ""
+
+    // Viewer-first title overrides so the UI updates immediately after rename.
+    @State private var localTitleOverrides: [URL: String] = [:]
 
     // New enum for replace strategy
     enum ReplaceStrategy { case immediate, deferred }
@@ -63,7 +66,13 @@ struct AttachmentViewerView: View {
     }
 
     var onDelete: ((URL) -> Void)? = nil
-    var onRename: ((URL, String) -> Void)? = nil
+    /// Optional title resolver used for viewer display + rename prefill.
+    /// Must honor existing app title stores (caller responsibility).
+    var titleForURL: ((URL, AttachmentKind) -> String?)? = nil
+    /// Preferred rename callback (viewer-first). Empty string means "clear title" for video.
+    var onRename: ((URL, String, AttachmentKind) -> Void)? = nil
+    /// Legacy callback kept for compatibility during rollout.
+    var onRenameLegacy: ((URL, String) -> Void)? = nil
     var onFavourite: ((URL) -> Void)? = nil
     var isFavourite: ((URL) -> Bool)? = nil
     var onTogglePrivacy: ((URL) -> Void)? = nil
@@ -76,22 +85,35 @@ struct AttachmentViewerView: View {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
     }
 
-    init(imageURLs: [URL],
-         startIndex: Int,
-         themeBackground: Color = Color.clear,
-         videoURLs: [URL] = [],
-         audioURLs: [URL] = [],
-         audioTitles: [String]? = nil,
-         onDelete: ((URL) -> Void)? = nil,
-         onRename: ((URL, String) -> Void)? = nil,
-         onFavourite: ((URL) -> Void)? = nil,
-         isFavourite: ((URL) -> Bool)? = nil,
-         onTogglePrivacy: ((URL) -> Void)? = nil,
-         isPrivate: ((URL) -> Bool)? = nil,
-         onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
-         onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
-         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
-         replaceStrategy: ReplaceStrategy = .immediate
+
+    private var currentAttachmentKind: AttachmentKind {
+        guard media.indices.contains(currentIndex) else { return .file }
+        return media[currentIndex].kind
+    }
+
+    
+    // MARK: - Initializers
+
+    /// Preferred initializer (viewer-first) with explicit defaults to avoid memberwise ordering traps.
+    init(
+        imageURLs: [URL],
+        startIndex: Int,
+        themeBackground: Color = Color.clear,
+        videoURLs: [URL] = [],
+        audioURLs: [URL] = [],
+        audioTitles: [String]? = nil,
+        onDelete: ((URL) -> Void)? = nil,
+        titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
+        onRename: ((URL, String, AttachmentKind) -> Void)? = nil,
+        onRenameLegacy: ((URL, String) -> Void)? = nil,
+        onFavourite: ((URL) -> Void)? = nil,
+        isFavourite: ((URL) -> Bool)? = nil,
+        onTogglePrivacy: ((URL) -> Void)? = nil,
+        isPrivate: ((URL) -> Bool)? = nil,
+        onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        replaceStrategy: ReplaceStrategy = .immediate
     ) {
         #if DEBUG
         print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
@@ -105,7 +127,9 @@ struct AttachmentViewerView: View {
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
         self.onDelete = onDelete
+        self.titleForURL = titleForURL
         self.onRename = onRename
+        self.onRenameLegacy = onRenameLegacy
         self.onFavourite = onFavourite
         self.isFavourite = isFavourite
         self.onTogglePrivacy = onTogglePrivacy
@@ -116,11 +140,51 @@ struct AttachmentViewerView: View {
         self.replaceStrategy = replaceStrategy
     }
 
-    enum MediaKind { case image, video, audio }
-    enum ViewerAttachmentKind { case image, video, audio }
+    /// Legacy initializer kept during rollout (2-arg onRename).
+    init(
+        imageURLs: [URL],
+        startIndex: Int,
+        themeBackground: Color = Color.clear,
+        videoURLs: [URL] = [],
+        audioURLs: [URL] = [],
+        audioTitles: [String]? = nil,
+        onDelete: ((URL) -> Void)? = nil,
+        onRename: ((URL, String) -> Void)? = nil,
+        onFavourite: ((URL) -> Void)? = nil,
+        isFavourite: ((URL) -> Bool)? = nil,
+        onTogglePrivacy: ((URL) -> Void)? = nil,
+        isPrivate: ((URL) -> Bool)? = nil,
+        onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        replaceStrategy: ReplaceStrategy = .immediate
+    ) {
+        self.init(
+            imageURLs: imageURLs,
+            startIndex: startIndex,
+            themeBackground: themeBackground,
+            videoURLs: videoURLs,
+            audioURLs: audioURLs,
+            audioTitles: audioTitles,
+            onDelete: onDelete,
+            titleForURL: nil,
+            onRename: nil,
+
+            onRenameLegacy: onRename,
+            onFavourite: onFavourite,
+            isFavourite: isFavourite,
+            onTogglePrivacy: onTogglePrivacy,
+            isPrivate: isPrivate,
+            onReplaceAttachment: onReplaceAttachment,
+            onSaveAsNewAttachment: onSaveAsNewAttachment,
+            onSaveAsNewAttachmentFromSource: onSaveAsNewAttachmentFromSource,
+            replaceStrategy: replaceStrategy
+        )
+    }
+
     struct MediaAttachment: Identifiable {
         let id = UUID()
-        let kind: MediaKind
+        let kind: AttachmentKind
         let url: URL
     }
 
@@ -132,13 +196,6 @@ struct AttachmentViewerView: View {
         return items
     }
 
-    private func mediaKindToAttachmentKind(_ kind: MediaKind) -> ViewerAttachmentKind {
-        switch kind {
-        case .audio: return .audio
-        case .video: return .video
-        case .image: return .image
-        }
-    }
 
     // Proxy to resolve audio title from arrays passed into the viewer
     static func resolvedAudioTitleProxy(url: URL, audioURLs: [URL], audioTitles: [String]?) -> String? {
@@ -146,6 +203,37 @@ struct AttachmentViewerView: View {
               let idx = audioURLs.firstIndex(of: url) else { return nil }
         let t = titles[idx].trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty ? nil : t
+    }
+
+
+    // MARK: - Title resolution
+
+    private func normalizedTitle(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// Resolve a display title for a given URL + kind.
+    /// Order:
+    /// 1) local override (just edited)
+    /// 2) titleForURL callback (caller-supplied source of truth)
+    /// 3) legacy audioTitles proxy (audio only)
+    /// 4) nil (no title) — video has no fallback by design
+    private func resolvedTitle(for url: URL, kind: AttachmentKind) -> String? {
+        if let ov = normalizedTitle(localTitleOverrides[url]) { return ov }
+
+        if let t = normalizedTitle(titleForURL?(url, kind)) { return t }
+
+        if kind == .audio, let t = normalizedTitle(
+            Self.resolvedAudioTitleProxy(url: url, audioURLs: audioURLs, audioTitles: audioTitles)
+        ) { return t }
+
+        return nil
+    }
+
+    private var hasRenameCapability: Bool {
+        onRename != nil || onRenameLegacy != nil
     }
 
     var body: some View {
@@ -169,7 +257,10 @@ struct AttachmentViewerView: View {
                             onRequestStopAll: $stopAllPlayersToggle,
                             background: themeBackground,
                             audioURLs: audioURLs,
-                            audioTitles: audioTitles
+                            audioTitles: audioTitles,
+                            titleForURL: { url, kind in
+                                resolvedTitle(for: url, kind: kind)
+                            }
                         )
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
@@ -263,7 +354,7 @@ struct AttachmentViewerView: View {
                         let currentURL = media[currentIndex].url
                         let isFav = (isFavourite?(currentURL) ?? false)
                         let isPriv = localIsPrivate
-                        let currentKind = media[currentIndex].kind
+                        let currentAttachmentKind = media[currentIndex].kind
 
                         HStack(spacing: headerSpacing) {
                             Button {
@@ -320,11 +411,17 @@ struct AttachmentViewerView: View {
                                 isPriv ? "Make attachment visible to others" : "Hide attachment from others"
                             )
 
-                            if (currentKind == .video || currentKind == .audio), onRename != nil {
+                            if (currentAttachmentKind == .video || currentAttachmentKind == .audio), hasRenameCapability {
                                 Button {
                                     let url = currentURL
                                     renameTargetURL = url
-                                    renameText = url.deletingPathExtension().lastPathComponent
+                                    let kind = currentAttachmentKind
+                                    if kind == .video {
+                                        renameText = resolvedTitle(for: url, kind: .video) ?? ""
+                                    } else {
+                                        renameText = resolvedTitle(for: url, kind: .audio)
+                                            ?? url.deletingPathExtension().lastPathComponent
+                                    }
                                     isRenaming = true
                                     stopAllPlayersToggle.toggle()
                                 } label: {
@@ -348,10 +445,10 @@ struct AttachmentViewerView: View {
                                 .accessibilityLabel("Rename attachment")
                             }
 
-                            if currentKind == .video || currentKind == .audio {
+                            if currentAttachmentKind == .video || currentAttachmentKind == .audio {
                                 Button {
                                     trimURL = currentURL
-                                    trimKind = currentKind
+                                    trimKind = currentAttachmentKind
                                     isShowingTrimmer = true
                                     stopAllPlayersToggle.toggle()
                                 } label: {
@@ -376,7 +473,7 @@ struct AttachmentViewerView: View {
                                     .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel(currentKind == .video ? "Trim video" : "Trim audio")
+                                .accessibilityLabel(currentAttachmentKind == .video ? "Trim video" : "Trim audio")
                                 .accessibilityHint("Open trimmer to shorten this recording")
                             }
 
@@ -484,14 +581,38 @@ struct AttachmentViewerView: View {
                         Spacer()
 
                         Button("Save") {
-                            let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmed.isEmpty, let target = renameTargetURL else {
+                            guard let target = renameTargetURL else {
                                 isRenaming = false
                                 renameTargetURL = nil
                                 renameText = ""
                                 return
                             }
-                            onRename?(target, trimmed)
+
+                            let kind = currentAttachmentKind
+                            let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                            // Audio: empty is a no-op (we never want to show UUID/filenames as "cleared").
+                            // Video: empty means "clear title".
+                            if kind == .audio, trimmed.isEmpty {
+                                isRenaming = false
+                                renameTargetURL = nil
+                                renameText = ""
+                                return
+                            }
+
+                            // Optimistic UI update
+                            if trimmed.isEmpty {
+                                localTitleOverrides.removeValue(forKey: target)
+                            } else {
+                                localTitleOverrides[target] = trimmed
+                            }
+
+                            if let cb = onRename {
+                                cb(target, trimmed, kind)
+                            } else if let cbLegacy = onRenameLegacy {
+                                cbLegacy(target, trimmed)
+                            }
+
                             isRenaming = false
                             renameTargetURL = nil
                             renameText = ""
@@ -529,13 +650,7 @@ struct AttachmentViewerView: View {
                             .deletingPathExtension()
                             .lastPathComponent
                             .isEmpty ? "Trimmed" : url.deletingPathExtension().lastPathComponent
-                        let attachmentKind = mediaKindToAttachmentKind(kind)
-                        let globalKind: AttachmentKind
-                        switch attachmentKind {
-                        case .image: globalKind = .image
-                        case .video: globalKind = .video
-                        case .audio: globalKind = .audio
-                        }
+                        let globalKind: AttachmentKind = kind
                         if let newPath = try? AttachmentStore.adoptTempExport(
                             tempURL,
                             suggestedName: suggestedName,
@@ -564,6 +679,7 @@ struct AttachmentViewerView: View {
                                 self.audioURLs = newAudios
                                 currentIndex = currentIndex + 1
                             case .image: break
+                            case .file: break
                             }
                             cachedURL = newURL
                             stopAllPlayersToggle.toggle()
@@ -594,13 +710,7 @@ struct AttachmentViewerView: View {
                             return
                         }
                         let originalPath = originalURL.path
-                        let attachmentKind = mediaKindToAttachmentKind(kind)
-                        let globalKind: AttachmentKind
-                        switch attachmentKind {
-                        case .image: globalKind = .image
-                        case .video: globalKind = .video
-                        case .audio: globalKind = .audio
-                        }
+                        let globalKind: AttachmentKind = kind
 
                         switch replaceStrategy {
                         case .immediate:
@@ -632,6 +742,7 @@ struct AttachmentViewerView: View {
                                     let upper = media.count - 1
                                     currentIndex = min(max(currentIndex, 0), max(upper, 0))
                                 case .image: break
+                            case .file: break
                                 }
                                 cachedURL = finalURL
                                 onReplaceAttachment?(url, finalURL, globalKind)
@@ -661,6 +772,7 @@ struct AttachmentViewerView: View {
                                 }
                                 self.audioURLs = newAudios
                             case .image: break
+                            case .file: break
                             }
                             cachedURL = finalURL
                             onReplaceAttachment?(url, finalURL, globalKind)
@@ -703,7 +815,7 @@ struct AttachmentViewerView: View {
 private final class _ImageCache {
     static let shared = _ImageCache()
     let cache = NSCache<NSURL, UIImage>()
-    }
+}
 
 
 // MARK: - Async URL Image Loader (no blocking on main)
@@ -779,6 +891,7 @@ private struct MediaPage: View {
     var background: Color
     let audioURLs: [URL]
     let audioTitles: [String]?
+    let titleForURL: ((URL, AttachmentKind) -> String?)?
 
     var body: some View {
         switch attachment.kind {
@@ -791,12 +904,20 @@ private struct MediaPage: View {
                 onRequestStopAll: $onRequestStopAll
             )
         case .audio:
+            let displayTitle: String? = {
+                let raw = titleForURL?(attachment.url, .audio)
+                    ?? AttachmentViewerView.resolvedAudioTitleProxy(url: attachment.url, audioURLs: audioURLs, audioTitles: audioTitles)
+                let t = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                return t.isEmpty ? nil : t
+            }()
             AudioPage(
                 url: attachment.url,
                 isAnyPlayerActive: $isAnyPlayerActive,
                 onRequestStopAll: $onRequestStopAll,
-                displayTitle: AttachmentViewerView.resolvedAudioTitleProxy(url: attachment.url, audioURLs: audioURLs, audioTitles: audioTitles)
+                displayTitle: displayTitle
             )
+        case .file:
+            EmptyView()
         }
     }
 }
@@ -1531,4 +1652,3 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
-

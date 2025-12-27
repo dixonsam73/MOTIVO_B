@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251219_092152-ptv-sheets-trimSig-01
-// SCOPE: Phase 1 follow-up — update MediaTrimView callsite to new callback contract (signature-only; no logic/UI changes).
+// CHANGE-ID: 20251227_153950-ptv-sheets-renamewire-audioPersistSync-01
+// SCOPE: PTV viewer audio rename: also write to StagingStore.updateAudioMetadata so card does not snap back. No other changes.
 
 import SwiftUI
 import AVFoundation
@@ -148,7 +148,38 @@ extension PracticeTimerView {
         }
 
 
-    func attachmentViewerView(for payload: PTVViewerURL) -> some View {
+    
+    // MARK: - Viewer Rename (PTV staged video titles)
+    // Video titles are optional metadata only (no defaults). Stored in UserDefaults keyed by UUID string.
+    private static let ptvVideoTitlesDefaultsKey = "PracticeTimer.videoTitles_v1"
+
+    private func loadPTVVideoTitlesMap() -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: Self.ptvVideoTitlesDefaultsKey) as? [String: String]) ?? [:]
+    }
+
+    private func savePTVVideoTitlesMap(_ map: [String: String]) {
+        UserDefaults.standard.set(map, forKey: Self.ptvVideoTitlesDefaultsKey)
+    }
+
+    private func videoTitle(for id: UUID) -> String? {
+        let v = loadPTVVideoTitlesMap()[id.uuidString]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return v.isEmpty ? nil : v
+    }
+
+    private func setVideoTitle(_ title: String?, for id: UUID) {
+        var map = loadPTVVideoTitlesMap()
+        let trimmed = (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            map.removeValue(forKey: id.uuidString)
+        } else {
+            map[id.uuidString] = trimmed
+        }
+        savePTVVideoTitlesMap(map)
+        // Snapshot staged state for resilience (matches other staged metadata persistence expectations)
+        persistStagedAttachments()
+    }
+
+func attachmentViewerView(for payload: PTVViewerURL) -> some View {
         var imageURLs: [URL] = []
         var videoURLs: [URL] = []
         var audioURLs: [URL] = []
@@ -173,22 +204,9 @@ extension PracticeTimerView {
         }
 
         func resolveStagedID(from url: URL) -> UUID? {
+            // LOCKED: URL → UUID mapping is stem-only.
             let stem = url.deletingPathExtension().lastPathComponent
-            if let uuid = UUID(uuidString: stem) { return uuid }
-            // Fallback for audio: filename may be a sanitized title, not the UUID
-            // Try to match by data size first, then by byte equality as a tie-breaker.
-            guard let fileData = try? Data(contentsOf: url) else { return nil }
-            // Prefer matching among stagedAudio
-            if let match = stagedAudio.first(where: { $0.data.count == fileData.count }) {
-                return match.id
-            }
-            if let exact = stagedAudio.first(where: { $0.data == fileData }) {
-                return exact.id
-            }
-            // As a last resort, try videos/images by size (unlikely for audio but harmless)
-            if let vm = stagedVideos.first(where: { $0.data.count == fileData.count }) { return vm.id }
-            if let im = stagedImages.first(where: { $0.data.count == fileData.count }) { return im.id }
-            return nil
+            return UUID(uuidString: stem)
         }
 
         return AttachmentViewerView(
@@ -230,6 +248,47 @@ extension PracticeTimerView {
                     }
                 }
             },
+            titleForURL: { url, kind in
+                guard let id = resolveStagedID(from: url) else { return nil }
+                switch kind {
+                case .audio:
+#if DEBUG
+                    print("[PTV] titleForURL.audio id=\(id) title=\(audioTitles[id] ?? "nil") auto=\(audioAutoTitles[id] ?? "nil")")
+#endif
+                    if let t = audioTitles[id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                    if let t = audioAutoTitles[id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                    return nil
+                case .video:
+                    return videoTitle(for: id)
+                case .image, .file:
+                    return nil
+                }
+            },
+            onRename: { url, newTitle, kind in
+                guard let id = resolveStagedID(from: url) else { return }
+                let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                switch kind {
+                case .audio:
+                    // LOCKED: audio rename writes into the existing staged audio title store.
+                    guard !trimmed.isEmpty else { return }
+                    audioTitles[id] = trimmed
+#if DEBUG
+                    print("[PTV] onRename.audio id=\(id) new=\(trimmed)")
+#endif
+                    // Keep staged persistence in sync with the same mechanism used elsewhere in PTV.
+                    let auto = audioAutoTitles[id] ?? ""
+                    let dur = audioDurations[id].map(Double.init)
+                    StagingStore.updateAudioMetadata(id: id, title: trimmed, autoTitle: auto, duration: dur)
+
+                    persistStagedAttachments()
+                case .video:
+                    // Video titles are optional; empty means clear.
+                    setVideoTitle(trimmed, for: id)
+                case .image, .file:
+                    break
+                }
+            },
+
             onFavourite: { url in
                 if let uuid = resolveStagedID(from: url) {
                     selectedThumbnailID = uuid

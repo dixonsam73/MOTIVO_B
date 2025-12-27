@@ -65,6 +65,9 @@ struct PostRecordDetailsView: View {
     
     @State private var areNotesPrivate: Bool = false
 
+    @State private var attachmentTitlesRefreshTick: Int = 0
+
+
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
     @State private var showActivityPicker = false
@@ -490,22 +493,68 @@ struct PostRecordDetailsView: View {
 
                 let startIndex = min(max(request.startIndex, 0), max(combined.count - 1, 0))
 
-                let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                let audioTitles: [String] = audioURLs.map { u in
-                    let stem = u.deletingPathExtension().lastPathComponent
-                    let raw = namesDict[stem] ?? stem
-                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return trimmed.isEmpty ? stem : trimmed
-                }
+                let _ = attachmentTitlesRefreshTick
+                                let audioNamesKey = "stagedAudioNames_temp"
+                let audioNamesDict = (UserDefaults.standard.dictionary(forKey: audioNamesKey) as? [String: String]) ?? [:]
 
-                AttachmentViewerView(
+                let videoTitlesKey = "stagedVideoTitles_temp"
+                let videoTitlesDict = (UserDefaults.standard.dictionary(forKey: videoTitlesKey) as? [String: String]) ?? [:]
+
+AttachmentViewerView(
                     imageURLs: imageURLs,
                     startIndex: startIndex,
                     themeBackground: Color(.systemBackground),
                     videoURLs: videoURLs,
                     audioURLs: audioURLs,
-                    audioTitles: audioTitles,
-                    onDelete: { _ in /* Deletion remains managed by existing overlay button in grid; no-op here */ },
+onDelete: { _ in /* Deletion remains managed by existing overlay button in grid; no-op here */ },
+                    titleForURL: { url, kind in
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        guard let id = UUID(uuidString: stem) else { return nil }
+
+                        switch kind {
+                        case .audio:
+                            if let raw = audioNamesDict[id.uuidString] {
+                                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                return t.isEmpty ? "Audio clip" : t
+                            }
+                            return "Audio clip"
+
+                        case .video:
+                            if let raw = videoTitlesDict[id.uuidString] {
+                                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                return t.isEmpty ? nil : t
+                            }
+                            return nil
+
+                        case .image, .file:
+                            return nil
+                        }
+                    },
+                    onRename: { url, newTitle, kind in
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        guard let id = UUID(uuidString: stem) else { return }
+
+                        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                        switch kind {
+                        case .audio:
+                            var dict = (UserDefaults.standard.dictionary(forKey: audioNamesKey) as? [String: String]) ?? [:]
+                            if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) }
+                            else { dict[id.uuidString] = trimmed }
+                            UserDefaults.standard.set(dict, forKey: audioNamesKey)
+                            attachmentTitlesRefreshTick &+= 1
+
+                        case .video:
+                            var dict = (UserDefaults.standard.dictionary(forKey: videoTitlesKey) as? [String: String]) ?? [:]
+                            if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) }
+                            else { dict[id.uuidString] = trimmed }
+                            UserDefaults.standard.set(dict, forKey: videoTitlesKey)
+                            attachmentTitlesRefreshTick &+= 1
+
+                        case .image, .file:
+                            break
+                        }
+                    },
                     onFavourite: { _ in /* Not applicable in staging */ },
                     isFavourite: { _ in false },
                     onTogglePrivacy: { url in

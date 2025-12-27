@@ -3,6 +3,9 @@
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
 // SCOPE: Fix tasks pad placement; proper state; pass notesPrefill
 
+// CHANGE-ID: 20251227_150000-ptv-videoTitles
+// SCOPE: Add staged videoTitles map persistence + hydration (metadata only) for AttachmentViewer rename
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -139,6 +142,7 @@ struct PracticeTimerView: View {
     @State var showVideoRecorder: Bool = false
     @State var stagedVideos: [StagedAttachment] = []
     @State var videoThumbnails: [UUID: UIImage] = [:]
+    @State var videoTitles: [UUID: String] = [:]
     // Remove old video player state:
     // @State private var showVideoPlayer: Bool = false
     // @State private var videoPlayerItem: AVPlayer? = nil
@@ -432,6 +436,7 @@ struct PracticeTimerView: View {
                 stagedImages.removeAll()
                 stagedVideos.removeAll()
                 videoThumbnails.removeAll()
+                videoTitles.removeAll()
                 selectedThumbnailID = nil
                 clearPersistedTimer()
                 resetUIOnly()
@@ -455,6 +460,7 @@ struct PracticeTimerView: View {
                 stagedImages.removeAll()
                 stagedVideos.removeAll()
                 videoThumbnails.removeAll()
+                videoTitles.removeAll()
                 selectedThumbnailID = nil
                 clearPersistedTimer()
                 resetUIOnly()
@@ -527,6 +533,19 @@ struct PracticeTimerView: View {
             let audioIDs = audioIDStrings.compactMap(UUID.init)
             let videoIDs = videoIDStrings.compactMap(UUID.init)
             let imageIDs = imageIDStrings.compactMap(UUID.init)
+        // Restore staged video titles (metadata only; user-provided; no defaults)
+        if let data = d.data(forKey: TimerDefaultsKey.videoTitles.rawValue),
+           let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
+            let mapped: [UUID: String] = decoded.reduce(into: [:]) { acc, pair in
+                if let id = UUID(uuidString: pair.key) {
+                    let trimmed = pair.value.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                    if !trimmed.isEmpty { acc[id] = pair.value }
+                }
+            }
+            self.videoTitles = mapped
+        } else {
+            self.videoTitles = [:]
+        }
             #if DEBUG
             print("[PracticeTimer] hydrate IDs defaults audio=\(audioIDs) video=\(videoIDs) image=\(imageIDs) store=\(StagingStore.list().map{ $0.id })")
             #endif
@@ -1213,6 +1232,7 @@ private var tasksPadSection: some View {
         clearPersistedStagedAttachments()
         clearPersistedTasks()
         resetUIOnly()
+        videoTitles.removeAll()
         UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
     }
 
@@ -1306,6 +1326,7 @@ private var tasksPadSection: some View {
         case stagedAudioIDs = "PracticeTimer.stagedAudioIDs"
         case stagedVideoIDs = "PracticeTimer.stagedVideoIDs"
         case stagedImageIDs = "PracticeTimer.stagedImageIDs"
+        case videoTitles = "PracticeTimer.videoTitles"
         // Commented out to move audio metadata persistence to StagingStore
         // case audioTitles = "PracticeTimer.audioTitles"
         // case audioAutoTitles = "PracticeTimer.audioAutoTitles"
@@ -1624,6 +1645,15 @@ private var tasksPadSection: some View {
         let audioIDs = stagedAudio.map { $0.id.uuidString }
         let videoIDs = stagedVideos.map { $0.id.uuidString }
         let imageIDs = stagedImages.map { $0.id.uuidString }
+        // Persist staged video titles (metadata only; no auto titles)
+        let validVideoIDs = Set(stagedVideos.map { $0.id })
+        videoTitles = videoTitles.filter { validVideoIDs.contains($0.key) }
+        let videoTitlesStringKeyed: [String: String] = Dictionary(uniqueKeysWithValues: videoTitles.map { ($0.key.uuidString, $0.value) })
+        if let encodedVideoTitles = try? JSONEncoder().encode(videoTitlesStringKeyed) {
+            d.set(encodedVideoTitles, forKey: TimerDefaultsKey.videoTitles.rawValue)
+        } else {
+            d.removeObject(forKey: TimerDefaultsKey.videoTitles.rawValue)
+        }
         d.set(audioIDs, forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.set(videoIDs, forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.set(imageIDs, forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
@@ -1766,6 +1796,7 @@ private var tasksPadSection: some View {
         d.removeObject(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue)
         d.removeObject(forKey: TimerDefaultsKey.stagedImageIDs.rawValue)
+        d.removeObject(forKey: TimerDefaultsKey.videoTitles.rawValue)
         // Commented out removing audio metadata from UserDefaults since persistence moved to StagingStore
         /*
         d.removeObject(forKey: TimerDefaultsKey.audioTitles.rawValue)
@@ -1924,28 +1955,10 @@ private var tasksPadSection: some View {
     private func openAudioViewer(_ id: UUID) {
         guard let att = stagedAudio.first(where: { $0.id == id }) else { return }
 
-        // Prefer user-entered title, then auto-title, then fallback to UUID
-        let explicitTitle = audioTitles[att.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let autoTitle = audioAutoTitles[att.id]?.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let rawTitle: String = {
-            if let t = explicitTitle, !t.isEmpty { return t }
-            if let t = autoTitle, !t.isEmpty { return t }
-            return att.id.uuidString
-        }()
-
-        // Sanitize into a safe, not-crazy-long filename
-        let safeBase = rawTitle
-            .replacingOccurrences(of: "/", with: "-")
-            .replacingOccurrences(of: ":", with: "-")
-            .replacingOccurrences(of: "\n", with: " ")
-            .prefix(60)
-
-        let fileName = safeBase.isEmpty ? att.id.uuidString : String(safeBase)
-
+        // Build a temp URL whose filename is strictly the UUID so the viewer can resolve URL->UUID reliably
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(fileName)
-            .appendingPathExtension("m4a")   // matches our recorder’s format
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension("m4a")
 
         do {
             try att.data.write(to: url, options: .atomic)
@@ -2319,6 +2332,7 @@ private var tasksPadSection: some View {
         stagedImages.removeAll()
         stagedVideos.removeAll()
         videoThumbnails.removeAll()
+        videoTitles.removeAll()
         selectedThumbnailID = nil
         UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
 
@@ -2378,6 +2392,7 @@ struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
+
 
 
 
