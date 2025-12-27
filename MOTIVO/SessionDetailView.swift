@@ -51,6 +51,18 @@ private func persistedAudioTitle(for attachmentID: UUID) -> String? {
     return trimmed.isEmpty ? nil : trimmed
 }
 
+private let persistedVideoTitlesKey = "persistedVideoTitles_v1"
+
+private func loadPersistedVideoTitles() -> [String: String] {
+    (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
+}
+
+private func persistedVideoTitle(for attachmentID: UUID) -> String? {
+    let raw = loadPersistedVideoTitles()[attachmentID.uuidString] ?? ""
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 struct SessionDetailView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.dismiss) private var dismiss
@@ -263,8 +275,41 @@ struct SessionDetailView: View {
                         let stem = url.deletingPathExtension().lastPathComponent
                         let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
                         return trimmed.isEmpty ? nil : trimmed
-                    case .video, .image, .file:
+                    case .video:
+                        // Match by stable basename (UUID-like) ignoring extension
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        let set = (session.attachments as? Set<Attachment>) ?? []
+                        if let match = set.first(where: { att in
+                            guard let stored = att.value(forKey: "fileURL") as? String, !stored.isEmpty else { return false }
+                            let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
+                            return storedStem == stem
+                        }), let attID = match.value(forKey: "id") as? UUID {
+                            return persistedVideoTitle(for: attID)
+                        }
                         return nil
+                    case .image, .file:
+                        return nil
+                    }
+                },
+                onRename: { url, newTitle, kind in
+                    guard kind == .video else { return }
+                    // Persist video title keyed by Attachment UUID (match by stem to handle extension changes)
+                    let stem = url.deletingPathExtension().lastPathComponent
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let match = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String, !stored.isEmpty else { return false }
+                        let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
+                        return storedStem == stem
+                    }), let attID = match.value(forKey: "id") as? UUID {
+                        var map = loadPersistedVideoTitles()
+                        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if trimmed.isEmpty {
+                            map.removeValue(forKey: attID.uuidString)
+                        } else {
+                            map[attID.uuidString] = trimmed
+                        }
+                        UserDefaults.standard.set(map, forKey: persistedVideoTitlesKey)
+                        _refreshTick &+= 1
                     }
                 },
                 onFavourite: { url in

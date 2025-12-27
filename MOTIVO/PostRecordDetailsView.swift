@@ -1468,6 +1468,11 @@ onDelete: { _ in /* Deletion remains managed by existing overlay button in grid;
         let namesKey = "stagedAudioNames_temp"
         let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
 
+        // Read staged video titles captured during timer flow and define persisted store key
+        let stagedVideoTitlesKey = "stagedVideoTitles_temp"
+        let stagedVideoTitles: [String: String] = (UserDefaults.standard.dictionary(forKey: stagedVideoTitlesKey) as? [String: String]) ?? [:]
+        let persistedVideoTitlesKey = "persistedVideoTitles_v1"
+
         // Track rollback closures for files written during this commit attempt
         var rollbacks: [() -> Void] = []
         var createdAttachments: [Attachment] = []
@@ -1492,6 +1497,28 @@ onDelete: { _ in /* Deletion remains managed by existing overlay button in grid;
                 let finalURL = URL(fileURLWithPath: result.path)
                 let stagedURL = surrogateURL(for: att)
                 migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
+
+                // Persist any staged video title so SessionDetailView can surface it later
+                if att.kind == .video {
+                    let stagedKey = att.id.uuidString
+                    if let stagedTitleRaw = stagedVideoTitles[stagedKey] {
+                        let trimmed = stagedTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            // Store under the final attachment UUID (preferred) if available; else fall back to file path stem
+                            if let finalID = created.value(forKey: "id") as? UUID {
+                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
+                                persisted[finalID.uuidString] = trimmed
+                                UserDefaults.standard.set(persisted, forKey: persistedVideoTitlesKey)
+                            } else {
+                                // Fallback: use the created file path stem as a last resort
+                                let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent
+                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
+                                persisted[stem] = trimmed
+                                UserDefaults.standard.set(persisted, forKey: persistedVideoTitlesKey)
+                            }
+                        }
+                    }
+                }
 
                 createdAttachments.append(created)
             } catch {
@@ -1523,6 +1550,7 @@ onDelete: { _ in /* Deletion remains managed by existing overlay button in grid;
 
         // Note: Do not save the context here; caller will attempt save and handle rollback of files on failure.
         UserDefaults.standard.removeObject(forKey: namesKey)
+        UserDefaults.standard.removeObject(forKey: stagedVideoTitlesKey)
     }
 
     private func stagedIndexForAttachment(_ target: StagedAttachment) -> Int {
@@ -1940,6 +1968,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

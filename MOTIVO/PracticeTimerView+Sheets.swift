@@ -259,6 +259,14 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                     if let t = audioAutoTitles[id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
                     return nil
                 case .video:
+                    // Prefer shared staging map used by PRDV for seamless handoff
+                    let stagingKey = "stagedVideoTitles_temp"
+                    if let dict = UserDefaults.standard.dictionary(forKey: stagingKey) as? [String: String],
+                       let raw = dict[id.uuidString] {
+                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !t.isEmpty { return t }
+                    }
+                    // Fallback to PTV-local map
                     return videoTitle(for: id)
                 case .image, .file:
                     return nil
@@ -284,6 +292,12 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 case .video:
                     // Video titles are optional; empty means clear.
                     setVideoTitle(trimmed, for: id)
+                    // Mirror into shared staging map so PRDV can read immediately after finishing timer
+                    let stagingKey = "stagedVideoTitles_temp"
+                    var dict = (UserDefaults.standard.dictionary(forKey: stagingKey) as? [String: String]) ?? [:]
+                    if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) }
+                    else { dict[id.uuidString] = trimmed }
+                    UserDefaults.standard.set(dict, forKey: stagingKey)
                 case .image, .file:
                     break
                 }

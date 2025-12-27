@@ -170,6 +170,12 @@ struct AddEditSessionView: View {
         (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
     }
 
+    // Persisted video title overrides (existing store)
+    private let persistedVideoTitlesKey = "persistedVideoTitles_v1"
+    private func loadPersistedVideoTitles() -> [String: String] {
+        (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
+    }
+
     /// Remove the `FocusDotIndex:` and `StateIndex:` lines from `notes` for clean UI display.
     private func stripFocusTokensFromNotes_edit() {
         let tokens = ["FocusDotIndex:", "StateIndex:"]
@@ -830,6 +836,37 @@ AttachmentViewerView(
                                     }
                                     return nil
                                 case .video:
+                                    let persistedVideoTitles = loadPersistedVideoTitles()
+                                    // Try UUID directly from URL stem first
+                                    if let id = UUID(uuidString: stem) {
+                                        if let persisted = persistedVideoTitles[id.uuidString] {
+                                            let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            if !t.isEmpty { return t }
+                                        }
+                                    } else {
+                                        // Fallback: resolve UUID by matching the actual URL to existingAttachmentURLMap
+                                        if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == url.standardizedFileURL }) {
+                                            if let persisted = persistedVideoTitles[attID.uuidString] {
+                                                let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if !t.isEmpty { return t }
+                                            }
+                                        } else {
+                                            // Last attempt: compare by stem against resolved viewer URLs for staged attachments
+                                            if let att = stagedAttachments.first(where: { candidate in
+                                                if let resolved = viewerResolvedURL_edit(for: candidate) {
+                                                    return resolved.deletingPathExtension().lastPathComponent == stem
+                                                }
+                                                return false
+                                            }) {
+                                                if let persisted = persistedVideoTitles[att.id.uuidString] {
+                                                    let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    if !t.isEmpty { return t }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Finally, fall back to staged temp titles used during AESV staging
                                     let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
                                     if let raw = videoDict[stem] {
                                         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -859,8 +896,37 @@ AttachmentViewerView(
                                     attachmentTitlesRefreshTick &+= 1
                                 case .video:
                                     var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
-                                    if trimmed.isEmpty { videoDict.removeValue(forKey: stem) } else { guard let id = UUID(uuidString: stem) else { return }
-                                    videoDict[id.uuidString] = trimmed }
+                                    if trimmed.isEmpty {
+                                        videoDict.removeValue(forKey: stem)
+                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                        attachmentTitlesRefreshTick &+= 1
+                                        return
+                                    }
+
+                                    // Primary path: stem is a UUID
+                                    if let id = UUID(uuidString: stem) {
+                                        videoDict[id.uuidString] = trimmed
+                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                        var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
+                                        persisted[id.uuidString] = trimmed
+                                        UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
+                                        attachmentTitlesRefreshTick &+= 1
+                                        return
+                                    }
+
+                                    // Fallback: resolve UUID by matching the actual URL passed from viewer to existingAttachmentURLMap
+                                    if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == url.standardizedFileURL }) {
+                                        videoDict[attID.uuidString] = trimmed
+                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                        var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
+                                        persisted[attID.uuidString] = trimmed
+                                        UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
+                                        attachmentTitlesRefreshTick &+= 1
+                                        return
+                                    }
+
+                                    // Last resort: keep temp map keyed by stem for in-session use
+                                    videoDict[stem] = trimmed
                                     UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
                                     attachmentTitlesRefreshTick &+= 1
                                 case .image, .file:
@@ -2164,6 +2230,9 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
 
 
