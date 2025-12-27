@@ -534,6 +534,35 @@ struct AttachmentViewerView: View {
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
 
+                // Video title (presentation-only)
+                if media.indices.contains(currentIndex) {
+                    let att = media[currentIndex]
+                    if att.kind == .video {
+                        let rawTitle = resolvedTitle(for: att.url, kind: .video)
+                        let trimmed = rawTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                        if !trimmed.isEmpty {
+                            // Strip common file extensions for display only
+                            let display: String = {
+                                let lower = trimmed.lowercased()
+                                if lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.hasSuffix(".m4v") || lower.hasSuffix(".avi") {
+                                    return String(trimmed.split(separator: ".").dropLast().joined(separator: "."))
+                                }
+                                return trimmed
+                            }()
+                            Text(display)
+                                .font(.callout)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .frame(maxWidth: .infinity)
+                                .multilineTextAlignment(.center)
+                                .padding(.top, 6)
+                                .padding(.horizontal, Theme.Spacing.l)
+                                .accessibilityLabel("Video title: \(display)")
+                        }
+                    }
+                }
+
                 Spacer()
             }
             .zIndex(2) // ensure buttons are above the pager
@@ -1652,3 +1681,4 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
+
