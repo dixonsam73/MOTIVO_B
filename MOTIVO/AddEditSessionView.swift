@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251228_210200-aesv-videoTitleParityFix-01
+// SCOPE: AESV video title routing: staged temp titles only for unsaved videos; persisted videos read/write canonical persistedVideoTitles_v1 only; no other logic/UI changes.
+
 // CHANGE-ID: 20251227_163900-aesv-renamewire-audioAliasURL-01
 // SCOPE: Wire AttachmentViewer rename callbacks for AESV staged audio/video titles (UserDefaults temp maps) + refresh tick; no other UI/logic changes.
 // CHANGE-ID: 20251219_160900-aesv-replace-urlmap-01
@@ -42,6 +45,7 @@ private struct AttachmentViewerRequest: Identifiable {
     let imageURLs: [URL]
     let videoURLs: [URL]
     let audioURLs: [URL]
+    let viewerAttachmentIDs: [UUID]
 }
 
 
@@ -538,6 +542,18 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                         return viewerResolvedURL_edit(for: item)
                                                                     }
 
+                                                                    let orderedVisualIDs: [UUID] = {
+                                                                        let imageIDs: [UUID] = visuals.compactMap { item in
+                                                                            guard item.kind == .image else { return nil }
+                                                                            return item.id
+                                                                        }
+                                                                        let videoIDs: [UUID] = visuals.compactMap { item in
+                                                                            guard item.kind == .video else { return nil }
+                                                                            return item.id
+                                                                        }
+                                                                        return imageIDs + videoIDs
+                                                                    }()
+
                                                                     let startIndex: Int = {
                                                                         switch att.kind {
                                                                         case .image:
@@ -556,7 +572,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                         startIndex: startIndex,
                                                                         imageURLs: imageURLs,
                                                                         videoURLs: videoURLs,
-                                                                        audioURLs: []
+                                                                        audioURLs: [],
+                                                                        viewerAttachmentIDs: orderedVisualIDs
                                                                     )
                                                                 }
                                                             }
@@ -590,6 +607,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 return (item.id, url)
                                             }
                                             let audioURLs: [URL] = audioItems.map { $0.1 }
+                                            let orderedAudioIDs: [UUID] = audioItems.map { $0.0 }
                                             let startIndex = audioItems.firstIndex(where: { $0.0 == att.id }) ?? 0
 
                                             viewerRequest = AttachmentViewerRequest(
@@ -597,7 +615,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 startIndex: startIndex,
                                                 imageURLs: [],
                                                 videoURLs: [],
-                                                audioURLs: audioURLs
+                                                audioURLs: audioURLs,
+                                                viewerAttachmentIDs: orderedAudioIDs
                                             )
                                         } label: {
                                             HStack(spacing: 10) {
@@ -790,6 +809,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             let combined = imageURLs + videoURLs + audioURLs
             let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
 
+            let viewerAttachmentIDs: [UUID] = req.viewerAttachmentIDs
+
             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
             let persistedTitles = loadPersistedAudioTitles()
             let audioTitles: [String] = audioURLs.map { u in
@@ -837,42 +858,30 @@ AttachmentViewerView(
                                     return nil
                                 case .video:
                                     let persistedVideoTitles = loadPersistedVideoTitles()
-                                    // Try UUID directly from URL stem first
-                                    if let id = UUID(uuidString: stem) {
-                                        if let persisted = persistedVideoTitles[id.uuidString] {
-                                            let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            if !t.isEmpty { return t }
-                                        }
-                                    } else {
-                                        // Fallback: resolve UUID by matching the actual URL to existingAttachmentURLMap
-                                        if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == url.standardizedFileURL }) {
-                                            if let persisted = persistedVideoTitles[attID.uuidString] {
-                                                let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
-                                                if !t.isEmpty { return t }
-                                            }
-                                        } else {
-                                            // Last attempt: compare by stem against resolved viewer URLs for staged attachments
-                                            if let att = stagedAttachments.first(where: { candidate in
-                                                if let resolved = viewerResolvedURL_edit(for: candidate) {
-                                                    return resolved.deletingPathExtension().lastPathComponent == stem
-                                                }
-                                                return false
-                                            }) {
-                                                if let persisted = persistedVideoTitles[att.id.uuidString] {
-                                                    let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
-                                                    if !t.isEmpty { return t }
-                                                }
-                                            }
-                                        }
-                                    }
+                                    // Determine the index of this URL within the viewer's video section
+                                    // The AttachmentViewerView provides (url, kind) but not index directly; infer index within the combined sequence we passed.
+                                    // We built `viewerAttachmentIDs` to match the order of (imageURLs + videoURLs + audioURLs).
+                                    let indexInCombined: Int? = {
+                                        let all = imageURLs + videoURLs + audioURLs
+                                        return all.firstIndex(where: { $0 == url })
+                                    }()
+                                    guard let idx = indexInCombined, idx >= 0, idx < viewerAttachmentIDs.count else { return nil }
+                                    let attID = viewerAttachmentIDs[idx]
 
-                                    // Finally, fall back to staged temp titles used during AESV staging
-                                    let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
-                                    if let raw = videoDict[stem] {
-                                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        return t.isEmpty ? nil : t
+                                    if existingAttachmentIDs.contains(attID) {
+                                        if let persisted = persistedVideoTitles[attID.uuidString] {
+                                            let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            return t.isEmpty ? nil : t
+                                        }
+                                        return nil
+                                    } else {
+                                        let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                        if let raw = videoDict[attID.uuidString] {
+                                            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            return t.isEmpty ? nil : t
+                                        }
+                                        return nil
                                     }
-                                    return nil
                                 case .image, .file:
                                     return nil
                                 }
@@ -895,40 +904,31 @@ AttachmentViewerView(
 
                                     attachmentTitlesRefreshTick &+= 1
                                 case .video:
-                                    var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
-                                    if trimmed.isEmpty {
-                                        videoDict.removeValue(forKey: stem)
-                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
-                                        attachmentTitlesRefreshTick &+= 1
-                                        return
+                                    // Resolve attachment identity by viewer index → ID, then route to persisted or staged store only.
+                                    let indexInCombined: Int? = {
+                                        let all = imageURLs + videoURLs + audioURLs
+                                        return all.firstIndex(where: { $0 == url })
+                                    }()
+                                    let ids = req.viewerAttachmentIDs
+                                    if let idx = indexInCombined, idx >= 0, idx < ids.count {
+                                        let attID = ids[idx]
+                                        if existingAttachmentIDs.contains(attID) {
+                                            // Persisted: write/remove only in persistedVideoTitles_v1
+                                            var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
+                                            if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
+                                            else { persisted[attID.uuidString] = trimmed }
+                                            UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
+                                            attachmentTitlesRefreshTick &+= 1
+                                        } else {
+                                            // Staged (unsaved): write/remove only in stagedVideoTitles_temp
+                                            var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                            if trimmed.isEmpty { videoDict.removeValue(forKey: attID.uuidString) }
+                                            else { videoDict[attID.uuidString] = trimmed }
+                                            UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                            attachmentTitlesRefreshTick &+= 1
+                                        }
                                     }
-
-                                    // Primary path: stem is a UUID
-                                    if let id = UUID(uuidString: stem) {
-                                        videoDict[id.uuidString] = trimmed
-                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
-                                        var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
-                                        persisted[id.uuidString] = trimmed
-                                        UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
-                                        attachmentTitlesRefreshTick &+= 1
-                                        return
-                                    }
-
-                                    // Fallback: resolve UUID by matching the actual URL passed from viewer to existingAttachmentURLMap
-                                    if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == url.standardizedFileURL }) {
-                                        videoDict[attID.uuidString] = trimmed
-                                        UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
-                                        var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
-                                        persisted[attID.uuidString] = trimmed
-                                        UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
-                                        attachmentTitlesRefreshTick &+= 1
-                                        return
-                                    }
-
-                                    // Last resort: keep temp map keyed by stem for in-session use
-                                    videoDict[stem] = trimmed
-                                    UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
-                                    attachmentTitlesRefreshTick &+= 1
+                                    return
                                 case .image, .file:
                                     return
                                 }
@@ -2230,6 +2230,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
