@@ -8,6 +8,8 @@ import AVFoundation
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
     let audioTitles: [String]?
+    let isReadOnly: Bool
+    let canShare: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private let topButtonSize: CGFloat = 40
@@ -91,6 +93,34 @@ struct AttachmentViewerView: View {
         return media[currentIndex].kind
     }
 
+
+    // MARK: - Capability gating
+    private var canDelete: Bool {
+        !isReadOnly && onDelete != nil
+    }
+    private var canPrivacy: Bool {
+        guard !isReadOnly else { return false }
+        return (isPrivate != nil) && (onTogglePrivacy != nil)
+    }
+    private var canFavourite: Bool {
+        guard !isReadOnly else { return false }
+        return (isFavourite != nil) && (onFavourite != nil)
+    }
+    private func canRename(for kind: AttachmentKind, url: URL) -> Bool {
+        guard !isReadOnly else { return false }
+        guard kind == .audio || kind == .video else { return false }
+        // Require both a title source and a rename handler (either modern or legacy)
+        let hasTitleSource = (titleForURL != nil)
+        let hasRenameHandler = (onRename != nil) || (onRenameLegacy != nil)
+        return hasTitleSource && hasRenameHandler
+    }
+    private func canTrim(for kind: AttachmentKind) -> Bool {
+        guard !isReadOnly else { return false }
+        guard kind == .audio || kind == .video else { return false }
+        return (onReplaceAttachment != nil) || (onSaveAsNewAttachment != nil)
+    }
+    private var canShowShare: Bool { !isReadOnly && canShare }
+
     
     // MARK: - Initializers
 
@@ -113,6 +143,8 @@ struct AttachmentViewerView: View {
         onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
         onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        isReadOnly: Bool = false,
+        canShare: Bool = true,
         replaceStrategy: ReplaceStrategy = .immediate
     ) {
         #if DEBUG
@@ -137,6 +169,8 @@ struct AttachmentViewerView: View {
         self.onReplaceAttachment = onReplaceAttachment
         self.onSaveAsNewAttachment = onSaveAsNewAttachment
         self.onSaveAsNewAttachmentFromSource = onSaveAsNewAttachmentFromSource
+        self.isReadOnly = isReadOnly
+        self.canShare = canShare
         self.replaceStrategy = replaceStrategy
     }
 
@@ -178,6 +212,8 @@ struct AttachmentViewerView: View {
             onReplaceAttachment: onReplaceAttachment,
             onSaveAsNewAttachment: onSaveAsNewAttachment,
             onSaveAsNewAttachmentFromSource: onSaveAsNewAttachmentFromSource,
+            isReadOnly: false,
+            canShare: true,
             replaceStrategy: replaceStrategy
         )
     }
@@ -357,61 +393,65 @@ struct AttachmentViewerView: View {
                         let currentAttachmentKind = media[currentIndex].kind
 
                         HStack(spacing: headerSpacing) {
-                            Button {
-                                let url = currentURL
-                                let priv = isPrivate?(url) ?? false
-                                onFavourite?(url)
-                                if !priv {
-                                    /* presenter enforces single-thumbnail rule */
+                            if canFavourite {
+                                Button {
+                                    let url = currentURL
+                                    let priv = isPrivate?(url) ?? false
+                                    onFavourite?(url)
+                                    if !priv {
+                                        /* presenter enforces single-thumbnail rule */
+                                    }
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(
+                                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                                radius: 2,
+                                                y: 1
+                                            )
+                                        Image(systemName: isFav ? "star.fill" : "star")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
                                 }
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(
-                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                            radius: 2,
-                                            y: 1
-                                        )
-                                    Image(systemName: isFav ? "star.fill" : "star")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
-                                .frame(width: topButtonSize, height: topButtonSize)
-                                .contentShape(Circle())
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
 
-                            Button {
-                                let url = currentURL
-                                // Optimistic UI update – no rebuild, no flash
-                                localIsPrivate.toggle()
-                                onTogglePrivacy?(url)
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(
-                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                            radius: 2,
-                                            y: 1
-                                        )
-                                    Image(systemName: isPriv ? "eye.slash" : "eye")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
+                            if canPrivacy {
+                                Button {
+                                    let url = currentURL
+                                    // Optimistic UI update – no rebuild, no flash
+                                    localIsPrivate.toggle()
+                                    onTogglePrivacy?(url)
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(
+                                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                                radius: 2,
+                                                y: 1
+                                            )
+                                        Image(systemName: isPriv ? "eye.slash" : "eye")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
                                 }
-                                .frame(width: topButtonSize, height: topButtonSize)
-                                .contentShape(Circle())
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(
+                                    isPriv ? "Make attachment visible to others" : "Hide attachment from others"
+                                )
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel(
-                                isPriv ? "Make attachment visible to others" : "Hide attachment from others"
-                            )
 
-                            if (currentAttachmentKind == .video || currentAttachmentKind == .audio), hasRenameCapability {
+                            if canRename(for: currentAttachmentKind, url: currentURL) {
                                 Button {
                                     let url = currentURL
                                     renameTargetURL = url
@@ -445,7 +485,7 @@ struct AttachmentViewerView: View {
                                 .accessibilityLabel("Rename attachment")
                             }
 
-                            if currentAttachmentKind == .video || currentAttachmentKind == .audio {
+                            if canTrim(for: currentAttachmentKind) {
                                 Button {
                                     trimURL = currentURL
                                     trimKind = currentAttachmentKind
@@ -477,55 +517,59 @@ struct AttachmentViewerView: View {
                                 .accessibilityHint("Open trimmer to shorten this recording")
                             }
 
-                            Button {
-                                let url = currentURL
-                                onDelete?(url)
-                                stopAllPlayersToggle.toggle()
-                                dismiss()
-                            } label: {
-                                ZStack {
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(
-                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                            radius: 2,
-                                            y: 1
-                                        )
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
+                            if canDelete {
+                                Button {
+                                    let url = currentURL
+                                    onDelete?(url)
+                                    stopAllPlayersToggle.toggle()
+                                    dismiss()
+                                } label: {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(
+                                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                                radius: 2,
+                                                y: 1
+                                            )
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
                                 }
-                                .frame(width: topButtonSize, height: topButtonSize)
-                                .contentShape(Circle())
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Delete attachment")
                             }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Delete attachment")
 
-                            ShareLink(item: currentURL) {
-                                ZStack {
-                                    Circle()
-                                        .fill(.thinMaterial)
-                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                        .shadow(
-                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                            radius: 2,
-                                            y: 1
-                                        )
-                                    Image(systemName: "square.and.arrow.up")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
+                            if canShowShare {
+                                ShareLink(item: currentURL) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(.thinMaterial)
+                                            .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                            .shadow(
+                                                color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                                radius: 2,
+                                                y: 1
+                                            )
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.system(size: 17, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .frame(width: topButtonSize, height: topButtonSize)
+                                    .contentShape(Circle())
                                 }
-                                .frame(width: topButtonSize, height: topButtonSize)
-                                .contentShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .contentShape(Rectangle())
-                            .onAppear {
-                                // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
-                                let tmp = FileManager.default.temporaryDirectory
-                                if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
-                                    registerTemp(currentURL)
+                                .buttonStyle(.plain)
+                                .contentShape(Rectangle())
+                                .onAppear {
+                                    // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
+                                    let tmp = FileManager.default.temporaryDirectory
+                                    if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
+                                        registerTemp(currentURL)
+                                    }
                                 }
                             }
                         }
@@ -669,6 +713,7 @@ struct AttachmentViewerView: View {
                         trimKind = nil
                     },
                     onSaveAsNewAttachment: { tempURL, _ in
+                        guard onSaveAsNewAttachment != nil || onSaveAsNewAttachmentFromSource != nil else { return }
                         guard let currentMediaIndex = media.firstIndex(where: { $0.url == url }) else {
                             isShowingTrimmer = false
                             trimURL = nil
@@ -731,6 +776,7 @@ struct AttachmentViewerView: View {
                         trimKind = nil
                     },
                     onReplaceAttachment: { originalURL, tempURL, _ in
+                        guard onReplaceAttachment != nil else { return }
                         guard let currentMediaIndex = media.firstIndex(where: { $0.url == originalURL }),
                               originalURL.isFileURL else {
                             isShowingTrimmer = false

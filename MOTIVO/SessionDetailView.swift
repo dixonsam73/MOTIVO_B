@@ -242,7 +242,6 @@ struct SessionDetailView: View {
             return AttachmentViewerView(
                 imageURLs: imageURLs,
                 startIndex: startIndex,
-                themeBackground: Color(.systemBackground),
                 videoURLs: videoURLs,
                 audioURLs: audioURLs,
                 onDelete: { url in
@@ -384,7 +383,9 @@ struct SessionDetailView: View {
                     } catch {
                         print("Save-as-new attachment error:", error)
                     }
-                }
+                },
+                isReadOnly: true,
+                canShare: ((session.ownerUserID ?? "") == (auth.currentUserID ?? ""))
             )
             .onDisappear { _refreshTick &+= 1 }
     }
@@ -400,15 +401,14 @@ struct SessionDetailView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
-                    Button("Edit") {
-                        editWasPresented = true
-                        showEdit = true
+                    // Show Edit only when the current user owns the session
+                    let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
+                    if isOwner {
+                        Button("Edit") {
+                            editWasPresented = true
+                            showEdit = true
+                        }
                     }
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        Image(systemName: "trash")
-                    }
-                    .accessibilityLabel("Delete session")
-                    .accessibilityIdentifier("button.deleteSession")
                 }
             }
         }
