@@ -506,7 +506,25 @@ AttachmentViewerView(
                     themeBackground: Color(.systemBackground),
                     videoURLs: videoURLs,
                     audioURLs: audioURLs,
-onDelete: { _ in /* Deletion remains managed by existing overlay button in grid; no-op here */ },
+onDelete: { url in
+    // Map surrogate URL back to staged attachment by matching staged id in the basename
+    let stem = url.deletingPathExtension().lastPathComponent
+    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+        let removed = stagedAttachments[idx]
+        // Use existing removal path
+        removeStagedAttachment(removed)
+        // If this was the current thumbnail, reassign or clear using existing logic
+        if selectedThumbnailID == removed.id {
+            if let nextImage = stagedAttachments.first(where: { $0.kind == .image }) {
+                selectedThumbnailID = nextImage.id
+            } else {
+                selectedThumbnailID = nil
+            }
+        }
+        // Dismiss the viewer cleanly
+        viewerRequest = nil
+    }
+},
                     titleForURL: { url, kind in
                         let stem = url.deletingPathExtension().lastPathComponent
                         guard let id = UUID(uuidString: stem) else { return nil }
@@ -555,8 +573,19 @@ onDelete: { _ in /* Deletion remains managed by existing overlay button in grid;
                             break
                         }
                     },
-                    onFavourite: { _ in /* Not applicable in staging */ },
-                    isFavourite: { _ in false },
+                    onFavourite: { url in
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                            selectedThumbnailID = att.id
+                        }
+                    },
+                    isFavourite: { url in
+                        let stem = url.deletingPathExtension().lastPathComponent
+                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                            return selectedThumbnailID == att.id
+                        }
+                        return false
+                    },
                     onTogglePrivacy: { url in
                         // Toggle privacy using same ID-first, URL-fallback key as grid
                         let stem = url.deletingPathExtension().lastPathComponent
@@ -1968,6 +1997,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
