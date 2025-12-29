@@ -302,7 +302,6 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                     break
                 }
             },
-
             onFavourite: { url in
                 if let uuid = resolveStagedID(from: url) {
                     selectedThumbnailID = uuid
@@ -344,7 +343,8 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                         handleTrimSaveAsNew(from: newURL, basedOn: item)
                     }
                 }
-            }
+            },
+            canShare: false
         )
         .onAppear {
             killDroneAndMetronome()

@@ -607,7 +607,8 @@ onDelete: { url in
                     onSaveAsNewAttachment: { newURL, kind in
                         // Insert new item after the current one in its section
                         insertNewStagedAttachment(after: combined[min(max(startIndex,0), max(combined.count-1,0))], newURL: newURL, kind: kind)
-                    }
+                    },
+                    canShare: false
                 )
             }
             // Sheets
@@ -1997,6 +1998,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

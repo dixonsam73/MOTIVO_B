@@ -385,7 +385,7 @@ struct SessionDetailView: View {
                     }
                 },
                 isReadOnly: true,
-                canShare: ((session.ownerUserID ?? "") == (auth.currentUserID ?? ""))
+                canShare: (session.ownerUserID == auth.currentUserID)
             )
             .onDisappear { _refreshTick &+= 1 }
     }

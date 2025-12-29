@@ -119,7 +119,7 @@ struct AttachmentViewerView: View {
         guard kind == .audio || kind == .video else { return false }
         return (onReplaceAttachment != nil) || (onSaveAsNewAttachment != nil)
     }
-    private var canShowShare: Bool { !isReadOnly && canShare }
+    private var canShowShare: Bool { canShare }
 
     
     // MARK: - Initializers

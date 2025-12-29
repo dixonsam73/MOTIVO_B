@@ -822,242 +822,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 return staged.isEmpty ? stem : staged
             }
 
-AttachmentViewerView(
-                            imageURLs: imageURLs,
-                            startIndex: startIndex,
-                            themeBackground: Color(.systemBackground),
-                            videoURLs: videoURLs,
-                            audioURLs: audioURLs,
-                            audioTitles: audioTitles,
-                            onDelete: { url in
-                                // Map by staged id from surrogate URL stem
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                                    let removed = stagedAttachments.remove(at: idx)
-                                    existingAttachmentIDs.remove(removed.id)
-                                    if selectedThumbnailID == removed.id {
-                                        selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
-                                    }
-                                }
-                            },
-                            titleForURL: { url, kind in
-                                let _ = attachmentTitlesRefreshTick
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                switch kind {
-                                case .audio:
-                                    let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                                    let persistedTitles = loadPersistedAudioTitles()
-                                    if let persisted = persistedTitles[stem] {
-                                        let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        if !t.isEmpty { return t }
-                                    }
-                                    if let raw = namesDict[stem] {
-                                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        return t.isEmpty ? nil : t
-                                    }
-                                    return nil
-                                case .video:
-                                    let persistedVideoTitles = loadPersistedVideoTitles()
-                                    // Determine the index of this URL within the viewer's video section
-                                    // The AttachmentViewerView provides (url, kind) but not index directly; infer index within the combined sequence we passed.
-                                    // We built `viewerAttachmentIDs` to match the order of (imageURLs + videoURLs + audioURLs).
-                                    let indexInCombined: Int? = {
-                                        let all = imageURLs + videoURLs + audioURLs
-                                        return all.firstIndex(where: { $0 == url })
-                                    }()
-                                    guard let idx = indexInCombined, idx >= 0, idx < viewerAttachmentIDs.count else { return nil }
-                                    let attID = viewerAttachmentIDs[idx]
-
-                                    if existingAttachmentIDs.contains(attID) {
-                                        if let persisted = persistedVideoTitles[attID.uuidString] {
-                                            let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            return t.isEmpty ? nil : t
-                                        }
-                                        return nil
-                                    } else {
-                                        let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
-                                        if let raw = videoDict[attID.uuidString] {
-                                            let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                                            return t.isEmpty ? nil : t
-                                        }
-                                        return nil
-                                    }
-                                case .image, .file:
-                                    return nil
-                                }
-                            },
-                            onRename: { url, newTitle, kind in
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-                                switch kind {
-                                case .audio:
-                                    guard !trimmed.isEmpty else { return }
-                                    var namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                                    guard let id = UUID(uuidString: stem) else { return }
-                                    namesDict[id.uuidString] = trimmed
-                                    UserDefaults.standard.set(namesDict, forKey: "stagedAudioNames_temp")
-
-                                    // Also persist audio titles for existing attachments (no file rename / no Core Data change)
-                                    var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
-                                    persisted[id.uuidString] = trimmed
-                                    UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
-
-                                    attachmentTitlesRefreshTick &+= 1
-                                case .video:
-                                    // Resolve attachment identity by viewer index → ID, then route to persisted or staged store only.
-                                    let indexInCombined: Int? = {
-                                        let all = imageURLs + videoURLs + audioURLs
-                                        return all.firstIndex(where: { $0 == url })
-                                    }()
-                                    let ids = req.viewerAttachmentIDs
-                                    if let idx = indexInCombined, idx >= 0, idx < ids.count {
-                                        let attID = ids[idx]
-                                        if existingAttachmentIDs.contains(attID) {
-                                            // Persisted: write/remove only in persistedVideoTitles_v1
-                                            var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
-                                            if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
-                                            else { persisted[attID.uuidString] = trimmed }
-                                            UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
-                                            attachmentTitlesRefreshTick &+= 1
-                                        } else {
-                                            // Staged (unsaved): write/remove only in stagedVideoTitles_temp
-                                            var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
-                                            if trimmed.isEmpty { videoDict.removeValue(forKey: attID.uuidString) }
-                                            else { videoDict[attID.uuidString] = trimmed }
-                                            UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
-                                            attachmentTitlesRefreshTick &+= 1
-                                        }
-                                    }
-                                    return
-                                case .image, .file:
-                                    return
-                                }
-                            },
-                            onFavourite: { url in
-                                // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                    selectedThumbnailID = att.id
-                                }
-                            },
-                            isFavourite: { url in
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                    return selectedThumbnailID == att.id
-                                }
-                                return false
-                            },
-                            onTogglePrivacy: { url in
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                    let priv = isPrivate(id: att.id, url: url)
-                                    setPrivate(id: att.id, url: url, !priv)
-                                }
-                            },
-                            isPrivate: { url in
-                                let stem = url.deletingPathExtension().lastPathComponent
-                                if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                    return isPrivate(id: att.id, url: url)
-                                }
-                                return false
-                            },
-                            onReplaceAttachment: { originalURL, newURL, kind in
-                                // Replace should preserve attachment identity.
-                                // AttachmentViewerView has already written the replacement file to disk and passes
-                                // the final on-disk URL here as newURL.
-                                if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == originalURL.standardizedFileURL }) {
-                                    existingAttachmentURLMap[attID] = newURL
-
-                                    // Persistence deferred to save() to avoid SessionDetailView dismissal.
-                                    /*
-                                    // Persist the new file path to Core Data so future loads resolve correctly.
-                                    let req = NSFetchRequest<Attachment>(entityName: "Attachment")
-                                    req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
-                                    req.fetchLimit = 1
-                                    if let hit = try? viewContext.fetch(req).first {
-                                        hit.fileURL = newURL.path
-                                        viewContext.processPendingChanges()
-                                    }
-
-                                    #if canImport(UIKit)
-                                    if kind == .video {
-                                        _ = AttachmentStore.generateVideoPoster(url: newURL)
-                                    }
-                                    #endif
-                                    */
-                                } else {
-                                    // Fallback: this may be a newly-staged (not-yet-persisted) item. Update staged bytes by id-stem.
-                                    let stem = originalURL.deletingPathExtension().lastPathComponent
-                                    if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                                        if let data = try? Data(contentsOf: newURL) {
-                                            let old = stagedAttachments[idx]
-                                            stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
-                                        }
-                                    }
-                                }
-
-                            },
-                            onSaveAsNewAttachment: { newURL, kind in
-                                // Append a new staged item of provided kind after current index section-wise
-                                let newID = UUID()
-                                let data = (try? Data(contentsOf: newURL)) ?? Data()
-                                let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
-                                // Ensure a real file exists at a stable URL for poster generation + playback.
-                                // (VideoPosterView relies on a file URL; temp exports can disappear.)
-                                if kind == .video, let sur = guaranteedSurrogateURL_edit(for: newAtt) {
-                                    
-                                    // Write the trimmed output to the surrogate URL so poster generation has a real file.
-                                    do {
-                                        // Ensure tmp folder exists
-                                        try FileManager.default.createDirectory(
-                                            at: sur.deletingLastPathComponent(),
-                                            withIntermediateDirectories: true,
-                                            attributes: nil
-                                        )
-                                        // Prefer copy for large files; fall back to write if needed.
-                                        if FileManager.default.fileExists(atPath: sur.path) {
-                                            try FileManager.default.removeItem(at: sur)
-                                        }
-                                        try FileManager.default.copyItem(at: newURL, to: sur)
-                                        existingAttachmentURLMap[newID] = sur
-                                    } catch {
-                                        // Fallback: keep using the export temp URL
-                                        existingAttachmentURLMap[newID] = newURL
-                                    }
-                                } else {
-                                    existingAttachmentURLMap[newID] = newURL
-                                }
-
-                                // Seed audio title for save-as-new so we don't fall back to "audio clip"
-                                if kind == .audio {
-                                    let key = "stagedAudioNames_temp"
-                                    var dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-                                    let stem = newURL.deletingPathExtension().lastPathComponent
-                                    if !stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                        dict[newID.uuidString] = stem
-                                        UserDefaults.standard.set(dict, forKey: key)
-                                    }
-                                }
-                                // Insert by section: images, then videos, then audios
-                                switch kind {
-                                case .image:
-                                    if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
-                                        stagedAttachments.insert(newAtt, at: splitIndex)
-                                    } else { stagedAttachments.append(newAtt) }
-                                case .video:
-                                    let lastVideoIndex = stagedAttachments.lastIndex(where: { $0.kind == .video })
-                                    if let lastVideoIndex { stagedAttachments.insert(newAtt, at: lastVideoIndex + 1) }
-                                    else if let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image }) { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) }
-                                    else { stagedAttachments.append(newAtt) }
-                                case .audio:
-                                    let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
-                                    if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
-                                case .file:
-                                    stagedAttachments.append(newAtt)
-                                }
-                            },
-                            replaceStrategy: .deferred
-                        )
+attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, audioTitles: audioTitles, req: req)
         }
         .task { hydrate() } // unified first-appearance init
         .onAppear {
@@ -2125,6 +1890,257 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
         }
         return fm.fileExists(atPath: url.path) ? url : nil
     }
+
+
+    // CHANGE-ID: 20251229_175900-canShareAESV-typecheckHelper
+    // SCOPE: Policy — disable AttachmentViewer share when launched from AddEditSessionView (AESV) by passing canShare: false.
+    @ViewBuilder
+    private func attachmentViewer_AESV(
+        imageURLs: [URL],
+        startIndex: Int,
+        videoURLs: [URL],
+        audioURLs: [URL],
+        audioTitles: [String],
+        req: AttachmentViewerRequest
+    ) -> some View {
+
+        AttachmentViewerView(
+                                    imageURLs: imageURLs,
+                                    startIndex: startIndex,
+                                    themeBackground: Color(.systemBackground),
+                                    videoURLs: videoURLs,
+                                    audioURLs: audioURLs,
+                                    audioTitles: audioTitles,
+                                    onDelete: { url in
+                                        // Map by staged id from surrogate URL stem
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                                            let removed = stagedAttachments.remove(at: idx)
+                                            existingAttachmentIDs.remove(removed.id)
+                                            if selectedThumbnailID == removed.id {
+                                                selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+                                            }
+                                        }
+                                    },
+                                    titleForURL: { url, kind in
+                                        let _ = attachmentTitlesRefreshTick
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        switch kind {
+                                        case .audio:
+                                            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                                            let persistedTitles = loadPersistedAudioTitles()
+                                            if let persisted = persistedTitles[stem] {
+                                                let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                return t.isEmpty ? nil : t
+                                            }
+                                            if let raw = namesDict[stem] {
+                                                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                return t.isEmpty ? nil : t
+                                            }
+                                            return nil
+                                        case .video:
+                                            let persistedVideoTitles = loadPersistedVideoTitles()
+                                            // Determine the index of this URL within the viewer's video section
+                                            // The AttachmentViewerView provides (url, kind) but not index directly; infer index within the combined sequence we passed.
+                                            // We built `req.viewerAttachmentIDs` to match the order of (imageURLs + videoURLs + audioURLs).
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            guard let idx = indexInCombined, idx >= 0, idx < req.viewerAttachmentIDs.count else { return nil }
+                                            let attID = req.viewerAttachmentIDs[idx]
+                                            
+                                            if existingAttachmentIDs.contains(attID) {
+                                                if let persisted = persistedVideoTitles[attID.uuidString] {
+                                                    let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    return t.isEmpty ? nil : t
+                                                }
+                                                return nil
+                                            } else {
+                                                let videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                                if let raw = videoDict[attID.uuidString] {
+                                                    let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    return t.isEmpty ? nil : t
+                                                }
+                                                return nil
+                                            }
+                                        case .image, .file:
+                                            return nil
+                                        }
+                                    }, onRename: { url, newTitle, kind in
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                                        switch kind {
+                                        case .audio:
+                                            guard !trimmed.isEmpty else { return }
+                                            var namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                                            guard let id = UUID(uuidString: stem) else { return }
+                                            namesDict[id.uuidString] = trimmed
+                                            UserDefaults.standard.set(namesDict, forKey: "stagedAudioNames_temp")
+                                            
+                                            // Also persist audio titles for existing attachments (no file rename / no Core Data change)
+                                            var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
+                                            persisted[id.uuidString] = trimmed
+                                            UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
+                                            
+                                            attachmentTitlesRefreshTick &+= 1
+                                        case .video:
+                                            // Resolve attachment identity by viewer index → ID, then route to persisted or staged store only.
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            let ids = req.viewerAttachmentIDs
+                                            if let idx = indexInCombined, idx >= 0, idx < ids.count {
+                                                let attID = ids[idx]
+                                                if existingAttachmentIDs.contains(attID) {
+                                                    // Persisted: write/remove only in persistedVideoTitles_v1
+                                                    var persisted = (UserDefaults.standard.dictionary(forKey: "persistedVideoTitles_v1") as? [String: String]) ?? [:]
+                                                    if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
+                                                    else { persisted[attID.uuidString] = trimmed }
+                                                    UserDefaults.standard.set(persisted, forKey: "persistedVideoTitles_v1")
+                                                    attachmentTitlesRefreshTick &+= 1
+                                                } else {
+                                                    // Staged (unsaved): write/remove only in stagedVideoTitles_temp
+                                                    var videoDict = (UserDefaults.standard.dictionary(forKey: "stagedVideoTitles_temp") as? [String: String]) ?? [:]
+                                                    if trimmed.isEmpty { videoDict.removeValue(forKey: attID.uuidString) }
+                                                    else { videoDict[attID.uuidString] = trimmed }
+                                                    UserDefaults.standard.set(videoDict, forKey: "stagedVideoTitles_temp")
+                                                    attachmentTitlesRefreshTick &+= 1
+                                                }
+                                            }
+                                            return
+                                        case .image, .file:
+                                            return
+                                        }
+                                    },
+                                    onFavourite: { url in
+                                        // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                            selectedThumbnailID = att.id
+                                        }
+                                    },
+                                    isFavourite: { url in
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                            return selectedThumbnailID == att.id
+                                        }
+                                        return false
+                                    },
+                                    onTogglePrivacy: { url in
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                            let priv = isPrivate(id: att.id, url: url)
+                                            setPrivate(id: att.id, url: url, !priv)
+                                        }
+                                    },
+                                    isPrivate: { url in
+                                        let stem = url.deletingPathExtension().lastPathComponent
+                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                            return isPrivate(id: att.id, url: url)
+                                        }
+                                        return false
+                                    },
+                                    onReplaceAttachment: { originalURL, newURL, kind in
+                                        // Replace should preserve attachment identity.
+                                        // AttachmentViewerView has already written the replacement file to disk and passes
+                                        // the final on-disk URL here as newURL.
+                                        if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == originalURL.standardizedFileURL }) {
+                                            existingAttachmentURLMap[attID] = newURL
+        
+                                            // Persistence deferred to save() to avoid SessionDetailView dismissal.
+                                            /*
+                                            // Persist the new file path to Core Data so future loads resolve correctly.
+                                            let req = NSFetchRequest<Attachment>(entityName: "Attachment")
+                                            req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
+                                            req.fetchLimit = 1
+                                            if let hit = try? viewContext.fetch(req).first {
+                                                hit.fileURL = newURL.path
+                                                viewContext.processPendingChanges()
+                                            }
+        
+                                            #if canImport(UIKit)
+                                            if kind == .video {
+                                                _ = AttachmentStore.generateVideoPoster(url: newURL)
+                                            }
+                                            #endif
+                                            */
+                                        } else {
+                                            // Fallback: this may be a newly-staged (not-yet-persisted) item. Update staged bytes by id-stem.
+                                            let stem = originalURL.deletingPathExtension().lastPathComponent
+                                            if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
+                                                if let data = try? Data(contentsOf: newURL) {
+                                                    let old = stagedAttachments[idx]
+                                                    stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                                                }
+                                            }
+                                        }
+        
+                                    },
+                                    onSaveAsNewAttachment: { newURL, kind in
+                                        // Append a new staged item of provided kind after current index section-wise
+                                        let newID = UUID()
+                                        let data = (try? Data(contentsOf: newURL)) ?? Data()
+                                        let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+                                        // Ensure a real file exists at a stable URL for poster generation + playback.
+                                        // (VideoPosterView relies on a file URL; temp exports can disappear.)
+                                        if kind == .video, let sur = guaranteedSurrogateURL_edit(for: newAtt) {
+                                            
+                                            // Write the trimmed output to the surrogate URL so poster generation has a real file.
+                                            do {
+                                                // Ensure tmp folder exists
+                                                try FileManager.default.createDirectory(
+                                                    at: sur.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true,
+                                                    attributes: nil
+                                                )
+                                                // Prefer copy for large files; fall back to write if needed.
+                                                if FileManager.default.fileExists(atPath: sur.path) {
+                                                    try FileManager.default.removeItem(at: sur)
+                                                }
+                                                try FileManager.default.copyItem(at: newURL, to: sur)
+                                                existingAttachmentURLMap[newID] = sur
+                                            } catch {
+                                                // Fallback: keep using the export temp URL
+                                                existingAttachmentURLMap[newID] = newURL
+                                            }
+                                        } else {
+                                            existingAttachmentURLMap[newID] = newURL
+                                        }
+        
+                                        // Seed audio title for save-as-new so we don't fall back to "audio clip"
+                                        if kind == .audio {
+                                            let key = "stagedAudioNames_temp"
+                                            var dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
+                                            let stem = newURL.deletingPathExtension().lastPathComponent
+                                            if !stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                                dict[newID.uuidString] = stem
+                                                UserDefaults.standard.set(dict, forKey: key)
+                                            }
+                                        }
+                                        // Insert by section: images, then videos, then audios
+                                        switch kind {
+                                        case .image:
+                                            if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
+                                                stagedAttachments.insert(newAtt, at: splitIndex)
+                                            } else { stagedAttachments.append(newAtt) }
+                                        case .video:
+                                            let lastVideoIndex = stagedAttachments.lastIndex(where: { $0.kind == .video })
+                                            if let lastVideoIndex { stagedAttachments.insert(newAtt, at: lastVideoIndex + 1) }
+                                            else if let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image }) { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) }
+                                            else { stagedAttachments.append(newAtt) }
+                                        case .audio:
+                                            let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
+                                            if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
+                                        case .file:
+                                            stagedAttachments.append(newAtt)
+                                        }
+                                    },
+                                    canShare: false,
+                                    replaceStrategy: .deferred
+                                )
+    }
 }
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
 
@@ -2230,6 +2246,8 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
 
 
 
