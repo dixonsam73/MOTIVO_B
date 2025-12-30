@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1CE3B0332F04671D00BFF0B8 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 1CE3B0322F04671D00BFF0B8 /* Auth */; };
+		1CE3B03E2F04730900BFF0B8 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 1CE3B03D2F04730900BFF0B8 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -69,6 +70,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1CE3B03E2F04730900BFF0B8 /* Supabase in Frameworks */,
 				1CE3B0332F04671D00BFF0B8 /* Auth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -96,6 +98,7 @@
 				1CA2DFBD2E704AF800F23C97 /* MOTIVO */,
 				1CA2DFD02E704AFA00F23C97 /* MOTIVOTests */,
 				1CA2DFDA2E704AFA00F23C97 /* MOTIVOUITests */,
+				1CE3B03C2F04704900BFF0B8 /* Frameworks */,
 				1CA2DFBC2E704AF800F23C97 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -108,6 +111,13 @@
 				1CA2DFD72E704AFA00F23C97 /* MOTIVOUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		1CE3B03C2F04704900BFF0B8 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -131,6 +141,7 @@
 			name = MOTIVO;
 			packageProductDependencies = (
 				1CE3B0322F04671D00BFF0B8 /* Auth */,
+				1CE3B03D2F04730900BFF0B8 /* Supabase */,
 			);
 			productName = MOTIVO;
 			productReference = 1CA2DFBB2E704AF800F23C97 /* MOTIVO.app */;
@@ -611,6 +622,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1CE3B0312F04671D00BFF0B8 /* XCRemoteSwiftPackageReference "supabase-swift" */;
 			productName = Auth;
+		};
+		1CE3B03D2F04730900BFF0B8 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1CE3B0312F04671D00BFF0B8 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

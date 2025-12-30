@@ -14,8 +14,8 @@ import Combine
 import Supabase
 #endif
 
-// CHANGE-ID: 20251230_Step7_SupabaseAuthBridge_193205-8f3c
-// SCOPE: Step 7 — bridge native Sign in with Apple to Supabase Auth (native idToken flow); persist Supabase session userID + access token; wire NetworkManager bearer token
+// CHANGE-ID: 20251230_Step7_SupabaseAuthBridge_193205-8f3c_fix1
+// SCOPE: Step 7 — bridge native Sign in with Apple to Supabase Auth (native idToken flow); clarify missing module diagnostics (Supabase product needed for SupabaseClient)
 
 // MARK: - Keychain helper
 
@@ -173,7 +173,6 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         // Step 7: If backend config is present, bridge Apple → Supabase Auth (native idToken flow).
-        // This is what makes `auth.uid()` non-null, unlocking RLS writes/reads to `public.posts`.
         if BackendConfig.isConfigured {
             Task {
                 await self.signInToSupabaseIfPossible(credential: credential)
@@ -245,9 +244,10 @@ final class AuthManager: NSObject, ObservableObject {
             NSLog("[Auth] Supabase sign-in failed: %@", String(describing: error))
         }
         #else
-        // If you hit this path: add the Supabase Swift SDK (supabase-swift) via Swift Package Manager,
-        // then rebuild. We intentionally avoid an undocumented REST fallback here.
-        NSLog("[Auth] Supabase Swift SDK not present; add supabase-swift to use signInWithIdToken.")
+        // You have supabase-swift installed, but the MOTIVO target is missing the *Supabase* product/library.
+        // In Xcode: Package Dependencies → supabase-swift → add the "Supabase" product to the MOTIVO target
+        // (often below the visible list—scroll).
+        NSLog("[Auth] Supabase module not present. Add supabase-swift product 'Supabase' to the MOTIVO app target (not just 'Auth'), then rebuild.")
         #endif
     }
 

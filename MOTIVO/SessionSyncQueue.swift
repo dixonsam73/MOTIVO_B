@@ -6,6 +6,8 @@
 //  SCOPE: v7.12D — Deferred local publish queue (no networking)
 //  CHANGE-ID: 20251230-SessionSyncQueue-6A-wire-preview-upload
 //  SCOPE: v7.12D — Step 6A minimal real-call wiring (preview only)
+//  CHANGE-ID: 20251230_210900-SessionSyncQueue-NSLogFlush
+//  SCOPE: Step 7 — Ensure flush path is visible in Xcode console and always attempts upload in Backend Preview
 //
 
 import Foundation
@@ -61,25 +63,31 @@ public final class SessionSyncQueue: ObservableObject {
     /// In Local Simulation: logs and keeps items to reflect "waiting to publish".
     public func flushNow() async {
         let mode = BackendEnvironment.shared.mode
+        NSLog("[SessionSyncQueue] flushNow requested • mode=%@ • queued=%d", String(describing: mode), items.count)
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
-        if BackendEnvironment.shared.isPreview {
+        if mode == .backendPreview {
             for item in items {
                 let result = await BackendEnvironment.shared.publish.uploadPost(item.id)
                 switch result {
                 case .success:
+                    NSLog("[SessionSyncQueue] upload success • postID=%@", item.id.uuidString)
                     BackendLogger.notice("Preview upload success • postID=\(item.id.uuidString)")
                     self.dequeue(postID: item.id)
                 case .failure(let error):
+                    NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", item.id.uuidString, error.localizedDescription)
                     BackendLogger.notice("Preview upload failed • postID=\(item.id.uuidString) • error=\(error.localizedDescription)")
-                    // Preserve current semantics: failures remain queued; no retries/timers added here.
+                    // Preserve semantics: failures remain queued; no retries/timers added here.
                 }
             }
+            NSLog("[SessionSyncQueue] flushNow completed • remaining=%d", items.count)
             BackendLogger.notice("Flush completed • remaining=\(items.count)")
         } else {
+            NSLog("[SessionSyncQueue] flushNow skipped (local-simulation) • remaining=%d", items.count)
             BackendLogger.notice("Flush skipped (local-simulation) • remaining=\(items.count)")
         }
     }
+
 
     // MARK: - Persistence
 

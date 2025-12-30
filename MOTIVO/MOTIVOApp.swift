@@ -12,6 +12,9 @@ import Foundation
 // CHANGE-ID: 20251203_BackendIdentityHandshakeStep5
 // SCOPE: Step 5 — Inject LocalStubIdentityService into AuthManager (no behaviour/UI changes)
 
+// CHANGE-ID: 20251230_Step7_BackendConfigApplyAtLaunch
+// SCOPE: Step 7 — Apply BackendConfig at app launch so NetworkManager.baseURL/authToken are configured before backend services select simulated vs HTTP
+
 @main
 struct MOTIVOApp: App {
     let persistenceController = PersistenceController.shared
@@ -20,6 +23,8 @@ struct MOTIVOApp: App {
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     init() {
+        // Step 7: ensure live HTTP configuration is applied before any backend services initialize
+        BackendConfig.apply()
         let identityService = LocalStubIdentityService()
         self.identityService = identityService
         _auth = StateObject(wrappedValue: AuthManager(identityService: identityService))

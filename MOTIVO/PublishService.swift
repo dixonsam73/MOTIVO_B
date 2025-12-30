@@ -1,6 +1,8 @@
 // CHANGE-ID: 20251230_6A-PublishService-SessionIDOverload
 // SCOPE: Step 6A — add sessionID overload; make local-only default; remove heuristics
 // CHANGE-ID: 20251230_6A-PublishService-PreviewBackend
+// CHANGE-ID: 20251230_210900-PublishService-NSLogPreviewGate
+// SCOPE: Step 7 — add explicit logs for preview gate + ensure flush is attempted
 // SCOPE: Step 6A — backend preview wiring for publish/unpublish (non-blocking)
 // CHANGE-ID: v7.12B-PublishService-DebugGlobal-20251112_133247
 // SCOPE: Add DEBUG helper to read other owners' published sets
@@ -83,7 +85,11 @@ final class PublishService: ObservableObject {
 
         // Step 6A: Preview-only backend wiring (non-blocking) using explicit sessionID.
         Task { @MainActor in
-            if (BackendEnvironment.shared.isPreview) && (NetworkManager.shared.baseURL != nil) {
+            let mode = BackendEnvironment.shared.mode
+            let hasBaseURL = (NetworkManager.shared.baseURL != nil)
+            let configured = BackendConfig.isConfigured
+            NSLog("[PublishService] preview-gate check • mode=%@ • hasBaseURL=%@ • isConfigured=%@", String(describing: mode), String(describing: hasBaseURL), String(describing: configured))
+            if (mode == .backendPreview) && hasBaseURL && configured {
                 if shouldPublish {
                     SessionSyncQueue.shared.enqueue(postID: sessionID)
                     await SessionSyncQueue.shared.flushNow()

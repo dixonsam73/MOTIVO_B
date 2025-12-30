@@ -1,3 +1,6 @@
+// CHANGE-ID: 20251230_200530-BackendDiagnostics-PreviewToHTTP
+// SCOPE: Step 7 — Log simulated calls only when BackendEnvironment is in simulated preview
+
 //
 //  BackendDiagnostics.swift
 //  MOTIVO
@@ -16,8 +19,7 @@ public final class BackendDiagnostics {
     public func simulatedCall(_ name: String, meta: [String: String] = [:]) async {
         // Small artificial delay to mimic an async hop (kept tiny for UX safety).
         try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-        let mode = currentBackendMode()
-        if mode == .backendPreview {
+        if BackendEnvironment.shared.isPreview {
             let metaString = meta.map { "\($0.key)=\($0.value)" }.joined(separator: " ")
             print("🌐 [Simulated API] \(name) \(metaString)")
         } else {
