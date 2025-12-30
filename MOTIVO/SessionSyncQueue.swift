@@ -4,6 +4,8 @@
 //
 //  CHANGE-ID: 20251112-SessionSyncQueue-a9e1-fix2
 //  SCOPE: v7.12D — Deferred local publish queue (no networking)
+//  CHANGE-ID: 20251230-SessionSyncQueue-6A-wire-preview-upload
+//  SCOPE: v7.12D — Step 6A minimal real-call wiring (preview only)
 //
 
 import Foundation
@@ -61,11 +63,17 @@ public final class SessionSyncQueue: ObservableObject {
         let mode = BackendEnvironment.shared.mode
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
-        if mode == .backendPreview {
+        if BackendEnvironment.shared.isPreview {
             for item in items {
-                await BackendDiagnostics.shared.simulatedCall("SessionSyncQueue.flush.upload",
-                                                             meta: ["postID": item.id.uuidString])
-                self.dequeue(postID: item.id)
+                let result = await BackendEnvironment.shared.publish.uploadPost(item.id)
+                switch result {
+                case .success:
+                    BackendLogger.notice("Preview upload success • postID=\(item.id.uuidString)")
+                    self.dequeue(postID: item.id)
+                case .failure(let error):
+                    BackendLogger.notice("Preview upload failed • postID=\(item.id.uuidString) • error=\(error.localizedDescription)")
+                    // Preserve current semantics: failures remain queued; no retries/timers added here.
+                }
             }
             BackendLogger.notice("Flush completed • remaining=\(items.count)")
         } else {

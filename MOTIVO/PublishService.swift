@@ -1,3 +1,7 @@
+// CHANGE-ID: 20251230_6A-PublishService-SessionIDOverload
+// SCOPE: Step 6A — add sessionID overload; make local-only default; remove heuristics
+// CHANGE-ID: 20251230_6A-PublishService-PreviewBackend
+// SCOPE: Step 6A — backend preview wiring for publish/unpublish (non-blocking)
 // CHANGE-ID: v7.12B-PublishService-DebugGlobal-20251112_133247
 // SCOPE: Add DEBUG helper to read other owners' published sets
 // PublishService.swift
@@ -57,6 +61,46 @@ final class PublishService: ObservableObject {
         NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
     }
 
+    /// Overload with explicit sessionID for backend preview wiring.
+    /// Performs the same local registry update, then (in preview) enqueues or deletes via backend using the provided sessionID.
+    func publishIfNeeded(objectID: NSManagedObjectID, sessionID: UUID, shouldPublish: Bool) {
+        let uri = objectID.uriRepresentation().absoluteString
+
+        var set = publishedURIs
+        let changed: Bool
+        if shouldPublish {
+            changed = set.insert(uri).inserted
+        } else {
+            changed = set.remove(uri) != nil
+        }
+        guard changed else { return }
+
+        // Persist first, then publish new value (all on main actor).
+        persist(set)
+        publishedURIs = set
+
+        NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
+
+        // Step 6A: Preview-only backend wiring (non-blocking) using explicit sessionID.
+        Task { @MainActor in
+            if (BackendEnvironment.shared.isPreview) && (NetworkManager.shared.baseURL != nil) {
+                if shouldPublish {
+                    SessionSyncQueue.shared.enqueue(postID: sessionID)
+                    await SessionSyncQueue.shared.flushNow()
+                    NSLog("[PublishService] Preview enqueue + flush for published session → %@", sessionID.uuidString)
+                } else {
+                    let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
+                    switch result {
+                    case .success:
+                        NSLog("[PublishService] Preview deletePost success → %@", sessionID.uuidString)
+                    case .failure(let error):
+                        NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", sessionID.uuidString, String(describing: error))
+                    }
+                }
+            }
+        }
+    }
+
     func publish(objectID: NSManagedObjectID) {
         publishIfNeeded(objectID: objectID, shouldPublish: true)
     }
@@ -102,5 +146,4 @@ final class PublishService: ObservableObject {
         return arr.contains(uri)
     }
 #endif
-
 }

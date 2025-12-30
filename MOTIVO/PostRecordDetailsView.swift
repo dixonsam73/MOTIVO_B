@@ -1410,7 +1410,11 @@ onDelete: { url in
             try viewContext.save()
             viewContext.processPendingChanges()
             // v7.12A — Social Pilot (local-only)
-            PublishService.shared.publishIfNeeded(objectID: s.objectID, shouldPublish: isPublic /* or your current flag */)
+            if let sid = s.id {
+                PublishService.shared.publishIfNeeded(objectID: s.objectID, sessionID: sid, shouldPublish: isPublic /* or your current flag */)
+            } else {
+                print("Publish skipped: missing Session.id")
+            }
             FeedInteractionStore.markForPublish(s.id ?? UUID())
 
             // Cleanup: remove staged items that were just committed successfully
@@ -1998,6 +2002,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

@@ -1,4 +1,9 @@
 //
+// CHANGE-ID: step-6A-http-publish
+// SCOPE: Add HTTPBackendPublishService and wire into backendPreview selection
+//
+
+//
 //  BackendShim.swift
 //  MOTIVO
 //
@@ -91,6 +96,58 @@ public final class SimulatedPublishService: BackendPublishService {
     }
 }
 
+public final class HTTPBackendPublishService: BackendPublishService {
+    public init() {}
+
+    @MainActor
+    public func uploadPost(_ postID: UUID) async -> Result<Void, Error> {
+        let path = "v1/publish/\(postID.uuidString)"
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "POST",
+            query: nil,
+            jsonBody: nil
+        )
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+    @MainActor
+    public func updatePost(_ postID: UUID) async -> Result<Void, Error> {
+        // Not part of Step 6A contract yet; keep simulated behavior
+        await BackendDiagnostics.shared.simulatedCall("HTTPBackendPublishService.updatePost", meta: ["postID": postID.uuidString])
+        return .success(())
+    }
+
+    @MainActor
+    public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
+        let path = "v1/publish/\(postID.uuidString)"
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "DELETE",
+            query: nil,
+            jsonBody: nil
+        )
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+    @MainActor
+    public func fetchFeed(scope: String) async -> Result<Void, Error> {
+        // Not part of Step 6A contract yet; keep simulated behavior
+        await BackendDiagnostics.shared.simulatedCall("HTTPBackendPublishService.fetchFeed", meta: ["scope": scope])
+        return .success(())
+    }
+}
+
 public final class SimulatedProfileService: BackendProfileService {
     public init() {}
     @MainActor
@@ -139,7 +196,13 @@ public final class BackendEnvironment {
 
     private init() {
         // All simulated by default. Real services can be swapped in later.
-        self.publish = SimulatedPublishService()
+        let hasConfig = (NetworkManager.shared.baseURL != nil)
+        let mode = currentBackendMode()
+        if mode == .backendPreview && hasConfig {
+            self.publish = HTTPBackendPublishService()
+        } else {
+            self.publish = SimulatedPublishService()
+        }
         self.profile = SimulatedProfileService()
         self.follow  = SimulatedFollowService()
     }
@@ -150,3 +213,4 @@ public final class BackendEnvironment {
     @inline(__always)
     public var isPreview: Bool { mode == .backendPreview }
 }
+

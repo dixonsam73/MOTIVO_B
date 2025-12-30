@@ -93,6 +93,46 @@ public struct DebugViewerView: View {
                 APIConfigView()
                 SyncQueueSection()
 
+                // Backend • Step 6A diagnostics
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Backend • Step 6A").font(.headline)
+
+                    // 1) Mode
+                    Text("mode: \(BackendEnvironment.shared.mode.rawValue)  preview: \(BackendEnvironment.shared.isPreview ? "true" : "false")")
+                        .font(.subheadline)
+
+                    // 2) Network config
+                    Group {
+                        if let url = NetworkManager.shared.baseURL {
+                            Text("baseURL: \(url.absoluteString)")
+                                .font(.footnote)
+                        } else {
+                            Text("baseURL: nil")
+                                .font(.footnote)
+                        }
+                    }
+
+                    // 3) Publish service type
+                    Text("publish service: \(String(describing: type(of: BackendEnvironment.shared.publish)))")
+                        .font(.subheadline)
+
+                    // 4) Queue
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("queue: \(SessionSyncQueue.shared.items.count)")
+                            .font(.subheadline)
+                        ForEach(Array(SessionSyncQueue.shared.items.prefix(5)), id: \.id) { item in
+                            Text("• \(item.id.uuidString)\(item.lastError != nil ? " — " + (item.lastError ?? "") : "")")
+                                .font(.footnote)
+                        }
+                    }
+
+                    // 5) Hint
+                    Text("Note: publish service selection is decided at app launch; relaunch after changing preview/config.")
+                        .font(.footnote)
+                        .opacity(0.7)
+                }
+                .padding(.horizontal)
+
                 // Simulate Follows panel
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Simulate Follows").font(.headline)
@@ -429,3 +469,4 @@ public enum DebugDump {
 }
 
 #endif
+
