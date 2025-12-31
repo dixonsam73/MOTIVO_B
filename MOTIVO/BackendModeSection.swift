@@ -26,7 +26,7 @@ public struct BackendModeSection: View {
                 })
             ) {
                 Text("Local Simulation").tag(BackendMode.localSimulation)
-                Text("Backend Preview").tag(BackendMode.backendPreview)
+                Text("Backend (Supabase)").tag(BackendMode.backendPreview)
             }
             .pickerStyle(.segmented)
 

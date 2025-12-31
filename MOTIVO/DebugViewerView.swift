@@ -98,8 +98,9 @@ public struct DebugViewerView: View {
                     Text("Backend • Step 6A").font(.headline)
 
                     // 1) Mode
-                    Text("mode: \(BackendEnvironment.shared.mode.rawValue)  preview: \(BackendEnvironment.shared.isPreview ? "true" : "false")")
-                        .font(.subheadline)
+                    Text("mode: \(BackendEnvironment.shared.mode.rawValue) • backend enabled: \(BackendEnvironment.shared.mode == .backendPreview ? "true" : "false")"
+                    )
+                    .font(.subheadline)
 
                     // 2) Network config
                     Group {
