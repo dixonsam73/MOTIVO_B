@@ -7,8 +7,6 @@
 import Foundation
 import SwiftUI
 
-// MARK: - BackendKeys + Mode Setter (compat for BackendModeSection)
-
 public enum BackendKeys {
     public static let modeKey = "backendMode_v1"
 }
@@ -17,8 +15,6 @@ public enum BackendKeys {
 public func setBackendMode(_ mode: BackendMode) {
     UserDefaults.standard.set(mode.rawValue, forKey: BackendKeys.modeKey)
 }
-
-// MARK: - Backend Mode
 
 public enum BackendMode: String, CaseIterable, Identifiable {
     case localSimulation
@@ -34,10 +30,6 @@ public enum BackendMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Backend Feed Models (Step 8A/8B)
-
-/// Minimal representation of a Supabase `public.posts` row for debug feed fetch.
-/// Keep fields optional/loose to avoid schema coupling.
 public struct BackendPost: Codable, Identifiable, Hashable {
     public let id: UUID
     public let ownerUserID: String?
@@ -58,32 +50,24 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     }
 }
 
-/// Debug-only in-memory store for fetched backend posts.
-/// Intentionally not persisted (no Core Data / no disk writes).
 @MainActor
 public final class BackendFeedStore: ObservableObject {
     public static let shared = BackendFeedStore()
 
-    // Step 8A primary output (Mine)
     @Published public private(set) var minePosts: [BackendPost] = []
-
-    // Step 8B output (All)
     @Published public private(set) var allPosts: [BackendPost] = []
 
-    // Step 8A.1 diagnostics (additive)
     @Published public private(set) var lastRawCount: Int = 0
     @Published public private(set) var lastMineCount: Int = 0
     @Published public private(set) var lastOwnerKey: String? = nil
     @Published public private(set) var lastOwnerSamples: [String] = []
     @Published public private(set) var lastCreatedAtSamples: [String] = []
 
-    // Step 8B diagnostics (additive)
     @Published public private(set) var lastScope: String? = nil
     @Published public private(set) var lastAllCount: Int = 0
     @Published public private(set) var lastTargetOwnerCount: Int = 0
     @Published public private(set) var lastTargetOwnerSamples: [String] = []
 
-    // Common status
     @Published public private(set) var isFetching: Bool = false
     @Published public private(set) var lastError: String? = nil
     @Published public private(set) var lastFetchAt: Date? = nil
@@ -107,7 +91,6 @@ public final class BackendFeedStore: ObservableObject {
         lastTargetOwnerCount = targetOwners.count
         lastTargetOwnerSamples = Array(targetOwners.prefix(3))
 
-        // Preserve existing values until success, but clear post arrays for clarity
         minePosts = []
         allPosts = []
     }
@@ -134,8 +117,6 @@ public final class BackendFeedStore: ObservableObject {
     }
 }
 
-// MARK: - Backend Services Protocols (preview contract)
-
 public protocol BackendPublishService {
     func uploadPost(_ postID: UUID) async -> Result<Void, Error>
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
@@ -145,8 +126,6 @@ public protocol BackendPublishService {
 
 public protocol BackendProfileService {}
 public protocol BackendFollowService {}
-
-// MARK: - Simulated Services
 
 public final class SimulatedPublishService: BackendPublishService {
     public init() {}
@@ -176,15 +155,8 @@ public final class SimulatedPublishService: BackendPublishService {
     }
 }
 
-public final class SimulatedProfileService: BackendProfileService {
-    public init() {}
-}
-
-public final class SimulatedFollowService: BackendFollowService {
-    public init() {}
-}
-
-// MARK: - HTTP Publish Service (Supabase PostgREST)
+public final class SimulatedProfileService: BackendProfileService { public init() {} }
+public final class SimulatedFollowService: BackendFollowService { public init() {} }
 
 public final class HTTPBackendPublishService: BackendPublishService {
     public init() {}
@@ -275,7 +247,6 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
     @MainActor
     public func fetchFeed(scope: String) async -> Result<Void, Error> {
-        // Step 8A/8B: Mine + All debug fetch
         let normalized = scope.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         guard normalized == "mine" || normalized == "all" else {
             return .failure(NSError(domain: "Backend", code: 10, userInfo: [NSLocalizedDescriptionKey: "Unsupported feed scope: \(scope)"]))
@@ -293,15 +264,12 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
         }
 
-        // Target owner set for "all" = me + local simulated following IDs.
-        // NOTE: Until real follow relationships exist, this will usually equal Mine.
         let ownerLower = owner.lowercased()
 
         var targetOwnersLower: [String] = [ownerLower]
         if normalized == "all" {
             let following = FollowStore.shared.followingIDs()
             let normalizedFollowing = following.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            // Deduplicate while preserving order
             var seen = Set<String>()
             var merged: [String] = []
             for id in ([ownerLower] + normalizedFollowing) {
@@ -318,11 +286,21 @@ public final class HTTPBackendPublishService: BackendPublishService {
             "Accept": "application/json"
         ]
 
-        // IMPORTANT: keep path clean (no "?select=" in path) to avoid path-encoding issues.
+        // Step 8C.1 sanity: Mine uses proper server-side filter + order.
+        // NOTE: owner_user_id is uuid, so we MUST use eq., not ilike.
+        let queryItems: [URLQueryItem]? = {
+            guard normalized == "mine" else { return nil }
+            return [
+                URLQueryItem(name: "select", value: "*"),
+                URLQueryItem(name: "owner_user_id", value: "eq.\(ownerLower)"),
+                URLQueryItem(name: "order", value: "created_at.desc")
+            ]
+        }()
+
         let result = await NetworkManager.shared.request(
             path: "rest/v1/posts",
             method: "GET",
-            query: nil,
+            query: queryItems,
             jsonBody: nil,
             headers: headers
         )
@@ -333,10 +311,8 @@ public final class HTTPBackendPublishService: BackendPublishService {
                 let decoder = JSONDecoder()
                 let rawPosts = try decoder.decode([BackendPost].self, from: data)
 
-                // Mine filter (case-insensitive UUID string match)
                 let mine = rawPosts.filter { ($0.ownerUserID ?? "").lowercased() == ownerLower }
 
-                // All filter (me + followed owners), case-insensitive
                 let all: [BackendPost]
                 if normalized == "all" {
                     let allow = Set(targetOwnersLower)
@@ -345,7 +321,6 @@ public final class HTTPBackendPublishService: BackendPublishService {
                     all = mine
                 }
 
-                // Best-effort sort by created_at desc
                 let iso = ISO8601DateFormatter()
                 func sortByCreatedDesc(_ posts: [BackendPost]) -> [BackendPost] {
                     posts.sorted { a, b in
@@ -372,23 +347,16 @@ public final class HTTPBackendPublishService: BackendPublishService {
     }
 }
 
-// MARK: - Backend Environment
-
 public final class BackendEnvironment {
     public static let shared = BackendEnvironment()
 
-    // Note: publish service selection is intentionally *dynamic* so that switching
-    // Backend Mode or applying BackendConfig does not require an app relaunch.
     public var publish: BackendPublishService {
         let mode = currentBackendMode()
-
-        // "Backend Preview" becomes real HTTP when configured.
         let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
 
         if mode == .backendPreview && hasHTTPConfig {
             return HTTPBackendPublishService()
         }
-
         return SimulatedPublishService()
     }
 
@@ -403,12 +371,9 @@ public final class BackendEnvironment {
     @inline(__always)
     public var mode: BackendMode { currentBackendMode() }
 
-    // Compatibility shim — required by existing green files
     @inline(__always)
     public var isPreview: Bool { mode == .backendPreview }
 }
-
-// MARK: - Backend Mode Resolution (MUST be public for other files)
 
 @inline(__always)
 public func currentBackendMode() -> BackendMode {
