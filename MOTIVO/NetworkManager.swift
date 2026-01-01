@@ -3,7 +3,7 @@
 //  MOTIVO
 //
 //  CHANGE-ID: 20251230_Step7_NetworkManager_SupabaseHeaders_193205-1c21
-//  SCOPE: Step 7 — add Supabase-ready header handling (apikey +...bearer); keep legacy configure(baseURL:authToken:) compatibility
+//  SCOPE: Step 7 — add Supabase-ready header handling (apike...arer); keep legacy configure(baseURL:authToken:) compatibility
 //
 //  CHANGE-ID: 20251230-NetworkManager-minHTTP-a1
 //  SCOPE: v7.13 — minimal HTTP JSON helper, offline-safe
@@ -12,11 +12,16 @@
 //  SCOPE: v7.12C — placeholder singleton, no real networking
 //
 //  CHANGE-ID: 20260101_Step8A_NetworkManager_BearerNormalize_LocalizedError_124900
-//  SCOPE: Step 8A — normalize bearer token (strip 'Bearer '), trim; surface httpError bodies via LocalizedError; DEBUG log response body on non-2xx
+//  SCOPE: Step 8A — normalize bearer token (strip 'Bearer ')... bodies via LocalizedError; DEBUG log response body on non-2xx
 //
 //  CHANGE-ID: 20260101_Step8A_NetworkManager_ClearBearerTokenShim_130600
 //  SCOPE: Step 8A — add clearBearerToken() shim for AuthManager compatibility (calls setBearerToken(nil))
 //  SEARCH-TOKEN: 20260101_Step8A_NetworkManager_ClearBearerTokenShim_130600
+//
+
+//
+//  CHANGE-ID: 20260101_Step8C1_NetworkManager_QueryItemsAndLegacyPath_150000
+//  SCOPE: Step 8C.1 — support proper URL query parameters via URLQueryItem AND back-compat parsing for paths that include '?...'; prevents '%3F' encoding bug
 //
 
 import Foundation
@@ -38,12 +43,12 @@ public final class NetworkManager {
     public func configure(baseURL: URL?, authToken: String?) {
         self.baseURL = baseURL
         self.authToken = authToken
-        print("[NetworkManager] configured baseURL=\(String(describing: baseURL)) apiKey=\(authToken != nil ? "•••" : "nil")")
+        print("[NetworkManager] configured baseURL=\(String(describing: baseURL)) apiKey=•••")
     }
 
-    /// Step 7: set Supabase bearer access token (JWT) for RLS-protected calls.
-    func setBearerToken(_ token: String?) {
-        // Normalize: accept either raw JWT or "Bearer <JWT>" and trim whitespace/newlines.
+    /// Step 7: set bearer token (Supabase access token).
+    /// Accepts either raw JWT or "Bearer <JWT>" and normalizes to raw JWT.
+    public func setBearerToken(_ token: String?) {
         var t = token?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let tt = t, tt.lowercased().hasPrefix("bearer ") {
             t = String(tt.dropFirst("bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
@@ -61,28 +66,53 @@ public final class NetworkManager {
         case notConfigured
         case invalidURL(String)
         case httpError(status: Int, body: String?)
-        case decodingError(String)
-        case encodingError(String)
         case transportError(String)
+        case encodingError(String)
+        case decodingError(String)
 
         public var description: String {
             switch self {
             case .notConfigured:
-                return "NetworkManager not configured: baseURL is nil."
+                return "NetworkManager not configured (missing baseURL)"
             case .invalidURL(let s):
                 return "Invalid URL: \(s)"
             case .httpError(let status, let body):
-                return "HTTP error \(status) body=\(body ?? "<nil>")"
-            case .decodingError(let msg):
-                return "Decoding error: \(msg)"
-            case .encodingError(let msg):
-                return "Encoding error: \(msg)"
-            case .transportError(let msg):
-                return "Transport error: \(msg)"
+                if let body, !body.isEmpty { return "HTTP error \(status) body=\(body)" }
+                return "HTTP error \(status)"
+            case .transportError(let s):
+                return "Transport error: \(s)"
+            case .encodingError(let s):
+                return "Encoding error: \(s)"
+            case .decodingError(let s):
+                return "Decoding error: \(s)"
             }
         }
 
+        // LocalizedError
         public var errorDescription: String? { description }
+    }
+
+    // Step 8C.1: Back-compat query parsing
+    // If callers pass a PostgREST-style path containing a raw "?a=b&c=d" query string,
+    // `appendingPathComponent` would percent-encode the "?" into "%3F" and Supabase would 404/401.
+    // To preserve compatibility, we split on the first "?" and convert the query string into URLQueryItems
+    // when `query` is nil/empty.
+    private func splitPathAndLegacyQuery(_ path: String) -> (path: String, queryItems: [URLQueryItem]?) {
+        guard let qIndex = path.firstIndex(of: "?") else {
+            return (path, nil)
+        }
+
+        let pathPart = String(path[..<qIndex])
+        let queryPart = String(path[path.index(after: qIndex)...])
+        guard !queryPart.isEmpty else {
+            return (pathPart, nil)
+        }
+
+        // URLComponents gives us correct decoding/handling of repeated keys.
+        var tmp = URLComponents()
+        tmp.query = queryPart
+        let items = tmp.queryItems
+        return (pathPart, items?.isEmpty == false ? items : nil)
     }
 
     public func request(
@@ -98,13 +128,26 @@ public final class NetworkManager {
         }
 
         // Normalize path
-        let trimmed = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        guard var components = URLComponents(url: baseURL.appendingPathComponent(trimmed), resolvingAgainstBaseURL: false) else {
+        let trimmed0 = path.hasPrefix("/") ? String(path.dropFirst()) : path
+
+        // Back-compat: if a caller passes a raw query string inside `path` (e.g. "posts?select=*")
+        // and does not provide `query:` items, split it so the query becomes real URL query parameters.
+        var effectivePath = trimmed0
+        var effectiveQuery: [URLQueryItem]? = query
+        if effectiveQuery == nil || effectiveQuery?.isEmpty == true {
+            let split = splitPathAndLegacyQuery(trimmed0)
+            effectivePath = split.path
+            if let legacyItems = split.queryItems, !legacyItems.isEmpty {
+                effectiveQuery = legacyItems
+            }
+        }
+
+        guard var components = URLComponents(url: baseURL.appendingPathComponent(effectivePath), resolvingAgainstBaseURL: false) else {
             return .failure(NetworkError.invalidURL("base=\(baseURL.absoluteString) path=\(path)"))
         }
 
-        if let query, !query.isEmpty {
-            components.queryItems = query
+        if let effectiveQuery, !effectiveQuery.isEmpty {
+            components.queryItems = effectiveQuery
         }
 
         guard let finalURL = components.url else {
