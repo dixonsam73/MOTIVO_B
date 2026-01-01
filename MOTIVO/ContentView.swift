@@ -111,6 +111,14 @@ fileprivate struct SessionsRootView: View {
     private var effectiveUserID: String? { userID }
     #endif
 
+    // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
+    @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
+
+    private var useBackendFeed: Bool {
+        BackendEnvironment.shared.isPreview &&
+        BackendConfig.isConfigured &&
+        (NetworkManager.shared.baseURL != nil)
+    }
 
     // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
     @FetchRequest(
@@ -154,6 +162,44 @@ fileprivate struct SessionsRootView: View {
 
     // Debounce
     @State private var debounceCancellable: AnyCancellable?
+
+// Step 8C: Backend feed list (read-only rows; no navigation yet)
+@ViewBuilder private var backendFeedList: some View {
+    let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+    let rows: [BackendPost] = (selectedScope == .mine)
+        ? backendFeedStore.minePosts
+        : backendFeedStore.allPosts
+
+    List {
+        Section {
+            if rows.isEmpty {
+                if backendFeedStore.isFetching {
+                    Text("Fetching…")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                } else if let err = backendFeedStore.lastError, !err.isEmpty {
+                    Text(err)
+                        .foregroundStyle(.red)
+                } else {
+                    Text("No backend posts yet.")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            } else {
+                ForEach(rows, id: \.id) { post in
+                    BackendPostRow(post: post)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listSectionSeparator(.hidden, edges: .all)
+    }
+    .task(id: scopeKey) {
+        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+    }
+    .refreshable {
+        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+    }
+}
 
     var body: some View {
         NavigationStack {
@@ -220,37 +266,43 @@ fileprivate struct SessionsRootView: View {
                 .padding(.bottom, -8)
 
                 // ---------- Sessions List ----------
-                List {
-                    Section {
-                        let rows: [Session] = filteredSessions
-                        if rows.isEmpty {
-                            Text("No sessions match your filters yet.")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        } else {
-                            ForEach(rows, id: \.objectID) { session in
-                                ZStack {
-                                    NavigationLink(
-                                        destination: SessionDetailView(session: session),
-                                        isActive: Binding(
-                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                            set: { active in if !active { pushSessionID = nil } }
-                                        )
-                                    ) { EmptyView() }
-                                    .opacity(0)
+                Group {
+                if useBackendFeed {
+                    backendFeedList
+                } else {
+                    List {
+                        Section {
+                            let rows: [Session] = filteredSessions
+                            if rows.isEmpty {
+                                Text("No sessions match your filters yet.")
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            } else {
+                                ForEach(rows, id: \.objectID) { session in
+                                    ZStack {
+                                        NavigationLink(
+                                            destination: SessionDetailView(session: session),
+                                            isActive: Binding(
+                                                get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                set: { active in if !active { pushSessionID = nil } }
+                                            )
+                                        ) { EmptyView() }
+                                        .opacity(0)
 
-                                    SessionRow(session: session, scope: selectedScope)
-                                        .contentShape(Rectangle())
-                                        .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
-                                        .cardSurface()
-                                        .padding(.bottom, Theme.Spacing.section)
+                                        SessionRow(session: session, scope: selectedScope)
+                                            .contentShape(Rectangle())
+                                            .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
+                                            .cardSurface()
+                                            .padding(.bottom, Theme.Spacing.section)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .listRowSeparator(.hidden)
                                 }
-                                .buttonStyle(.plain)
-                                .listRowSeparator(.hidden)
+                                .onDelete(perform: deleteSessions)
                             }
-                            .onDelete(perform: deleteSessions)
                         }
+                        .listSectionSeparator(.hidden, edges: .all)
                     }
-                    .listSectionSeparator(.hidden, edges: .all)
+                }
                 }
                 .listStyle(.plain)
                 .listRowSeparator(.hidden)
@@ -367,7 +419,7 @@ fileprivate struct SessionsRootView: View {
 .overlay(alignment: .top) {
     // Invisible hit area over the top toolbar GAP only (between avatar and record/add cluster)
     // Avatar is 40pt + 8pt padding each side inside the inset; right cluster has two 40pt buttons with spacing TopButtonsUI.spacing.
-    // We place a narrow transparent rectangle centered in the gap so it doesn't intercept button taps.
+    // We place a narrow transparent rectangle centered in the remaining space so it doesn't intercept button taps.
     GeometryReader { geo in
         // Compute a conservative gap: full width minus left avatar block (~56) and right cluster (~40+spacing+40) and horizontal insets
         let horizontalInset = Theme.Spacing.l
@@ -1521,6 +1573,45 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #else
 fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat) -> UIImage? { nil }
 #endif
+// MARK: - Step 8C Backend Feed Row (read-only)
+
+fileprivate struct BackendPostRow: View {
+    let post: BackendPost
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Backend Post")
+                    .font(Theme.Text.body)
+                Spacer()
+                if let created = post.createdAt, !created.isEmpty {
+                    Text(created)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
+            }
+
+            if let owner = post.ownerUserID, !owner.isEmpty {
+                Text(owner)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+
+            if let sid = post.sessionID?.uuidString {
+                Text(sid)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
+            }
+        }
+        .cardSurface()
+    }
+}
+
+
+
 
 
 
