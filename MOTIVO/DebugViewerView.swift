@@ -1,5 +1,6 @@
 // CHANGE-ID: v7.13A-DebugViewer-OverrideViewerID-20251201_1830
 // SCOPE: Social hardening — use Debug.currentUserIDOverride in followContext viewerID + ensure JSON block is visible in scroll view.
+// ADD-ON: Step 8A — Backend Feed debug fetch (Mine only), additive section + store binding.
 
 #if DEBUG
 import SwiftUI
@@ -47,6 +48,9 @@ public struct DebugViewerView: View {
     @State private var targetID: String = "user_B"
     @State private var acceptFromID: String = "local-device"
     @StateObject private var followStore = FollowStore.shared
+
+    // Step 8A (additive): backend feed debug store
+    @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
 
     private var activeViewerID: String {
         if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"), !o.isEmpty {
@@ -131,6 +135,51 @@ public struct DebugViewerView: View {
                     Text("Note: publish service selection is decided at app launch; relaunch after changing preview/config.")
                         .font(.footnote)
                         .opacity(0.7)
+                }
+                .padding(.horizontal)
+
+                // Backend • Step 8A feed diagnostics (Mine only) — additive
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Backend • Step 8A Feed (Mine)").font(.headline)
+
+                    HStack(spacing: 12) {
+                        Button(backendFeedStore.isFetching ? "Fetching…" : "Fetch Mine") {
+                            Task { _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "mine") }
+                        }
+                        .disabled(backendFeedStore.isFetching)
+
+                        Spacer()
+
+                        Text("posts: \(backendFeedStore.minePosts.count)")
+                            .font(.subheadline)
+                    }
+
+                    if let t = backendFeedStore.lastFetchAt {
+                        Text("lastFetchAt: \(t.formatted(date: .abbreviated, time: .standard))")
+                            .font(.footnote)
+                    } else {
+                        Text("lastFetchAt: nil")
+                            .font(.footnote)
+                            .opacity(0.7)
+                    }
+
+                    if let err = backendFeedStore.lastError, !err.isEmpty {
+                        Text("error: \(err)")
+                            .font(.footnote)
+                            .foregroundColor(.red)
+                    } else {
+                        Text("error: nil")
+                            .font(.footnote)
+                            .opacity(0.7)
+                    }
+
+                    if !backendFeedStore.minePosts.isEmpty {
+                        ForEach(Array(backendFeedStore.minePosts.prefix(3)), id: \.id) { p in
+                            Text("• \(p.id.uuidString)\(p.createdAt != nil ? " — " + (p.createdAt ?? "") : "")")
+                                .font(.footnote)
+                                .lineLimit(1)
+                        }
+                    }
                 }
                 .padding(.horizontal)
 
@@ -470,4 +519,3 @@ public enum DebugDump {
 }
 
 #endif
-
