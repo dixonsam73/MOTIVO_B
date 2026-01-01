@@ -1,7 +1,7 @@
 //
-// CHANGE-ID: 20260101_132700_Step8A1_BackendFeedDiagnostics_RestoreFetch
-// SCOPE: Step 8A.1 — Restore backend Mine feed fetch (GET /rest/v1/posts) + add debug diagnostics (raw vs mine counts, owner key, samples).
-// SEARCH-TOKEN: 20260101_132700_Step8A1_BackendFeedDiagnostics_RestoreFetch
+// CHANGE-ID: 20260101_141600_Step8B_AllFeed_DebugOnly
+// SCOPE: Step 8B — Add "all" scope fetch (debug-only) using local FollowStore followingIDs; keep Step 8A Mine intact; add minimal diagnostics.
+// SEARCH-TOKEN: 20260101_141600_Step8B_AllFeed_DebugOnly
 //
 
 import Foundation
@@ -34,7 +34,7 @@ public enum BackendMode: String, CaseIterable, Identifiable {
     }
 }
 
-// MARK: - Backend Feed Models (Step 8A)
+// MARK: - Backend Feed Models (Step 8A/8B)
 
 /// Minimal representation of a Supabase `public.posts` row for debug feed fetch.
 /// Keep fields optional/loose to avoid schema coupling.
@@ -64,8 +64,11 @@ public struct BackendPost: Codable, Identifiable, Hashable {
 public final class BackendFeedStore: ObservableObject {
     public static let shared = BackendFeedStore()
 
-    // Step 8A primary output
+    // Step 8A primary output (Mine)
     @Published public private(set) var minePosts: [BackendPost] = []
+
+    // Step 8B output (All)
+    @Published public private(set) var allPosts: [BackendPost] = []
 
     // Step 8A.1 diagnostics (additive)
     @Published public private(set) var lastRawCount: Int = 0
@@ -74,6 +77,12 @@ public final class BackendFeedStore: ObservableObject {
     @Published public private(set) var lastOwnerSamples: [String] = []
     @Published public private(set) var lastCreatedAtSamples: [String] = []
 
+    // Step 8B diagnostics (additive)
+    @Published public private(set) var lastScope: String? = nil
+    @Published public private(set) var lastAllCount: Int = 0
+    @Published public private(set) var lastTargetOwnerCount: Int = 0
+    @Published public private(set) var lastTargetOwnerSamples: [String] = []
+
     // Common status
     @Published public private(set) var isFetching: Bool = false
     @Published public private(set) var lastError: String? = nil
@@ -81,24 +90,39 @@ public final class BackendFeedStore: ObservableObject {
 
     private init() {}
 
-    public func beginFetch(ownerKey: String) {
+    public func beginFetch(ownerKey: String, scope: String, targetOwners: [String]) {
         isFetching = true
         lastError = nil
+
         lastOwnerKey = ownerKey
+        lastScope = scope
+
         lastRawCount = 0
         lastMineCount = 0
+        lastAllCount = 0
+
         lastOwnerSamples = []
         lastCreatedAtSamples = []
+
+        lastTargetOwnerCount = targetOwners.count
+        lastTargetOwnerSamples = Array(targetOwners.prefix(3))
+
+        // Preserve existing values until success, but clear post arrays for clarity
+        minePosts = []
+        allPosts = []
     }
 
-    public func endFetchSuccess(rawPosts: [BackendPost], minePosts: [BackendPost]) {
+    public func endFetchSuccess(rawPosts: [BackendPost], minePosts: [BackendPost], allPosts: [BackendPost]) {
         self.lastRawCount = rawPosts.count
         self.lastMineCount = minePosts.count
+        self.lastAllCount = allPosts.count
 
         self.lastOwnerSamples = Array(rawPosts.prefix(3)).map { ($0.ownerUserID ?? "<nil>") }
         self.lastCreatedAtSamples = Array(rawPosts.prefix(3)).map { ($0.createdAt ?? "<nil>") }
 
         self.minePosts = minePosts
+        self.allPosts = allPosts
+
         self.lastFetchAt = Date()
         self.isFetching = false
         self.lastError = nil
@@ -251,9 +275,9 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
     @MainActor
     public func fetchFeed(scope: String) async -> Result<Void, Error> {
-        // Step 8A: Mine-only debug fetch
+        // Step 8A/8B: Mine + All debug fetch
         let normalized = scope.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard normalized == "mine" else {
+        guard normalized == "mine" || normalized == "all" else {
             return .failure(NSError(domain: "Backend", code: 10, userInfo: [NSLocalizedDescriptionKey: "Unsupported feed scope: \(scope)"]))
         }
 
@@ -269,7 +293,25 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
         }
 
-        BackendFeedStore.shared.beginFetch(ownerKey: owner)
+        // Target owner set for "all" = me + local simulated following IDs.
+        // NOTE: Until real follow relationships exist, this will usually equal Mine.
+        let ownerLower = owner.lowercased()
+
+        var targetOwnersLower: [String] = [ownerLower]
+        if normalized == "all" {
+            let following = FollowStore.shared.followingIDs()
+            let normalizedFollowing = following.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            // Deduplicate while preserving order
+            var seen = Set<String>()
+            var merged: [String] = []
+            for id in ([ownerLower] + normalizedFollowing) {
+                guard !id.isEmpty else { continue }
+                if seen.insert(id).inserted { merged.append(id) }
+            }
+            targetOwnersLower = merged
+        }
+
+        BackendFeedStore.shared.beginFetch(ownerKey: owner, scope: normalized, targetOwners: targetOwnersLower)
 
         let headers: [String: String] = [
             "apikey": apiKey,
@@ -292,18 +334,31 @@ public final class HTTPBackendPublishService: BackendPublishService {
                 let rawPosts = try decoder.decode([BackendPost].self, from: data)
 
                 // Mine filter (case-insensitive UUID string match)
-                let ownerLower = owner.lowercased()
                 let mine = rawPosts.filter { ($0.ownerUserID ?? "").lowercased() == ownerLower }
+
+                // All filter (me + followed owners), case-insensitive
+                let all: [BackendPost]
+                if normalized == "all" {
+                    let allow = Set(targetOwnersLower)
+                    all = rawPosts.filter { allow.contains(($0.ownerUserID ?? "").lowercased()) }
+                } else {
+                    all = mine
+                }
 
                 // Best-effort sort by created_at desc
                 let iso = ISO8601DateFormatter()
-                let sortedMine = mine.sorted { a, b in
-                    let da = a.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
-                    let db = b.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
-                    return da > db
+                func sortByCreatedDesc(_ posts: [BackendPost]) -> [BackendPost] {
+                    posts.sorted { a, b in
+                        let da = a.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
+                        let db = b.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
+                        return da > db
+                    }
                 }
 
-                BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine)
+                let sortedMine = sortByCreatedDesc(mine)
+                let sortedAll = sortByCreatedDesc(all)
+
+                BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
                 return .success(())
             } catch {
                 BackendFeedStore.shared.endFetchFailure(error)

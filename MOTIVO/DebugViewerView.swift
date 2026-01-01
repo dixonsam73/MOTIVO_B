@@ -1,7 +1,8 @@
 // CHANGE-ID: v7.13A-DebugViewer-OverrideViewerID-20251201_1830
 // SCOPE: Social hardening — use Debug.currentUserIDOverride in followContext viewerID + ensure JSON block is visible in scroll view.
-// ADD-ON: Step 8A — Backend Feed debug fetch (Mine only), additive section + store binding.
-// ADD-ON: Step 8A.1 — Display backend feed diagnostics (raw vs mine counts, owner key, samples). Additive-only.
+// ADD-ON: Step 8A/8A.1 — Backend Feed debug fetch (Mine) + diagnostics.
+// ADD-ON: Step 8B — Add Fetch All + allPosts + targetOwners diagnostics (debug-only). Additive-only.
+// SEARCH-TOKEN: 20260101_143400_Step8B_DebugViewer_Fix
 
 #if DEBUG
 import SwiftUI
@@ -50,7 +51,7 @@ public struct DebugViewerView: View {
     @State private var acceptFromID: String = "local-device"
     @StateObject private var followStore = FollowStore.shared
 
-    // Step 8A/8A.1 (additive): backend feed debug store
+    // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
 
     private var activeViewerID: String {
@@ -77,6 +78,119 @@ public struct DebugViewerView: View {
         }
         // Fallback so we *see* something if the buffer is never populated
         return "(debugJSONBuffer is empty – no debug payload received)"
+    }
+
+    // MARK: - Backend feed debug section (Step 8A/8B)
+
+    @ViewBuilder private var backendFeedSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backend • Step 8A/8B Feed").font(.headline)
+
+            HStack(spacing: 12) {
+                Button(backendFeedStore.isFetching ? "Fetching…" : "Fetch Mine") {
+                    Task { _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "mine") }
+                }
+                .disabled(backendFeedStore.isFetching)
+
+                Button(backendFeedStore.isFetching ? "Fetching…" : "Fetch All") {
+                    Task { _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "all") }
+                }
+                .disabled(backendFeedStore.isFetching)
+
+                Spacer()
+
+                Text("mine: \(backendFeedStore.minePosts.count) • all: \(backendFeedStore.allPosts.count)")
+                    .font(.subheadline)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("scope: \(backendFeedStore.lastScope ?? "nil")")
+                    .font(.footnote)
+
+                Text("rawPosts: \(backendFeedStore.lastRawCount) • minePosts: \(backendFeedStore.lastMineCount) • allPosts: \(backendFeedStore.lastAllCount)")
+                    .font(.footnote)
+
+                Text("targetOwners: \(backendFeedStore.lastTargetOwnerCount)")
+                    .font(.footnote)
+
+                if !backendFeedStore.lastTargetOwnerSamples.isEmpty {
+                    Text("target owner samples:")
+                        .font(.footnote)
+                        .opacity(0.8)
+                    ForEach(Array(backendFeedStore.lastTargetOwnerSamples.prefix(3).enumerated()), id: \.offset) { _, s in
+                        Text("• \(s)")
+                            .font(.footnote)
+                            .lineLimit(1)
+                    }
+                }
+
+                if let key = backendFeedStore.lastOwnerKey, !key.isEmpty {
+                    Text("ownerKey: \(key)")
+                        .font(.footnote)
+                        .lineLimit(1)
+                } else {
+                    Text("ownerKey: nil")
+                        .font(.footnote)
+                        .opacity(0.7)
+                }
+
+                if !backendFeedStore.lastOwnerSamples.isEmpty {
+                    Text("owner samples:")
+                        .font(.footnote)
+                        .opacity(0.8)
+                    ForEach(Array(backendFeedStore.lastOwnerSamples.prefix(3).enumerated()), id: \.offset) { _, s in
+                        Text("• \(s)")
+                            .font(.footnote)
+                            .lineLimit(1)
+                    }
+                }
+
+                if !backendFeedStore.lastCreatedAtSamples.isEmpty {
+                    Text("createdAt samples:")
+                        .font(.footnote)
+                        .opacity(0.8)
+                    ForEach(Array(backendFeedStore.lastCreatedAtSamples.prefix(3).enumerated()), id: \.offset) { _, s in
+                        Text("• \(s)")
+                            .font(.footnote)
+                            .lineLimit(1)
+                    }
+                }
+            }
+            .padding(.top, 4)
+
+            if let t = backendFeedStore.lastFetchAt {
+                Text("lastFetchAt: \(t.formatted(date: .abbreviated, time: .standard))")
+                    .font(.footnote)
+            } else {
+                Text("lastFetchAt: nil")
+                    .font(.footnote)
+                    .opacity(0.7)
+            }
+
+            if let err = backendFeedStore.lastError, !err.isEmpty {
+                Text("error: \(err)")
+                    .font(.footnote)
+                    .foregroundColor(.red)
+            } else {
+                Text("error: nil")
+                    .font(.footnote)
+                    .opacity(0.7)
+            }
+
+            if !backendFeedStore.allPosts.isEmpty {
+                Text("first posts:")
+                    .font(.footnote)
+                    .opacity(0.8)
+
+                ForEach(Array(backendFeedStore.allPosts.prefix(3)), id: \.id) { p in
+                    let suffix = p.createdAt.map { " — \($0)" } ?? ""
+                    Text("• \(p.id.uuidString)\(suffix)")
+                        .font(.footnote)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(.horizontal)
     }
 
     public var body: some View {
@@ -139,89 +253,8 @@ public struct DebugViewerView: View {
                 }
                 .padding(.horizontal)
 
-                // Backend • Step 8A feed diagnostics (Mine only) — additive
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Backend • Step 8A Feed (Mine)").font(.headline)
-
-                    HStack(spacing: 12) {
-                        Button(backendFeedStore.isFetching ? "Fetching…" : "Fetch Mine") {
-                            Task { _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "mine") }
-                        }
-                        .disabled(backendFeedStore.isFetching)
-
-                        Spacer()
-
-                        Text("posts: \(backendFeedStore.minePosts.count)")
-                            .font(.subheadline)
-                    }
-
-                    // Step 8A.1 diagnostics (read-only)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("rawPosts: \(backendFeedStore.lastRawCount) • minePosts: \(backendFeedStore.lastMineCount)")
-                            .font(.footnote)
-
-                        if let key = backendFeedStore.lastOwnerKey, !key.isEmpty {
-                            Text("ownerKey: \(key)")
-                                .font(.footnote)
-                                .lineLimit(1)
-                        } else {
-                            Text("ownerKey: nil")
-                                .font(.footnote)
-                                .opacity(0.7)
-                        }
-
-                        if !backendFeedStore.lastOwnerSamples.isEmpty {
-                            Text("owner samples:")
-                                .font(.footnote)
-                                .opacity(0.8)
-                            ForEach(Array(backendFeedStore.lastOwnerSamples.prefix(3).enumerated()), id: \.offset) { i, s in
-                                Text("• \(s)")
-                                    .font(.footnote)
-                                    .lineLimit(1)
-                            }
-                        }
-
-                        if !backendFeedStore.lastCreatedAtSamples.isEmpty {
-                            Text("createdAt samples:")
-                                .font(.footnote)
-                                .opacity(0.8)
-                            ForEach(Array(backendFeedStore.lastCreatedAtSamples.prefix(3).enumerated()), id: \.offset) { i, s in
-                                Text("• \(s)")
-                                    .font(.footnote)
-                                    .lineLimit(1)
-                            }
-                        }
-                    }
-                    .padding(.top, 4)
-
-                    if let t = backendFeedStore.lastFetchAt {
-                        Text("lastFetchAt: \(t.formatted(date: .abbreviated, time: .standard))")
-                            .font(.footnote)
-                    } else {
-                        Text("lastFetchAt: nil")
-                            .font(.footnote)
-                            .opacity(0.7)
-                    }
-
-                    if let err = backendFeedStore.lastError, !err.isEmpty {
-                        Text("error: \(err)")
-                            .font(.footnote)
-                            .foregroundColor(.red)
-                    } else {
-                        Text("error: nil")
-                            .font(.footnote)
-                            .opacity(0.7)
-                    }
-
-                    if !backendFeedStore.minePosts.isEmpty {
-                        ForEach(Array(backendFeedStore.minePosts.prefix(3)), id: \.id) { p in
-                            Text("• \(p.id.uuidString)\(p.createdAt != nil ? " — " + (p.createdAt ?? "") : "")")
-                                .font(.footnote)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .padding(.horizontal)
+                // Step 8A/8B debug-only section (additive)
+                backendFeedSection
 
                 // Simulate Follows panel
                 VStack(alignment: .leading, spacing: 12) {
