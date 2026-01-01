@@ -1,7 +1,7 @@
 //
-// CHANGE-ID: 20260101_124700_Step8A_BackendFeedFetch_PathQueryFix
-// SCOPE: Step 8A — Fix feed fetch URL construction by removing query string from path; filter/sort Mine client-side; debug-store only.
-// SEARCH-TOKEN: 20260101_124700_Step8A_BackendFeedFetch_PathQueryFix
+// CHANGE-ID: 20260101_132700_Step8A1_BackendFeedDiagnostics_RestoreFetch
+// SCOPE: Step 8A.1 — Restore backend Mine feed fetch (GET /rest/v1/posts) + add debug diagnostics (raw vs mine counts, owner key, samples).
+// SEARCH-TOKEN: 20260101_132700_Step8A1_BackendFeedDiagnostics_RestoreFetch
 //
 
 import Foundation
@@ -64,25 +64,44 @@ public struct BackendPost: Codable, Identifiable, Hashable {
 public final class BackendFeedStore: ObservableObject {
     public static let shared = BackendFeedStore()
 
+    // Step 8A primary output
     @Published public private(set) var minePosts: [BackendPost] = []
+
+    // Step 8A.1 diagnostics (additive)
+    @Published public private(set) var lastRawCount: Int = 0
+    @Published public private(set) var lastMineCount: Int = 0
+    @Published public private(set) var lastOwnerKey: String? = nil
+    @Published public private(set) var lastOwnerSamples: [String] = []
+    @Published public private(set) var lastCreatedAtSamples: [String] = []
+
+    // Common status
     @Published public private(set) var isFetching: Bool = false
     @Published public private(set) var lastError: String? = nil
     @Published public private(set) var lastFetchAt: Date? = nil
-    @Published public private(set) var lastFetchCount: Int = 0
 
     private init() {}
 
-    public func beginFetch() {
+    public func beginFetch(ownerKey: String) {
         isFetching = true
         lastError = nil
+        lastOwnerKey = ownerKey
+        lastRawCount = 0
+        lastMineCount = 0
+        lastOwnerSamples = []
+        lastCreatedAtSamples = []
     }
 
-    public func endFetchSuccess(posts: [BackendPost]) {
-        minePosts = posts
-        lastFetchCount = posts.count
-        lastFetchAt = Date()
-        isFetching = false
-        lastError = nil
+    public func endFetchSuccess(rawPosts: [BackendPost], minePosts: [BackendPost]) {
+        self.lastRawCount = rawPosts.count
+        self.lastMineCount = minePosts.count
+
+        self.lastOwnerSamples = Array(rawPosts.prefix(3)).map { ($0.ownerUserID ?? "<nil>") }
+        self.lastCreatedAtSamples = Array(rawPosts.prefix(3)).map { ($0.createdAt ?? "<nil>") }
+
+        self.minePosts = minePosts
+        self.lastFetchAt = Date()
+        self.isFetching = false
+        self.lastError = nil
     }
 
     public func endFetchFailure(_ error: Error) {
@@ -202,10 +221,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        // NOTE: delete endpoint here is unchanged; if NetworkManager path-encodes '?',
-        // this may also need the same treatment later. For Step 8A we are fixing feed fetch first.
         let path = "rest/v1/posts?id=eq.\(postID.uuidString)"
-
         let headers: [String: String] = [
             "apikey": apiKey,
             "Prefer": "return=minimal"
@@ -253,16 +269,14 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
         }
 
-        BackendFeedStore.shared.beginFetch()
+        BackendFeedStore.shared.beginFetch(ownerKey: owner)
 
-        // CRITICAL FIX:
-        // Do NOT embed "?select=..." in `path:` because NetworkManager path-encodes it (turns "?" into "%3F").
-        // Fetch the collection via a clean path, then Mine-filter + sort client-side for Step 8A.
         let headers: [String: String] = [
             "apikey": apiKey,
             "Accept": "application/json"
         ]
 
+        // IMPORTANT: keep path clean (no "?select=" in path) to avoid path-encoding issues.
         let result = await NetworkManager.shared.request(
             path: "rest/v1/posts",
             method: "GET",
@@ -275,21 +289,21 @@ public final class HTTPBackendPublishService: BackendPublishService {
         case .success(let data):
             do {
                 let decoder = JSONDecoder()
-                let posts = try decoder.decode([BackendPost].self, from: data)
+                let rawPosts = try decoder.decode([BackendPost].self, from: data)
 
-                // Mine filter (defensive even if RLS already restricts)
+                // Mine filter (case-insensitive UUID string match)
                 let ownerLower = owner.lowercased()
-                let mine = posts.filter { ($0.ownerUserID ?? "").lowercased() == ownerLower }
+                let mine = rawPosts.filter { ($0.ownerUserID ?? "").lowercased() == ownerLower }
 
                 // Best-effort sort by created_at desc
                 let iso = ISO8601DateFormatter()
-                let sorted = mine.sorted { a, b in
+                let sortedMine = mine.sorted { a, b in
                     let da = a.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
                     let db = b.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
                     return da > db
                 }
 
-                BackendFeedStore.shared.endFetchSuccess(posts: sorted)
+                BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine)
                 return .success(())
             } catch {
                 BackendFeedStore.shared.endFetchFailure(error)
@@ -308,9 +322,12 @@ public final class HTTPBackendPublishService: BackendPublishService {
 public final class BackendEnvironment {
     public static let shared = BackendEnvironment()
 
+    // Note: publish service selection is intentionally *dynamic* so that switching
+    // Backend Mode or applying BackendConfig does not require an app relaunch.
     public var publish: BackendPublishService {
         let mode = currentBackendMode()
 
+        // "Backend Preview" becomes real HTTP when configured.
         let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
 
         if mode == .backendPreview && hasHTTPConfig {

@@ -1,6 +1,7 @@
 // CHANGE-ID: v7.13A-DebugViewer-OverrideViewerID-20251201_1830
 // SCOPE: Social hardening — use Debug.currentUserIDOverride in followContext viewerID + ensure JSON block is visible in scroll view.
 // ADD-ON: Step 8A — Backend Feed debug fetch (Mine only), additive section + store binding.
+// ADD-ON: Step 8A.1 — Display backend feed diagnostics (raw vs mine counts, owner key, samples). Additive-only.
 
 #if DEBUG
 import SwiftUI
@@ -49,7 +50,7 @@ public struct DebugViewerView: View {
     @State private var acceptFromID: String = "local-device"
     @StateObject private var followStore = FollowStore.shared
 
-    // Step 8A (additive): backend feed debug store
+    // Step 8A/8A.1 (additive): backend feed debug store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
 
     private var activeViewerID: String {
@@ -153,6 +154,45 @@ public struct DebugViewerView: View {
                         Text("posts: \(backendFeedStore.minePosts.count)")
                             .font(.subheadline)
                     }
+
+                    // Step 8A.1 diagnostics (read-only)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("rawPosts: \(backendFeedStore.lastRawCount) • minePosts: \(backendFeedStore.lastMineCount)")
+                            .font(.footnote)
+
+                        if let key = backendFeedStore.lastOwnerKey, !key.isEmpty {
+                            Text("ownerKey: \(key)")
+                                .font(.footnote)
+                                .lineLimit(1)
+                        } else {
+                            Text("ownerKey: nil")
+                                .font(.footnote)
+                                .opacity(0.7)
+                        }
+
+                        if !backendFeedStore.lastOwnerSamples.isEmpty {
+                            Text("owner samples:")
+                                .font(.footnote)
+                                .opacity(0.8)
+                            ForEach(Array(backendFeedStore.lastOwnerSamples.prefix(3).enumerated()), id: \.offset) { i, s in
+                                Text("• \(s)")
+                                    .font(.footnote)
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        if !backendFeedStore.lastCreatedAtSamples.isEmpty {
+                            Text("createdAt samples:")
+                                .font(.footnote)
+                                .opacity(0.8)
+                            ForEach(Array(backendFeedStore.lastCreatedAtSamples.prefix(3).enumerated()), id: \.offset) { i, s in
+                                Text("• \(s)")
+                                    .font(.footnote)
+                                    .lineLimit(1)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
 
                     if let t = backendFeedStore.lastFetchAt {
                         Text("lastFetchAt: \(t.formatted(date: .abbreviated, time: .standard))")
@@ -347,9 +387,6 @@ public enum DebugDump {
 
     @MainActor public static func dump(session: Any) -> String {
         // Best-effort reflection to avoid importing Core Data types here.
-        // Expecting fields accessed via KVC-style lookups.
-        // If anything fails, return an error stub.
-        // Known field names from codebase: id (UUID), title (String?), notes (String?), timestamp (Date?), durationSeconds (Int64), isPublic (Bool?), ownerUserID (String?), attachments (Set<Attachment>)
         let mirror = Mirror(reflecting: session)
         var idString: String? = nil
         var title: String? = nil
@@ -361,18 +398,15 @@ public enum DebugDump {
         var attachmentIDs: [String] = []
 
         func valueForKey(_ key: String) -> Any? {
-            // Try KVC via NSObject if available
             if let obj = session as AnyObject?, obj.responds(to: Selector(key)) {
                 return obj.value(forKey: key)
             }
-            // Fallback: mirror children
             for child in mirror.children {
                 if child.label == key { return child.value }
             }
             return nil
         }
 
-        // id
         if let uuid = valueForKey("id") as? UUID { idString = uuid.uuidString }
         else if let s = valueForKey("id") as? String { idString = s }
 
@@ -407,14 +441,12 @@ public enum DebugDump {
         )
 
         #if DEBUG
-        // Build a wrapper payload that includes followContext without altering existing fields
         struct SessionDumpWrapper: Encodable {
             let session: SessionSnapshot
             let attachments: [AttachmentSnapshot]
             let followContext: FollowContextDump?
         }
 
-        // Attempt to collect attachments if present and encodable via our AttachmentSnapshot logic
         var attachSnaps: [AttachmentSnapshot] = []
         if let set = valueForKey("attachments") as? Set<AnyHashable> {
             for any in set {
@@ -430,27 +462,17 @@ public enum DebugDump {
             }
         }
 
-        // Determine viewer ID using whatever is available in DEBUG; prefer override, then auth, then persistence fallback
         let viewerIDResolved: String = {
             if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
                !override.isEmpty {
                 return override
             }
-
-            if let authClass = NSClassFromString("AuthManager") as? NSObject.Type,
-               let auth = authClass.value(forKey: "shared") as? NSObject,
-               let currentUserID = auth.value(forKey: "currentUserID") as? String,
-               !currentUserID.isEmpty {
-                return currentUserID
-            }
-
             if let pcClass = NSClassFromString("PersistenceController") as? NSObject.Type,
                let pcShared = pcClass.value(forKey: "shared") as? NSObject,
                let currentUserID = pcShared.value(forKey: "currentUserID") as? String,
                !currentUserID.isEmpty {
                 return currentUserID
             }
-
             return "local-device"
         }()
 
@@ -483,7 +505,6 @@ public enum DebugDump {
     }
 
     public static func dump(post: Any) -> String {
-        // For symmetry; try common fields: id, ownerUserID, createdAt, text, sessionID
         let obj = post as AnyObject
         var dict: [String: Any?] = [:]
         dict["id"] = (obj.value(forKey: "id") as? UUID)?.uuidString ?? (obj.value(forKey: "id") as? String)
