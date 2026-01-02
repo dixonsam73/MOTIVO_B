@@ -65,7 +65,22 @@ final class PublishService: ObservableObject {
 
     /// Overload with explicit sessionID for backend preview wiring.
     /// Performs the same local registry update, then (in preview) enqueues or deletes via backend using the provided sessionID.
+    func publishIfNeeded(context: NSManagedObjectContext, objectID: NSManagedObjectID, sessionID: UUID, shouldPublish: Bool) {
+        // Compatibility wrapper (Step 8F): forward to context-based overload using provided context.
+        publishIfNeeded(
+            usingContext: context,
+            objectID: objectID,
+            sessionID: sessionID,
+            shouldPublish: shouldPublish
+        )
+    }
+
     func publishIfNeeded(objectID: NSManagedObjectID, sessionID: UUID, shouldPublish: Bool) {
+        let ctx = PersistenceController.shared.container.viewContext
+        publishIfNeeded(usingContext: ctx, objectID: objectID, sessionID: sessionID, shouldPublish: shouldPublish)
+    }
+
+    func publishIfNeeded(usingContext context: NSManagedObjectContext, objectID: NSManagedObjectID, sessionID: UUID, shouldPublish: Bool) {
         let uri = objectID.uriRepresentation().absoluteString
 
         var set = publishedURIs
@@ -102,10 +117,13 @@ final class PublishService: ObservableObject {
                 var sMood: Int? = nil
                 var sEffort: Int? = nil
 
-                // Resolve the managed object directly via PersistenceController and extract fields best-effort.
-                let viewContext = PersistenceController.shared.container.viewContext
+                // Resolve the managed object directly via provided context and extract fields best-effort.
+                let viewContext = context
                 do {
                     let obj = try viewContext.existingObject(with: objectID)
+                    // [8F] Force materialization to capture latest values from caller's context.
+                    viewContext.refresh(obj, mergeChanges: true)
+                    NSLog("[PublishService] [8F] snapshot materialized for session → %@", sessionID.uuidString)
                     func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
 
                     if hasAttr("id"), let val = obj.value(forKey: "id") as? UUID { sID = val }

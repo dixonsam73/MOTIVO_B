@@ -1411,7 +1411,12 @@ onDelete: { url in
             viewContext.processPendingChanges()
             // v7.12A — Social Pilot (local-only)
             if let sid = s.id {
-                PublishService.shared.publishIfNeeded(objectID: s.objectID, sessionID: sid, shouldPublish: isPublic /* or your current flag */)
+                PublishService.shared.publishIfNeeded(
+                    context: viewContext,
+                    objectID: s.objectID,
+                    sessionID: sid,
+                    shouldPublish: isPublic
+                )
             } else {
                 print("Publish skipped: missing Session.id")
             }

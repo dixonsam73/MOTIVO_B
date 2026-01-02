@@ -1249,6 +1249,7 @@ private var instrumentPicker: some View {
             // ===== v7.12A • Publish hook after successful save =====
             if let sid = s.id {
                 PublishService.shared.publishIfNeeded(
+                    context: viewContext,
                     objectID: s.objectID,
                     sessionID: sid,
                     shouldPublish: isPublic
