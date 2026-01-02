@@ -1579,60 +1579,43 @@ fileprivate struct BackendPostRow: View {
     let post: BackendPost
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            // Header: Title on the left, timestamp (if available) on the right
             HStack(alignment: .firstTextBaseline) {
                 Text("Backend Post")
                     .font(Theme.Text.body)
+                    .foregroundStyle(.primary)
+
                 Spacer()
+
                 if let created = post.createdAt, !created.isEmpty {
                     Text(created)
                         .font(.footnote)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
+                        .multilineTextAlignment(.trailing)
                 }
             }
 
-            if let owner = post.ownerUserID, !owner.isEmpty {
-                Text(owner)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(1)
-            }
+            // Secondary metadata lines
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                if let owner = post.ownerUserID, !owner.isEmpty {
+                    Text(owner)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
 
-            if let sid = post.sessionID?.uuidString {
-                Text(sid)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(1)
+                if let sid = post.sessionID?.uuidString, !sid.isEmpty {
+                    Text(sid)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                }
             }
         }
+        .padding(Theme.Spacing.m)
         .cardSurface()
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
