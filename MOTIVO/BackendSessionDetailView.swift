@@ -7,11 +7,10 @@ public struct BackendSessionDetailView: View {
     public let model: BackendSessionViewModel
 
     // Local shims to avoid hard dependencies on Theme while keeping visual consistency.
-    // If Theme provides spacing/tokens, prefer those via optional accessors; otherwise use system defaults.
     private var spacingS: CGFloat { 8 }
     private var spacingM: CGFloat { 12 }
     private var spacingL: CGFloat { 16 }
-    
+
     public init(model: BackendSessionViewModel) {
         self.model = model
     }
@@ -19,22 +18,29 @@ public struct BackendSessionDetailView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: spacingL) {
-                // Card surface container
-                Group {
-                    VStack(alignment: .leading, spacing: spacingM) {
-                        titleRow
-                        metaRow
+                titleRow
+
+                section(header: Text("Metadata")) {
+                    VStack(alignment: .leading, spacing: spacingS) {
+                        // Activity / instrument
+                        labeledLine(label: "Activity", value: model.activityLabel)
+                        labeledLine(label: "Instrument", value: model.instrumentLabel ?? "—")
+
+                        // Ownership
+                        labeledLine(label: "Owner", value: model.ownerUserID.isEmpty ? "—" : model.ownerUserID)
+                        labeledLine(label: "Is mine", value: model.isMine ? "true" : "false")
+
+                        // Timestamps
+                        labeledLine(label: "Session time", value: model.sessionTimestampRaw ?? "—")
+                        labeledLine(label: "Created", value: model.createdAtRaw ?? "—")
+                        labeledLine(label: "Updated", value: model.updatedAtRaw ?? "—")
                     }
-                    .padding(spacingL)
-                    .background(cardBackground)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
 
-                // Notes section
+                // Notes section (placeholder until backend provides it)
                 section(header: Text("Notes")) {
-                    if let notes = model.notes, notes.isEmpty == false {
+                    if let notes = model.notes, !notes.isEmpty {
                         Text(notes)
-                            .foregroundStyle(.primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         Text("No notes.")
@@ -43,7 +49,7 @@ public struct BackendSessionDetailView: View {
                     }
                 }
 
-                // Attachments section
+                // Attachments section (8G will wire read-only URLs)
                 section(header: Text("Attachments")) {
                     if model.attachmentURLs.isEmpty {
                         Text("No attachments.")
@@ -56,8 +62,7 @@ public struct BackendSessionDetailView: View {
                                     Image(systemName: "paperclip")
                                         .foregroundStyle(.secondary)
                                     Text(url.lastPathComponent)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
+                                        .font(.footnote)
                                         .foregroundStyle(.primary)
                                     Spacer()
                                 }
@@ -66,9 +71,10 @@ public struct BackendSessionDetailView: View {
                     }
                 }
             }
-            .padding(spacingL)
+            .padding(.horizontal, spacingM)
+            .padding(.vertical, spacingL)
         }
-        .navigationTitle("Post")
+        .navigationTitle("Backend Detail")
         .navigationBarTitleDisplayMode(.inline)
     }
 
@@ -77,77 +83,77 @@ public struct BackendSessionDetailView: View {
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline) {
             Text(model.activityLabel)
-                .font(.headline) // Use Theme text style if available; fallback to .headline
+                .font(.headline)
                 .foregroundStyle(.primary)
+
+            if let instrument = model.instrumentLabel, !instrument.isEmpty {
+                Text("•")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                Text(instrument)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+
             Spacer()
-            Text(model.createdAtRaw ?? "")
+
+            // Prefer sessionTimestamp in the header when available; fall back to createdAt.
+            Text(model.sessionTimestampRaw ?? model.createdAtRaw ?? "")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
     }
 
-    private var metaRow: some View {
-        VStack(alignment: .leading, spacing: spacingS) {
-            Text(model.ownerUserID)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            Text(model.id.uuidString)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // Generic section builder with a header to mimic Theme section headers while staying dependency-free.
-    @ViewBuilder
     private func section<Content: View>(header: Text, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: spacingM) {
+        VStack(alignment: .leading, spacing: spacingS) {
             header
-                .font(.subheadline.weight(.semibold))
-                .textCase(.uppercase)
+                .font(.subheadline)
                 .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: spacingM) {
+
+            VStack(alignment: .leading, spacing: spacingS) {
                 content()
             }
-            .padding(spacingL)
-            .background(cardBackground)
+            .padding(spacingM)
+            .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
     }
 
-    // Card-like surface using system materials to approximate Motivo cardSurface.
-    @ViewBuilder
-    private var cardBackground: some View {
-        if #available(iOS 15.0, macOS 12.0, *) {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(.regularMaterial)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
-                )
-                .background(.clear)
-        } else {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(Color(UIColor.secondarySystemBackground))
+    private func labeledLine(label: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: spacingS) {
+            Text(label + ":")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(width: 92, alignment: .leading)
+
+            Text(value)
+                .font(.footnote)
+                .foregroundStyle(.primary)
+
+            Spacer(minLength: 0)
         }
     }
 }
 
-#Preview("Backend Session Detail") {
-    // Inline JSON representing a BackendPost. Adjust keys to match BackendPost's Decodable mapping.
+#if DEBUG
+#Preview("BackendSessionDetailView") {
     let json = """
     {
-      "id": "11111111-2222-3333-4444-555555555555",
-      "createdAt": "2025-12-31 23:59",
-      "ownerUserID": "user_123"
+      "id": "00000000-0000-0000-0000-000000000001",
+      "owner_user_id": "user_123",
+      "session_id": "00000000-0000-0000-0000-000000000002",
+      "session_timestamp": "2025-12-31 23:58",
+      "created_at": "2025-12-31 23:59",
+      "updated_at": "2026-01-01 00:01",
+      "is_public": true,
+      "activity_label": "Practice",
+      "instrument_label": "Bass"
     }
     """.data(using: .utf8)!
 
     let decoder = JSONDecoder()
-    // If BackendPost uses snake_case or different date strategies, configure decoder here.
-    // decoder.keyDecodingStrategy = .convertFromSnakeCase
-
     let post = try! decoder.decode(BackendPost.self, from: json)
     let model = BackendSessionViewModel(post: post, currentUserID: "user_123")
-
-    return BackendSessionDetailView(model: model)
+    return NavigationStack { BackendSessionDetailView(model: model) }
 }
+#endif

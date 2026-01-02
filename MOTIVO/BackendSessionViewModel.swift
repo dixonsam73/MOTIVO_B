@@ -5,29 +5,40 @@ import Foundation
 public struct BackendSessionViewModel: Identifiable {
     // MARK: - Display-ready properties
     public let id: UUID
+
+    // Timestamps (raw strings from backend; parsing/formatting can be layered later)
+    public let sessionTimestampRaw: String?
     public let createdAtRaw: String?
+    public let updatedAtRaw: String?
+
+    // Metadata parity (Step 8F)
     public let activityLabel: String
     public let instrumentLabel: String?
+
+    // Optional content
     public let notes: String?
-    // Attachments are not defined in the given context; expose an empty collection for now to satisfy API.
-    // Replace BackendAttachment with your concrete type if/when available.
+
+    // Attachments are out of scope for 8F; keep empty to satisfy downstream UI plumbing.
     public let attachmentURLs: [URL]
+
+    // Ownership
     public let ownerUserID: String
     public let isMine: Bool
 
-    // MARK: - Init
-    // Initializes from BackendPost, with trivial mapping and minimal formatting.
-    // - Parameters:
-    //   - post: Source backend post.
-    //   - currentUserID: The current user id used to compute ownership.
     public init(post: BackendPost, currentUserID: String?) {
         self.id = post.id
-        self.createdAtRaw = post.createdAt
 
-        // Map from backend if such a field exists; neutral fallback otherwise.
-        // BackendPost currently does not expose activity fields; use a neutral placeholder.
-        self.activityLabel = "—" // em dash as neutral fallback
-        self.instrumentLabel = nil
+        self.sessionTimestampRaw = post.sessionTimestamp
+        self.createdAtRaw = post.createdAt
+        self.updatedAtRaw = post.updatedAt
+
+        // Step 8F: map backend labels (safe if absent)
+        let activity = (post.activityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.activityLabel = activity.isEmpty ? "—" : activity
+
+        let instrument = (post.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.instrumentLabel = instrument.isEmpty ? nil : instrument
+
         self.notes = nil
         self.attachmentURLs = []
 

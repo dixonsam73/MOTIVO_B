@@ -194,7 +194,7 @@ fileprivate struct SessionsRootView: View {
                     NavigationLink {
                         BackendSessionDetailView(model: BackendSessionViewModel(post: post, currentUserID: effectiveUserID))
                     } label: {
-                        BackendPostRow(post: post)
+                        BackendPostRow(model: BackendSessionViewModel(post: post, currentUserID: effectiveUserID))
                     }
                     .buttonStyle(.plain)
                     .listRowSeparator(.hidden)
@@ -1599,38 +1599,36 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 // MARK: - Step 8C Backend Feed Row (read-only)
 
 fileprivate struct BackendPostRow: View {
-    let post: BackendPost
+    let model: BackendSessionViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            // Header: Title on the left, timestamp (if available) on the right
+            // Header: activity on the left, session time (if available) on the right
             HStack(alignment: .firstTextBaseline) {
-                Text("Backend Post")
+                Text(model.activityLabel)
                     .font(Theme.Text.body)
                     .foregroundStyle(.primary)
 
                 Spacer()
 
-                if let created = post.createdAt, !created.isEmpty {
-                    Text(created)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .lineLimit(1)
-                        .multilineTextAlignment(.trailing)
-                }
+                Text(model.sessionTimestampRaw ?? model.createdAtRaw ?? "")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
+                    .multilineTextAlignment(.trailing)
             }
 
             // Secondary metadata lines
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                if let owner = post.ownerUserID, !owner.isEmpty {
-                    Text(owner)
+                if let instrument = model.instrumentLabel, !instrument.isEmpty {
+                    Text(instrument)
                         .font(.footnote)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
                 }
 
-                if let sid = post.sessionID?.uuidString, !sid.isEmpty {
-                    Text(sid)
+                if !model.ownerUserID.isEmpty {
+                    Text(model.ownerUserID)
                         .font(.footnote)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
@@ -1641,4 +1639,5 @@ fileprivate struct BackendPostRow: View {
         .cardSurface()
     }
 }
+
 
