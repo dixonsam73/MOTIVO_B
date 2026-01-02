@@ -191,9 +191,14 @@ fileprivate struct SessionsRootView: View {
                 }
             } else {
                 ForEach(rows, id: \.id) { post in
-                    BackendPostRow(post: post)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                    NavigationLink {
+                        BackendSessionDetailView(model: BackendSessionViewModel(post: post, currentUserID: effectiveUserID))
+                    } label: {
+                        BackendPostRow(post: post)
+                    }
+                    .buttonStyle(.plain)
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
                 }
             }
         }
