@@ -86,7 +86,7 @@ public final class SessionSyncQueue: ObservableObject {
 
         if mode == .backendPreview {
             for payload in items {
-                let result = await BackendEnvironment.shared.publish.uploadPost(payload.id)
+                let result = await BackendEnvironment.shared.publish.uploadPost(payload)
                 switch result {
                 case .success:
                     NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)

@@ -123,7 +123,7 @@ public final class BackendFeedStore: ObservableObject {
 }
 
 public protocol BackendPublishService {
-    func uploadPost(_ postID: UUID) async -> Result<Void, Error>
+    func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error>
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
@@ -136,8 +136,8 @@ public final class SimulatedPublishService: BackendPublishService {
     public init() {}
 
     @MainActor
-    public func uploadPost(_ postID: UUID) async -> Result<Void, Error> {
-        await BackendDiagnostics.shared.simulatedCall("PublishService.uploadPost", meta: ["postID": postID.uuidString])
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("PublishService.uploadPost", meta: ["postID": payload.id.uuidString])
         return .success(())
     }
 
@@ -167,7 +167,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
     public init() {}
 
     @MainActor
-    public func uploadPost(_ postID: UUID) async -> Result<Void, Error> {
+    public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
@@ -181,12 +181,40 @@ public final class HTTPBackendPublishService: BackendPublishService {
         }
 
         let createdAt = ISO8601DateFormatter().string(from: Date())
-        let body: [String: Any] = [
-            "id": postID.uuidString,
+        var body: [String: Any] = [
+            "id": payload.id.uuidString,
             "created_at": createdAt,
             "owner_user_id": owner,
             "is_public": true
         ]
+
+        if let sid = payload.sessionID {
+            body["session_id"] = sid.uuidString
+        }
+        if let ts = payload.sessionTimestamp {
+            body["session_timestamp"] = ISO8601DateFormatter().string(from: ts)
+        }
+        if let title = payload.title {
+            body["title"] = title
+        }
+        if let dur = payload.durationSeconds {
+            body["duration_seconds"] = dur
+        }
+        if let at = payload.activityType {
+            body["activity_type"] = at
+        }
+        if let ad = payload.activityDetail {
+            body["activity_detail"] = ad
+        }
+        if let instr = payload.instrumentLabel {
+            body["instrument_label"] = instr
+        }
+        if let mood = payload.mood {
+            body["mood"] = mood
+        }
+        if let effort = payload.effort {
+            body["effort"] = effort
+        }
 
         let jsonData: Data
         do {
@@ -388,3 +416,4 @@ public func currentBackendMode() -> BackendMode {
     }
     return .localSimulation
 }
+

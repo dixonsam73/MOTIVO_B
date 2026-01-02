@@ -75,34 +75,98 @@ final class PublishService: ObservableObject {
         } else {
             changed = set.remove(uri) != nil
         }
-        guard changed else { return }
 
-        // Persist first, then publish new value (all on main actor).
-        persist(set)
-        publishedURIs = set
+        if changed {
+            // Persist first, then publish new value (all on main actor).
+            persist(set)
+            publishedURIs = set
 
-        NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
+            NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
+        }
 
-        // Step 6A: Preview-only backend wiring (non-blocking) using explicit sessionID.
         Task { @MainActor in
+            // Always attempt to enqueue for public sessions; flush behavior depends on mode.
+            // Build payload from Core Data using KVC to avoid importing model types here.
+            var payload: SessionSyncQueue.PostPublishPayload? = nil
+
+            if shouldPublish {
+                NSLog("[PublishService] enqueue gate • mode=%@ • shouldPublish=%@ • changed=%@ • sessionID=%@", String(describing: BackendEnvironment.shared.mode), shouldPublish ? "true" : "false", changed ? "true" : "false", sessionID.uuidString)
+                
+                var sID: UUID? = nil
+                var sTimestamp: Date? = nil
+                var sTitle: String? = nil
+                var sDuration: Int? = nil
+                var sActivityType: String? = nil
+                var sActivityDetail: String? = nil
+                var sInstrumentLabel: String? = nil
+                var sMood: Int? = nil
+                var sEffort: Int? = nil
+
+                // Resolve the managed object and extract fields best-effort.
+                if let ctxClass = NSClassFromString("PersistenceController") as? NSObject.Type,
+                   let shared = ctxClass.value(forKey: "shared") as? NSObject,
+                   let viewContext = shared.value(forKey: "container")
+                        .flatMap({ ($0 as AnyObject).value(forKey: "viewContext") }) as AnyObject? {
+                    do {
+                        if let obj = try (viewContext as? NSManagedObjectContext)?.existingObject(with: objectID) {
+                            if let val = obj.value(forKey: "id") as? UUID { sID = val }
+                            if let val = obj.value(forKey: "timestamp") as? Date { sTimestamp = val }
+                            if let val = obj.value(forKey: "title") as? String { sTitle = val }
+                            if let val = obj.value(forKey: "durationSeconds") as? Int { sDuration = val }
+                            else if let val64 = obj.value(forKey: "durationSeconds") as? Int64 { sDuration = Int(val64) }
+                            if let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
+                            if let val = obj.value(forKey: "activityDetail") as? String { sActivityDetail = val }
+                            if let val = obj.value(forKey: "instrumentLabel") as? String { sInstrumentLabel = val }
+                            if let val = obj.value(forKey: "mood") as? Int { sMood = val }
+                            else if let val16 = obj.value(forKey: "mood") as? Int16 { sMood = Int(val16) }
+                            if let val = obj.value(forKey: "effort") as? Int { sEffort = val }
+                            else if let val16 = obj.value(forKey: "effort") as? Int16 { sEffort = Int(val16) }
+                        }
+                    } catch {
+                        // Ignore extraction errors; fallback to minimal payload below.
+                    }
+                }
+
+                let p = SessionSyncQueue.PostPublishPayload(
+                    id: sessionID,
+                    sessionID: sID,
+                    sessionTimestamp: sTimestamp,
+                    title: sTitle,
+                    durationSeconds: sDuration,
+                    activityType: sActivityType,
+                    activityDetail: sActivityDetail,
+                    instrumentLabel: sInstrumentLabel,
+                    mood: sMood,
+                    effort: sEffort
+                )
+                payload = p
+
+                if let payload = payload {
+                    SessionSyncQueue.shared.enqueue(payload)
+                } else {
+                    SessionSyncQueue.shared.enqueue(postID: sessionID)
+                }
+            }
+
+            // Flush now – will upload in backendPreview and skip in localSimulation per existing semantics.
+            await SessionSyncQueue.shared.flushNow()
+
+            // Preserve delete behavior in backend preview when unpublishing.
             let mode = BackendEnvironment.shared.mode
             let hasBaseURL = (NetworkManager.shared.baseURL != nil)
             let configured = BackendConfig.isConfigured
-            NSLog("[PublishService] preview-gate check • mode=%@ • hasBaseURL=%@ • isConfigured=%@", String(describing: mode), String(describing: hasBaseURL), String(describing: configured))
-            if (mode == .backendPreview) && hasBaseURL && configured {
-                if shouldPublish {
-                    SessionSyncQueue.shared.enqueue(postID: sessionID)
-                    await SessionSyncQueue.shared.flushNow()
-                    NSLog("[PublishService] Preview enqueue + flush for published session → %@", sessionID.uuidString)
-                } else {
-                    let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
-                    switch result {
-                    case .success:
-                        NSLog("[PublishService] Preview deletePost success → %@", sessionID.uuidString)
-                    case .failure(let error):
-                        NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", sessionID.uuidString, String(describing: error))
-                    }
+            if !shouldPublish, (mode == .backendPreview) && hasBaseURL && configured {
+                let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
+                switch result {
+                case .success:
+                    NSLog("[PublishService] Preview deletePost success → %@", sessionID.uuidString)
+                case .failure(let error):
+                    NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", sessionID.uuidString, String(describing: error))
                 }
+            }
+
+            if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
+                NSLog("[PublishService] Preview enqueue + flush for published session → %@", sessionID.uuidString)
             }
         }
     }
