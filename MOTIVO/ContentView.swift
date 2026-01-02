@@ -102,44 +102,8 @@ fileprivate struct SessionsRootView: View {
 
     let userID: String?
 
-    #if DEBUG
-    private var effectiveUserID: String? {
-        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
-        return userID
-    }
-    #else
-    private var effectiveUserID: String? { userID }
-    #endif
-
-    // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
-    @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
-
-    private var useBackendFeed: Bool {
-        BackendEnvironment.shared.isPreview &&
-        BackendConfig.isConfigured &&
-        (NetworkManager.shared.baseURL != nil)
-    }
-
-    // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
-        predicate: NSPredicate(value: true),
-        animation: .default
-    ) private var sessions: FetchedResults<Session>
-
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
-        animation: .default
-    ) private var instruments: FetchedResults<Instrument>
-
-    // Fetch user-local custom activities for filter menu
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "displayName", ascending: true)],
-        animation: .default
-    ) private var userActivities: FetchedResults<UserActivity>
-
-    // UI state
     @AppStorage("filtersExpanded") private var filtersExpanded = false
+    @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedScope: FeedScope = .all
@@ -164,6 +128,46 @@ fileprivate struct SessionsRootView: View {
     @State private var debounceCancellable: AnyCancellable?
     @State private var lastBackendAutoFetchKey: String = ""
     @State private var lastBackendAutoFetchAt: Date = .distantPast
+
+    #if DEBUG
+    private var effectiveUserID: String? {
+        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
+        return userID
+    }
+    #else
+    private var effectiveUserID: String? { userID }
+    #endif
+
+    // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
+    @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
+
+    private var useBackendFeed: Bool {
+        _ = backendModeChangeTick
+        return BackendEnvironment.shared.isPreview &&
+        BackendConfig.isConfigured &&
+        (NetworkManager.shared.baseURL != nil)
+    }
+
+    // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "timestamp", ascending: false)],
+        predicate: NSPredicate(value: true),
+        animation: .default
+    ) private var sessions: FetchedResults<Session>
+
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
+        animation: .default
+    ) private var instruments: FetchedResults<Instrument>
+
+    // Fetch user-local custom activities for filter menu
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "displayName", ascending: true)],
+        animation: .default
+    ) private var userActivities: FetchedResults<UserActivity>
+
+    // UI state
+   
 
 // Step 8C: Backend feed list (read-only rows; no navigation yet)
 @ViewBuilder private var backendFeedList: some View {
@@ -317,6 +321,7 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
                 }
+                .id(backendModeChangeTick)
                 .listStyle(.plain)
                 .listRowSeparator(.hidden)
                 .scrollContentBackground(.hidden)

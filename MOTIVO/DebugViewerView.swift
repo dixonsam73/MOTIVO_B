@@ -54,6 +54,10 @@ public struct DebugViewerView: View {
     // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
 
+    // Observe backend mode to trigger a mode-change tick
+    @State private var observedBackendMode: BackendMode = BackendEnvironment.shared.mode
+    private let backendModeTickKey = "BackendModeChangeTick_v1"
+
     private var activeViewerID: String {
         if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"), !o.isEmpty {
             return o
@@ -292,6 +296,14 @@ public struct DebugViewerView: View {
                 .padding(.bottom)
             }
             .padding(.top, 8)
+        }
+        .onChange(of: BackendEnvironment.shared.mode) { _, newValue in
+            // Keep a local copy updated
+            observedBackendMode = newValue
+            // Increment the mode change tick to force view refreshes listening to this key
+            let k = backendModeTickKey
+            let cur = UserDefaults.standard.integer(forKey: k)
+            UserDefaults.standard.set(cur + 1, forKey: k)
         }
         .navigationTitle(title)
         .toolbar {
@@ -573,3 +585,4 @@ public enum DebugDump {
 }
 
 #endif
+
