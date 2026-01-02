@@ -795,16 +795,8 @@ final class VideoRecorderController: NSObject,
         let vInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         vInput.expectsMediaDataInRealTime = true
 
-        // Do not rotate; choose width/height above to match orientation. Only mirror for front camera.
-        var transform = CGAffineTransform.identity
-        if preferredPosition == .front {
-            // Horizontal mirror; translate back into the frame
-            let mirror = CGAffineTransform(scaleX: -1, y: 1)
-            let translate = CGAffineTransform(translationX: CGFloat(width), y: 0)
-            transform = mirror.concatenating(translate)
-        }
-
-        vInput.transform = transform
+        // Do not rotate or mirror; choose width/height above to match orientation. Keep preview mirroring only.
+        vInput.transform = .identity
 
         // Audio settings: AAC 44.1kHz mono
         let audioSettings: [String: Any] = [
