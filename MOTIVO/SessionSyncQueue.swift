@@ -16,21 +16,33 @@ import Foundation
 public final class SessionSyncQueue: ObservableObject {
     public static let shared = SessionSyncQueue()
 
-    public struct Item: Codable, Identifiable, Equatable {
-        public let id: UUID          // postID
-        public let createdAt: Date
-        public var attempts: Int
-        public var lastError: String?
+    public struct PostPublishPayload: Codable, Identifiable {
+      public let id: UUID            // == postID
+      public let sessionID: UUID?
+      public let sessionTimestamp: Date?
+      public let title: String?
+      public let durationSeconds: Int?
+      public let activityType: String?
+      public let activityDetail: String?
+      public let instrumentLabel: String?
+      public let mood: Int?
+      public let effort: Int?
 
-        public init(id: UUID, createdAt: Date = .init(), attempts: Int = 0, lastError: String? = nil) {
-            self.id = id
-            self.createdAt = createdAt
-            self.attempts = attempts
-            self.lastError = lastError
-        }
+      public init(id: UUID, sessionID: UUID?, sessionTimestamp: Date?, title: String?, durationSeconds: Int?, activityType: String?, activityDetail: String?, instrumentLabel: String?, mood: Int?, effort: Int?) {
+          self.id = id
+          self.sessionID = sessionID
+          self.sessionTimestamp = sessionTimestamp
+          self.title = title
+          self.durationSeconds = durationSeconds
+          self.activityType = activityType
+          self.activityDetail = activityDetail
+          self.instrumentLabel = instrumentLabel
+          self.mood = mood
+          self.effort = effort
+      }
     }
 
-    @Published public private(set) var items: [Item] = []
+    @Published public private(set) var items: [PostPublishPayload] = []
     private let fileURL: URL
 
     private init() {
@@ -40,11 +52,17 @@ public final class SessionSyncQueue: ObservableObject {
 
     // MARK: - Public API
 
+    public func enqueue(_ payload: PostPublishPayload) {
+        guard items.contains(where: { $0.id == payload.id }) == false else { return }
+        items.append(payload)
+        persist()
+        BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
+    }
+
     public func enqueue(postID: UUID) {
         guard items.contains(where: { $0.id == postID }) == false else { return }
-        items.append(Item(id: postID))
-        persist()
-        BackendLogger.notice("Queue enqueue • postID=\(postID.uuidString) • total=\(items.count)")
+        let payload = PostPublishPayload(id: postID, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil)
+        enqueue(payload)
     }
 
     public func dequeue(postID: UUID) {
@@ -67,16 +85,16 @@ public final class SessionSyncQueue: ObservableObject {
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
         if mode == .backendPreview {
-            for item in items {
-                let result = await BackendEnvironment.shared.publish.uploadPost(item.id)
+            for payload in items {
+                let result = await BackendEnvironment.shared.publish.uploadPost(payload.id)
                 switch result {
                 case .success:
-                    NSLog("[SessionSyncQueue] upload success • postID=%@", item.id.uuidString)
-                    BackendLogger.notice("Preview upload success • postID=\(item.id.uuidString)")
-                    self.dequeue(postID: item.id)
+                    NSLog("[SessionSyncQueue] upload success • postID=%@", payload.id.uuidString)
+                    BackendLogger.notice("Preview upload success • postID=\(payload.id.uuidString)")
+                    self.dequeue(postID: payload.id)
                 case .failure(let error):
-                    NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", item.id.uuidString, error.localizedDescription)
-                    BackendLogger.notice("Preview upload failed • postID=\(item.id.uuidString) • error=\(error.localizedDescription)")
+                    NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", payload.id.uuidString, error.localizedDescription)
+                    BackendLogger.notice("Preview upload failed • postID=\(payload.id.uuidString) • error=\(error.localizedDescription)")
                     // Preserve semantics: failures remain queued; no retries/timers added here.
                 }
             }
@@ -100,9 +118,19 @@ public final class SessionSyncQueue: ObservableObject {
         }
     }
 
-    private static func load(from url: URL) throws -> [Item] {
+    private static func load(from url: URL) throws -> [PostPublishPayload] {
         let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode([Item].self, from: data)
+        let decoder = JSONDecoder()
+        if let new = try? decoder.decode([PostPublishPayload].self, from: data) {
+            return new
+        }
+        if let old = try? decoder.decode([UUID].self, from: data) {
+            return old.map { uuid in
+                PostPublishPayload(id: uuid, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil)
+            }
+        }
+        // If neither format matches, propagate a decoding error
+        return try decoder.decode([PostPublishPayload].self, from: data)
     }
 
     private static func makeFileURL() -> URL {
@@ -113,3 +141,4 @@ public final class SessionSyncQueue: ObservableObject {
         return dir.appendingPathComponent("SessionSyncQueue_v1.json")
     }
 }
+

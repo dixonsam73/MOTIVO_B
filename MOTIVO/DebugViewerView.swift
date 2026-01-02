@@ -197,103 +197,122 @@ public struct DebugViewerView: View {
         .padding(.horizontal)
     }
 
+    @ViewBuilder private var jsonDumpBlock: some View {
+        // JSON dump at the top
+        Text(displayText)
+            .font(.system(.body, design: .monospaced))
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding()
+            .background(Color.black.opacity(0.06))
+            .cornerRadius(8)
+            .padding(.horizontal)
+    }
+
+    @ViewBuilder private var backendControlsBlock: some View {
+        // Backend + sync controls
+        BackendModeSection()
+        APIConfigView()
+        SyncQueueSection()
+    }
+
+    @ViewBuilder private var backendStep6ABlock: some View {
+        // Precompute mode line to ease type-checking
+        let modeRaw: String = BackendEnvironment.shared.mode.rawValue
+        let isBackendEnabled: Bool = (BackendEnvironment.shared.mode == .backendPreview)
+        let enabledString: String = isBackendEnabled ? "true" : "false"
+        let modeLine: String = "mode: \(modeRaw) • backend enabled: \(enabledString)"
+
+        // Backend • Step 6A diagnostics
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backend • Step 6A").font(.headline)
+
+            // 1) Mode
+            Text(modeLine)
+                .font(.subheadline)
+
+            // 2) Network config
+            Group {
+                if let url = NetworkManager.shared.baseURL {
+                    Text("baseURL: \(url.absoluteString)")
+                        .font(.footnote)
+                } else {
+                    Text("baseURL: nil")
+                        .font(.footnote)
+                }
+            }
+
+            // 3) Publish service type
+            Text("publish service: \(String(describing: type(of: BackendEnvironment.shared.publish)))")
+                .font(.subheadline)
+
+            // 4) Queue
+            VStack(alignment: .leading, spacing: 4) {
+                Text("queue: \(SessionSyncQueue.shared.items.count)")
+                    .font(.subheadline)
+                ForEach(Array(SessionSyncQueue.shared.items.prefix(5)), id: \.id) { item in
+                    Text("• \(item.id.uuidString)")
+                        .font(.footnote)
+                }
+            }
+
+            // 5) Hint
+            Text("Note: publish service selection is decided at app launch; relaunch after changing preview/config.")
+                .font(.footnote)
+                .opacity(0.7)
+        }
+        .padding(.horizontal)
+    }
+
+    @ViewBuilder private var simulateFollowsBlock: some View {
+        // Simulate Follows panel
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Simulate Follows").font(.headline)
+
+            HStack {
+                Text("Viewer: \(activeViewerID)")
+                    .font(.subheadline)
+                Spacer()
+            }
+
+            HStack {
+                TextField("Counterparty ID", text: $targetID)
+                    .textFieldStyle(.roundedBorder)
+                Button("Request") {
+                    FollowStore.shared.simulateRequestFollow(to: targetID)
+                    FollowStore.shared.debugReload()
+                }
+                Button("Unfollow") {
+                    FollowStore.shared.simulateUnfollow(targetID)
+                    FollowStore.shared.debugReload()
+                }
+            }
+
+            HStack {
+                TextField("Accept From ID", text: $acceptFromID)
+                    .textFieldStyle(.roundedBorder)
+                Button("Accept From") {
+                    FollowStore.shared.simulateAcceptFollow(from: acceptFromID)
+                    FollowStore.shared.debugReload()
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.bottom)
+    }
+
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
+                jsonDumpBlock
 
-                // JSON dump at the top
-                Text(displayText)
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
-                    .background(Color.black.opacity(0.06))
-                    .cornerRadius(8)
-                    .padding(.horizontal)
+                backendControlsBlock
 
-                // Backend + sync controls
-                BackendModeSection()
-                APIConfigView()
-                SyncQueueSection()
+                backendStep6ABlock
 
-                // Backend • Step 6A diagnostics
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Backend • Step 6A").font(.headline)
-
-                    // 1) Mode
-                    Text("mode: \(BackendEnvironment.shared.mode.rawValue) • backend enabled: \(BackendEnvironment.shared.mode == .backendPreview ? "true" : "false")"
-                    )
-                    .font(.subheadline)
-
-                    // 2) Network config
-                    Group {
-                        if let url = NetworkManager.shared.baseURL {
-                            Text("baseURL: \(url.absoluteString)")
-                                .font(.footnote)
-                        } else {
-                            Text("baseURL: nil")
-                                .font(.footnote)
-                        }
-                    }
-
-                    // 3) Publish service type
-                    Text("publish service: \(String(describing: type(of: BackendEnvironment.shared.publish)))")
-                        .font(.subheadline)
-
-                    // 4) Queue
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("queue: \(SessionSyncQueue.shared.items.count)")
-                            .font(.subheadline)
-                        ForEach(Array(SessionSyncQueue.shared.items.prefix(5)), id: \.id) { item in
-                            Text("• \(item.id.uuidString)\(item.lastError != nil ? " — " + (item.lastError ?? "") : "")")
-                                .font(.footnote)
-                        }
-                    }
-
-                    // 5) Hint
-                    Text("Note: publish service selection is decided at app launch; relaunch after changing preview/config.")
-                        .font(.footnote)
-                        .opacity(0.7)
-                }
-                .padding(.horizontal)
-
-                // Step 8A/8B debug-only section (additive)
                 backendFeedSection
 
-                // Simulate Follows panel
-                VStack(alignment: .leading, spacing: 12) {
-                    Text("Simulate Follows").font(.headline)
-
-                    HStack {
-                        Text("Viewer: \(activeViewerID)")
-                            .font(.subheadline)
-                        Spacer()
-                    }
-
-                    HStack {
-                        TextField("Counterparty ID", text: $targetID)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Request") {
-                            FollowStore.shared.simulateRequestFollow(to: targetID)
-                            FollowStore.shared.debugReload()
-                        }
-                        Button("Unfollow") {
-                            FollowStore.shared.simulateUnfollow(targetID)
-                            FollowStore.shared.debugReload()
-                        }
-                    }
-
-                    HStack {
-                        TextField("Accept From ID", text: $acceptFromID)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Accept From") {
-                            FollowStore.shared.simulateAcceptFollow(from: acceptFromID)
-                            FollowStore.shared.debugReload()
-                        }
-                    }
-                }
-                .padding(.horizontal)
-                .padding(.bottom)
+                simulateFollowsBlock
             }
             .padding(.top, 8)
         }
@@ -585,4 +604,6 @@ public enum DebugDump {
 }
 
 #endif
+
+
 
