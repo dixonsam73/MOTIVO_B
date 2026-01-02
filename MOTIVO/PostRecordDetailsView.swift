@@ -105,7 +105,7 @@ struct PostRecordDetailsView: View {
     }
 
     // v7.9E — State circles (neutral greys)
-    private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
+    private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear) 
 
     // v7.9E — 12-dot gradient strip (dark → light) with drag selection
     private let stateDotsCount: Int = 12
@@ -1395,7 +1395,14 @@ onDelete: { url in
         s.notes = notes
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
+        
+        let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+
+        // Replaced this line:
+        // s.setValue(activityTypeString, forKey: "activityType")
         s.setValue(activity.rawValue, forKey: "activityType")
+        
         #if DEBUG
         let __dbgID = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")
         let __effectiveUID = __dbgID ?? PersistenceController.shared.currentUserID
@@ -1411,10 +1418,27 @@ onDelete: { url in
             viewContext.processPendingChanges()
             // v7.12A — Social Pilot (local-only)
             if let sid = s.id {
-                PublishService.shared.publishIfNeeded(
-                    context: viewContext,
-                    objectID: s.objectID,
+                let resolvedTitle = s.title ?? ""
+                let instLabel =
+                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? s.instrument?.name
+
+                let payload = SessionSyncQueue.PostPublishPayload(
+                    id: sid,
                     sessionID: sid,
+                    sessionTimestamp: timestamp,
+                    title: resolvedTitle,
+                    durationSeconds: Int(durationSeconds),
+                    activityType: activityTypeString,
+                    activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
+                    instrumentLabel: instLabel,
+                    mood: Int(mood),
+                    effort: Int(effort)
+                )
+
+                PublishService.shared.publish(
+                    payload: payload,
+                    objectID: s.objectID,
                     shouldPublish: isPublic
                 )
             } else {
@@ -2007,6 +2031,9 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
+
 
 
 

@@ -53,10 +53,29 @@ public final class SessionSyncQueue: ObservableObject {
     // MARK: - Public API
 
     public func enqueue(_ payload: PostPublishPayload) {
-        guard items.contains(where: { $0.id == payload.id }) == false else { return }
-        items.append(payload)
-        persist()
-        BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
+        if let index = items.firstIndex(where: { $0.id == payload.id }) {
+            // Merge with existing item: prefer new non-nil values, otherwise keep old
+            let existing = items[index]
+            let merged = PostPublishPayload(
+                id: existing.id,
+                sessionID: payload.sessionID ?? existing.sessionID,
+                sessionTimestamp: payload.sessionTimestamp ?? existing.sessionTimestamp,
+                title: payload.title ?? existing.title,
+                durationSeconds: payload.durationSeconds ?? existing.durationSeconds,
+                activityType: payload.activityType ?? existing.activityType,
+                activityDetail: payload.activityDetail ?? existing.activityDetail,
+                instrumentLabel: payload.instrumentLabel ?? existing.instrumentLabel,
+                mood: payload.mood ?? existing.mood,
+                effort: payload.effort ?? existing.effort
+            )
+            items[index] = merged
+            persist()
+            BackendLogger.notice("Queue update • postID=\(payload.id.uuidString) • total=\(items.count)")
+        } else {
+            items.append(payload)
+            persist()
+            BackendLogger.notice("Queue enqueue • postID=\(payload.id.uuidString) • total=\(items.count)")
+        }
     }
 
     public func enqueue(postID: UUID) {

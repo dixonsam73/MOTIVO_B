@@ -1248,10 +1248,27 @@ private var instrumentPicker: some View {
 
             // ===== v7.12A • Publish hook after successful save =====
             if let sid = s.id {
-                PublishService.shared.publishIfNeeded(
-                    context: viewContext,
-                    objectID: s.objectID,
+                let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+                let instLabel =
+                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? s.instrument?.name
+
+                let payload = SessionSyncQueue.PostPublishPayload(
+                    id: sid,
                     sessionID: sid,
+                    sessionTimestamp: timestamp,
+                    title: s.title,
+                    durationSeconds: Int(durationSeconds),
+                    activityType: activityTypeString,
+                    activityDetail: trimmedDetail,
+                    instrumentLabel: instLabel,
+                    mood: Int(s.mood),
+                    effort: Int(s.effort)
+                )
+
+                PublishService.shared.publish(
+                    payload: payload,
+                    objectID: s.objectID,
                     shouldPublish: isPublic
                 )
             } else {
@@ -2254,6 +2271,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

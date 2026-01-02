@@ -111,6 +111,8 @@ final class PublishService: ObservableObject {
                 var sTimestamp: Date? = nil
                 var sTitle: String? = nil
                 var sDuration: Int? = nil
+                // Removed line per instructions:
+                // if hasAttr("activityType"), let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
                 var sActivityType: String? = nil
                 var sActivityDetail: String? = nil
                 var sInstrumentLabel: String? = nil
@@ -133,7 +135,6 @@ final class PublishService: ObservableObject {
                         if let val = obj.value(forKey: "durationSeconds") as? Int { sDuration = val }
                         else if let val64 = obj.value(forKey: "durationSeconds") as? Int64 { sDuration = Int(val64) }
                     }
-                    if hasAttr("activityType"), let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
                     if hasAttr("activityDetail"), let val = obj.value(forKey: "activityDetail") as? String { sActivityDetail = val }
                     if hasAttr("userInstrumentLabel"), let val = obj.value(forKey: "userInstrumentLabel") as? String { sInstrumentLabel = val }
                     if hasAttr("mood") {
@@ -162,6 +163,7 @@ final class PublishService: ObservableObject {
                 )
                 payload = p
 
+                NSLog("[PublishService][8F] LEGACY publishIfNeeded path used • sessionID=%@", sessionID.uuidString)
                 if let payload = payload {
                     SessionSyncQueue.shared.enqueue(payload)
                 } else {
@@ -188,6 +190,59 @@ final class PublishService: ObservableObject {
 
             if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
                 NSLog("[PublishService] Preview enqueue + flush for published session → %@", sessionID.uuidString)
+            }
+        }
+    }
+
+    public func publish(
+        payload: SessionSyncQueue.PostPublishPayload,
+        objectID: NSManagedObjectID,
+        shouldPublish: Bool
+    ) {
+        let uri = objectID.uriRepresentation().absoluteString
+
+        var set = publishedURIs
+        let changed: Bool
+        if shouldPublish {
+            changed = set.insert(uri).inserted
+        } else {
+            changed = set.remove(uri) != nil
+        }
+        if changed {
+            persist(set)
+            publishedURIs = set
+            NSLog("[PublishService] %@ session → %@", shouldPublish ? "Published" : "Unpublished", uri)
+        }
+
+        Task { @MainActor in
+            if shouldPublish {
+                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ title=%@ dur=%@ act=%@ mood=%@ effort=%@",
+                      payload.id.uuidString,
+                      payload.title ?? "nil",
+                      payload.durationSeconds != nil ? String(payload.durationSeconds!) : "nil",
+                      payload.activityType ?? "nil",
+                      payload.mood != nil ? String(payload.mood!) : "nil",
+                      payload.effort != nil ? String(payload.effort!) : "nil")
+                SessionSyncQueue.shared.enqueue(payload)
+            }
+
+            await SessionSyncQueue.shared.flushNow()
+
+            let mode = BackendEnvironment.shared.mode
+            let hasBaseURL = (NetworkManager.shared.baseURL != nil)
+            let configured = BackendConfig.isConfigured
+            if !shouldPublish, (mode == .backendPreview) && hasBaseURL && configured {
+                let result = await BackendEnvironment.shared.publish.deletePost(payload.id)
+                switch result {
+                case .success:
+                    NSLog("[PublishService] Preview deletePost success → %@", payload.id.uuidString)
+                case .failure(let error):
+                    NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", payload.id.uuidString, String(describing: error))
+                }
+            }
+
+            if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
+                NSLog("[PublishService] Preview enqueue + flush for published session → %@", payload.id.uuidString)
             }
         }
     }
@@ -238,4 +293,3 @@ final class PublishService: ObservableObject {
     }
 #endif
 }
-
