@@ -162,6 +162,8 @@ fileprivate struct SessionsRootView: View {
 
     // Debounce
     @State private var debounceCancellable: AnyCancellable?
+    @State private var lastBackendAutoFetchKey: String = ""
+    @State private var lastBackendAutoFetchAt: Date = .distantPast
 
 // Step 8C: Backend feed list (read-only rows; no navigation yet)
 @ViewBuilder private var backendFeedList: some View {
@@ -192,9 +194,6 @@ fileprivate struct SessionsRootView: View {
             }
         }
         .listSectionSeparator(.hidden, edges: .all)
-    }
-    .task(id: scopeKey) {
-        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
     }
     .refreshable {
         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
@@ -269,6 +268,20 @@ fileprivate struct SessionsRootView: View {
                 Group {
                 if useBackendFeed {
                     backendFeedList
+                        .task(id: selectedScope) {
+                            let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                            let key = "auto:\(scopeKey)"
+
+                            // Debounce: prevent rapid consecutive auto-fetches for the same scope
+                           
+                            if key == lastBackendAutoFetchKey && Date().timeIntervalSince(lastBackendAutoFetchAt) < 1.5 {
+                                return
+                            }
+                            lastBackendAutoFetchKey = key
+                            lastBackendAutoFetchAt = Date()
+
+                            _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+                        }
                 } else {
                     List {
                         Section {
