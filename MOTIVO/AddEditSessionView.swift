@@ -1245,11 +1245,18 @@ private var instrumentPicker: some View {
 
         do {
             try viewContext.save()
+
             // ===== v7.12A • Publish hook after successful save =====
-            PublishService.shared.publishIfNeeded(
-                objectID: s.objectID,
-                shouldPublish: isPublic
-            )
+            if let sid = s.id {
+                PublishService.shared.publishIfNeeded(
+                    objectID: s.objectID,
+                    sessionID: sid,
+                    shouldPublish: isPublic
+                )
+            } else {
+                print("Publish skipped: missing Session.id")
+            }
+
             viewContext.processPendingChanges()
             dismiss()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }

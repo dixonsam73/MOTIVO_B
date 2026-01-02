@@ -102,29 +102,32 @@ final class PublishService: ObservableObject {
                 var sMood: Int? = nil
                 var sEffort: Int? = nil
 
-                // Resolve the managed object and extract fields best-effort.
-                if let ctxClass = NSClassFromString("PersistenceController") as? NSObject.Type,
-                   let shared = ctxClass.value(forKey: "shared") as? NSObject,
-                   let viewContext = shared.value(forKey: "container")
-                        .flatMap({ ($0 as AnyObject).value(forKey: "viewContext") }) as AnyObject? {
-                    do {
-                        if let obj = try (viewContext as? NSManagedObjectContext)?.existingObject(with: objectID) {
-                            if let val = obj.value(forKey: "id") as? UUID { sID = val }
-                            if let val = obj.value(forKey: "timestamp") as? Date { sTimestamp = val }
-                            if let val = obj.value(forKey: "title") as? String { sTitle = val }
-                            if let val = obj.value(forKey: "durationSeconds") as? Int { sDuration = val }
-                            else if let val64 = obj.value(forKey: "durationSeconds") as? Int64 { sDuration = Int(val64) }
-                            if let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
-                            if let val = obj.value(forKey: "activityDetail") as? String { sActivityDetail = val }
-                            if let val = obj.value(forKey: "instrumentLabel") as? String { sInstrumentLabel = val }
-                            if let val = obj.value(forKey: "mood") as? Int { sMood = val }
-                            else if let val16 = obj.value(forKey: "mood") as? Int16 { sMood = Int(val16) }
-                            if let val = obj.value(forKey: "effort") as? Int { sEffort = val }
-                            else if let val16 = obj.value(forKey: "effort") as? Int16 { sEffort = Int(val16) }
-                        }
-                    } catch {
-                        // Ignore extraction errors; fallback to minimal payload below.
+                // Resolve the managed object directly via PersistenceController and extract fields best-effort.
+                let viewContext = PersistenceController.shared.container.viewContext
+                do {
+                    let obj = try viewContext.existingObject(with: objectID)
+                    func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
+
+                    if hasAttr("id"), let val = obj.value(forKey: "id") as? UUID { sID = val }
+                    if hasAttr("timestamp"), let val = obj.value(forKey: "timestamp") as? Date { sTimestamp = val }
+                    if hasAttr("title"), let val = obj.value(forKey: "title") as? String { sTitle = val }
+                    if hasAttr("durationSeconds") {
+                        if let val = obj.value(forKey: "durationSeconds") as? Int { sDuration = val }
+                        else if let val64 = obj.value(forKey: "durationSeconds") as? Int64 { sDuration = Int(val64) }
                     }
+                    if hasAttr("activityType"), let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
+                    if hasAttr("activityDetail"), let val = obj.value(forKey: "activityDetail") as? String { sActivityDetail = val }
+                    if hasAttr("userInstrumentLabel"), let val = obj.value(forKey: "userInstrumentLabel") as? String { sInstrumentLabel = val }
+                    if hasAttr("mood") {
+                        if let val = obj.value(forKey: "mood") as? Int { sMood = val }
+                        else if let val16 = obj.value(forKey: "mood") as? Int16 { sMood = Int(val16) }
+                    }
+                    if hasAttr("effort") {
+                        if let val = obj.value(forKey: "effort") as? Int { sEffort = val }
+                        else if let val16 = obj.value(forKey: "effort") as? Int16 { sEffort = Int(val16) }
+                    }
+                } catch {
+                    // Ignore extraction errors; fallback to minimal payload below.
                 }
 
                 let p = SessionSyncQueue.PostPublishPayload(
@@ -217,3 +220,4 @@ final class PublishService: ObservableObject {
     }
 #endif
 }
+

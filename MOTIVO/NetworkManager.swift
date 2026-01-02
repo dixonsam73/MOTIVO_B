@@ -179,6 +179,36 @@ public final class NetworkManager {
         for (k, v) in headers { allHeaders[k] = v }
         for (k, v) in allHeaders { request.setValue(v, forHTTPHeaderField: k) }
 
+        #if DEBUG
+        // DEBUG: Log POST /rest/v1/posts request details without exposing secrets
+        if method.uppercased() == "POST", finalURL.path.contains("/rest/v1/posts") {
+            print("[NetworkManager][DEBUG] ▶︎ POST Request: \(finalURL.absoluteString)")
+            if let body = request.httpBody, !body.isEmpty {
+                if let bodyString = String(data: body, encoding: .utf8) {
+                    print("[NetworkManager][DEBUG] body=\(bodyString)")
+                } else {
+                    print("[NetworkManager][DEBUG] body=(non-UTF8, \(body.count) bytes)")
+                }
+                do {
+                    let obj = try JSONSerialization.jsonObject(with: body, options: [])
+                    if let dict = obj as? [String: Any] {
+                        let keys = Array(dict.keys)
+                        print("[NetworkManager][DEBUG] jsonKeys=\(keys)")
+                    } else if let arr = obj as? [[String: Any]], let first = arr.first {
+                        let keys = Array(first.keys)
+                        print("[NetworkManager][DEBUG] jsonKeys(first item)=\(keys)")
+                    } else {
+                        print("[NetworkManager][DEBUG] jsonKeys=(not a top-level object)")
+                    }
+                } catch {
+                    print("[NetworkManager][DEBUG] json parse error=\(error)")
+                }
+            } else {
+                print("[NetworkManager][DEBUG] body=(none)")
+            }
+        }
+        #endif
+
         // Logging (no tokens printed)
         print("[NetworkManager] ▶︎ \(method) \(finalURL.absoluteString)")
 
@@ -220,3 +250,4 @@ public final class NetworkManager {
         }
     }
 }
+

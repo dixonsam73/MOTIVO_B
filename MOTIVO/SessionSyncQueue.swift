@@ -95,7 +95,34 @@ public final class SessionSyncQueue: ObservableObject {
                 case .failure(let error):
                     NSLog("[SessionSyncQueue] upload failed • postID=%@ • error=%@", payload.id.uuidString, error.localizedDescription)
                     BackendLogger.notice("Preview upload failed • postID=\(payload.id.uuidString) • error=\(error.localizedDescription)")
-                    // Preserve semantics: failures remain queued; no retries/timers added here.
+
+                    // Treat HTTP 409 (duplicate primary key) as success so the queue doesn't get stuck.
+                    let isHTTP409Duplicate: Bool = {
+                        // Check common error representations without importing or changing other modules.
+                        // 1) URLError/URLResponse wrapped types that expose a code or statusCode in the description.
+                        let desc = String(describing: error)
+                        if desc.contains(" 409 ") || desc.contains("status code: 409") || desc.contains("HTTP 409") || desc.contains("Code=409") {
+                            return true
+                        }
+                        // 2) Some backends include database constraint names in the message; match common Supabase duplicate key text.
+                        if desc.localizedCaseInsensitiveContains("duplicate key") || desc.localizedCaseInsensitiveContains("posts_pkey") {
+                            return true
+                        }
+                        // 3) Also check localizedDescription as a fallback.
+                        let localized = error.localizedDescription
+                        if localized.contains(" 409 ") || localized.localizedCaseInsensitiveContains("duplicate key") || localized.localizedCaseInsensitiveContains("posts_pkey") || localized.contains("HTTP 409") || localized.contains("status code: 409") || localized.contains("Code=409") {
+                            return true
+                        }
+                        return false
+                    }()
+
+                    if isHTTP409Duplicate {
+                        NSLog("[SessionSyncQueue] duplicate postID %@ — treating as success", payload.id.uuidString)
+                        BackendLogger.notice("Duplicate post • treating as success • postID=\(payload.id.uuidString)")
+                        self.dequeue(postID: payload.id)
+                    } else {
+                        // Preserve semantics: failures remain queued; no retries/timers added here.
+                    }
                 }
             }
             NSLog("[SessionSyncQueue] flushNow completed • remaining=%d", items.count)
