@@ -458,12 +458,15 @@ struct SessionDetailView: View {
                 }
                 return false
             }
+
             let updated = note.userInfo?[NSUpdatedObjectsKey] as? Set<NSManagedObject>
             let inserted = note.userInfo?[NSInsertedObjectsKey] as? Set<NSManagedObject>
             let deleted = note.userInfo?[NSDeletedObjectsKey] as? Set<NSManagedObject>
+
             if touchesThisSession(updated) || touchesThisSession(inserted) || touchesThisSession(deleted) {
                 _refreshTick &+= 1
             }
+
             // If the edit sheet was (or is) presented and this session was updated, pop back to ContentView
             if editWasPresented && (touchesThisSession(updated) || touchesThisSession(inserted)) {
                 editWasPresented = false
@@ -473,6 +476,9 @@ struct SessionDetailView: View {
                     dismiss()
                 }
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            _refreshTick &+= 1
         }
         .appBackground()
         // Added task to hydrate local interaction state on sessionUUID change
@@ -642,6 +648,11 @@ struct SessionDetailView: View {
                                 .contentShape(Rectangle())
                                 .accessibilityLabel("Open audio clip \(title)")
                                 Spacer(minLength: 8)
+                                if AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
+                                    Image(systemName: "eye.slash")
+                                        .imageScale(.small)
+                                        .accessibilityHidden(true)
+                                }
                             }
                             .padding(12)
                             .background(Color.secondary.opacity(0.08))
@@ -1041,6 +1052,13 @@ fileprivate struct AttachmentRow: View {
                 }.foregroundStyle(.secondary)
             }
             Spacer()
+            if AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
+                Image(systemName: "eye.slash")
+                    .imageScale(.small)
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .accessibilityHidden(true)
+            }
         }
         .onTapGesture { onTap() }
         .buttonStyle(.plain)

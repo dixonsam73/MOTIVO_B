@@ -4,10 +4,13 @@
 //  Centralized helpers for attachment privacy state.
 //  Uses a JSON file in Application Support as the single source of truth with ID-first, URL-fallback keys.
 
+// CHANGE-ID: 20260103_203738
+// SCOPE: Default attachments to owner-only: empty/missing map entry => private; reset map key to v2
+
 import Foundation
 
 public enum AttachmentPrivacy {
-    public static let mapKey = "attachmentPrivacyMap_v1"
+    public static let mapKey = "attachmentPrivacyMap_v2"
 
     private static let queue = DispatchQueue(label: "AttachmentPrivacy.fileQueue", qos: .userInitiated)
     private static var cache: [String: Bool]?
@@ -59,9 +62,9 @@ public enum AttachmentPrivacy {
 
     @inline(__always)
     public static func isPrivate(id: UUID?, url: URL?) -> Bool {
-        guard let key = privacyKey(id: id, url: url) else { return false }
+        guard let key = privacyKey(id: id, url: url) else { return true }
         let map = currentMap()
-        return map[key] ?? false
+        return map[key] ?? true
     }
 
     @inline(__always)

@@ -27,7 +27,7 @@ struct AttachmentViewerView: View {
     @State private var isPagerInteractable = false
     @State private var pendingDragTranslation: CGFloat = 0
     @State private var hasCommittedOnce: Bool = false
-    @State private var localIsPrivate: Bool = false
+    @State private var localIsPrivate: Bool = true
     @State private var cachedURL: URL? = nil
     @State private var isAnyPlayerActive = false
     @State private var stopAllPlayersToggle = false
@@ -331,7 +331,7 @@ struct AttachmentViewerView: View {
                     if media.indices.contains(clamped) {
                         let url = media[clamped].url
                         cachedURL = url
-                        localIsPrivate = isPrivate?(url) ?? false
+                        localIsPrivate = isPrivate?(url) ?? true
                         // Note: Private items should not be considered as default thumbnail candidates by the presenter.
                     }
                 }
@@ -353,7 +353,7 @@ struct AttachmentViewerView: View {
                     if media.indices.contains(idx) {
                         let url = media[idx].url
                         cachedURL = url
-                        localIsPrivate = isPrivate?(url) ?? false
+                        localIsPrivate = isPrivate?(url) ?? true
                     }
                 }
             }

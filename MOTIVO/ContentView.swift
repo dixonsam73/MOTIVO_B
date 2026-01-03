@@ -1031,6 +1031,9 @@ fileprivate struct SessionRow: View {
                 _refreshTick &+= 1
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            _refreshTick &+= 1
+        }
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
                 isLikedLocal = FeedInteractionStore.isLiked(sid)

@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260103_205708
+// SCOPE: Fix AESV AttachmentViewer privacy sync by resolving attachment ID via viewer index (handles persisted URLs). Default unknown => private.
+
 // CHANGE-ID: 20251228_210200-aesv-videoTitleParityFix-01
 // SCOPE: AESV video title routing: staged temp titles only for unsaved videos; persisted videos read/write canonical persistedVideoTitles_v1 only; no other logic/UI changes.
 
@@ -156,7 +159,7 @@ struct AddEditSessionView: View {
             if let v = privacyMap[key] { return v }
             return AttachmentPrivacy.isPrivate(id: id, url: url)
         }
-        return false
+        return true
     }
 
     private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
@@ -2057,19 +2060,38 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         return false
                                     },
                                     onTogglePrivacy: { url in
-                                        let stem = url.deletingPathExtension().lastPathComponent
-                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                            let priv = isPrivate(id: att.id, url: url)
-                                            setPrivate(id: att.id, url: url, !priv)
-                                        }
-                                    },
-                                    isPrivate: { url in
-                                        let stem = url.deletingPathExtension().lastPathComponent
-                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                            return isPrivate(id: att.id, url: url)
-                                        }
-                                        return false
-                                    },
+    // Resolve attachment identity by viewer index first (matches imageURLs+videoURLs+audioURLs),
+    // falling back to UUID-from-stem when possible.
+    let attID: UUID? = {
+        let all = imageURLs + videoURLs + audioURLs
+        if let idx = all.firstIndex(where: { $0 == url }),
+           idx >= 0,
+           idx < req.viewerAttachmentIDs.count {
+            return req.viewerAttachmentIDs[idx]
+        }
+        let stem = url.deletingPathExtension().lastPathComponent
+        return UUID(uuidString: stem)
+    }()
+    guard let id = attID else { return }
+    let priv = isPrivate(id: id, url: url)
+    setPrivate(id: id, url: url, !priv)
+},
+isPrivate: { url in
+    let attID: UUID? = {
+        let all = imageURLs + videoURLs + audioURLs
+        if let idx = all.firstIndex(where: { $0 == url }),
+           idx >= 0,
+           idx < req.viewerAttachmentIDs.count {
+            return req.viewerAttachmentIDs[idx]
+        }
+        let stem = url.deletingPathExtension().lastPathComponent
+        return UUID(uuidString: stem)
+    }()
+    // Default is private when identity cannot be resolved.
+    guard let id = attID else { return true }
+    return isPrivate(id: id, url: url)
+},
+
                                     onReplaceAttachment: { originalURL, newURL, kind in
                                         // Replace should preserve attachment identity.
                                         // AttachmentViewerView has already written the replacement file to disk and passes

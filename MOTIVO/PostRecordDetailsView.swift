@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260103_205708
+// SCOPE: Fix PRDV AttachmentViewer privacy default + fallback so viewer and thumbnails stay consistent. Default unknown => private.
+
 // CHANGE-ID: 20251212_122700-prdv-viewerreq-04
 // SCOPE: Step 4 — Wire PRDV audio attachment row taps to viewerRequest (audio-only viewer)
 
@@ -105,7 +108,7 @@ struct PostRecordDetailsView: View {
     }
 
     // v7.9E — State circles (neutral greys)
-    private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear) 
+    private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
 
     // v7.9E — 12-dot gradient strip (dark → light) with drag selection
     private let stateDotsCount: Int = 12
@@ -146,7 +149,7 @@ struct PostRecordDetailsView: View {
             if let v = privacyMap[key] { return v }
             return AttachmentPrivacy.isPrivate(id: id, url: url)
         }
-        return false
+        return true
     }
 
     private func setPrivate(id: UUID?, url: URL?, _ value: Bool) {
@@ -587,20 +590,31 @@ onDelete: { url in
                         return false
                     },
                     onTogglePrivacy: { url in
-                        // Toggle privacy using same ID-first, URL-fallback key as grid
-                        let stem = url.deletingPathExtension().lastPathComponent
-                        if let staged = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                            let priv = isPrivate(id: staged.id, url: url)
-                            setPrivate(id: staged.id, url: url, !priv)
-                        }
-                    },
-                    isPrivate: { url in
-                        let stem = url.deletingPathExtension().lastPathComponent
-                        if let staged = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                            return isPrivate(id: staged.id, url: url)
-                        }
-                        return false
-                    },
+    // Toggle "shown in post" state (default private) using ID-first key.
+    let stem = url.deletingPathExtension().lastPathComponent
+    if let staged = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+        let priv = isPrivate(id: staged.id, url: url)
+        setPrivate(id: staged.id, url: url, !priv)
+        return
+    }
+    // Fallback: if the URL stem is a UUID but we couldn't find it in stagedAttachments (should be rare), still toggle.
+    if let id = UUID(uuidString: stem) {
+        let priv = isPrivate(id: id, url: url)
+        setPrivate(id: id, url: url, !priv)
+    }
+},
+isPrivate: { url in
+    let stem = url.deletingPathExtension().lastPathComponent
+    if let staged = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+        return isPrivate(id: staged.id, url: url)
+    }
+    // Default private if unknown.
+    if let id = UUID(uuidString: stem) {
+        return isPrivate(id: id, url: url)
+    }
+    return true
+},
+
                     onReplaceAttachment: { originalURL, newURL, kind in
                         replaceStagedAttachment(originalURL: originalURL, with: newURL, kind: kind)
                     },
@@ -2036,6 +2050,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
