@@ -50,6 +50,8 @@ public struct DebugViewerView: View {
     @State private var targetID: String = "user_B"
     @State private var acceptFromID: String = "local-device"
     @StateObject private var followStore = FollowStore.shared
+    @State private var deletePostIDText: String = ""
+    @State private var deletePostStatusText: String? = nil
 
     // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
@@ -105,6 +107,39 @@ public struct DebugViewerView: View {
 
                 Text("mine: \(backendFeedStore.minePosts.count) • all: \(backendFeedStore.allPosts.count)")
                     .font(.subheadline)
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    TextField("Post UUID", text: $deletePostIDText)
+                        .textFieldStyle(.roundedBorder)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+                        .keyboardType(.asciiCapable)
+                    Button(backendFeedStore.isFetching ? "Deleting…" : "Delete Post") {
+                        let trimmed = deletePostIDText.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard let uuid = UUID(uuidString: trimmed) else {
+                            deletePostStatusText = "Invalid UUID"
+                            return
+                        }
+                        deletePostStatusText = nil
+                        Task {
+                            let result = await BackendEnvironment.shared.publish.deletePost(uuid)
+                            switch result {
+                            case .success:
+                                deletePostStatusText = "Deleted \(uuid.uuidString)"
+                            case .failure(let error):
+                                deletePostStatusText = "Delete failed: \(String(describing: error))"
+                            }
+                        }
+                    }
+                    .disabled(backendFeedStore.isFetching)
+                }
+                if let status = deletePostStatusText, !status.isEmpty {
+                    Text(status)
+                        .font(.footnote)
+                        .foregroundColor(status.lowercased().contains("fail") ? .red : .secondary)
+                }
             }
 
             VStack(alignment: .leading, spacing: 4) {

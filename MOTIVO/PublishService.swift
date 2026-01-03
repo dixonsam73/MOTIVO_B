@@ -104,9 +104,17 @@ final class PublishService: ObservableObject {
             // Build payload from Core Data using KVC to avoid importing model types here.
             var payload: SessionSyncQueue.PostPublishPayload? = nil
 
+            // Early exit for backendPreview when publishing: do not build/enqueue legacy payload here.
+            // Still flush so payloads enqueued via publish(payload: ...) are sent.
+            if BackendEnvironment.shared.mode == .backendPreview, shouldPublish {
+                await SessionSyncQueue.shared.flushNow()
+                NSLog("[PublishService] [8F] backendPreview publishIfNeeded skipped legacy enqueue → %@", sessionID.uuidString)
+                return
+            }
+
             if shouldPublish {
                 NSLog("[PublishService] enqueue gate • mode=%@ • shouldPublish=%@ • changed=%@ • sessionID=%@", String(describing: BackendEnvironment.shared.mode), shouldPublish ? "true" : "false", changed ? "true" : "false", sessionID.uuidString)
-                
+
                 var sID: UUID? = nil
                 var sTimestamp: Date? = nil
                 var sTitle: String? = nil
