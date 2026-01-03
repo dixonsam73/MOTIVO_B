@@ -1247,33 +1247,36 @@ private var instrumentPicker: some View {
             try viewContext.save()
 
             // ===== v7.12A • Publish hook after successful save =====
-            if let sid = s.id {
-                let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
-                let instLabel =
-                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                    ?? s.instrument?.name
-
-                let payload = SessionSyncQueue.PostPublishPayload(
-                    id: sid,
-                    sessionID: sid,
-                    sessionTimestamp: timestamp,
-                    title: s.title,
-                    durationSeconds: Int(durationSeconds),
-                    activityType: activityTypeString,
-                    activityDetail: trimmedDetail,
-                    instrumentLabel: instLabel,
-                    mood: Int(s.mood),
-                    effort: Int(s.effort)
-                )
-
-                PublishService.shared.publish(
-                    payload: payload,
-                    objectID: s.objectID,
-                    shouldPublish: isPublic
-                )
-            } else {
+            guard let sid = s.id else {
                 print("Publish skipped: missing Session.id")
+                return
             }
+
+            let focusValue: Int? = selectedDotIndex_edit
+
+            let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+            let instLabel =
+                (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? s.instrument?.name
+
+            let payload = SessionSyncQueue.PostPublishPayload(
+                id: sid,
+                sessionID: sid,
+                sessionTimestamp: timestamp,
+                title: s.title,
+                durationSeconds: Int(durationSeconds),
+                activityType: activityTypeString,
+                activityDetail: trimmedDetail,
+                instrumentLabel: instLabel,
+                mood: nil,
+                effort: focusValue
+            )
+
+            PublishService.shared.publish(
+                payload: payload,
+                objectID: s.objectID,
+                shouldPublish: isPublic
+            )
 
             viewContext.processPendingChanges()
             dismiss()
@@ -2271,6 +2274,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 

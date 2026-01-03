@@ -149,6 +149,10 @@ final class PublishService: ObservableObject {
                     // Ignore extraction errors; fallback to minimal payload below.
                 }
 
+                let focusValue: Int? = { return sMood ?? sEffort }()
+                let mappedEffort: Int? = focusValue
+                let mappedMood: Int? = nil
+
                 let p = SessionSyncQueue.PostPublishPayload(
                     id: sessionID,
                     sessionID: sID,
@@ -158,8 +162,8 @@ final class PublishService: ObservableObject {
                     activityType: sActivityType,
                     activityDetail: sActivityDetail,
                     instrumentLabel: sInstrumentLabel,
-                    mood: sMood,
-                    effort: sEffort
+                    mood: mappedMood,
+                    effort: mappedEffort
                 )
                 payload = p
 

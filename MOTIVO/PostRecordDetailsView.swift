@@ -1423,6 +1423,11 @@ onDelete: { url in
                     (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
                     ?? s.instrument?.name
 
+                let focusValue: Int? = {
+                    if let idx = selectedDotIndex { return idx }
+                    return nil
+                }()
+
                 let payload = SessionSyncQueue.PostPublishPayload(
                     id: sid,
                     sessionID: sid,
@@ -1432,8 +1437,8 @@ onDelete: { url in
                     activityType: activityTypeString,
                     activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
                     instrumentLabel: instLabel,
-                    mood: Int(mood),
-                    effort: Int(effort)
+                    mood: nil,
+                    effort: focusValue
                 )
 
                 PublishService.shared.publish(
@@ -2031,6 +2036,7 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
 
 
 
