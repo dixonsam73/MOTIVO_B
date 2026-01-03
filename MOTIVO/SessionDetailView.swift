@@ -106,7 +106,7 @@ struct SessionDetailView: View {
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
 
-    private let grid = [GridItem(.adaptive(minimum: 84), spacing: 12)]
+    private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
 
     // Unified via helpers
     private var headerTitle: String {
@@ -1102,11 +1102,11 @@ fileprivate struct ThumbCell: View {
                     if let ui = image { Image(uiImage: ui).resizable().scaledToFill() }
                     else { Image(systemName: "photo").imageScale(.large).foregroundStyle(.secondary) }
                 }
-                .frame(width: 84, height: 84)
+                .frame(width: 128, height: 128)
                 .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(.secondary.opacity(0.15), lineWidth: 1)
                 )
 
@@ -1150,7 +1150,7 @@ fileprivate struct VideoThumbCell: View {
                         Image(uiImage: poster).resizable().scaledToFill()
                     } else {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
                                 .fill(Color.secondary.opacity(0.08))
                             Image(systemName: "video")
                                 .imageScale(.large)
@@ -1158,11 +1158,11 @@ fileprivate struct VideoThumbCell: View {
                         }
                     }
                 }
-                .frame(width: 84, height: 84)
+                .frame(width: 128, height: 128)
                 .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
                         .stroke(.secondary.opacity(0.15), lineWidth: 1)
                 )
 
@@ -1180,6 +1180,7 @@ fileprivate struct VideoThumbCell: View {
                     .accessibilityHidden(true)
             }
         }
+        .frame(width: 128, height: 128)
         .task(id: fileURL) {
             guard poster == nil, let u = fileURL else { return }
             await generatePoster(u)
