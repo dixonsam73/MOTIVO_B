@@ -646,8 +646,10 @@ struct SessionDetailView: View {
                                 if isOwner && !AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
                                     Image(systemName: "eye")
                                         .imageScale(.small)
-                                        .padding(6)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .padding(4)
                                         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                        .padding([.top, .trailing], 4)
                                         .accessibilityLabel("Included in post")
                                 }
                             }
@@ -1053,7 +1055,8 @@ fileprivate struct AttachmentRow: View {
             if isOwner && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
                 Image(systemName: "eye")
                     .imageScale(.small)
-                    .padding(6)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(4)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .accessibilityLabel("Included in post")
             }
@@ -1093,7 +1096,7 @@ fileprivate struct ThumbCell: View {
     let attachment: Attachment
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topTrailing) {
             // Existing thumbnail + star remains in an inner ZStack to keep its topTrailing alignment
             ZStack(alignment: .topTrailing) {
                 Group {
@@ -1123,9 +1126,10 @@ fileprivate struct ThumbCell: View {
             if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
-                    .padding(6)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(4)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .padding(6)
+                    .padding([.top, .trailing], 4)
                     .accessibilityLabel("Included in post")
             }
         }
@@ -1142,7 +1146,7 @@ fileprivate struct VideoThumbCell: View {
     private var attachmentID: UUID? { (attachment.value(forKey: "id") as? UUID) }
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .topTrailing) {
             ZStack(alignment: .center) {
                 Group {
                     if let poster {
@@ -1174,9 +1178,10 @@ fileprivate struct VideoThumbCell: View {
             if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
-                    .padding(6)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(4)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .padding(6)
+                    .padding([.top, .trailing], 4)
                     .accessibilityLabel("Included in post")
             }
         }
