@@ -69,7 +69,7 @@ struct TasksPadCard: View {
             .frame(maxWidth: .infinity, alignment: .leading)
 
             ForEach($taskLines) { $line in
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     Button {
                         onToggleDone(line.id)
                     } label: {
@@ -117,10 +117,13 @@ struct TasksPadCard: View {
                         onDeleteLine(line.id)
                     } label: {
                         Image(systemName: "trash")
-                            .foregroundStyle(.primary.opacity(0.8))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                            .padding(.leading, 2)
                     }
                     .buttonStyle(.plain)
                 }
+                // Slightly tighter row height than the prior TextField vertical padding
+                .padding(.vertical, 1)
             }
 
             Button(action: { onAddEmptyLine() }) {
@@ -158,3 +161,4 @@ struct TasksPadCard: View {
         .padding(.vertical, 8)
     }
 }
+
