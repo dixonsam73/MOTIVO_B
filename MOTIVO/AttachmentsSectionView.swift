@@ -51,3 +51,4 @@ struct AttachmentsSectionView: View {
         return URL(fileURLWithPath: path).lastPathComponent
     }
 }
+

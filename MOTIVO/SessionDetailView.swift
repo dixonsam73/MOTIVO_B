@@ -540,13 +540,7 @@ struct SessionDetailView: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text("Notes").sectionHeader()
                             Spacer(minLength: 0)
-                            if areNotesPrivate {
-                                Image(systemName: "eye.slash")
-                                    .imageScale(.small)
-                                    .padding(6)
-                                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                                    .accessibilityHidden(true)
-                            }
+                            // REMOVED: no privacy icon here per instructions
                         }
                         Text(displayNotes)
                     }
@@ -648,10 +642,13 @@ struct SessionDetailView: View {
                                 .contentShape(Rectangle())
                                 .accessibilityLabel("Open audio clip \(title)")
                                 Spacer(minLength: 8)
-                                if AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
-                                    Image(systemName: "eye.slash")
+                                let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
+                                if isOwner && !AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
+                                    Image(systemName: "eye")
                                         .imageScale(.small)
-                                        .accessibilityHidden(true)
+                                        .padding(6)
+                                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                                        .accessibilityLabel("Included in post")
                                 }
                             }
                             .padding(12)
@@ -1052,12 +1049,13 @@ fileprivate struct AttachmentRow: View {
                 }.foregroundStyle(.secondary)
             }
             Spacer()
-            if AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
-                Image(systemName: "eye.slash")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            if isOwner && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
+                Image(systemName: "eye")
                     .imageScale(.small)
                     .padding(6)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
-                    .accessibilityHidden(true)
+                    .accessibilityLabel("Included in post")
             }
         }
         .onTapGesture { onTap() }
@@ -1121,13 +1119,14 @@ fileprivate struct ThumbCell: View {
             }
 
             // Read-only privacy badge (supports ID-first and URL fallback)
-            if isPrivateAttachment(id: attachmentID, url: fileURL) {
-                Image(systemName: "eye.slash")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
+                Image(systemName: "eye")
                     .imageScale(.small)
                     .padding(6)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(6)
-                    .accessibilityHidden(true)
+                    .accessibilityLabel("Included in post")
             }
         }
     }
@@ -1171,13 +1170,14 @@ fileprivate struct VideoThumbCell: View {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             }
-            if isPrivateAttachment(id: attachmentID, url: fileURL) {
-                Image(systemName: "eye.slash")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
+                Image(systemName: "eye")
                     .imageScale(.small)
                     .padding(6)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
                     .padding(6)
-                    .accessibilityHidden(true)
+                    .accessibilityLabel("Included in post")
             }
         }
         .frame(width: 128, height: 128)
@@ -1278,13 +1278,7 @@ fileprivate struct SessionIdentityHeader: View {
             }
 
             Spacer(minLength: 0)
-            // Updated privacy icon from lock.fill to eye.slash
-            if isPrivate {
-                Image(systemName: "eye.slash")
-                    .imageScale(.small)
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, 2)
-            }
+            // REMOVED privacy icon from lock.fill to eye.slash per instructions (nothing here)
         }
         .padding(.bottom, 2)
     }

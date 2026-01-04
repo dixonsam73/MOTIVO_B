@@ -938,8 +938,15 @@ isPrivate: { url in
                                         setPrivate(id: att.id, url: privURL, !current)
                                     } label: {
                                         let current = isPrivate(id: att.id, url: privURL)
-                                        Image(systemName: current ? "eye.slash" : "eye")
-                                            .font(.system(size: 16, weight: .semibold))
+                                        if !current {
+                                            Image(systemName: "eye")
+                                                .font(.system(size: 16, weight: .semibold))
+                                                .padding(8)
+                                                .background(.ultraThinMaterial, in: Circle())
+                                        } else {
+                                            // Quiet when private: render nothing to avoid eye/eye.slash outside viewer
+                                            EmptyView()
+                                        }
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
@@ -1855,6 +1862,8 @@ fileprivate struct AttachmentThumbCell: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                     )
+
+                // Removed included-in-post badge for owners only (eye overlay)
             }
 
             // Right-side vertical control column: Star, Privacy, Delete
@@ -1875,10 +1884,15 @@ fileprivate struct AttachmentThumbCell: View {
                     setPrivate(att.id, resolvedURL, !priv)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
-                    Image(systemName: priv ? "eye.slash" : "eye")
-                        .font(.system(size: 16, weight: .semibold))
-                        .padding(8)
-                        .background(.ultraThinMaterial, in: Circle())
+                    if !priv {
+                        Image(systemName: "eye")
+                            .font(.system(size: 16, weight: .semibold))
+                            .padding(8)
+                            .background(.ultraThinMaterial, in: Circle())
+                    } else {
+                        // Quiet when private: render nothing to avoid eye/eye.slash outside viewer
+                        EmptyView()
+                    }
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
@@ -2050,6 +2064,8 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
+
 
 
 

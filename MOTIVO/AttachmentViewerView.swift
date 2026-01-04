@@ -422,7 +422,7 @@ struct AttachmentViewerView: View {
                                 .accessibilityLabel(isFav ? "Unfavourite attachment" : "Favourite attachment")
                             }
 
-                            if canPrivacy {
+                            if canPrivacy && !isReadOnly {
                                 Button {
                                     let url = currentURL
                                     // Optimistic UI update – no rebuild, no flash
@@ -446,9 +446,7 @@ struct AttachmentViewerView: View {
                                     .contentShape(Circle())
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityLabel(
-                                    isPriv ? "Make attachment visible to others" : "Hide attachment from others"
-                                )
+                                .accessibilityLabel(isPriv ? "Only visible to you" : "Included in post")
                             }
 
                             if canRename(for: currentAttachmentKind, url: currentURL) {
