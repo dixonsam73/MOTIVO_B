@@ -394,7 +394,7 @@ struct SessionDetailView: View {
         ScrollView {
             mainContentErased()
                 .padding(.horizontal, Theme.Spacing.l)
-                .padding(.top, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
         }
         .navigationTitle("Session")
@@ -666,14 +666,14 @@ struct SessionDetailView: View {
                         }
                     }
                 }
-                .cardSurface()
+                .cardSurface(padding: Theme.Spacing.m)
             }
 
             if let sid = sessionUUID {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     interactionRow(sessionID: sid)
                 }
-                .cardSurface()
+                .cardSurface(padding: Theme.Spacing.m)
             }
         }
     }
@@ -784,7 +784,7 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
                     .frame(height: 44)
                     .accessibilityLabel(Text(bucketLabel(for: dotIndex)))
             }
-            .cardSurface()
+            .cardSurface(padding: Theme.Spacing.m)
         }
 
         private func bucketLabel(for dot: Int) -> String {
