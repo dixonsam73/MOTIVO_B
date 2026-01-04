@@ -2052,18 +2052,36 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         }
                                     },
                                     onFavourite: { url in
-                                        // Selecting favourite maps to setting selectedThumbnailID for images/videos/audio
-                                        let stem = url.deletingPathExtension().lastPathComponent
-                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
+                                        // Resolve attachment identity by viewer index first, fallback to UUID-from-stem
+                                        let all = imageURLs + videoURLs + audioURLs
+                                        let attID: UUID? = {
+                                            if let idx = all.firstIndex(where: { $0 == url }),
+                                               idx >= 0,
+                                               idx < req.viewerAttachmentIDs.count {
+                                                return req.viewerAttachmentIDs[idx]
+                                            }
+                                            let stem = url.deletingPathExtension().lastPathComponent
+                                            return UUID(uuidString: stem)
+                                        }()
+                                        guard let id = attID else { return }
+                                        if let att = stagedAttachments.first(where: { $0.id == id }) {
                                             selectedThumbnailID = att.id
                                         }
                                     },
                                     isFavourite: { url in
-                                        let stem = url.deletingPathExtension().lastPathComponent
-                                        if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                                            return selectedThumbnailID == att.id
-                                        }
-                                        return false
+                                        let all = imageURLs + videoURLs + audioURLs
+                                        let attID: UUID? = {
+                                            if let idx = all.firstIndex(where: { $0 == url }),
+                                               idx >= 0,
+                                               idx < req.viewerAttachmentIDs.count {
+                                                return req.viewerAttachmentIDs[idx]
+                                            }
+                                            let stem = url.deletingPathExtension().lastPathComponent
+                                            return UUID(uuidString: stem)
+                                        }()
+                                        guard let id = attID else { return false }
+                                        guard stagedAttachments.contains(where: { $0.id == id }) else { return false }
+                                        return selectedThumbnailID == id
                                     },
                                     onTogglePrivacy: { url in
     // Resolve attachment identity by viewer index first (matches imageURLs+videoURLs+audioURLs),
