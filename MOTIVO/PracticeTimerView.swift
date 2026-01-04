@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260104_103632-ptv-visualTierAlign
+// SCOPE: Visual-only — align PracticeTimerView padding and demote tool strips (drone/metronome) to match ContentView hierarchy
+
 // CHANGE-ID: 20251124_213000-ptv-viewerRoutingAndHitTests
 // SCOPE: Ensure audio rows win hit-testing over video tiles in attachments card
 // CHANGE-ID: 20251012_202320-tasks-pad-a2
@@ -875,7 +878,7 @@ struct PracticeTimerView: View {
             attachmentsSection
         }
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.top, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.m)
         .padding(.bottom, Theme.Spacing.xl)
     }
 
@@ -894,20 +897,19 @@ struct PracticeTimerView: View {
     @ViewBuilder
     private var droneSection: some View {
         if showDroneStrip {
-            VStack(spacing: Theme.Spacing.s) {
-                DroneControlStripCard(
-                    droneIsOn: $droneIsOn,
-                    droneVolume: $droneVolume,
-                    droneNoteIndex: $droneNoteIndex,
-                    droneFreq: $droneFreq,
-                    showDroneVolumePopover: $showDroneVolumePopover,
-                    droneNotes: droneNotes,
-                    droneEngine: audioServices.droneEngine,
-                    recorderIcon: recorderIcon
-                )
-            }
+            DroneControlStripCard(
+                droneIsOn: $droneIsOn,
+                droneVolume: $droneVolume,
+                droneNoteIndex: $droneNoteIndex,
+                droneFreq: $droneFreq,
+                showDroneVolumePopover: $showDroneVolumePopover,
+                droneNotes: droneNotes,
+                droneEngine: audioServices.droneEngine,
+                recorderIcon: recorderIcon
+            )
             .frame(maxWidth: .infinity, alignment: .center)
-            .cardSurfaceNonClipping()
+            // Visual tier: treat as control tray (lighter than full content cards)
+            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
             .zIndex(5)
         }
     }
@@ -915,18 +917,17 @@ struct PracticeTimerView: View {
     @ViewBuilder
     private var metronomeSection: some View {
         if showMetronomeStrip {
-            VStack(spacing: Theme.Spacing.s) {
-                MetronomeControlStripCard(
-                    metronomeIsOn: $metronomeIsOn,
-                    metronomeBPM: $metronomeBPM,
-                    metronomeAccentEvery: $metronomeAccentEvery,
-                    metronomeVolume: $metronomeVolume,
-                    metronomeEngine: audioServices.metronomeEngine,
-                    recorderIcon: recorderIcon
-                )
-            }
+            MetronomeControlStripCard(
+                metronomeIsOn: $metronomeIsOn,
+                metronomeBPM: $metronomeBPM,
+                metronomeAccentEvery: $metronomeAccentEvery,
+                metronomeVolume: $metronomeVolume,
+                metronomeEngine: audioServices.metronomeEngine,
+                recorderIcon: recorderIcon
+            )
             .frame(maxWidth: .infinity, alignment: .center)
-            .cardSurfaceNonClipping()
+            // Visual tier: treat as control tray (lighter than full content cards)
+            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
             .zIndex(5)
         }
     }
@@ -2392,13 +2393,3 @@ struct InfoSheetView: View {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — post
-
-
-
-
-
-
-
-
-
-

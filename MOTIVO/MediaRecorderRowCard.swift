@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260104_103646-mrrc-densityDemoteA
+// SCOPE: Visual-only — slightly reduce MediaRecorderRowCard vertical density to demote it vs TimerCard (Option A)
+
 // MediaRecorderRowCard.swift
 // Extracted from PracticeTimerView as part of refactor step 2.
 // Visual/interaction row for audio, photo, and video recorders.
@@ -22,7 +25,7 @@ struct MediaRecorderRowCard: View {
     let ensureCameraAuthorized: (@escaping () -> Void) -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: Theme.Spacing.s) {
             HStack(spacing: Theme.Spacing.m) {
                 Button {
                     if showAudioRecorder {
@@ -142,7 +145,5 @@ struct MediaRecorderRowCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
-        .frame(maxWidth: .infinity, alignment: .center)
-        
     }
 }
