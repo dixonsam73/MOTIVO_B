@@ -11,6 +11,7 @@ import Foundation
 
 public enum AttachmentPrivacy {
     public static let mapKey = "attachmentPrivacyMap_v2"
+    public static let didChangeNotification = Notification.Name("AttachmentPrivacy.didChange")
 
     private static let queue = DispatchQueue(label: "AttachmentPrivacy.fileQueue", qos: .userInitiated)
     private static var cache: [String: Bool]?
@@ -75,7 +76,7 @@ public enum AttachmentPrivacy {
             map[key] = value
             saveMap(map)
             cache = map
-            NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: nil)
+            NotificationCenter.default.post(name: didChangeNotification, object: nil)
         }
     }
 

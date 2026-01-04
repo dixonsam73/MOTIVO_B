@@ -476,18 +476,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                             setPrivate(id: att.id, url: fileURL, !priv)
                                                                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                                                         } label: {
+                                                                            // Quiet Mode: show badge only when included (not private)
                                                                             ZStack {
-                                                                                Circle()
-                                                                                    .fill(.ultraThinMaterial)
                                                                                 Image(systemName: "eye")
                                                                                     .font(.system(size: 16, weight: .semibold))
+                                                                                    .padding(8)
+                                                                                    .background(.ultraThinMaterial, in: Circle())
                                                                             }
                                                                             .opacity(priv ? 0 : 1)
-                                                                            .frame(width: 32, height: 32)
-                                                                            .contentShape(Circle())
                                                                         }
                                                                         .buttonStyle(.plain)
-                                                                        .accessibilityLabel(priv ? "Include in post" : "Remove from post")
+                                                                        .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
 
                                                                         Button {
                                                                             // Preserve existing persistent delete behavior for items sourced from Core Data
@@ -669,17 +668,13 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 let current = isPrivate(id: att.id, url: privURL)
                                                 setPrivate(id: att.id, url: privURL, !current)
                                             } label: {
-                                                ZStack {
-                                                    Circle().fill(.ultraThinMaterial)
-                                                    Image(systemName: "eye")
-                                                        .font(.system(size: 16, weight: .semibold))
-                                                }
-                                                .opacity(isPriv ? 0 : 1)
-                                                .frame(width: 32, height: 32)
-                                                .contentShape(Circle())
+                                                // Quiet Mode: only show when included
+                                                Image(systemName: "eye")
+                                                    .font(.system(size: 16, weight: .semibold))
+                                                    .opacity(isPriv ? 0 : 1)
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel(isPriv ? "Include in post" : "Remove from post")
+                                            .accessibilityLabel("Toggle privacy")
 
                                             Button(role: .destructive) {
                                                 removeStagedAttachment(att)
@@ -846,7 +841,7 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
             // Ensure token is hidden in Notes whenever view appears
             stripFocusTokensFromNotes_edit()
         }
-        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+        .onReceive(NotificationCenter.default.publisher(for: AttachmentPrivacy.didChangeNotification)) { _ in
             loadPrivacyMap()
         }
         .onChange(of: activity) { _, _ in

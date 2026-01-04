@@ -737,7 +737,7 @@ isPrivate: { url in
                 }
             }
             .onAppear { loadPrivacyMap() }
-            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: AttachmentPrivacy.didChangeNotification)) { _ in
                 loadPrivacyMap()
             }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
@@ -938,15 +938,9 @@ isPrivate: { url in
                                         setPrivate(id: att.id, url: privURL, !current)
                                     } label: {
                                         let current = isPrivate(id: att.id, url: privURL)
-                                        if !current {
-                                            Image(systemName: "eye")
-                                                .font(.system(size: 16, weight: .semibold))
-                                                .padding(8)
-                                                .background(.ultraThinMaterial, in: Circle())
-                                        } else {
-                                            // Quiet when private: render nothing to avoid eye/eye.slash outside viewer
-                                            EmptyView()
-                                        }
+                                        Image(systemName: "eye")
+                                            .font(.system(size: 16, weight: .semibold))
+                                            .opacity(current ? 0 : 1)
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
@@ -1862,8 +1856,6 @@ fileprivate struct AttachmentThumbCell: View {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                     )
-
-                // Removed included-in-post badge for owners only (eye overlay)
             }
 
             // Right-side vertical control column: Star, Privacy, Delete
@@ -1884,15 +1876,11 @@ fileprivate struct AttachmentThumbCell: View {
                     setPrivate(att.id, resolvedURL, !priv)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
-                    if !priv {
-                        Image(systemName: "eye")
-                            .font(.system(size: 16, weight: .semibold))
-                            .padding(8)
-                            .background(.ultraThinMaterial, in: Circle())
-                    } else {
-                        // Quiet when private: render nothing to avoid eye/eye.slash outside viewer
-                        EmptyView()
-                    }
+                    Image(systemName: "eye")
+                        .font(.system(size: 16, weight: .semibold))
+                        .padding(8)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .opacity(priv ? 0 : 1)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
@@ -2064,26 +2052,4 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
