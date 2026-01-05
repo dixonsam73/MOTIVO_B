@@ -1,5 +1,5 @@
-// CHANGE-ID: 20251227_125700-avv-renamewire-fix3-10366580
-// SCOPE: Fix convenience init call (remove duplicate titleForURL), add currentAttachmentKind, keep viewer rename/title contract. No other logic/UI changes.
+// CHANGE-ID: 20260105_181300-avv-include-thumb-invariant-fix3
+// SCOPE: Enforce attachment inclusion↔thumbnail invariants in AttachmentViewerView (⭐ implies 👁; private clears ⭐; per-item optimistic state; eye-slash only in control panel). No UI/layout, backend, schema, or publish/sync changes.
 
 import SwiftUI
 import AVKit
@@ -27,7 +27,9 @@ struct AttachmentViewerView: View {
     @State private var isPagerInteractable = false
     @State private var pendingDragTranslation: CGFloat = 0
     @State private var hasCommittedOnce: Bool = false
-    @State private var localIsPrivate: Bool = true
+    @State private var localPrivateByKey: [String: Bool] = [:]
+    @State private var localFavouriteKey: String? = nil
+    @State private var suppressedFavouriteKeys: Set<String> = []
     @State private var cachedURL: URL? = nil
     @State private var isAnyPlayerActive = false
     @State private var stopAllPlayersToggle = false
@@ -85,6 +87,51 @@ struct AttachmentViewerView: View {
 
     private func currentURL() -> URL? {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
+    }
+
+
+    private func urlKey(_ url: URL) -> String {
+        // URL is our stable handle inside the viewer (hosts can map URL→ID however they like).
+        url.absoluteString
+    }
+
+    private func seedPrivacy(for url: URL) {
+        localPrivateByKey[urlKey(url)] = isPrivate?(url) ?? true
+    }
+
+    private func optimisticIsPrivate(_ url: URL) -> Bool {
+        localPrivateByKey[urlKey(url)] ?? (isPrivate?(url) ?? true)
+    }
+
+    private func setOptimisticPrivacy(_ isPrivate: Bool, for url: URL) {
+        localPrivateByKey[urlKey(url)] = isPrivate
+    }
+
+    private func seedFavouriteIfNeeded() {
+        guard localFavouriteKey == nil else { return }
+        // Seed from host once so the star reflects whatever the presenter considers "thumbnail".
+        // Do not seed a favourite for an attachment that is currently private (⭐ must never be private),
+        // and respect any local suppression (e.g., user explicitly turned ⭐ off in the viewer).
+        for item in media {
+            let k = urlKey(item.url)
+            if suppressedFavouriteKeys.contains(k) { continue }
+            if optimisticIsPrivate(item.url) { continue }
+            if (isFavourite?(item.url) ?? false) {
+                localFavouriteKey = k
+                break
+            }
+        }
+    }
+
+    private func optimisticIsFavourite(_ url: URL) -> Bool {
+        let k = urlKey(url)
+        if suppressedFavouriteKeys.contains(k) { return false }
+        // Hard rule: ⭐ must never be private.
+        if optimisticIsPrivate(url) { return false }
+        if let key = localFavouriteKey {
+            return key == k
+        }
+        return isFavourite?(url) ?? false
     }
 
 
@@ -331,7 +378,7 @@ struct AttachmentViewerView: View {
                     if media.indices.contains(clamped) {
                         let url = media[clamped].url
                         cachedURL = url
-                        localIsPrivate = isPrivate?(url) ?? true
+                        seedPrivacy(for: url)
                         // Note: Private items should not be considered as default thumbnail candidates by the presenter.
                     }
                 }
@@ -353,7 +400,7 @@ struct AttachmentViewerView: View {
                     if media.indices.contains(idx) {
                         let url = media[idx].url
                         cachedURL = url
-                        localIsPrivate = isPrivate?(url) ?? true
+                        seedPrivacy(for: url)
                     }
                 }
             }
@@ -388,18 +435,35 @@ struct AttachmentViewerView: View {
 
                     if media.indices.contains(currentIndex) {
                         let currentURL = media[currentIndex].url
-                        let isFav = (isFavourite?(currentURL) ?? false)
-                        let isPriv = localIsPrivate
+                        let _ = seedFavouriteIfNeeded()
+                        let isFav = optimisticIsFavourite(currentURL)
+                        let isPriv = optimisticIsPrivate(currentURL)
                         let currentAttachmentKind = media[currentIndex].kind
 
                         HStack(spacing: headerSpacing) {
                             if canFavourite {
                                 Button {
                                     let url = currentURL
-                                    let priv = isPrivate?(url) ?? false
-                                    onFavourite?(url)
-                                    if !priv {
-                                        /* presenter enforces single-thumbnail rule */
+                                    let key = urlKey(url)
+                                    let isFavNow = optimisticIsFavourite(url)
+
+                                    if isFavNow {
+                                        // Turning ⭐ OFF does not imply removing 👁 (inclusion stays as-is).
+                                        localFavouriteKey = nil
+                                        suppressedFavouriteKeys.insert(key)
+                                        onFavourite?(url)
+                                    } else {
+                                        // Turning ⭐ ON ⇒ must be included.
+                                        if optimisticIsPrivate(url) {
+                                            setOptimisticPrivacy(false, for: url)
+                                            onTogglePrivacy?(url)
+                                        }
+
+                                        // Optimistically set as the current favourite.
+                                        suppressedFavouriteKeys.remove(key)
+
+                                        localFavouriteKey = key
+                                        onFavourite?(url)
                                     }
                                 } label: {
                                     ZStack {
@@ -425,9 +489,22 @@ struct AttachmentViewerView: View {
                             if canPrivacy && !isReadOnly {
                                 Button {
                                     let url = currentURL
-                                    // Optimistic UI update – no rebuild, no flash
-                                    localIsPrivate.toggle()
-                                    onTogglePrivacy?(url)
+                                    let wasPrivate = optimisticIsPrivate(url)
+                                    let willBePrivate = !wasPrivate
+
+                                    if willBePrivate {
+                                        // Invariant: private ⇒ cannot remain thumbnail.
+                                        if optimisticIsFavourite(url) {
+                                            localFavouriteKey = nil
+                                            suppressedFavouriteKeys.insert(urlKey(url))
+                                            onFavourite?(url)
+                                        }
+                                        setOptimisticPrivacy(true, for: url)
+                                        onTogglePrivacy?(url)
+                                    } else {
+                                        setOptimisticPrivacy(false, for: url)
+                                        onTogglePrivacy?(url)
+                                    }
                                 } label: {
                                     ZStack {
                                         Circle()
@@ -1725,4 +1802,3 @@ private extension Comparable {
         min(max(self, range.lowerBound), range.upperBound)
     }
 }
-

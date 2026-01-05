@@ -3,6 +3,8 @@
 // CHANGE-ID: v710H-TopButtonsSafeInset-20251030-1205
 // SCOPE: ContentView — replace .toolbar with .safeAreaInset for avatar/record/plus (visual-only); remove toolbar capsule
 // UNIQUE-TOKEN: v710H-TopButtonsSafeInset-20251030-1205
+// CHANGE-ID: 20260105_191200_contentview_thumb_inclusion_invariant
+// SCOPE: Feed thumbnail preview must never use private (not-included) attachments; if none included, show no thumbnail.
 //
 //  ContentView.swift
 //  MOTIVO
@@ -851,8 +853,14 @@ fileprivate struct SessionRow: View {
     private var attachments: [Attachment] {
         (session.attachments as? Set<Attachment>).map { Array($0) } ?? []
     }
+
+    // Attachments included with the post (non-private). The feed thumbnail must come from this set.
+    private var includedAttachments: [Attachment] {
+        attachments.filter { !isPrivate($0) }
+    }
+
     private var favoriteAttachment: Attachment? {
-        pickFavoriteAttachment(from: attachments)
+        pickFavoriteAttachment(from: includedAttachments)
     }
 
     // Visible attachments for the current viewer (owner sees all; others see non-private only)

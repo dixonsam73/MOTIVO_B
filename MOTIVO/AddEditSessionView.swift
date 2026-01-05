@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260105_183654-aesv-thumb-inclusion-invariants-3109c299
+// SCOPE: AESV: remove auto-thumbnail defaults; enforce ⭐⇒👁; privacy→private clears thumbnail; suppress eye badge when starred; gate invalid persisted thumbnails
 // CHANGE-ID: 20260103_205708
 // SCOPE: Fix AESV AttachmentViewer privacy sync by resolving attachment ID via viewer index (handles persisted URLs). Default unknown => private.
 
@@ -466,14 +468,27 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                                 .font(.system(size: 16))
                                                                                 .padding(8)
                                                                                 .background(.ultraThinMaterial, in: Circle())
-                                                                                .onTapGesture { selectedThumbnailID = att.id }
+                                                                                .onTapGesture {
+                                                                                    let fileURL: URL? = surrogateURL(for: att)
+                                                                                    let privNow: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                                    if privNow {
+                                                                                        // ⭐ implies 👁 — starring auto-includes.
+                                                                                        setPrivate(id: att.id, url: fileURL, false)
+                                                                                    }
+                                                                                    selectedThumbnailID = att.id
+                                                                                }
                                                                                 .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
                                                                         }
 
                                                                         let fileURL: URL? = surrogateURL(for: att)
                                                                         let priv: Bool = isPrivate(id: att.id, url: fileURL)
                                                                         Button {
-                                                                            setPrivate(id: att.id, url: fileURL, !priv)
+                                                                            let newPriv = !priv
+                                                                            if newPriv, selectedThumbnailID == att.id {
+                                                                                // Making thumbnail private clears ⭐.
+                                                                                selectedThumbnailID = nil
+                                                                            }
+                                                                            setPrivate(id: att.id, url: fileURL, newPriv)
                                                                             UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                                                         } label: {
                                                                             // Quiet Mode: show badge only when included (not private)
@@ -483,7 +498,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                                     .padding(8)
                                                                                     .background(.ultraThinMaterial, in: Circle())
                                                                             }
-                                                                            .opacity(priv ? 0 : 1)
+                                                                            .opacity((priv || selectedThumbnailID == att.id) ? 0 : 1)
                                                                         }
                                                                         .buttonStyle(.plain)
                                                                         .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
@@ -516,7 +531,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                 }
                                                                 .contextMenu {
                                                                     if att.kind == .image || att.kind == .audio || att.kind == .video {
-                                                                        Button("Set as Thumbnail") { selectedThumbnailID = att.id }
+                                                                        Button("Set as Thumbnail") {
+                                                                            let fileURL: URL? = surrogateURL(for: att)
+                                                                            let privNow: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                            if privNow {
+                                                                                // ⭐ implies 👁 — starring auto-includes.
+                                                                                setPrivate(id: att.id, url: fileURL, false)
+                                                                            }
+                                                                            selectedThumbnailID = att.id
+                                                                        }
                                                                     }
                                                                     Button(role: .destructive) {
                                                                         if existingAttachmentIDs.contains(att.id), let s = session {
@@ -1512,7 +1535,12 @@ private var instrumentPicker: some View {
             existingAttachmentIDs.insert(id)
 
             if (a.value(forKey: "isThumbnail") as? Bool) == true {
-                selectedThumbnailID = id
+                // Do not surface an invalid thumbnail if the attachment is private.
+                let storedPath = (a.value(forKey: "fileURL") as? String) ?? ""
+                let resolvedURL = resolveStoredFileURL(at: storedPath)
+                if !isPrivate(id: id, url: resolvedURL) {
+                    selectedThumbnailID = id
+                }
             }
         }
     }
@@ -1610,17 +1638,15 @@ private var instrumentPicker: some View {
             try? data.write(to: tempURL, options: .atomic)
         }
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
-        if kind == .image {
-            let imageCount = stagedAttachments.filter { $0.kind == .image }.count
-            if imageCount == 1 { selectedThumbnailID = id }
-        }
+        // No auto-thumbnail: thumbnail is set only via explicit user intent (⭐).
     }
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
         existingAttachmentIDs.remove(a.id)
         if selectedThumbnailID == a.id {
-            selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+            // No auto-reassign: removing the thumbnail clears it.
+            selectedThumbnailID = nil
         }
     }
 
@@ -1955,7 +1981,8 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             let removed = stagedAttachments.remove(at: idx)
                                             existingAttachmentIDs.remove(removed.id)
                                             if selectedThumbnailID == removed.id {
-                                                selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
+                                                // No auto-reassign: removing the thumbnail clears it.
+                                                selectedThumbnailID = nil
                                             }
                                         }
                                     },
@@ -2098,7 +2125,12 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
     }()
     guard let id = attID else { return }
     let priv = isPrivate(id: id, url: url)
-    setPrivate(id: id, url: url, !priv)
+    let newPriv = !priv
+    if newPriv, selectedThumbnailID == id {
+        // Making thumbnail private clears ⭐.
+        selectedThumbnailID = nil
+    }
+    setPrivate(id: id, url: url, newPriv)
 },
 isPrivate: { url in
     let attID: UUID? = {

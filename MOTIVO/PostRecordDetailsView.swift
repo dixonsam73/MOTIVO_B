@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260105_prdv_staged_to_final_thumbnail_mapping
+// SCOPE: PRDV commit-time staged→final thumbnail ID mapping + enforce ⭐⇒👁 at commit.
+// CHANGE-ID: 20260105_prdv_star_toggle_sync
+// SCOPE: PRDV attachments card star toggle is bidirectional and stays in sync with viewer (no UI change).
+// CHANGE-ID: 20260105_prdv_final_key_inclusion_for_thumbnail
+// SCOPE: Persist inclusion on FINAL (id+fileURL) keys for the chosen thumbnail attachment at commit.
+// CHANGE-ID: 20260105_prdv_hide_eye_when_starred
+// SCOPE: PRDV attachments card hides 👁 badge when ⭐ (thumbnail) is present to reduce noise.
 // CHANGE-ID: 20260103_205708
 // SCOPE: Fix PRDV AttachmentViewer privacy default + fallback so viewer and thumbnails stay consistent. Default unknown => private.
 
@@ -579,7 +587,7 @@ onDelete: { url in
                     onFavourite: { url in
                         let stem = url.deletingPathExtension().lastPathComponent
                         if let att = stagedAttachments.first(where: { $0.id.uuidString == stem }) {
-                            selectedThumbnailID = att.id
+                            toggleThumbnail(att)
                         }
                     },
                     isFavourite: { url in
@@ -799,7 +807,7 @@ isPrivate: { url in
                                 AttachmentThumbCell(
                                     att: att,
                                     isThumbnail: selectedThumbnailID == att.id,
-                                    onMakeThumbnail: { selectedThumbnailID = att.id },
+                                    onMakeThumbnail: { toggleThumbnail(att) },
                                     onRemove: { removeStagedAttachment(att) },
                                     isPrivate: { id, url in
                                         return isPrivate(id: id, url: url)
@@ -923,7 +931,7 @@ isPrivate: { url in
                                 VStack(spacing: 6) {
                                     // Star (use audio clip as session thumbnail)
                                     Button {
-                                        selectedThumbnailID = att.id
+                                        toggleThumbnail(att)
                                     } label: {
                                         Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
                                             .font(.system(size: 16, weight: .semibold))
@@ -940,7 +948,7 @@ isPrivate: { url in
                                         let current = isPrivate(id: att.id, url: privURL)
                                         Image(systemName: "eye")
                                             .font(.system(size: 16, weight: .semibold))
-                                            .opacity(current ? 0 : 1)
+                                            .opacity((current || selectedThumbnailID == att.id) ? 0 : 1)
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
@@ -1505,6 +1513,22 @@ isPrivate: { url in
             .appendingPathExtension(ext)
     }
 
+    // CHANGE-ID: 20260105_prdv_star_toggle_sync
+    // SCOPE: PRDV attachments card star toggle must be bidirectional and consistent with AttachmentViewerView.
+    private func toggleThumbnail(_ att: StagedAttachment) {
+        guard let url = surrogateURL(for: att) else { return }
+        if selectedThumbnailID == att.id {
+            selectedThumbnailID = nil
+            return
+        }
+        // ⭐ implies 👁 (thumbnail implies included)
+        if isPrivate(id: att.id, url: url) {
+            setPrivate(id: att.id, url: url, false)
+        }
+        selectedThumbnailID = att.id
+    }
+
+
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
@@ -1546,9 +1570,19 @@ isPrivate: { url in
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
-        if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
 
-        let namesKey = "stagedAudioNames_temp"
+        // Ensure thumbnail implies included (staged privacy) before migration/commit
+        if let tid = chosenThumbID, let thumb = stagedAttachments.first(where: { $0.id == tid }) {
+            setPrivate(id: tid, url: surrogateURL(for: thumb), false)
+        }
+
+        // Map staged UUID → final Attachment UUID (used to persist isThumbnail correctly)
+        var stagedToFinalID: [UUID: UUID] = [:]
+        
+
+        // Map staged UUID → final file URL (used to persist privacy on final keys)
+        var stagedToFinalURL: [UUID: URL] = [:]
+let namesKey = "stagedAudioNames_temp"
         let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
 
         // Read staged video titles captured during timer flow and define persisted store key
@@ -1575,10 +1609,16 @@ isPrivate: { url in
 
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
+                if let finalID = (created.value(forKey: "id") as? UUID) {
+                    stagedToFinalID[att.id] = finalID
+                }
+
 
                 // Attempt to migrate privacy from staged keys (ID/Temp URL) to final keys (ID/File URL)
                 let finalURL = URL(fileURLWithPath: result.path)
-                let stagedURL = surrogateURL(for: att)
+                
+                stagedToFinalURL[att.id] = finalURL
+let stagedURL = surrogateURL(for: att)
                 migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
 
                 // Persist any staged video title so SessionDetailView can surface it later
@@ -1616,14 +1656,26 @@ isPrivate: { url in
             }
         }
 
-        // 2) Update thumbnail flags across ALL attachments in this session to reflect selection
+        // Resolve staged thumbnail UUID to final Attachment UUID
+        let chosenFinalThumbID: UUID? = chosenThumbID.flatMap { stagedToFinalID[$0] }
+
+
+        
+
+        // Persist inclusion on FINAL keys for the chosen thumbnail attachment (ContentView relies on final URL keys)
+        if let stagedID = chosenThumbID,
+           let finalID = chosenFinalThumbID,
+           let finalURL = stagedToFinalURL[stagedID] {
+            setPrivate(id: finalID, url: finalURL, false)
+        }
+// 2) Update thumbnail flags across ALL attachments in this session to reflect selection
         do {
             let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
             req.predicate = NSPredicate(format: "session == %@", session.objectID)
             let existing = try ctx.fetch(req)
             for a in existing {
                 let id = (a.value(forKey: "id") as? UUID)
-                let isThumb = (id != nil) && (id == chosenThumbID)
+                let isThumb = (id != nil) && (id == chosenFinalThumbID)
                 a.setValue(isThumb, forKey: "isThumbnail")
             }
         } catch {
@@ -1880,7 +1932,7 @@ fileprivate struct AttachmentThumbCell: View {
                         .font(.system(size: 16, weight: .semibold))
                         .padding(8)
                         .background(.ultraThinMaterial, in: Circle())
-                        .opacity(priv ? 0 : 1)
+                        .opacity((priv || isThumbnail) ? 0 : 1)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
@@ -2052,4 +2104,3 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
