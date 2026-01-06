@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260106_221700-meview-calmtext-scrollindicators
+// SCOPE: Visual-only: soften key highlight text + hide scroll indicators in MeView. No logic/state changes.
 // CHANGE-ID: 20251015_150332-me-focus-from-notes
 // SCOPE: Me dashboard — Focus average parsed from Session.notes token "FocusDotIndex: n" (fallback: legacy StateIndex→center dots).
 // NOTES: Timestamp-only predicates; no schema changes.
@@ -71,21 +73,22 @@ struct MeView: View {
                     }
                 }
             }
-            .padding()
         }
+        .scrollIndicators(.hidden)
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.m)
+        .padding(.bottom, Theme.Spacing.xl)
         .navigationTitle("")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text("Dashboard").font(Theme.Text.pageTitle)
-            }
-        }
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .onChange(of: range) { _, _ in reload() }
     }
 
     private var rangePickerHeader: some View {
-        VStack(alignment: .leading, spacing: 8) { }
+        HStack {
+            Text("Dashboard").sectionHeader()
+            Spacer()
+        }
     }
 
     private var currentStreakDays: Int { Stats.currentStreakDays(sessions: allSessions) }
@@ -288,7 +291,7 @@ struct MeView: View {
 fileprivate struct AdaptiveGrid<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16)], spacing: 16) { content() }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Theme.Spacing.section)], spacing: Theme.Spacing.section) { content() }
     }
 }
 
@@ -305,6 +308,7 @@ fileprivate struct StatTile: View {
                 .foregroundStyle(Theme.Colors.secondaryText)
             Text(value)
                 .font(.title3.weight(.semibold))
+                .foregroundStyle(Color.primary.opacity(0.75))
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
@@ -334,28 +338,25 @@ fileprivate struct TimeCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Time").sectionHeader()
             Picker("Range", selection: $range) {
                 ForEach(StatsRange.allCases) { r in Text(labelForRange(r)).tag(r) }
             }
             .pickerStyle(.segmented)
-            .padding(4)
-            .background(.regularMaterial.opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             
             if let dateRange {
                 Text(dateRange)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text(StatsHelper.formatDuration(seconds)).font(.system(size: 34, weight: .bold, design: .rounded))
-            Text("\(count) sessions").font(.subheadline).foregroundStyle(.secondary)
+            Text("\(StatsHelper.formatDuration(seconds)) · \(count) sessions")
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundStyle(.primary)
         }
-        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .cardSurface()
+.frame(maxWidth: .infinity, alignment: .leading)
+.cardSurface(padding: Theme.Spacing.m)
     }
 }
 
@@ -364,7 +365,7 @@ fileprivate struct StreaksCard: View {
 
     let current: Int; let best: Int
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Streaks").sectionHeader()
             HStack {
                 StatTile(title: "Current", value: "\(current) days")
@@ -372,9 +373,7 @@ fileprivate struct StreaksCard: View {
                 StatTile(title: "Best", value: "\(best) days")
             }
         }
-        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-        .padding(16)
-        .cardSurface()
+.cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Streaks: current \(current) days, best \(best) days")
     }
@@ -385,7 +384,7 @@ fileprivate struct FocusCard: View {
 
     let average: Double?
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Focus").sectionHeader()
             if let avg = average {
                 Text("Average").font(.caption).foregroundStyle(.secondary)
@@ -398,10 +397,8 @@ fileprivate struct FocusCard: View {
                 Text("No focus data in this period.").font(.subheadline).foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .cardSurface()
+.frame(maxWidth: .infinity, alignment: .leading)
+.cardSurface(padding: Theme.Spacing.m)
         .accessibilityLabel(average != nil ? "Focus average" : "No focus data")
     }
 }
@@ -472,11 +469,15 @@ fileprivate struct TopWinnerCard: View {
     let totalCount: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text(title).sectionHeader()
             if let w = winner {
                 HStack {
-                    Text(w.name).font(.title3).bold().lineLimit(1).truncationMode(.tail)
+                    Text(w.name)
+                        .font(.body).bold()
+                        .foregroundStyle(Color.primary.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                     Spacer()
                     Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
                 }
@@ -491,9 +492,7 @@ fileprivate struct TopWinnerCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-        .padding(16)
-        .cardSurface()
+.cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
@@ -531,7 +530,7 @@ fileprivate struct TimeDistributionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Time distribution").sectionHeader()
 
             if slices.isEmpty {
@@ -562,7 +561,7 @@ fileprivate struct TimeDistributionCard: View {
 
                 // --- legend (dots share the same shade as segments) ---
                 let total = slices.reduce(0) { $0 + $1.seconds }
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     ForEach(0..<slices.count, id: \.self) { i in
                         HStack(alignment: .firstTextBaseline) {
                             HStack(spacing: 8) {
@@ -579,14 +578,12 @@ fileprivate struct TimeDistributionCard: View {
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
                         }
-                        .font(.title3)
+                        .font(.body)
                     }
                 }
             }
         }
-        .frame(minHeight: baselineCardMinHeight(for: hSizeClass), alignment: .topLeading)
-        .padding(16)
-        .cardSurface()
+.cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(a11yText)
     }
