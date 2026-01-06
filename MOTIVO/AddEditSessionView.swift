@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260106_214417-aesv-visualparity-inset-v4
+// SCOPE: Visual parity micro-pass — match PRDV scroll top offset to prevent validation under nav blur (presentation-only).
+// SEARCH-TOKEN: AESV_VISUAL_PARITY_20260106_214417
+
 // CHANGE-ID: 20260105_183654-aesv-thumb-inclusion-invariants-3109c299
 // SCOPE: AESV: remove auto-thumbnail defaults; enforce ⭐⇒👁; privacy→private clears thumbnail; suppress eye badge when starred; gate invalid persisted thumbnails
 // CHANGE-ID: 20260103_205708
@@ -254,16 +258,17 @@ struct AddEditSessionView: View {
     var body: some View {
     NavigationStack {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
                 // No instruments / Instrument picker
                 if hasNoInstruments {
                     // Show the empty-state card only after the first 120ms tick
                     if instrumentsGateArmed && !instrumentsReady {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("No instruments found").font(.headline)
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("No instruments found").sectionHeader()
                             Text("Add an instrument in your Profile to save this session.")
-                                .foregroundStyle(.secondary).font(.subheadline)
+                                .font(.subheadline)
+                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .cardSurface()
                     } else {
@@ -383,20 +388,19 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .padding(.vertical, 12)
-                        .padding(.bottom, 4)
                     }
                     .buttonStyle(.plain)
                     if durationSeconds == 0 {
                         Text("Duration must be greater than 0")
                             .font(.footnote)
                             .foregroundColor(.red)
-                            .padding(.top, 4)
                     }
                 }
                 .cardSurface()
 
-                // Privacy
+                // ---------- Visibility ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Visibility").sectionHeader()
                     Toggle("Public", isOn: $isPublic)
                         .font(Theme.Text.body)
                 }
@@ -429,7 +433,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes)
                             .font(Theme.Text.body)
-                            .frame(minHeight: 100)
+                            .frame(minHeight: 120)
                             .accessibilityLabel("Notes")
                     }
                 }
@@ -722,7 +726,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         }
                     }
                 }
-                .cardSurface()
+                .cardSurface(padding: Theme.Spacing.m)
                 .accessibilityLabel("Attachments")
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -767,7 +771,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .padding(.horizontal, Theme.Spacing.l)
                     .padding(.vertical, 2)
                 }
-                .cardSurface()
+                .cardSurface(padding: Theme.Spacing.m)
 
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -2352,4 +2356,3 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
