@@ -859,6 +859,7 @@ isPrivate: { url in
                         }
                     }
                     .padding(.vertical, 4)
+                    .padding(.bottom, -Theme.Spacing.s)
                 }
 
                 if !audioOnly.isEmpty {
@@ -906,6 +907,7 @@ isPrivate: { url in
                                     HStack(spacing: 8) {
                                     Image(systemName: "waveform")
                                         .font(.system(size: 16, weight: .semibold))
+                                        .opacity(0.85)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(title)
@@ -964,7 +966,8 @@ isPrivate: { url in
                                     .accessibilityLabel("Delete attachment")
                                 }
                             }
-                            .padding(12)
+                            .padding(.vertical, 10)
+                            .padding(.horizontal, 12)
                             .background(Color.secondary.opacity(0.08))
                             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                             .overlay(
@@ -1987,6 +1990,7 @@ fileprivate struct AttachmentThumbCell: View {
                 HStack(alignment: .center, spacing: 8) {
                     Image(systemName: "waveform")
                         .font(.system(size: 16, weight: .semibold))
+                        .opacity(0.85)
 
                     VStack(alignment: .leading, spacing: 2) {
                         if !trimmedDisplay.isEmpty {
