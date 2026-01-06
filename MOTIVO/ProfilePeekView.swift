@@ -1,5 +1,5 @@
-// CHANGE-ID: v7.13A-ProfilePeek-ViewerOverride-20251201_1600
-// SCOPE: Social hardening — align viewerID with Debug.currentUserIDOverride for dummy accounts.
+// CHANGE-ID: 20260106_223800-profilepeek-visualrefine
+// SCOPE: UI polish — align ProfilePeekView with ContentView/MeView tone (calmer overview + instrument list).
 
 import SwiftUI
 import CoreData
@@ -103,18 +103,19 @@ struct ProfilePeekView: View {
                     // Visible summary
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Overview").sectionHeader()
-                        HStack(spacing: Theme.Spacing.l) {
-                            StatChip(title: "Sessions", value: "\(ownerSessions.count)")
-                            let totalSeconds = ownerSessions.reduce(0) { acc, s in
-                                let attrs = s.entity.attributesByName
-                                if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber { return acc + n.intValue }
-                                if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber { return acc + (n.intValue * 60) }
-                                if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber { return acc + (n.intValue * 60) }
-                                if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber { return acc + (n.intValue * 60) }
-                                return acc
-                            }
-                            StatChip(title: "Time", value: StatsHelper.formatDuration(totalSeconds))
-                        }
+                                                let sessionsCount = ownerSessions.count
+                                                let totalSeconds = ownerSessions.reduce(0) { acc, s in
+                                                    let attrs = s.entity.attributesByName
+                                                    if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber { return acc + n.intValue }
+                                                    if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber { return acc + (n.intValue * 60) }
+                                                    if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber { return acc + (n.intValue * 60) }
+                                                    if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber { return acc + (n.intValue * 60) }
+                                                    return acc
+                                                }
+                                                let sessionsLabel = sessionsCount == 1 ? "1 session" : "\(sessionsCount) sessions"
+                                                Text("\(sessionsLabel) · \(StatsHelper.formatDuration(totalSeconds)) total")
+                                                    .font(Theme.Text.body)
+                                                    .foregroundStyle(Color.primary.opacity(0.85))
                     }
                     .transition(.opacity)
 
@@ -123,12 +124,12 @@ struct ProfilePeekView: View {
                     if (viewerID == ownerID || canSee), !ownerInstruments.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             Text("Instruments").sectionHeader()
-                            VStack(alignment: .leading, spacing: 8) {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                 ForEach(ownerInstruments, id: \.objectID) { inst in
                                     Text((inst.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
                                         .font(Theme.Text.body)
                                         .lineLimit(1)
-                                        .foregroundStyle(.primary)
+                                        .foregroundStyle(Color.primary.opacity(0.85))
                                 }
                             }
                         }
