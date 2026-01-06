@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260105_235800_attachmentscard_star_toggle_no_fallback
+// SCOPE: Toggle star bidirectionally and clear selection on delete; remove auto-fallback to first image. No layout changes.
 // AttachmentsCard.swift
 // Extracted from PracticeTimerView as part of refactor step 3 (fixed).
 // Renders staged images, audio, and videos for the session.
@@ -85,12 +87,18 @@ struct AttachmentsCard: View {
                                         .font(.system(size: 16))
                                         .padding(8)
                                         .background(.ultraThinMaterial, in: Circle())
-                                        .onTapGesture { selectedThumbnailID = att.id }
+                                        .onTapGesture {
+                                            if selectedThumbnailID == att.id {
+                                                selectedThumbnailID = nil
+                                            } else {
+                                                selectedThumbnailID = att.id
+                                            }
+                                        }
                                     
                                     Button {
                                         stagedImages.removeAll { $0.id == att.id }
                                         if selectedThumbnailID == att.id {
-                                            selectedThumbnailID = stagedImages.first?.id
+                                            selectedThumbnailID = nil
                                         }
                                         onPersistStagedAttachments()
                                         // Mirror delete to staging store

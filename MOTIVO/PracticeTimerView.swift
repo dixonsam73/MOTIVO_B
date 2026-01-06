@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260105_231900_ptv_thumbnail_invariants
+// CHANGE-ID: 20260105_235950_ptv_remove_last_auto_thumbnail
+// SCOPE: Remove remaining auto-thumbnail assignment when first image is added (PTV).
+// SCOPE: Remove auto-thumbnail default; keep selection only if non-private; add toggleThumbnailForImage enforcing ⭐⇒👁 (no UI/layout changes).
 // CHANGE-ID: 20260104_103632-ptv-visualTierAlign
 // SCOPE: Visual-only — align PracticeTimerView padding and demote tool strips (drone/metronome) to match ContentView hierarchy
 
@@ -1775,12 +1779,23 @@ private var tasksPadSection: some View {
         self.stagedAudio = audios
         self.stagedVideos = videos
         self.videoThumbnails = thumbs
-        // Preserve existing selectedThumbnailID if still present; otherwise set to first image id
-        if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) {
-            self.selectedThumbnailID = sel
+        // Preserve existing selectedThumbnailID if still present; otherwise clear.
+// NOTE: No auto-favourite. Thumbnail is only set via explicit user intent (⭐).
+if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) {
+    // Keep selection only if it still points at a non-private attachment.
+    if let img = images.first(where: { $0.id == sel }) {
+        let u = surrogateURL(for: img)
+        if AttachmentPrivacy.isPrivate(id: sel, url: u) {
+            self.selectedThumbnailID = nil
         } else {
-            self.selectedThumbnailID = images.first?.id
+            self.selectedThumbnailID = sel
         }
+    } else {
+        self.selectedThumbnailID = nil
+    }
+} else {
+    self.selectedThumbnailID = nil
+}
         // Prune audio metadata to mirrored staged audio IDs to avoid losing titles on resume
         let validAudioIDs = Set(audios.map { $0.id })
         self.audioTitles = self.audioTitles.filter { validAudioIDs.contains($0.key) }
@@ -1953,7 +1968,23 @@ private var tasksPadSection: some View {
         }
     }
 
-    private func openAudioViewer(_ id: UUID) {
+    
+    // MARK: - Thumbnail invariants (PTV)
+    // ⭐ implies 👁 (included). Thumbnail is explicit user intent; no auto-default.
+    func toggleThumbnailForImage(id: UUID) {
+        guard let img = stagedImages.first(where: { $0.id == id }) else { return }
+        let u = surrogateURL(for: img)
+
+        if selectedThumbnailID == id {
+            selectedThumbnailID = nil
+            return
+        }
+
+        // Enforce ⭐ ⇒ 👁
+        AttachmentPrivacy.setPrivate(id: id, url: u, false)
+        selectedThumbnailID = id
+    }
+private func openAudioViewer(_ id: UUID) {
         guard let att = stagedAudio.first(where: { $0.id == id }) else { return }
 
         // Build a temp URL whose filename is strictly the UUID so the viewer can resolve URL->UUID reliably
@@ -2017,7 +2048,7 @@ private var tasksPadSection: some View {
             stagedImages.append(StagedAttachment(id: id, data: data, kind: .image))
             // Auto-select first image as thumbnail
             let imageCount = stagedImages.count
-            if imageCount == 1 { selectedThumbnailID = id }
+            if imageCount == 1 { /* no auto-thumbnail */ }
             persistStagedAttachments()
 
             // Double-write to staging store

@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260106_000900_ptv_sheets_viewer_state_sync
+// SCOPE: PTV viewer callbacks now use stable privacy keys + enforce ⭐⇔selection with privacy/thumbnail invariants; remove any thumbnail fallback on delete.
+
 // CHANGE-ID: 20251227_153950-ptv-sheets-renamewire-audioPersistSync-01
 // SCOPE: PTV viewer audio rename: also write to StagingStore.updateAudioMetadata so card does not snap back. No other changes.
 
@@ -217,34 +220,28 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
             audioURLs: audioURLs,
             onDelete: { url in
                 if let uuid = resolveStagedID(from: url) {
-                    // Remove from matching staged arrays and caches
+                    // Remove from matching staged arrays and caches (no thumbnail fallback; user must explicitly set ⭐)
                     if let idx = stagedImages.firstIndex(where: { $0.id == uuid }) {
                         let removed = stagedImages.remove(at: idx)
-                        if selectedThumbnailID == removed.id {
-                            selectedThumbnailID = stagedImages.first(where: { $0.kind == .image })?.id
-                        }
+                        if selectedThumbnailID == removed.id { selectedThumbnailID = nil }
                         persistStagedAttachments()
-                        return
-                    }
-                    if let idx = stagedVideos.firstIndex(where: { $0.id == uuid }) {
+                    } else if let idx = stagedVideos.firstIndex(where: { $0.id == uuid }) {
                         let removed = stagedVideos.remove(at: idx)
                         videoThumbnails.removeValue(forKey: removed.id)
-                        if selectedThumbnailID == removed.id {
-                            selectedThumbnailID = stagedImages.first?.id
-                        }
+                        if selectedThumbnailID == removed.id { selectedThumbnailID = nil }
                         persistStagedAttachments()
-                        return
-                    }
-                    if let idx = stagedAudio.firstIndex(where: { $0.id == uuid }) {
+                    } else if let idx = stagedAudio.firstIndex(where: { $0.id == uuid }) {
                         let removed = stagedAudio.remove(at: idx)
                         audioTitles.removeValue(forKey: removed.id)
                         audioAutoTitles.removeValue(forKey: removed.id)
                         audioDurations.removeValue(forKey: removed.id)
-                        if selectedThumbnailID == removed.id {
-                            selectedThumbnailID = stagedImages.first?.id
-                        }
+                        if selectedThumbnailID == removed.id { selectedThumbnailID = nil }
                         persistStagedAttachments()
-                        return
+                    }
+
+                    // Mirror delete to staging store
+                    if let ref = StagingStore.list().first(where: { $0.id == uuid }) {
+                        StagingStore.remove(ref)
                     }
                 }
             },
@@ -303,10 +300,27 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 }
             },
             onFavourite: { url in
-                if let uuid = resolveStagedID(from: url) {
-                    selectedThumbnailID = uuid
+                guard let uuid = resolveStagedID(from: url) else { return }
+
+                // Use a stable surrogate URL for privacy keys so viewer and thumbnails stay in sync.
+                let stableURL: URL = {
+                    if let a = stagedImages.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedVideos.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedAudio.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    return url
+                }()
+
+                if selectedThumbnailID == uuid {
+                    // Toggle OFF ⭐ (does not imply removing 👁)
+                    selectedThumbnailID = nil
                     persistStagedAttachments()
+                    return
                 }
+
+                // ⭐ ⇒ 👁 (included): starring forces non-private.
+                AttachmentPrivacy.setPrivate(id: uuid, url: stableURL, false)
+                selectedThumbnailID = uuid
+                persistStagedAttachments()
             },
             isFavourite: { url in
                 if let uuid = resolveStagedID(from: url) {
@@ -315,16 +329,37 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 return false
             },
             onTogglePrivacy: { url in
-                if let uuid = resolveStagedID(from: url) {
-                    let current = AttachmentPrivacy.isPrivate(id: uuid, url: url)
-                    AttachmentPrivacy.setPrivate(id: uuid, url: url, !current)
+                guard let uuid = resolveStagedID(from: url) else { return }
+
+                let stableURL: URL = {
+                    if let a = stagedImages.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedVideos.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedAudio.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    return url
+                }()
+
+                let current = AttachmentPrivacy.isPrivate(id: uuid, url: stableURL)
+                let next = !current
+                AttachmentPrivacy.setPrivate(id: uuid, url: stableURL, next)
+
+                // private ⇒ clear ⭐
+                if next == true, selectedThumbnailID == uuid {
+                    selectedThumbnailID = nil
                 }
+
+                persistStagedAttachments()
             },
             isPrivate: { url in
-                if let uuid = resolveStagedID(from: url) {
-                    return AttachmentPrivacy.isPrivate(id: uuid, url: url)
-                }
-                return false
+                guard let uuid = resolveStagedID(from: url) else { return true }
+
+                let stableURL: URL = {
+                    if let a = stagedImages.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedVideos.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    if let a = stagedAudio.first(where: { $0.id == uuid }), let u = surrogateURL(for: a) { return u }
+                    return url
+                }()
+
+                return AttachmentPrivacy.isPrivate(id: uuid, url: stableURL)
             },
             onReplaceAttachment: { oldURL, newURL, _ in
                 if let uuid = resolveStagedID(from: oldURL) {
