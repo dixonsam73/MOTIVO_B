@@ -81,20 +81,8 @@ struct AttachmentsCard: View {
                                     .onTapGesture { onViewImage(att.id) }
                                 }
                                 
-                                // Controls: star to set thumbnail, delete
+                                // Controls: delete only (star removed)
                                 VStack(spacing: 6) {
-                                    Text(selectedThumbnailID == att.id ? "★" : "☆")
-                                        .font(.system(size: 16))
-                                        .padding(8)
-                                        .background(.ultraThinMaterial, in: Circle())
-                                        .onTapGesture {
-                                            if selectedThumbnailID == att.id {
-                                                selectedThumbnailID = nil
-                                            } else {
-                                                selectedThumbnailID = att.id
-                                            }
-                                        }
-                                    
                                     Button {
                                         stagedImages.removeAll { $0.id == att.id }
                                         if selectedThumbnailID == att.id {
