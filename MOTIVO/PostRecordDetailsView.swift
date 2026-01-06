@@ -443,13 +443,13 @@ struct PostRecordDetailsView: View {
                     stateStripCard
 
                     attachmentsSection
-                        .cardSurface()
+                        .cardSurface(padding: Theme.Spacing.m)
 
                     addAttachmentsControlsSection
-                        .cardSurface()
+                        .cardSurface(padding: Theme.Spacing.m)
                 }
                 .padding(.horizontal, Theme.Spacing.l)
-                .padding(.top, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
             }
             .navigationTitle("")
@@ -1147,7 +1147,7 @@ isPrivate: { url in
             .frame(height: 48)       // a touch taller for the bloom
             .padding(.vertical, 2)
         }
-        .cardSurface()
+        .cardSurface(padding: Theme.Spacing.m)
     }
 
     // Instrument picker sheet
@@ -2104,3 +2104,4 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
