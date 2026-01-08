@@ -1,8 +1,9 @@
 import SwiftUI
+import Foundation
 
 // Read-only detail view for a BackendSessionViewModel.
 // - No CoreData imports
-// - Minimal styling with Motivo Theme tokens where available
+// - Step 8G Phase 2: download backend attachments (authenticated) to temp files and open AttachmentViewerView in strict read-only mode.
 public struct BackendSessionDetailView: View {
     public let model: BackendSessionViewModel
 
@@ -10,6 +11,14 @@ public struct BackendSessionDetailView: View {
     private var spacingS: CGFloat { 8 }
     private var spacingM: CGFloat { 12 }
     private var spacingL: CGFloat { 16 }
+
+    // Step 8G Phase 2: read-only backend attachment playback (download to temp + open AttachmentViewerView).
+    @State private var isViewerPresented: Bool = false
+    @State private var isLoadingAttachments: Bool = false
+    @State private var attachmentLoadError: String? = nil
+    @State private var viewerImageURLs: [URL] = []
+    @State private var viewerVideoURLs: [URL] = []
+    @State private var viewerAudioURLs: [URL] = []
 
     public init(model: BackendSessionViewModel) {
         self.model = model
@@ -49,21 +58,47 @@ public struct BackendSessionDetailView: View {
                     }
                 }
 
-                // Attachments section (8G will wire read-only URLs)
+                // Attachments section (Step 8G Phase 2: read-only backend playback)
                 section(header: Text("Attachments")) {
-                    if model.attachmentURLs.isEmpty {
+                    if model.attachmentRefs.isEmpty {
                         Text("No attachments.")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     } else {
                         VStack(alignment: .leading, spacing: spacingS) {
-                            ForEach(model.attachmentURLs, id: \.self) { url in
+                            Button {
+                                Task { await openAttachmentsViewer() }
+                            } label: {
                                 HStack(spacing: spacingS) {
                                     Image(systemName: "paperclip")
                                         .foregroundStyle(.secondary)
-                                    Text(url.lastPathComponent)
-                                        .font(.footnote)
+                                    Text(isLoadingAttachments ? "Loading…" : "View attachments (\(model.attachmentRefs.count))")
+                                        .font(.subheadline)
                                         .foregroundStyle(.primary)
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(isLoadingAttachments)
+
+                            if let err = attachmentLoadError, !err.isEmpty {
+                                Text(err)
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+
+                            // Light disclosure list (filenames) — presentation-only.
+                            ForEach(model.attachmentRefs, id: \.self) { ref in
+                                HStack(spacing: spacingS) {
+                                    Image(systemName: icon(for: ref.kind))
+                                        .foregroundStyle(.secondary)
+                                    Text(filename(for: ref.path))
+                                        .font(.footnote)
+                                        .foregroundStyle(.secondary)
                                     Spacer()
                                 }
                             }
@@ -76,9 +111,93 @@ public struct BackendSessionDetailView: View {
         }
         .navigationTitle("Backend Detail")
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $isViewerPresented) {
+            AttachmentViewerView(
+                imageURLs: viewerImageURLs,
+                startIndex: 0,
+                themeBackground: Color(.systemBackground),
+                videoURLs: viewerVideoURLs,
+                audioURLs: viewerAudioURLs,
+                onDelete: nil,
+                titleForURL: nil,
+                onRename: nil,
+                onRenameLegacy: nil,
+                onFavourite: nil,
+                isFavourite: nil,
+                onTogglePrivacy: nil,
+                isPrivate: nil,
+                onReplaceAttachment: nil,
+                onSaveAsNewAttachment: nil,
+                onSaveAsNewAttachmentFromSource: nil,
+                isReadOnly: true,
+                canShare: false
+            )
+        }
     }
 
-    // MARK: - Subviews
+    // MARK: - Step 8G Phase 2 helpers
+
+    private func icon(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
+        switch kind {
+        case .image: return "photo"
+        case .video: return "video"
+        case .audio: return "waveform"
+        }
+    }
+
+    private func filename(for path: String) -> String {
+        let comps = path.split(separator: "/")
+        return comps.last.map(String.init) ?? path
+    }
+
+    private func openAttachmentsViewer() async {
+        attachmentLoadError = nil
+        isLoadingAttachments = true
+
+        // Clear previous
+        viewerImageURLs = []
+        viewerVideoURLs = []
+        viewerAudioURLs = []
+
+        defer { isLoadingAttachments = false }
+
+        // Download each attachment to a temp file using authenticated storage GET.
+        // NOTE: AVPlayer / AsyncImage can't inject Authorization headers; we stage locally for playback/viewing.
+        for ref in model.attachmentRefs {
+            let result = await NetworkManager.shared.downloadAuthenticatedStorageObject(bucket: ref.bucket, path: ref.path)
+            switch result {
+            case .success(let data):
+                guard let localURL = writeToTemp(data: data, originalPath: ref.path) else {
+                    attachmentLoadError = "Failed to prepare attachment file."
+                    return
+                }
+                switch ref.kind {
+                case .image: viewerImageURLs.append(localURL)
+                case .video: viewerVideoURLs.append(localURL)
+                case .audio: viewerAudioURLs.append(localURL)
+                }
+            case .failure(let error):
+                attachmentLoadError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+                return
+            }
+        }
+
+        isViewerPresented = true
+    }
+
+    private func writeToTemp(data: Data, originalPath: String) -> URL? {
+        let name = filename(for: originalPath)
+        let safe = name.isEmpty ? UUID().uuidString : name
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("motivo_backend_\(UUID().uuidString)_\(safe)")
+        do {
+            try data.write(to: url, options: [.atomic])
+            return url
+        } catch {
+            return nil
+        }
+    }
+
+    // MARK: - Small UI helpers
 
     private var titleRow: some View {
         HStack(alignment: .firstTextBaseline) {

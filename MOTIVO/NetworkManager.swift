@@ -249,5 +249,41 @@ public final class NetworkManager {
             return .failure(NetworkError.encodingError(String(describing: error)))
         }
     }
+
+    // MARK: - Step 8G Phase 2 (Backend attachments)
+
+    /// Builds an authenticated Supabase Storage object path for this project.
+    /// Example:
+    ///   storage/v1/object/authenticated/<bucket>/<path>
+    public func authenticatedStorageObjectPath(bucket: String, path: String) -> String {
+        let b = bucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = path.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let bucketPart = percentEncodePathSegments(b)
+        let pathPart = percentEncodePathSegments(p)
+
+        // Intentionally no leading "/" — request() normalizes.
+        return "storage/v1/object/authenticated/\(bucketPart)/\(pathPart)"
+    }
+
+    /// Downloads an object from Supabase Storage using the current bearer token (Authorization header).
+    /// NOTE: This returns raw bytes; callers may write to a temp file for AVPlayer / Image rendering.
+    public func downloadAuthenticatedStorageObject(bucket: String, path: String) async -> Result<Data, Error> {
+        let storagePath = authenticatedStorageObjectPath(bucket: bucket, path: path)
+        return await request(path: storagePath, method: "GET")
+    }
+
+    private func percentEncodePathSegments(_ raw: String) -> String {
+        // Preserve "/" separators but percent-encode each segment.
+        let trimmed = raw.hasPrefix("/") ? String(raw.dropFirst()) : raw
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+        let encoded = parts.map { part -> String in
+            // Keep empty segments as empty to preserve structure.
+            if part.isEmpty { return "" }
+            return String(part).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String(part)
+        }
+        return encoded.joined(separator: "/")
+    }
+
 }
 

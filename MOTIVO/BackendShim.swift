@@ -38,9 +38,11 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     public let createdAt: String?
     public let updatedAt: String?
     public let isPublic: Bool?
-    // Step 8F: metadata parity (optional fields; safe when absent in backend)
     public let activityLabel: String?
     public let instrumentLabel: String?
+
+    // Step 8G: attachments (jsonb)
+    public let attachments: [[String: String]]?
 
     public enum CodingKeys: String, CodingKey {
         case id
@@ -52,6 +54,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
         case isPublic = "is_public"
         case activityLabel = "activity_label"
         case instrumentLabel = "instrument_label"
+        case attachments = "attachments"
     }
 }
 
