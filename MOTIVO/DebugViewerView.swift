@@ -1,7 +1,9 @@
 // CHANGE-ID: 20260108_134900_Step8G_StorageHello_DebugViewer
+// CHANGE-ID: 20260108_Option1_AttachToPost_DebugViewer
 // SCOPE: Step 8G seed — DEBUG-only Storage “Hello” (upload bundled image to attachments bucket + download via authenticated endpoint); additive-only.
 // ADD-ON: Step 8A/8A.1 — Backend Feed debug fetch (Mine) + diagnostics.
 // ADD-ON: Step 8B — Add Fetch All + allPosts + targetOwners diagnostics (debug-only). Additive-only.
+// ADD-ON: Step 8G Option 1 — DEBUG-only: attach last uploaded Storage objectPath to backend posts.attachments (jsonb) via REST PATCH.
 // SEARCH-TOKEN: 20260108_134900_Step8G_StorageHello_DebugViewer
 
 #if DEBUG
@@ -60,6 +62,10 @@ public struct DebugViewerView: View {
     @State private var storageHelloStatus: String = ""
     @State private var storageHelloObjectPath: String? = nil   // e.g. "debug/abc.png" (no bucket prefix)
     @State private var storageHelloImage: UIImage? = nil
+
+    // Step 8G Option 1 (debug-only): attach last uploaded objectPath to a backend post (posts.attachments jsonb)
+    @State private var attachPostIDText: String = ""
+    @State private var attachPostStatusText: String? = nil
 
     // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
@@ -147,6 +153,7 @@ using (
                         storageHelloObjectPath = nil
                         storageHelloImage = nil
                         storageHelloIsWorking = false
+                        attachPostStatusText = nil
                     }
                     .disabled(storageHelloIsBusy)
 
@@ -175,6 +182,37 @@ using (
                             .stroke(Color.primary.opacity(0.08), lineWidth: 1)
                     )
             }
+
+            // ===== Step 8G Option 1: Attach to Post (debug-only) =====
+            Divider().padding(.vertical, 6)
+
+            Text("Attach last debug upload to a backend post (posts.attachments)")
+                .font(.subheadline)
+
+            TextField("Post UUID", text: $attachPostIDText)
+                .textFieldStyle(.roundedBorder)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+                .keyboardType(.asciiCapable)
+
+            HStack(spacing: 12) {
+                Button("Attach to Post") {
+                    Task { await attachLastDebugUploadToPost() }
+                }
+                .disabled(storageHelloIsBusy || storageHelloObjectPath == nil || attachPostIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if storageHelloIsBusy {
+                    Text("busy…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if let s = attachPostStatusText, !s.isEmpty {
+                Text(s)
+                    .font(.footnote)
+                    .foregroundStyle(s.contains("❌") ? .red : .secondary)
+            }
         }
         .padding(.vertical, 8)
     }
@@ -187,6 +225,7 @@ using (
         storageHelloIsWorking = false
         storageHelloImage = nil
         storageHelloObjectPath = nil
+        attachPostStatusText = nil
 
         #if canImport(UIKit)
         guard let img = UIImage(named: "debug_upload_test") else {
@@ -267,6 +306,62 @@ using (
             storageHelloStatus = "✅ Download succeeded (\(bytes.count) bytes), but UIKit not available to render."
             storageHelloIsWorking = true
             #endif
+        }
+    }
+
+    // Step 8G Option 1: PATCH posts.attachments to reference the last Storage object path
+    @MainActor private func attachLastDebugUploadToPost() async {
+        attachPostStatusText = nil
+
+        let trimmed = attachPostIDText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard UUID(uuidString: trimmed) != nil else {
+            attachPostStatusText = "❌ Invalid UUID."
+            return
+        }
+        guard let objectPathResolved = storageHelloObjectPath else {
+            attachPostStatusText = "❌ No object path yet — run Storage Hello first."
+            return
+        }
+
+        attachPostStatusText = "Attaching…"
+
+        // JSONB payload for posts.attachments
+        // Minimal, versionable shape:
+        // [
+        //   { "kind":"image", "bucket":"attachments", "path":"debug/..." }
+        // ]
+        let payload: [String: Any] = [
+            "attachments": [
+                [
+                    "kind": "image",
+                    "bucket": "attachments",
+                    "path": objectPathResolved
+                ]
+            ]
+        ]
+
+        guard let body = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+            attachPostStatusText = "❌ Failed to encode JSON payload."
+            return
+        }
+
+        let patchPath = "rest/v1/posts?id=eq.\(trimmed)"
+
+        let patchResult = await NetworkManager.shared.request(
+            path: patchPath,
+            method: "PATCH",
+            jsonBody: body,
+            headers: [
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            ]
+        )
+
+        switch patchResult {
+        case .failure(let error):
+            attachPostStatusText = "❌ Attach failed: \(error.localizedDescription)"
+        case .success:
+            attachPostStatusText = "✅ Attached to post."
         }
     }
 
@@ -836,6 +931,3 @@ public enum DebugDump {
 }
 
 #endif
-
-
-
