@@ -1,8 +1,8 @@
-// CHANGE-ID: v7.13A-DebugViewer-OverrideViewerID-20251201_1830
-// SCOPE: Social hardening — use Debug.currentUserIDOverride in followContext viewerID + ensure JSON block is visible in scroll view.
+// CHANGE-ID: 20260108_134900_Step8G_StorageHello_DebugViewer
+// SCOPE: Step 8G seed — DEBUG-only Storage “Hello” (upload bundled image to attachments bucket + download via authenticated endpoint); additive-only.
 // ADD-ON: Step 8A/8A.1 — Backend Feed debug fetch (Mine) + diagnostics.
 // ADD-ON: Step 8B — Add Fetch All + allPosts + targetOwners diagnostics (debug-only). Additive-only.
-// SEARCH-TOKEN: 20260101_143400_Step8B_DebugViewer_Fix
+// SEARCH-TOKEN: 20260108_134900_Step8G_StorageHello_DebugViewer
 
 #if DEBUG
 import SwiftUI
@@ -53,6 +53,14 @@ public struct DebugViewerView: View {
     @State private var deletePostIDText: String = ""
     @State private var deletePostStatusText: String? = nil
 
+
+    // Step 8G (debug-only): Storage “Hello” pipeline (upload a bundled test image, then download via authenticated endpoint)
+    @State private var storageHelloIsWorking: Bool = false
+    @State private var storageHelloIsBusy: Bool = false
+    @State private var storageHelloStatus: String = ""
+    @State private var storageHelloObjectPath: String? = nil   // e.g. "debug/abc.png" (no bucket prefix)
+    @State private var storageHelloImage: UIImage? = nil
+
     // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
 
@@ -84,6 +92,193 @@ public struct DebugViewerView: View {
         }
         // Fallback so we *see* something if the buffer is never populated
         return "(debugJSONBuffer is empty – no debug payload received)"
+    }
+
+
+
+    // MARK: - Backend Storage “Hello” section (Step 8G seed)
+
+    @ViewBuilder private var backendStorageHelloBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Backend • Step 8G Storage (DEBUG seed)").font(.headline)
+
+            Text("Uploads a bundled debug image (Assets.xcassets → debug_upload_test) into Storage bucket “attachments” under folder “debug/”, then downloads it back using the authenticated Storage endpoint.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            // Required RLS hint (dashboard-created bucket has owner unset; policies still required).
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Supabase policies required (run in SQL Editor):")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text("""
+create policy "debug uploads to attachments/debug"
+on storage.objects for insert to authenticated
+with check (
+  bucket_id = 'attachments' and
+  (storage.foldername(name))[1] = 'debug'
+);
+
+create policy "debug reads from attachments/debug"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'attachments' and
+  (storage.foldername(name))[1] = 'debug'
+);
+""")
+                .font(.caption2)
+                .textSelection(.enabled)
+                .foregroundStyle(.secondary)
+                .padding(8)
+                .background(.thinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+
+            HStack(spacing: 12) {
+                Button(storageHelloIsBusy ? "Working…" : "Run Storage Hello") {
+                    Task { await runStorageHello() }
+                }
+                .disabled(storageHelloIsBusy)
+
+                if let objectPath = storageHelloObjectPath {
+                    Button("Clear") {
+                        storageHelloStatus = ""
+                        storageHelloObjectPath = nil
+                        storageHelloImage = nil
+                        storageHelloIsWorking = false
+                    }
+                    .disabled(storageHelloIsBusy)
+
+                    Text(objectPath)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+            }
+
+            if !storageHelloStatus.isEmpty {
+                Text(storageHelloStatus)
+                    .font(.footnote)
+                    .foregroundStyle(storageHelloIsWorking ? .secondary : .primary)
+            }
+
+            if let uiImage = storageHelloImage {
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                    )
+            }
+        }
+        .padding(.vertical, 8)
+    }
+
+    @MainActor private func runStorageHello() async {
+        storageHelloIsBusy = true
+        defer { storageHelloIsBusy = false }
+
+        storageHelloStatus = "Preparing asset…"
+        storageHelloIsWorking = false
+        storageHelloImage = nil
+        storageHelloObjectPath = nil
+
+        #if canImport(UIKit)
+        guard let img = UIImage(named: "debug_upload_test") else {
+            storageHelloStatus = "❌ Asset not found: UIImage(named: \"debug_upload_test\") returned nil. Check Assets.xcassets name."
+            return
+        }
+        guard let data = img.pngData() else {
+            storageHelloStatus = "❌ Could not encode debug image as PNG."
+            return
+        }
+        #else
+        storageHelloStatus = "❌ UIKit not available; cannot load UIImage asset."
+        return
+        #endif
+
+        let fileName = "debug_upload_test_\(Int(Date().timeIntervalSince1970)).png"
+        let objectPath = "debug/\(fileName)"
+        let uploadPath = "storage/v1/object/attachments/\(objectPath)"
+
+        storageHelloStatus = "Uploading to Storage…"
+
+        let uploadResult = await NetworkManager.shared.request(
+            path: uploadPath,
+            method: "POST",
+            jsonBody: data,
+            headers: [
+                "Content-Type": "image/png",
+                // Optional: allow overwriting if same path is reused; we use timestamp names so it should not collide.
+                "x-upsert": "false"
+            ]
+        )
+
+        switch uploadResult {
+        case .failure(let error):
+            storageHelloStatus = "❌ Upload failed. Likely missing Storage RLS policies. Error: \(error.localizedDescription)"
+            return
+
+        case .success(let responseData):
+            // Expected: {"Key":"attachments/debug/filename.png"} (REST API)
+            if let key = parseStorageKey(from: responseData) {
+                // Convert "attachments/<path>" → "<path>"
+                let cleaned = key.hasPrefix("attachments/") ? String(key.dropFirst("attachments/".count)) : key
+                storageHelloObjectPath = cleaned
+            } else {
+                // If response format changes, still try the known objectPath we asked for.
+                storageHelloObjectPath = objectPath
+            }
+        }
+
+        guard let objectPathResolved = storageHelloObjectPath else {
+            storageHelloStatus = "❌ Upload succeeded but could not resolve object path."
+            return
+        }
+
+        storageHelloStatus = "Downloading via authenticated endpoint…"
+        let downloadPath = "storage/v1/object/authenticated/attachments/\(objectPathResolved)"
+
+        let downloadResult = await NetworkManager.shared.request(
+            path: downloadPath,
+            method: "GET"
+        )
+
+        switch downloadResult {
+        case .failure(let error):
+            storageHelloStatus = "❌ Download failed. Check SELECT policy. Error: \(error.localizedDescription)"
+            return
+
+        case .success(let bytes):
+            #if canImport(UIKit)
+            if let img = UIImage(data: bytes) {
+                storageHelloImage = img
+                storageHelloIsWorking = true
+                storageHelloStatus = "✅ Storage Hello OK (uploaded + downloaded)."
+            } else {
+                storageHelloStatus = "❌ Downloaded bytes could not be decoded as an image."
+            }
+            #else
+            storageHelloStatus = "✅ Download succeeded (\(bytes.count) bytes), but UIKit not available to render."
+            storageHelloIsWorking = true
+            #endif
+        }
+    }
+
+    private func parseStorageKey(from data: Data) -> String? {
+        guard
+            let obj = try? JSONSerialization.jsonObject(with: data, options: []),
+            let dict = obj as? [String: Any]
+        else { return nil }
+
+        if let key = dict["Key"] as? String { return key }
+        if let key = dict["key"] as? String { return key }
+        return nil
     }
 
     // MARK: - Backend feed debug section (Step 8A/8B)
@@ -344,6 +539,8 @@ public struct DebugViewerView: View {
                 backendControlsBlock
 
                 backendStep6ABlock
+
+                backendStorageHelloBlock
 
                 backendFeedSection
 
