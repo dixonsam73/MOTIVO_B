@@ -63,9 +63,46 @@ public struct DebugViewerView: View {
     @State private var storageHelloObjectPath: String? = nil   // e.g. "debug/abc.png" (no bucket prefix)
     @State private var storageHelloImage: UIImage? = nil
 
+    private enum DebugSeedAttachmentKind: String, CaseIterable, Identifiable {
+        case image
+        case video
+        case audio
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .image: return "Image"
+            case .video: return "Video"
+            case .audio: return "Audio"
+            }
+        }
+
+        var fileExtension: String {
+            switch self {
+            case .image: return "png"
+            case .video: return "mp4"
+            case .audio: return "m4a"
+            }
+        }
+
+        var contentType: String {
+            switch self {
+            case .image: return "image/png"
+            case .video: return "video/mp4"
+            case .audio: return "audio/mp4"
+            }
+        }
+    }
+
+    @State private var storageHelloSelectedKind: DebugSeedAttachmentKind = .image
+    @State private var storageHelloLastUploadedKind: DebugSeedAttachmentKind? = nil
+
+
     // Step 8G Option 1 (debug-only): attach last uploaded objectPath to a backend post (posts.attachments jsonb)
     @State private var attachPostIDText: String = ""
     @State private var attachPostStatusText: String? = nil
+    @State private var attachPostAppendMode: Bool = false // DEBUG seed: when true, appends to existing posts.attachments instead of replacing
 
     // Step 8A/8A.1/8B (debug-only): backend feed store
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
@@ -108,9 +145,17 @@ public struct DebugViewerView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Backend • Step 8G Storage (DEBUG seed)").font(.headline)
 
-            Text("Uploads a bundled debug image (Assets.xcassets → debug_upload_test) into Storage bucket “attachments” under folder “debug/”, then downloads it back using the authenticated Storage endpoint.")
+            Text("Uploads a bundled debug media seed into Storage bucket “attachments” under folder “debug/”, then downloads it back using the authenticated Storage endpoint. Image uses Assets.xcassets name “debug_upload_test”. Video/audio require bundle files named “debug_upload_test.mp4” and “debug_upload_test.m4a”.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            Picker("Seed type", selection: $storageHelloSelectedKind) {
+                ForEach(DebugSeedAttachmentKind.allCases) { k in
+                    Text(k.displayName).tag(k)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Seed type")
 
             // Required RLS hint (dashboard-created bucket has owner unset; policies still required).
             VStack(alignment: .leading, spacing: 4) {
@@ -195,6 +240,13 @@ using (
                 .autocorrectionDisabled(true)
                 .keyboardType(.asciiCapable)
 
+            Picker("Mode", selection: $attachPostAppendMode) {
+                Text("Replace").tag(false)
+                Text("Append").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .font(.caption)
+
             HStack(spacing: 12) {
                 Button("Attach to Post") {
                     Task { await attachLastDebugUploadToPost() }
@@ -221,27 +273,50 @@ using (
         storageHelloIsBusy = true
         defer { storageHelloIsBusy = false }
 
-        storageHelloStatus = "Preparing asset…"
+        storageHelloStatus = "Preparing seed…"
         storageHelloIsWorking = false
         storageHelloImage = nil
         storageHelloObjectPath = nil
+        storageHelloLastUploadedKind = nil
         attachPostStatusText = nil
 
-        #if canImport(UIKit)
-        guard let img = UIImage(named: "debug_upload_test") else {
-            storageHelloStatus = "❌ Asset not found: UIImage(named: \"debug_upload_test\") returned nil. Check Assets.xcassets name."
-            return
-        }
-        guard let data = img.pngData() else {
-            storageHelloStatus = "❌ Could not encode debug image as PNG."
-            return
-        }
-        #else
-        storageHelloStatus = "❌ UIKit not available; cannot load UIImage asset."
-        return
-        #endif
+        let kind = storageHelloSelectedKind
+        let ext = kind.fileExtension
+        let contentType = kind.contentType
 
-        let fileName = "debug_upload_test_\(Int(Date().timeIntervalSince1970)).png"
+        // Load seed bytes
+        let data: Data
+        switch kind {
+        case .image:
+            #if canImport(UIKit)
+            guard let img = UIImage(named: "debug_upload_test") else {
+                storageHelloStatus = "❌ Asset not found: UIImage(named: \"debug_upload_test\") returned nil. Check Assets.xcassets name."
+                return
+            }
+            guard let png = img.pngData() else {
+                storageHelloStatus = "❌ Could not encode debug image as PNG."
+                return
+            }
+            data = png
+            #else
+            storageHelloStatus = "❌ UIKit not available; cannot load UIImage asset."
+            return
+            #endif
+
+        case .video, .audio:
+            guard let url = Bundle.main.url(forResource: "debug_upload_test", withExtension: ext) else {
+                storageHelloStatus = "❌ Bundle file not found: debug_upload_test.\(ext). Add it to the app target’s Copy Bundle Resources."
+                return
+            }
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                storageHelloStatus = "❌ Failed to read bundle file: \(error.localizedDescription)"
+                return
+            }
+        }
+
+        let fileName = "debug_upload_test_\(Int(Date().timeIntervalSince1970)).\(ext)"
         let objectPath = "debug/\(fileName)"
         let uploadPath = "storage/v1/object/attachments/\(objectPath)"
 
@@ -252,7 +327,7 @@ using (
             method: "POST",
             jsonBody: data,
             headers: [
-                "Content-Type": "image/png",
+                "Content-Type": contentType,
                 // Optional: allow overwriting if same path is reused; we use timestamp names so it should not collide.
                 "x-upsert": "false"
             ]
@@ -264,7 +339,7 @@ using (
             return
 
         case .success(let responseData):
-            // Expected: {"Key":"attachments/debug/filename.png"} (REST API)
+            // Expected: {"Key":"attachments/debug/filename.ext"} (REST API)
             if let key = parseStorageKey(from: responseData) {
                 // Convert "attachments/<path>" → "<path>"
                 let cleaned = key.hasPrefix("attachments/") ? String(key.dropFirst("attachments/".count)) : key
@@ -280,6 +355,8 @@ using (
             return
         }
 
+        storageHelloLastUploadedKind = kind
+
         storageHelloStatus = "Downloading via authenticated endpoint…"
         let downloadPath = "storage/v1/object/authenticated/attachments/\(objectPathResolved)"
 
@@ -294,20 +371,28 @@ using (
             return
 
         case .success(let bytes):
-            #if canImport(UIKit)
-            if let img = UIImage(data: bytes) {
-                storageHelloImage = img
+            switch kind {
+            case .image:
+                #if canImport(UIKit)
+                if let img = UIImage(data: bytes) {
+                    storageHelloImage = img
+                    storageHelloIsWorking = true
+                    storageHelloStatus = "✅ Storage Hello OK (uploaded + downloaded)."
+                } else {
+                    storageHelloStatus = "❌ Downloaded bytes could not be decoded as an image."
+                }
+                #else
+                storageHelloStatus = "✅ Download succeeded (\(bytes.count) bytes), but UIKit not available to render."
                 storageHelloIsWorking = true
-                storageHelloStatus = "✅ Storage Hello OK (uploaded + downloaded)."
-            } else {
-                storageHelloStatus = "❌ Downloaded bytes could not be decoded as an image."
+                #endif
+
+            case .video, .audio:
+                storageHelloStatus = "✅ Storage Hello OK (uploaded + downloaded \(bytes.count) bytes)."
+                storageHelloIsWorking = true
             }
-            #else
-            storageHelloStatus = "✅ Download succeeded (\(bytes.count) bytes), but UIKit not available to render."
-            storageHelloIsWorking = true
-            #endif
         }
     }
+
 
     // Step 8G Option 1: PATCH posts.attachments to reference the last Storage object path
     @MainActor private func attachLastDebugUploadToPost() async {
@@ -323,24 +408,52 @@ using (
             return
         }
 
+        let kindRaw = (storageHelloLastUploadedKind ?? storageHelloSelectedKind).rawValue
+
         attachPostStatusText = "Attaching…"
 
         // JSONB payload for posts.attachments
-        // Minimal, versionable shape:
-        // [
-        //   { "kind":"image", "bucket":"attachments", "path":"debug/..." }
-        // ]
-        let payload: [String: Any] = [
-            "attachments": [
-                [
-                    "kind": "image",
-                    "bucket": "attachments",
-                    "path": objectPathResolved
-                ]
-            ]
-        ]
+// Minimal, versionable shape:
+// [
+//   { "kind":"image", "bucket":"attachments", "path":"debug/..." }
+// ]
+let newRef: [String: Any] = [
+    "kind": kindRaw,
+    "bucket": "attachments",
+    "path": objectPathResolved
+]
 
-        guard let body = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
+var attachmentsArray: [[String: Any]] = [newRef]
+
+if attachPostAppendMode {
+    // Fetch current attachments so we can append without clobbering the array.
+    let fetchPath = "rest/v1/posts?id=eq.\(trimmed)&select=attachments"
+    let fetchResult = await NetworkManager.shared.request(
+        path: fetchPath,
+        method: "GET"
+    )
+
+    switch fetchResult {
+    case .failure(let error):
+        attachPostStatusText = "❌ Fetch existing attachments failed: \(error.localizedDescription)"
+        return
+
+    case .success(let data):
+        if let existing = parsePostAttachmentsArray(from: data) {
+            attachmentsArray = existing
+            let newPath = objectPathResolved
+            if !attachmentsArray.contains(where: { ($0["path"] as? String) == newPath }) {
+                attachmentsArray.append(newRef)
+            }
+        }
+    }
+}
+
+let payload: [String: Any] = [
+    "attachments": attachmentsArray
+]
+
+guard let body = try? JSONSerialization.data(withJSONObject: payload, options: []) else {
             attachPostStatusText = "❌ Failed to encode JSON payload."
             return
         }
@@ -375,6 +488,24 @@ using (
         if let key = dict["key"] as? String { return key }
         return nil
     }
+
+private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
+    // Expected response from PostgREST for select=attachments:
+    // [ { "attachments": [ { "kind": "...", "path": "...", "bucket": "attachments" }, ... ] } ]
+    guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return nil }
+
+    if let arr = obj as? [[String: Any]], let first = arr.first {
+        if let attachments = first["attachments"] as? [[String: Any]] {
+            return attachments
+        }
+        // attachments may be null
+        if first["attachments"] is NSNull {
+            return []
+        }
+    }
+    return nil
+}
+
 
     // MARK: - Backend feed debug section (Step 8A/8B)
 
