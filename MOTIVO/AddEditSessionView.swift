@@ -1675,6 +1675,26 @@ private var instrumentPicker: some View {
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
         return .file
     }
+    // --- PATCH 8G-AESV: migrate staged privacy → persisted attachment keys ---
+    // SEARCH-ANCHOR: private func migratePrivacy_AESV(
+    private func migratePrivacy_AESV(
+        fromStagedID stagedID: UUID,
+        stagedURL: URL?,
+        toNewID newID: UUID,
+        newURL: URL?
+    ) {
+        // Read staged privacy (default=true → private unless explicitly included)
+        let stagedIsPrivate = AttachmentPrivacy.isPrivate(id: stagedID, url: stagedURL)
+
+        // Write onto persisted attachment keys so backend publish can see it
+        if newID != stagedID {
+            AttachmentPrivacy.setPrivate(id: newID, url: newURL, stagedIsPrivate)
+        }
+
+        // Keep AESV local cache coherent
+        privacyMap = AttachmentPrivacy.currentMap()
+    }
+    // --- end PATCH 8G-AESV ---
 
     /// Adds only newly staged attachments (not those that originated from Core Data) and updates thumbnail flags for all.
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
@@ -1709,8 +1729,28 @@ private var instrumentPicker: some View {
                 let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: suggestedName, ext: ext)
                 rollbacks.append(result.rollback)
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                let created = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
+                let created = try AttachmentStore.addAttachment(
+                    kind: att.kind,
+                    filePath: result.path,
+                    to: session,
+                    isThumbnail: isThumb,
+                    ctx: ctx
+                )
                 createdAttachments.append(created)
+
+                // --- PATCH 8G-AESV: migrate privacy from staged → persisted ---
+                let stagedURL = surrogateURL(for: att)
+                let persistedURL = resolveStoredFileURL(at: result.path)
+                if let newID = created.value(forKey: "id") as? UUID {
+                    migratePrivacy_AESV(
+                        fromStagedID: att.id,
+                        stagedURL: stagedURL,
+                        toNewID: newID,
+                        newURL: persistedURL
+                    )
+                }
+                // --- end PATCH ---
+
             } catch {
                 // Roll back any files written so far and discard created (unsaved) attachments
                 for rb in rollbacks { rb() }
