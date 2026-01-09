@@ -168,26 +168,21 @@ struct PostRecordDetailsView: View {
         AttachmentPrivacy.setPrivate(id: id, url: url, value)
     }
 
+    // --- PATCH 8G3A: migrate staged privacy → final attachment keys using AttachmentPrivacy (file-backed) ---
+    // SEARCH-ANCHOR: private func migratePrivacy(fromStagedID stagedID: UUID, stagedURL: URL?, toNewID newID: UUID?, newURL: URL?)
     private func migratePrivacy(fromStagedID stagedID: UUID, stagedURL: URL?, toNewID newID: UUID?, newURL: URL?) {
-        // Read current maps fresh to avoid stale cache writes
-        var map = (UserDefaults.standard.dictionary(forKey: AttachmentPrivacy.mapKey) as? [String: Bool]) ?? [:]
+        // AttachmentPrivacy is file-backed; read staged value from the real source of truth.
+        // Default is private=true, so only explicit “included” (private=false) needs to be preserved for Phase 3.
+        let stagedIsPrivate = AttachmentPrivacy.isPrivate(id: stagedID, url: stagedURL)
 
-        // Resolve any value stored under staged keys
-        let stagedIDKey = "id://\(stagedID.uuidString)"
-        let stagedURLKey = stagedURL?.absoluteString
+        // Write the staged value onto the final keys so backend publish selection sees it.
+        if newID != nil || newURL != nil {
+            AttachmentPrivacy.setPrivate(id: newID, url: newURL, stagedIsPrivate)
+        }
 
-        // Prefer explicit staged id value; otherwise fallback to staged URL value
-        let stagedValue: Bool? = map[stagedIDKey] ?? (stagedURLKey.flatMap { map[$0] })
 
-        guard let value = stagedValue else { return }
-
-        // Write the same value to the final keys (ID-first, URL fallback)
-        if let newID { map["id://\(newID.uuidString)"] = value }
-        if let newURL { map[newURL.absoluteString] = value }
-
-        // Persist and update live cache for immediate UI reflection
-        UserDefaults.standard.set(map, forKey: AttachmentPrivacy.mapKey)
-        privacyMap = map
+        // Keep PRDV local cache in sync for any immediate UI reads in this view.
+        privacyMap = AttachmentPrivacy.currentMap()
     }
     // ---- end privacy helpers ----
 
