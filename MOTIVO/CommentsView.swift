@@ -1,7 +1,5 @@
-// CHANGE-ID: v8H-B-PrivateComments-20260109_183500
-// SCOPE: Step 8H-B — private comments visibility (owner↔commenter only), no counts
-// CHANGE-ID: v711A-Comments-MentionBoldDarkPreserved-20251109_124837
-// SCOPE: CommentsView dark-mode fix — replace hard-coded white/black with Theme tokens (wrappers only)
+// CHANGE-ID: v8H-C-PrivateOwnerReplies-20260109_215052
+// SCOPE: Step 8H-C (Model 1) — owner replies privately to individual commenters (local-only; no counts; no public thread)
 import SwiftUI
 import CoreData
 
@@ -9,6 +7,10 @@ public struct CommentsView: View {
     @ObservedObject private var store = CommentsStore.shared
     @State private var draft: String = ""
     @State private var tappedMention: String? = nil
+
+    @State private var replyTargetUserID: String? = nil
+    @State private var replyTargetDisplayName: String? = nil
+
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var scheme
@@ -21,6 +23,11 @@ public struct CommentsView: View {
         self.placeholderAuthor = placeholderAuthor
     }
 
+    private func clearReplyTarget() {
+        replyTargetUserID = nil
+        replyTargetDisplayName = nil
+    }
+
     // MARK: - Mentions tokenization & helpers
     private struct MentionSpan: Identifiable {
         let id = UUID()
@@ -29,9 +36,9 @@ public struct CommentsView: View {
     }
 
     private func tokenizeMentions(_ s: String) -> [MentionSpan] {
-        // Regex: (?<!\\w)@[A-Za-z0-9_\\.]+
+        // Regex: (?<!\w)@[A-Za-z0-9_\.]+
         // Keep allocation-light: if no matches, return single non-mention span
-        let pattern = "(?<!\\\\w)@[A-Za-z0-9_\\\\.]+"
+        let pattern = "(?<!\\w)@[A-Za-z0-9_\\.]+"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
             return [MentionSpan(text: s, isMention: false)]
         }
@@ -80,7 +87,6 @@ public struct CommentsView: View {
         }
         return "Comments"
     }
-
 
     // MARK: - 8H-B identity helpers (viewer + owner)
 
@@ -241,7 +247,7 @@ public struct CommentsView: View {
                                     .font(.footnote)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                    
+
                         }
                         Spacer()
                     }
@@ -347,6 +353,26 @@ public struct CommentsView: View {
                             Text(relativeTimestamp(from: comment.timestamp))
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+
+                            let authorID = store.authorUserID(for: comment.id)
+                            let ownerIDForUI = ownerID ?? ""
+                            let viewerIDForUI = viewerID ?? ""
+                            let isViewerOwner = (!ownerIDForUI.isEmpty && ownerIDForUI == viewerIDForUI)
+                            let isAuthorOwner = (authorID == ownerIDForUI)
+
+                            if isViewerOwner, let authorID, !authorID.isEmpty, !isAuthorOwner {
+                                Button {
+                                    replyTargetUserID = authorID
+                                    let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    replyTargetDisplayName = (name == "You") ? "Commenter" : name
+                                } label: {
+                                    Text("Reply")
+                                        .font(Theme.Text.meta.weight(.semibold))
+                                        .foregroundStyle(Theme.Colors.accent)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Reply to commenter")
+                            }
                         }
 
                         Spacer(minLength: 0)
@@ -414,6 +440,30 @@ public struct CommentsView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
+            let ownerID = ownerUserIDForSession()
+            let viewerID = viewerUserID()
+            let isOwner = (ownerID != nil && viewerID != nil && ownerID == viewerID)
+
+            if isOwner, let targetID = replyTargetUserID, !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                HStack(spacing: Theme.Spacing.s) {
+                    Text("Replying to \(replyTargetDisplayName ?? "commenter")")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        clearReplyTarget()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear reply target")
+                }
+                .padding(.bottom, Theme.Spacing.s)
+            }
+
             HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
                 TextField("Add a comment…", text: $draft, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
@@ -421,7 +471,14 @@ public struct CommentsView: View {
                     .onSubmit(send)
 
                 Button(action: send) {
-                    let isEnabled = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let ownerID = ownerUserIDForSession()
+                    let viewerID = viewerUserID()
+                    let isOwner = (ownerID != nil && viewerID != nil && ownerID == viewerID)
+
+                    let hasText = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let hasTarget = !(replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let isEnabled = isOwner ? (hasText && hasTarget) : hasText
+
                     if isEnabled {
                         ZStack {
                             RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -437,7 +494,15 @@ public struct CommentsView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled({
+                    let ownerID = ownerUserIDForSession()
+                    let viewerID = viewerUserID()
+                    let isOwner = (ownerID != nil && viewerID != nil && ownerID == viewerID)
+
+                    let hasText = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let hasTarget = !(replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    return isOwner ? !(hasText && hasTarget) : !hasText
+                }())
                 .accessibilityLabel("Send comment")
             }
         }
@@ -450,16 +515,25 @@ public struct CommentsView: View {
     private func send() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
+
         let ownerID = ownerUserIDForSession()
         let viewerID = viewerUserID()
-        // Fail closed if we can't determine identities.
-        guard ownerID != nil, viewerID != nil else { return }
-        store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed)
-        draft = ""
+        guard let ownerID, let viewerID else { return }
+
+        if viewerID == ownerID {
+            let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !target.isEmpty else { return }
+
+            store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: target)
+            draft = ""
+            clearReplyTarget()
+        } else {
+            store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: ownerID)
+            draft = ""
+        }
     }
 }
 
 #Preview("Comments") {
     CommentsView(sessionID: UUID())
 }
-

@@ -1,10 +1,11 @@
-// CHANGE-ID: v8H-B-PrivateComments-20260109_180000
-// SCOPE: Step 8H-B — private comments semantics (local-only; no counts; owner↔commenter visibility)
+// CHANGE-ID: v8H-C-PrivateOwnerReplies-20260109_215052
+// SCOPE: Step 8H-C (Model 1) — private owner replies via recipient mapping (local-only; no counts; owner↔commenter isolation)
 import Foundation
 import Combine
 
 /// A simple, local-only comments store that persists to disk as JSON.
 /// Step 8H-B: comments are private (visible only to owner + commenter). No public thread.
+/// Step 8H-C: owner replies are privately targeted to a single recipient (no broadcast).
 @MainActor
 public final class CommentsStore: ObservableObject {
     public static let shared = CommentsStore()
@@ -14,13 +15,18 @@ public final class CommentsStore: ObservableObject {
     /// Maps a comment id → author user id (string). Used for privacy gating without changing Comment shape.
     @Published private(set) var authorByCommentID: [UUID: String] = [:]
 
+    /// Maps a comment id → recipient user id (string). Used for private owner replies (8H-C) without changing Comment shape.
+    /// Semantics: recipientUserID == nil means "owner-only" when author is owner (no broadcast).
+    @Published private(set) var recipientByCommentID: [UUID: String] = [:]
+
     private let defaultsKey = "commentsStore_v1"
 
     // MARK: - Persistence payload
 
-    private struct PersistedV2: Codable {
+    private struct PersistedV3: Codable {
         var commentsBySessionID: [UUID: [Comment]]
         var authorByCommentID: [UUID: String]
+        var recipientByCommentID: [UUID: String]
     }
 
     // JSON encoder/decoder configured for ISO8601 dates and stable output
@@ -66,7 +72,12 @@ public final class CommentsStore: ObservableObject {
     }
 
     /// Returns comments visible to `viewerUserID` for this session.
-    /// Rule (8H-B): owner sees all. Non-owner sees only their own authored comments.
+    /// Rule (8H-C):
+    /// - Owner sees all.
+    /// - Non-owner sees:
+    ///   - comments they authored
+    ///   - owner-authored comments where recipientUserID == viewer
+    /// Note: owner-authored with recipientUserID == nil is treated as owner-only (no broadcast).
     public func visibleComments(for sessionID: UUID, viewerUserID: String?, ownerUserID: String?) -> [Comment] {
         let all = comments(for: sessionID)
 
@@ -80,13 +91,23 @@ public final class CommentsStore: ObservableObject {
             return all
         }
 
-        // Non-owner: only show comments authored by this viewer.
         return all.filter { c in
             guard let author = authorByCommentID[c.id], !author.isEmpty else {
                 // Legacy/unknown author: hide from non-owner to preserve privacy.
                 return false
             }
-            return author == viewer
+
+            // Viewer can always see their own authored comments.
+            if author == viewer { return true }
+
+            // Viewer can see owner-authored replies only when explicitly targeted to this viewer.
+            if author == owner {
+                let recipient = recipientByCommentID[c.id]
+                return recipient == viewer
+            }
+
+            // No one else’s comments are visible.
+            return false
         }
     }
 
@@ -108,8 +129,17 @@ public final class CommentsStore: ObservableObject {
     }
 
     /// Appends a new comment and saves.
-    /// Step 8H-B: pass `authorUserID` so visibility can be gated.
+    /// Step 8H-B/C: pass `authorUserID` so visibility can be gated.
+    /// Step 8H-C: optionally pass `recipientUserID` to target private delivery.
     public func add(sessionID: UUID, authorUserID: String?, authorName: String, text: String) {
+        add(sessionID: sessionID, authorUserID: authorUserID, authorName: authorName, text: text, recipientUserID: nil)
+    }
+
+    /// Step 8H-C overload: targeted delivery via recipient user id.
+    /// Semantics:
+    /// - If author == owner and recipientUserID == nil → owner-only (no broadcast)
+    /// - If author != owner, recipientUserID may still be stored (symmetry), but visibility already allows author’s own comments.
+    public func add(sessionID: UUID, authorUserID: String?, authorName: String, text: String, recipientUserID: String?) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -123,13 +153,22 @@ public final class CommentsStore: ObservableObject {
             authorByCommentID[comment.id] = author
         }
 
+        // Store recipient mapping when provided (used for owner→commenter private replies).
+        let recipient = (recipientUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !recipient.isEmpty {
+            recipientByCommentID[comment.id] = recipient
+        } else {
+            // Ensure no stale recipient mapping for this comment
+            recipientByCommentID.removeValue(forKey: comment.id)
+        }
+
         // Maintain reverse-chronological order
         list.sort { $0.timestamp > $1.timestamp }
         commentsBySessionID[sessionID] = list
         save()
     }
 
-    /// Back-compat API (legacy call sites). Adds without author mapping (will be owner-only visible).
+    /// Back-compat API (legacy call sites). Adds without author mapping (will be owner-only visible to non-owners).
     public func add(sessionID: UUID, authorName: String, text: String) {
         add(sessionID: sessionID, authorUserID: nil, authorName: authorName, text: text)
     }
@@ -141,6 +180,7 @@ public final class CommentsStore: ObservableObject {
         commentsBySessionID[sessionID] = list.sorted { $0.timestamp > $1.timestamp }
 
         authorByCommentID.removeValue(forKey: commentID)
+        recipientByCommentID.removeValue(forKey: commentID)
         save()
     }
 
@@ -148,6 +188,7 @@ public final class CommentsStore: ObservableObject {
     public func clearAll() {
         commentsBySessionID = [:]
         authorByCommentID = [:]
+        recipientByCommentID = [:]
         save()
     }
 
@@ -155,7 +196,11 @@ public final class CommentsStore: ObservableObject {
 
     private func save() {
         do {
-            let payload = PersistedV2(commentsBySessionID: commentsBySessionID, authorByCommentID: authorByCommentID)
+            let payload = PersistedV3(
+                commentsBySessionID: commentsBySessionID,
+                authorByCommentID: authorByCommentID,
+                recipientByCommentID: recipientByCommentID
+            )
             let data = try Self.makeEncoder().encode(payload)
             try data.write(to: Self.fileURL, options: .atomic)
         } catch {
@@ -170,14 +215,15 @@ public final class CommentsStore: ObservableObject {
             do {
                 let data = try Data(contentsOf: Self.fileURL)
 
-                // Try v2 first
-                if let decodedV2 = try? Self.makeDecoder().decode(PersistedV2.self, from: data) {
+                // Try v3 first
+                if let decodedV3 = try? Self.makeDecoder().decode(PersistedV3.self, from: data) {
                     var normalized: [UUID: [Comment]] = [:]
-                    for (key, list) in decodedV2.commentsBySessionID {
+                    for (key, list) in decodedV3.commentsBySessionID {
                         normalized[key] = list.sorted { $0.timestamp > $1.timestamp }
                     }
                     commentsBySessionID = normalized
-                    authorByCommentID = decodedV2.authorByCommentID
+                    authorByCommentID = decodedV3.authorByCommentID
+                    recipientByCommentID = decodedV3.recipientByCommentID
                     return
                 }
 
@@ -189,12 +235,14 @@ public final class CommentsStore: ObservableObject {
                 }
                 commentsBySessionID = normalized
                 authorByCommentID = [:]
+                recipientByCommentID = [:]
                 // Upgrade on disk
                 save()
                 return
             } catch {
                 commentsBySessionID = [:]
                 authorByCommentID = [:]
+                recipientByCommentID = [:]
                 return
             }
         } else if let legacyData = UserDefaults.standard.data(forKey: defaultsKey) {
@@ -206,17 +254,20 @@ public final class CommentsStore: ObservableObject {
                 }
                 commentsBySessionID = normalized
                 authorByCommentID = [:]
+                recipientByCommentID = [:]
                 save()
                 UserDefaults.standard.removeObject(forKey: defaultsKey)
                 return
             } catch {
                 commentsBySessionID = [:]
                 authorByCommentID = [:]
+                recipientByCommentID = [:]
                 return
             }
         } else {
             commentsBySessionID = [:]
             authorByCommentID = [:]
+            recipientByCommentID = [:]
         }
     }
 }
