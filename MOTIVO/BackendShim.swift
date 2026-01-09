@@ -1,10 +1,14 @@
 //
+// CHANGE-ID: 20260109_121500_Step8G_Phase3_Fix_8G3A
+// SCOPE: Step 8G Phase 3 — Fix BackendShim compile errors (scope/brace hygiene + 409 idempotence NetworkError casting). No behavior changes beyond making Phase 3 compile.
+// SEARCH-TOKEN: 20260109_121500_Step8G_Phase3_Fix_8G3A
+//
+// Prior CHANGE-ID retained below for provenance:
 // CHANGE-ID: 20260101_141600_Step8B_AllFeed_DebugOnly
-// SCOPE: Step 8B — Add "all" scope fetch (debug-only) using local FollowStore followingIDs; keep Step 8A Mine intact; add minimal diagnostics.
-// SEARCH-TOKEN: 20260101_141600_Step8B_AllFeed_DebugOnly
 //
 
 import Foundation
+import CoreData
 import SwiftUI
 
 public enum BackendKeys {
@@ -241,9 +245,234 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
         switch result {
         case .success:
+            break
+
+        case .failure(let e):
+            // Idempotence: if the post already exists (e.g. retry after attachment upload failure),
+            // treat 409 as "created" and continue into attachment upload + PATCH.
+            if let ne = e as? NetworkManager.NetworkError {
+                if case .httpError(let status, _) = ne, status == 409 {
+                    break
+                }
+            }
+            return .failure(e)
+        }
+
+        // Step 8G Phase 3: upload included attachments (owner-only by default) and PATCH posts.attachments.
+        guard let sessionID = payload.sessionID else {
+            // No local session reference → nothing to upload.
+            return .success(())
+        }
+
+        let included = loadIncludedAttachments(for: sessionID)
+        if included.isEmpty {
+            // Keep backend row consistent: explicitly clear attachments.
+            let patch = await patchPostAttachments(postID: payload.id, refs: [])
+            switch patch {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        }
+
+        var refs: [[String: String]] = []
+        refs.reserveCapacity(included.count)
+
+        for item in included {
+            let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: item.ext)
+            let upload = await uploadStorageObject(from: item.fileURL, bucket: "attachments", objectPath: objectPath, contentType: item.contentType)
+            switch upload {
+            case .success:
+                refs.append([
+                    "kind": item.kind,
+                    "bucket": "attachments",
+                    "path": objectPath
+                ])
+            case .failure(let e):
+                return .failure(e)
+            }
+        }
+
+        let patch = await patchPostAttachments(postID: payload.id, refs: refs)
+        switch patch {
+        case .success:
             return .success(())
         case .failure(let e):
             return .failure(e)
+        }
+    }
+
+    // MARK: - Step 8G Phase 3 helpers (publish-time Storage upload)
+
+    private struct LocalAttachmentUpload {
+        let id: UUID
+        let kind: String
+        let fileURL: URL
+        let ext: String
+        let contentType: String
+        let createdAt: Date?
+    }
+
+
+    private func resolveLocalFileURL(from stored: String) -> URL? {
+        let s = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+
+        // If we stored a file:// URL string, prefer parsing it directly.
+        if s.lowercased().hasPrefix("file://"), let u = URL(string: s) {
+            return u
+        }
+
+        // If the string already looks like a path (contains a slash), treat it as a path.
+        if s.contains("/") {
+            return URL(fileURLWithPath: s)
+        }
+
+        // Otherwise assume it's a filename in Documents/.
+        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        return docs.appendingPathComponent(s, isDirectory: false)
+    }
+
+    private func loadIncludedAttachments(for sessionID: UUID) -> [LocalAttachmentUpload] {
+        let context = PersistenceController.shared.container.viewContext
+
+        let request = NSFetchRequest<NSManagedObject>(entityName: "Session")
+        request.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        request.fetchLimit = 1
+
+        guard let session = (try? context.fetch(request))?.first else { return [] }
+        let attachments = session.value(forKey: "attachments") as? Set<NSManagedObject> ?? []
+
+        var items: [LocalAttachmentUpload] = []
+        items.reserveCapacity(attachments.count)
+
+        for a in attachments {
+            guard let id = a.value(forKey: "id") as? UUID else { continue }
+            let kind = ((a.value(forKey: "kind") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let filePath = a.value(forKey: "fileURL") as? String, !filePath.isEmpty else { continue }
+
+            guard let url = resolveLocalFileURL(from: filePath) else { continue }
+
+            // If the file no longer exists locally (e.g. user deleted storage), skip it rather than blocking publish.
+            if !FileManager.default.fileExists(atPath: url.path) { continue }
+
+            if AttachmentPrivacy.isPrivate(id: id, url: url) { continue }
+
+            let ext = url.pathExtension.isEmpty ? defaultExtension(for: kind) : url.pathExtension.lowercased()
+            let contentType = contentType(for: kind, ext: ext)
+            let createdAt = a.value(forKey: "createdAt") as? Date
+
+            items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, contentType: contentType, createdAt: createdAt))
+        }
+
+        items.sort {
+            let a = $0.createdAt ?? .distantPast
+            let b = $1.createdAt ?? .distantPast
+            if a != b { return a < b }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+
+        return items
+    }
+
+    private func storageObjectPath(owner: String, postID: UUID, attachmentID: UUID, ext: String) -> String {
+        let safeOwner = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeExt = ext.isEmpty ? "" : ".\(ext)"
+        return "users/\(safeOwner)/\(postID.uuidString)/\(attachmentID.uuidString)\(safeExt)"
+    }
+
+    private func uploadStorageObject(from localURL: URL, bucket: String, objectPath: String, contentType: String) async -> Result<Void, Error> {
+        let data: Data
+        do {
+            data = try await Task.detached(priority: .userInitiated) {
+                try Data(contentsOf: localURL)
+            }.value
+        } catch {
+            return .failure(error)
+        }
+
+        let uploadPath = "storage/v1/object/\(bucket)/\(objectPath)"
+        let result = await NetworkManager.shared.request(
+            path: uploadPath,
+            method: "POST",
+            query: nil,
+            jsonBody: data,
+            headers: [
+                "Content-Type": contentType,
+                // Allow safe retries (idempotent paths). If object already exists, overwrite.
+                "x-upsert": "true"
+            ]
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    private func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Result<Void, Error> {
+        let payload: [String: Any] = [
+            "attachments": refs
+        ]
+
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            return .failure(error)
+        }
+
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let result = await NetworkManager.shared.request(
+            path: patchPath,
+            method: "PATCH",
+            query: nil,
+            jsonBody: body,
+            headers: [
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal"
+            ]
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    private func defaultExtension(for kind: String) -> String {
+        switch kind.lowercased() {
+        case "image": return "jpg"
+        case "video": return "mp4"
+        case "audio": return "m4a"
+        default: return ""
+        }
+    }
+
+    private func contentType(for kind: String, ext: String) -> String {
+        let e = ext.lowercased()
+        switch kind.lowercased() {
+        case "image":
+            if e == "png" { return "image/png" }
+            if e == "heic" { return "image/heic" }
+            return "image/jpeg"
+        case "video":
+            if e == "mov" { return "video/quicktime" }
+            return "video/mp4"
+        case "audio":
+            if e == "mp3" { return "audio/mpeg" }
+            if e == "wav" { return "audio/wav" }
+            if e == "aac" { return "audio/aac" }
+            return "audio/m4a"
+        default:
+            return "application/octet-stream"
         }
     }
 
@@ -419,4 +648,3 @@ public func currentBackendMode() -> BackendMode {
     }
     return .localSimulation
 }
-
