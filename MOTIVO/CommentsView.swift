@@ -1,3 +1,5 @@
+// CHANGE-ID: v8H-B-PrivateComments-20260109_183500
+// SCOPE: Step 8H-B — private comments visibility (owner↔commenter only), no counts
 // CHANGE-ID: v711A-Comments-MentionBoldDarkPreserved-20251109_124837
 // SCOPE: CommentsView dark-mode fix — replace hard-coded white/black with Theme tokens (wrappers only)
 import SwiftUI
@@ -77,6 +79,34 @@ public struct CommentsView: View {
             return SessionActivity.feedTitle(for: session)
         }
         return "Comments"
+    }
+
+
+    // MARK: - 8H-B identity helpers (viewer + owner)
+
+    private func ownerUserIDForSession() -> String? {
+        let req: NSFetchRequest<Session> = Session.fetchRequest()
+        req.fetchLimit = 1
+        req.predicate = NSPredicate(format: "id == %@", sessionID as CVarArg)
+        if let session = try? viewContext.fetch(req).first {
+            let s = (session.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? nil : s
+        }
+        return nil
+    }
+
+    private func viewerUserID() -> String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
+        }
+        #endif
+        if let id = try? PersistenceController.shared.currentUserID {
+            let s = id.trimmingCharacters(in: .whitespacesAndNewlines)
+            return s.isEmpty ? nil : s
+        }
+        return nil
     }
 
     // MARK: - Header subtitle (owner name • session date)
@@ -249,114 +279,113 @@ public struct CommentsView: View {
     }
 
     private var list: some View {
-        let commentsRaw = store.comments(for: sessionID)
+        let ownerID = ownerUserIDForSession()
+        let viewerID = viewerUserID()
+        let commentsRaw = store.visibleComments(for: sessionID, viewerUserID: viewerID, ownerUserID: ownerID)
         let comments = commentsRaw.sorted { $0.timestamp < $1.timestamp }
-        return List {
-            VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                ForEach(comments) { comment in
-                    VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
 
-                        HStack(alignment: .center, spacing: 8) {
-                            // Avatar (32pt circle) — try to use current user's avatar when author is "You"; else show initials
-                            Group {
-                                #if canImport(UIKit)
-                                if comment.authorName == "You", let ui = ProfileStore.avatarImage(for: (try? PersistenceController.shared.currentUserID) ?? nil) {
-                                    Image(uiImage: ui).resizable().scaledToFill()
-                                } else {
-                                    let initials: String = {
-                                        let name = comment.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        let parts = name.split(separator: " ")
-                                        if parts.count == 1 { return String(parts[0].prefix(1)).uppercased() }
-                                        let first = parts.first?.first.map { String($0).uppercased() } ?? "U"
-                                        let last = parts.last?.first.map { String($0).uppercased() } ?? ""
-                                        return (first + last).isEmpty ? "U" : (first + last)
-                                    }()
-                                    ZStack {
-                                        Circle().fill(Color.gray.opacity(0.2))
-                                        Text(initials)
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundStyle(Theme.Colors.secondaryText)
-                                    }
-                                }
-                                #else
+        return List {
+            ForEach(comments) { comment in
+                VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+
+                    HStack(alignment: .center, spacing: 8) {
+                        // Avatar (32pt circle) — try to use current user's avatar when author is "You"; else show initials
+                        Group {
+                            #if canImport(UIKit)
+                            if comment.authorName == "You", let ui = ProfileStore.avatarImage(for: (try? PersistenceController.shared.currentUserID) ?? nil) {
+                                Image(uiImage: ui).resizable().scaledToFill()
+                            } else {
+                                let initials: String = {
+                                    let name = comment.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let parts = name.split(separator: " ")
+                                    if parts.count == 1 { return String(parts[0].prefix(1)).uppercased() }
+                                    let first = parts.first?.first.map { String($0).uppercased() } ?? "U"
+                                    let last = parts.last?.first.map { String($0).uppercased() } ?? ""
+                                    return (first + last).isEmpty ? "U" : (first + last)
+                                }()
                                 ZStack {
                                     Circle().fill(Color.gray.opacity(0.2))
-                                    Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                                    Text(initials)
+                                        .font(.system(size: 16, weight: .bold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
                                 }
-                                #endif
                             }
-                            .frame(width: 32, height: 32)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
-
-                            // Name and inline timestamp on one line
-                            HStack(spacing: 6) {
-                                let displayName: String = {
-                                    if comment.authorName == "You" {
-                                        // Lookup real name from Profile entity
-                                        #if canImport(CoreData)
-                                        let ctx = PersistenceController.shared.container.viewContext
-                                        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                                        req.fetchLimit = 1
-                                        if let profile = try? ctx.fetch(req).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                            return n
-                                        }
-                                        #endif
-                                        return "You"
-                                    } else {
-                                        return comment.authorName
-                                    }
-                                }()
-                                Text(displayName)
-                                    .font(Theme.Text.meta.weight(.semibold))
-                                Text("•")
-                                    .font(Theme.Text.meta)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                Text(relativeTimestamp(from: comment.timestamp))
-                                    .font(Theme.Text.meta)
-                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                            #else
+                            ZStack {
+                                Circle().fill(Color.gray.opacity(0.2))
+                                Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
                             }
-
-                            Spacer(minLength: 0)
+                            #endif
                         }
-                        .padding(.bottom, 2)
-                        .accessibilityLabel("Comment author")
+                        .frame(width: 32, height: 32)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
 
-                        // Mention-styled text (visual highlighting only)
-                        mentionStyledText(comment.text) { _ in }
-                            .fixedSize(horizontal: false, vertical: true)
-
-                        // Optional mention chips line for tappable actions
-                        if false { // HIDE (feature gated): mention chips row disabled for now; keep code for future use
-                            let _handles = mentions(in: comment.text)
-                            if !_handles.isEmpty {
-                                HStack(spacing: Theme.Spacing.s) {
-                                    ForEach(_handles, id: \.self) { handle in
-                                        Button(action: { tappedMention = handle }) {
-                                            Text(handle)
-                                                .font(.footnote)
-                                                .foregroundStyle(Color.primary).fontWeight(.bold)
-                                                .padding(.vertical, 2)
-                                                .padding(.horizontal, 6)
-                                                .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
-                                        }
-                                        .accessibilityLabel("Mention \(handle)")
+                        // Name and inline timestamp on one line
+                        HStack(spacing: 6) {
+                            let displayName: String = {
+                                if comment.authorName == "You" {
+                                    // Lookup real name from Profile entity
+                                    #if canImport(CoreData)
+                                    let ctx = PersistenceController.shared.container.viewContext
+                                    let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                    req.fetchLimit = 1
+                                    if let profile = try? ctx.fetch(req).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                        return n
                                     }
-                                    Spacer(minLength: 0)
+                                    #endif
+                                    return "You"
+                                } else {
+                                    return comment.authorName
                                 }
-                                .accessibilitySortPriority(1)
-                            }
+                            }()
+                            Text(displayName)
+                                .font(Theme.Text.meta.weight(.semibold))
+                            Text("•")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            Text(relativeTimestamp(from: comment.timestamp))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                         }
 
-                        //                        Text(comment.timestamp.formatted(date: .abbreviated, time: .shortened))
-                        //                            .font(.footnote)
-                        //                            .foregroundStyle(Theme.Colors.secondaryText)
-                        //                            .accessibilityLabel("Comment time")
+                        Spacer(minLength: 0)
                     }
-                    .padding(.vertical, Theme.Spacing.inline)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Comment")
-                    .swipeActions(edge: .trailing) {
+                    .padding(.bottom, 2)
+                    .accessibilityLabel("Comment author")
+
+                    // Mention-styled text (visual highlighting only)
+                    mentionStyledText(comment.text) { _ in }
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    // Optional mention chips line for tappable actions
+                    if false { // HIDE (feature gated): mention chips row disabled for now; keep code for future use
+                        let _handles = mentions(in: comment.text)
+                        if !_handles.isEmpty {
+                            HStack(spacing: Theme.Spacing.s) {
+                                ForEach(_handles, id: \.self) { handle in
+                                    Button(action: { tappedMention = handle }) {
+                                        Text(handle)
+                                            .font(.footnote)
+                                            .foregroundStyle(Color.primary).fontWeight(.bold)
+                                            .padding(.vertical, 2)
+                                            .padding(.horizontal, 6)
+                                            .background(Theme.Colors.surface(scheme).opacity(0.35), in: Capsule())
+                                    }
+                                    .accessibilityLabel("Mention \(handle)")
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            .accessibilitySortPriority(1)
+                        }
+                    }
+                }
+                .padding(.vertical, Theme.Spacing.inline)
+                .accessibilityElement(children: .combine)
+                .accessibilityHint("Comment")
+                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                    // Owner can delete any; commenter can delete their own. Fail-closed if identity is missing.
+                    if store.canDelete(commentID: comment.id, viewerUserID: viewerID, ownerUserID: ownerID) {
                         Button(role: .destructive) {
                             store.delete(commentID: comment.id, in: sessionID)
                         } label: {
@@ -364,19 +393,14 @@ public struct CommentsView: View {
                         }
                         .accessibilityLabel("Delete comment")
                     }
-                    // Spacer between comments (no visible divider)
-                    Rectangle().fill(Color.clear).frame(height: Theme.Spacing.inline)
                 }
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
-            .padding(Theme.Spacing.l)
-            .background(Theme.Colors.surface(scheme))
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous).stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .listRowBackground(Color.clear)
-        .listRowSeparator(.hidden)
         .background(Theme.Colors.surface(scheme))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         .overlay(
@@ -426,7 +450,11 @@ public struct CommentsView: View {
     private func send() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        store.add(sessionID: sessionID, authorName: placeholderAuthor, text: trimmed)
+        let ownerID = ownerUserIDForSession()
+        let viewerID = viewerUserID()
+        // Fail closed if we can't determine identities.
+        guard ownerID != nil, viewerID != nil else { return }
+        store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed)
         draft = ""
     }
 }
