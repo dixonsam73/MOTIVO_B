@@ -211,16 +211,7 @@ public struct CommentsView: View {
                                     .font(.footnote)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
-                            if headerLikesCount() > 0 {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "heart")
-                                        .font(.footnote)
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                    Text("\(headerLikesCount())")
-                                        .font(.footnote.monospacedDigit())
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
-                            }
+                    
                         }
                         Spacer()
                     }

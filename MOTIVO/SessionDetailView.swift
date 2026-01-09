@@ -103,8 +103,7 @@ struct SessionDetailView: View {
 
     // Added state for local interaction counts and liked state
     @State private var isLikedLocal: Bool = false
-    @State private var likeCountLocal: Int = 0
-    @State private var commentCountLocal: Int = 0
+
 
     private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
 
@@ -485,8 +484,7 @@ struct SessionDetailView: View {
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
                 isLikedLocal = FeedInteractionStore.isLiked(sid)
-                likeCountLocal = FeedInteractionStore.likeCount(sid)
-                commentCountLocal = FeedInteractionStore.commentCount(sid)
+             
             }
         }
     }
@@ -957,23 +955,21 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                let newState = FeedInteractionStore.toggleLike(sessionID)
+                let newState = FeedInteractionStore.toggleHeart(sessionID)
                 isLikedLocal = newState
-                likeCountLocal = FeedInteractionStore.likeCount(sessionID)
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
-                    Text("\(likeCountLocal)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                    
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
+            .accessibilityLabel("Open comments")
+
 
             // Comment
             Button {
@@ -985,9 +981,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                     Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(Theme.Colors.secondaryText)
-                    Text("\(commentsCount)")
-                        .font(.caption.monospacedDigit())
-                        .foregroundStyle(Theme.Colors.secondaryText)
+
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())

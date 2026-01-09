@@ -1044,8 +1044,8 @@ fileprivate struct SessionRow: View {
         }
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
-                isLikedLocal = FeedInteractionStore.isLiked(sid)
-                likeCountLocal = FeedInteractionStore.likeCount(sid)
+                isLikedLocal = FeedInteractionStore.isHearted(sid)
+                // 8H-A: no counts
                 commentCountLocal = FeedInteractionStore.commentCount(sid)
             }
         }
@@ -1077,9 +1077,10 @@ fileprivate struct SessionRow: View {
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                let newState = FeedInteractionStore.toggleLike(sessionID)
+                let newState = FeedInteractionStore.toggleHeart(sessionID)
                 isLikedLocal = newState
-                likeCountLocal = FeedInteractionStore.likeCount(sessionID)
+                // 8H-A: no counts
+
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
@@ -1099,11 +1100,9 @@ fileprivate struct SessionRow: View {
                 HStack(spacing: 6) {
                     Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
-                    Text("\(commentsCount)")
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
+
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Comments")
