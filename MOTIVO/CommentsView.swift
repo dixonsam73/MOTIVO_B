@@ -1,5 +1,5 @@
-// CHANGE-ID: v8H-C-PrivateOwnerReplies-20260109_215052
-// SCOPE: Step 8H-C (Model 1) — owner replies privately to individual commenters (local-only; no counts; no public thread)
+// CHANGE-ID: v8H-D-RespondToCommenters-20260109_220400
+// SCOPE: Step 8H-D — owner fan-out reply to commenters (private 1:1 copies; no broadcast; no new notifications)
 import SwiftUI
 import CoreData
 
@@ -10,6 +10,8 @@ public struct CommentsView: View {
 
     @State private var replyTargetUserID: String? = nil
     @State private var replyTargetDisplayName: String? = nil
+
+    @State private var isRespondToCommentersMode: Bool = false
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
@@ -26,6 +28,31 @@ public struct CommentsView: View {
     private func clearReplyTarget() {
         replyTargetUserID = nil
         replyTargetDisplayName = nil
+    }
+
+
+    // MARK: - 8H-D helper (owner fan-out recipients)
+    private func respondToCommentersRecipientIDs(ownerUserID: String) -> [String] {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty else { return [] }
+
+        // Owner can see all comments; derive distinct non-owner author IDs for this session.
+        let all = store.comments(for: sessionID) // ungated; sorted newest→oldest
+        var seen = Set<String>()
+        var ordered: [String] = []
+
+        // Iterate oldest→newest for stable, intuitive order (first commenters first).
+        for c in all.sorted(by: { $0.timestamp < $1.timestamp }) {
+            guard let author = store.authorUserID(for: c.id)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !author.isEmpty else { continue }
+            guard author != owner else { continue }
+            if !seen.contains(author) {
+                seen.insert(author)
+                ordered.append(author)
+            }
+        }
+        return ordered
     }
 
     // MARK: - Mentions tokenization & helpers
@@ -362,6 +389,7 @@ public struct CommentsView: View {
 
                             if isViewerOwner, let authorID, !authorID.isEmpty, !isAuthorOwner {
                                 Button {
+                                    isRespondToCommentersMode = false
                                     replyTargetUserID = authorID
                                     let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                                     replyTargetDisplayName = (name == "You") ? "Commenter" : name
@@ -444,7 +472,56 @@ public struct CommentsView: View {
             let viewerID = viewerUserID()
             let isOwner = (ownerID != nil && viewerID != nil && ownerID == viewerID)
 
-            if isOwner, let targetID = replyTargetUserID, !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if isOwner, let ownerID {
+                let recipients = respondToCommentersRecipientIDs(ownerUserID: ownerID)
+                let recipientCount = recipients.count
+
+                // Owner-only 8H-D control: respond to all commenters (fan-out private replies)
+                HStack(spacing: Theme.Spacing.s) {
+                    Button {
+                        // Enter/exit fan-out mode. Entering clears single-target reply.
+                        if isRespondToCommentersMode {
+                            isRespondToCommentersMode = false
+                        } else {
+                            clearReplyTarget()
+                            isRespondToCommentersMode = true
+                        }
+                    } label: {
+                        Text("Respond to commenters (\(recipientCount))")
+                            .font(Theme.Text.meta.weight(.semibold))
+                            .foregroundStyle(Theme.Colors.accent)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(recipientCount == 0)
+                    .accessibilityLabel("Respond to commenters")
+
+                    Spacer(minLength: 0)
+                }
+                .padding(.bottom, Theme.Spacing.s)
+
+                if isRespondToCommentersMode {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text("Sending privately to \(recipientCount) commenter\(recipientCount == 1 ? "" : "s")")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Spacer(minLength: 0)
+
+                        Button {
+                            isRespondToCommentersMode = false
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Cancel respond to commenters")
+                    }
+                    .padding(.bottom, Theme.Spacing.s)
+                }
+            }
+
+            // 8H-C single-target reply banner (suppressed while in fan-out mode)
+            if !isRespondToCommentersMode, isOwner, let targetID = replyTargetUserID, !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 HStack(spacing: Theme.Spacing.s) {
                     Text("Replying to \(replyTargetDisplayName ?? "commenter")")
                         .font(Theme.Text.meta)
@@ -477,7 +554,9 @@ public struct CommentsView: View {
 
                     let hasText = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     let hasTarget = !(replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    let isEnabled = isOwner ? (hasText && hasTarget) : hasText
+                    let recipientCount = (isOwner && ownerID != nil) ? respondToCommentersRecipientIDs(ownerUserID: ownerID!).count : 0
+                    let hasRecipients = recipientCount > 0
+                    let isEnabled = isOwner ? (hasText && (isRespondToCommentersMode ? hasRecipients : hasTarget)) : hasText
 
                     if isEnabled {
                         ZStack {
@@ -501,7 +580,9 @@ public struct CommentsView: View {
 
                     let hasText = !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     let hasTarget = !(replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    return isOwner ? !(hasText && hasTarget) : !hasText
+                    let recipientCount = (isOwner && ownerID != nil) ? respondToCommentersRecipientIDs(ownerUserID: ownerID!).count : 0
+                    let hasRecipients = recipientCount > 0
+                    return isOwner ? !(hasText && (isRespondToCommentersMode ? hasRecipients : hasTarget)) : !hasText
                 }())
                 .accessibilityLabel("Send comment")
             }
@@ -521,12 +602,39 @@ public struct CommentsView: View {
         guard let ownerID, let viewerID else { return }
 
         if viewerID == ownerID {
-            let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !target.isEmpty else { return }
+            if isRespondToCommentersMode {
+                let recipients = respondToCommentersRecipientIDs(ownerUserID: ownerID)
+                guard !recipients.isEmpty else { return }
 
-            store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: target)
-            draft = ""
-            clearReplyTarget()
+                for rid in recipients {
+                    store.add(
+                        sessionID: sessionID,
+                        authorUserID: viewerID,
+                        authorName: placeholderAuthor,
+                        text: trimmed,
+                        recipientUserID: rid
+                    )
+                }
+
+                draft = ""
+                isRespondToCommentersMode = false
+                clearReplyTarget()
+            } else {
+                // Owner: must have a reply target (no broadcast path).
+                let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !target.isEmpty else { return }
+
+                store.add(
+                    sessionID: sessionID,
+                    authorUserID: viewerID,
+                    authorName: placeholderAuthor,
+                    text: trimmed,
+                    recipientUserID: target
+                )
+
+                draft = ""
+                clearReplyTarget()
+            }
         } else {
             store.add(sessionID: sessionID, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: ownerID)
             draft = ""
