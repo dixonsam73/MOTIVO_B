@@ -408,9 +408,9 @@ public struct CommentsView: View {
                                     let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                                     replyTargetDisplayName = (name == "You") ? "Commenter" : name
                                 } label: {
-                                    Text("Reply")
+                                    Text("· Reply")
                                         .font(Theme.Text.meta)
-                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Reply to commenter")
