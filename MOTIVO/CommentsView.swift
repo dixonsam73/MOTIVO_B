@@ -1,5 +1,5 @@
-// CHANGE-ID: v8H-D-RespondToCommenters-20260109_220400
-// SCOPE: Step 8H-D — owner fan-out reply to commenters (private 1:1 copies; no broadcast; no new notifications)
+// CHANGE-ID: 20260110_150500_8HD_Polish
+// SCOPE: Step 8H-D polish — hide (0) control and dedupe owner fan-out display (UI-only; no new notifications)
 import SwiftUI
 import CoreData
 
@@ -315,7 +315,20 @@ public struct CommentsView: View {
         let ownerID = ownerUserIDForSession()
         let viewerID = viewerUserID()
         let commentsRaw = store.visibleComments(for: sessionID, viewerUserID: viewerID, ownerUserID: ownerID)
-        let comments = commentsRaw.sorted { $0.timestamp < $1.timestamp }
+        let sorted = commentsRaw.sorted { $0.timestamp < $1.timestamp }
+
+        let isOwnerViewer: Bool = {
+            guard let ownerID, let viewerID else { return false }
+            return ownerID == viewerID
+        }()
+
+        let comments: [Comment] = {
+            if isOwnerViewer, let ownerID {
+                return collapseOwnerFanOutDuplicates(sorted, ownerUserID: ownerID)
+            } else {
+                return sorted
+            }
+        }()
 
         return List {
             ForEach(comments) { comment in
@@ -477,50 +490,52 @@ public struct CommentsView: View {
                 let recipientCount = recipients.count
 
                 // Owner-only 8H-D control: respond to all commenters (fan-out private replies)
-                HStack(spacing: Theme.Spacing.s) {
-                    Button {
-                        // Enter/exit fan-out mode. Entering clears single-target reply.
-                        if isRespondToCommentersMode {
-                            isRespondToCommentersMode = false
-                        } else {
-                            clearReplyTarget()
-                            isRespondToCommentersMode = true
-                        }
-                    } label: {
-                        Text("Respond to commenters (\(recipientCount))")
-                            .font(Theme.Text.meta.weight(.semibold))
-                            .foregroundStyle(Theme.Colors.accent)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(recipientCount == 0)
-                    .accessibilityLabel("Respond to commenters")
-
-                    Spacer(minLength: 0)
-                }
-                .padding(.bottom, Theme.Spacing.s)
-
-                if isRespondToCommentersMode {
+                if recipientCount > 0 {
                     HStack(spacing: Theme.Spacing.s) {
-                        Text("Sending privately to \(recipientCount) commenter\(recipientCount == 1 ? "" : "s")")
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-
-                        Spacer(minLength: 0)
-
                         Button {
-                            isRespondToCommentersMode = false
+                            // Enter/exit fan-out mode. Entering clears single-target reply.
+                            if isRespondToCommentersMode {
+                                isRespondToCommentersMode = false
+                            } else {
+                                clearReplyTarget()
+                                isRespondToCommentersMode = true
+                            }
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                            Text("Respond to commenters (\(recipientCount))")
+                                .font(Theme.Text.meta.weight(.semibold))
+                                .foregroundStyle(Theme.Colors.accent)
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Cancel respond to commenters")
+                        .accessibilityLabel("Respond to commenters")
+
+                        Spacer(minLength: 0)
                     }
                     .padding(.bottom, Theme.Spacing.s)
-                }
-            }
 
-            // 8H-C single-target reply banner (suppressed while in fan-out mode)
+                    if isRespondToCommentersMode {
+                        HStack(spacing: Theme.Spacing.s) {
+                            Text("Sending privately to \(recipientCount) commenter\(recipientCount == 1 ? "" : "s")")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+
+                            Spacer(minLength: 0)
+
+                            Button {
+                                isRespondToCommentersMode = false
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Cancel respond to commenters")
+                        }
+                        .padding(.bottom, Theme.Spacing.s)
+                    }
+                }
+
+            
+                }
+// 8H-C single-target reply banner (suppressed while in fan-out mode)
             if !isRespondToCommentersMode, isOwner, let targetID = replyTargetUserID, !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 HStack(spacing: Theme.Spacing.s) {
                     Text("Replying to \(replyTargetDisplayName ?? "commenter")")
@@ -591,6 +606,33 @@ public struct CommentsView: View {
         .padding(.horizontal)
         .padding(.vertical, 10)
         .accessibilitySortPriority(0) // After list
+    }
+
+
+
+    // 8H-D polish: collapse owner fan-out duplicates for display only (owner view).
+    // Underlying comments remain separate per-recipient for privacy; we only dedupe rendering for the owner.
+    private func collapseOwnerFanOutDuplicates(_ comments: [Comment], ownerUserID: String) -> [Comment] {
+        var result: [Comment] = []
+        var lastKept: Comment? = nil
+
+        for c in comments {
+            // Only consider owner-authored comments for collapse.
+            let authorID = store.authorUserID(for: c.id)
+            if authorID == ownerUserID, let last = lastKept {
+                let lastAuthorID = store.authorUserID(for: last.id)
+                if lastAuthorID == ownerUserID,
+                   last.text == c.text,
+                   abs(last.timestamp.timeIntervalSince(c.timestamp)) < 1 {
+                    // Likely a fan-out duplicate: same owner text created in the same second → skip rendering.
+                    continue
+                }
+            }
+
+            result.append(c)
+            lastKept = c
+        }
+        return result
     }
 
     private func send() {
