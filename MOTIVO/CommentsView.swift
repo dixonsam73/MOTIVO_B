@@ -202,13 +202,13 @@ public struct CommentsView: View {
                     let base = Text(span.text)
                     if span.isMention {
                         let mentionText = base
-                            .foregroundStyle(Color.primary)
-                            .fontWeight(.bold)
+                            .foregroundStyle(Theme.Colors.accent)
+                            .fontWeight(.semibold)
                         // Add thin spaces around mention to create breathing room without breaking Text concatenation type
                         let padded = Text("\u{2009}") + mentionText + Text("\u{2009}")
                         return acc + padded
                     } else {
-                        return acc + base.foregroundStyle(Color.primary)
+                        return acc + base.foregroundStyle(Color.primary.opacity(0.9))
                     }
                 }
             }
@@ -268,7 +268,7 @@ public struct CommentsView: View {
                     HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(headerTitleForSession())
-                                .font(Theme.Text.pageTitle)
+                                .font(Theme.Text.sectionHeader)
                             if let sub = headerSubtitleForSession() {
                                 Text(sub)
                                     .font(.footnote)
@@ -386,7 +386,8 @@ public struct CommentsView: View {
                                 }
                             }()
                             Text(displayName)
-                                .font(Theme.Text.meta.weight(.semibold))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Color.primary.opacity(0.9))
                             Text("•")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -408,8 +409,8 @@ public struct CommentsView: View {
                                     replyTargetDisplayName = (name == "You") ? "Commenter" : name
                                 } label: {
                                     Text("Reply")
-                                        .font(Theme.Text.meta.weight(.semibold))
-                                        .foregroundStyle(Theme.Colors.accent)
+                                        .font(Theme.Text.meta)
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Reply to commenter")
@@ -447,26 +448,29 @@ public struct CommentsView: View {
                         }
                     }
                 }
-                .padding(.vertical, Theme.Spacing.inline)
+                .padding(.vertical, Theme.Spacing.s)
                 .accessibilityElement(children: .combine)
                 .accessibilityHint("Comment")
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     // Owner can delete any; commenter can delete their own. Fail-closed if identity is missing.
                     if store.canDelete(commentID: comment.id, viewerUserID: viewerID, ownerUserID: ownerID) {
-                        Button(role: .destructive) {
+                        Button {
                             store.delete(commentID: comment.id, in: sessionID)
                         } label: {
                             Label("Delete", systemImage: "trash")
                         }
+                        // Visual-only: soften destructive swipe action without changing behaviour.
+                        .tint(Theme.Colors.secondaryText.opacity(0.28))
                         .accessibilityLabel("Delete comment")
                     }
                 }
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                .listRowInsets(EdgeInsets(top: 0, leading: Theme.Spacing.m, bottom: 0, trailing: Theme.Spacing.m))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
+        .scrollIndicators(.hidden)
         .scrollContentBackground(.hidden)
         .background(Theme.Colors.surface(scheme))
         .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
@@ -502,8 +506,8 @@ public struct CommentsView: View {
                             }
                         } label: {
                             Text("Respond to commenters (\(recipientCount))")
-                                .font(Theme.Text.meta.weight(.semibold))
-                                .foregroundStyle(Theme.Colors.accent)
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Respond to commenters")
@@ -529,6 +533,16 @@ public struct CommentsView: View {
                             .buttonStyle(.plain)
                             .accessibilityLabel("Cancel respond to commenters")
                         }
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 10)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                .fill(Theme.Colors.surface(scheme).opacity(0.6))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                .stroke(Theme.Colors.cardStroke(scheme).opacity(0.6), lineWidth: 1)
+                        )
                         .padding(.bottom, Theme.Spacing.s)
                     }
                 }
