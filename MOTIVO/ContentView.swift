@@ -714,10 +714,10 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
                         .tint(Theme.Colors.secondaryText)
                         .controlSize(.small)
+                        .scaleEffect(0.92, anchor: .trailing)
                     }
                     .padding(.vertical, 2)
 
@@ -741,10 +741,10 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
                         .tint(Theme.Colors.secondaryText)
                         .controlSize(.small)
+                        .scaleEffect(0.92, anchor: .trailing)
                     }
                     .padding(.vertical, 2)
 
