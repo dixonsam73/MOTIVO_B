@@ -1128,26 +1128,18 @@ fileprivate struct SessionRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Comments")
 
-            // Share
-            Group {
-                if isPrivatePost && !viewerIsOwner {
+            // Share (owner-only)
+            if viewerIsOwner {
+                ShareLink(item: shareText()) {
                     HStack(spacing: 6) {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundStyle(Theme.Colors.secondaryText)
-                            .opacity(0.4)
                     }
-                    .accessibilityHidden(true)
-                } else {
-                    ShareLink(item: shareText()) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "square.and.arrow.up")
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .contentShape(Rectangle())
-                        .font(.system(size: 18, weight: .semibold))
-                    }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .font(.system(size: 18, weight: .semibold))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Export")
             }
 
             Spacer(minLength: 0)
