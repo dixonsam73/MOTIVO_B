@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260111_135903_9c2a7f1e
+// SCOPE: ContentView — Feed Filter visual-only pass (Saved-only row alignment + collapsed header optical centering)
+// UNIQUE-TOKEN: 20260111_135903_feed_filter_visual_pass3
 // CHANGE-ID: v7.12B-ContentView-FixEffectiveUserID-20251112_135718
 // SCOPE: Add effectiveUserID in SessionsRootView + DEBUG follow/publish gating in .all
 // CHANGE-ID: v710H-TopButtonsSafeInset-20251030-1205
@@ -18,6 +21,9 @@
 //
 // CHANGE-ID: 20251008_164453_70d21
 // SCOPE: Visual-only — capitalize 'Feed Filter'; tint Instrument & Activity pickers to header light grey
+// CHANGE-ID: 20260111_132050_feed_filter_visual_overhaul
+// SCOPE: Visual-only — shrink/soften Feed Filter collapsed+open states; no logic/behavior changes
+// UNIQUE-TOKEN: 20260111_132050_feed_filter_visual_overhaul
 import SwiftUI
 import CoreData
 import Combine
@@ -217,7 +223,7 @@ fileprivate struct SessionsRootView: View {
             VStack(spacing: Theme.Spacing.l) {
 
                 // ---------- Stats (card) ----------
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                VStack(alignment: .leading, spacing: 8) {
                     // CHANGE-ID: 20251015_132452-me-entry-icononly
                     // SCOPE: Add inline icon-only Me dashboard entry in Your Sessions header
                     HStack {
@@ -247,17 +253,27 @@ fileprivate struct SessionsRootView: View {
                 .onAppear { refreshStats() }
                 .onChange(of: statsRange) { _ in refreshStats() }
                 .cardSurface()
+                .padding(.bottom, Theme.Spacing.s)
 
-                // ---------- Filters (card) ----------
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    // Header now toggles expansion; chevron on same line
+                // ---------- Filters (utility strip) ----------
+                VStack(alignment: .leading, spacing: 6) {
+                    // Header toggles expansion; visually demoted (utility row)
                     Button { withAnimation { filtersExpanded.toggle() } } label: {
-                        HStack {
-                            Text("Feed Filter").sectionHeader()
-                            Spacer()
-                            Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("Feed Filter")
+                                .font(Theme.Text.meta.weight(.semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
+
+                            Spacer(minLength: 0)
+
+                            Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .imageScale(.small)
+                                .padding(.top, 1)
                         }
+                        .padding(.top, 1) // optical centering in collapsed pill
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
@@ -274,10 +290,18 @@ fileprivate struct SessionsRootView: View {
                         savedOnly: $savedOnly
                     )
                 }
-                .cardSurface()
-                .padding(.bottom, -8)
-
-                // ---------- Sessions List ----------
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Theme.Colors.surface(colorScheme).opacity(0.55))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
+                )
+                .padding(.bottom, Theme.Spacing.s)
+// ---------- Sessions List ----------
                 Group {
                 if useBackendFeed {
                     backendFeedList
@@ -652,10 +676,11 @@ fileprivate struct FilterBar: View {
     @Binding var savedOnly: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            // Header button now controls expansion; this view only renders contents when expanded
+        VStack(alignment: .leading, spacing: 6) {
+            // This view only renders contents when expanded (logic unchanged)
             if filtersExpanded {
-                VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                VStack(alignment: .leading, spacing: 8) {
+
                     // Scope
                     Picker("Scope", selection: $selectedScope) {
                         ForEach(FeedScope.allCases) { s in
@@ -663,21 +688,25 @@ fileprivate struct FilterBar: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .controlSize(.small)
 
                     // Search
-                    TextField("Search title or notes", text: $searchText)
+                    TextField("Search", text: $searchText)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
+                        .font(Theme.Text.meta)
                         .textFieldStyle(.roundedBorder)
-
-                    // Saved
-                    Toggle("Saved only", isOn: $savedOnly)
-                        .toggleStyle(.switch)
+                        .controlSize(.small)
+                        .padding(.vertical, -2)
+                        .padding(.horizontal, 2)
+                        .controlSize(.small)
 
                     // Instrument
-                    HStack {
+                    HStack(spacing: 10) {
                         Text("Instrument")
-                        Spacer()
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        Spacer(minLength: 0)
                         Picker("Instrument", selection: $selectedInstrument) {
                             Text("Any").tag(nil as Instrument?)
                             ForEach(instruments, id: \.objectID) { inst in
@@ -685,13 +714,19 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                         .tint(Theme.Colors.secondaryText)
+                        .controlSize(.small)
                     }
+                    .padding(.vertical, 2)
 
                     // Activity — include customs
-                    HStack {
+                    HStack(spacing: 10) {
                         Text("Activity")
-                        Spacer()
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        Spacer(minLength: 0)
                         Picker("Activity", selection: $selectedActivity) {
                             Text("Any").tag(ActivityFilter.any)
                             // Core activities
@@ -706,8 +741,26 @@ fileprivate struct FilterBar: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
                         .tint(Theme.Colors.secondaryText)
+                        .controlSize(.small)
                     }
+                    .padding(.vertical, 2)
+
+                    // Saved only — peer row (same label style/alignment as Instrument/Activity)
+                    HStack(spacing: 10) {
+                        Text("Saved only")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        Spacer(minLength: 0)
+                        Toggle("", isOn: $savedOnly)
+                            .labelsHidden()
+                            .controlSize(.small)
+                            .scaleEffect(0.92, anchor: .trailing)
+                            .padding(.trailing, 10) // aligns switch with menu picker trailing inset
+                    }
+                    .padding(.vertical, 2)
                 }
             }
         }
@@ -1642,7 +1695,7 @@ fileprivate struct BackendPostRow: View {
             }
 
             // Secondary metadata lines
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            VStack(alignment: .leading, spacing: 8) {
                 if let instrument = model.instrumentLabel, !instrument.isEmpty {
                     Text(instrument)
                         .font(.footnote)
