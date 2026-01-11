@@ -110,6 +110,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedScope: FeedScope = .all
     @State private var searchText: String = ""
+    @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
     @State private var debouncedQuery: String = ""
     @State private var pushSessionID: UUID? = nil
 
@@ -269,7 +270,8 @@ fileprivate struct SessionsRootView: View {
                         selectedInstrument: $selectedInstrument,
                         selectedActivity: $selectedActivity,
                         selectedScope: $selectedScope,
-                        searchText: $searchText
+                        searchText: $searchText,
+                        savedOnly: $savedOnly
                     )
                 }
                 .cardSurface()
@@ -580,6 +582,15 @@ fileprivate struct SessionsRootView: View {
             }
         }
 
+        // Saved-only (viewer-local)
+        if savedOnly {
+            guard let vid = effectiveUserID else { return [] }
+            out = out.filter { s in
+                guard let sid = (s.value(forKey: "id") as? UUID) else { return false }
+                return FeedInteractionStore.isSaved(sid, viewerUserID: vid)
+            }
+        }
+
         // Search (title or notes)
         let q = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty {
@@ -638,6 +649,7 @@ fileprivate struct FilterBar: View {
     @Binding var selectedActivity: ActivityFilter
     @Binding var selectedScope: FeedScope
     @Binding var searchText: String
+    @Binding var savedOnly: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -657,6 +669,10 @@ fileprivate struct FilterBar: View {
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
                         .textFieldStyle(.roundedBorder)
+
+                    // Saved
+                    Toggle("Saved only", isOn: $savedOnly)
+                        .toggleStyle(.switch)
 
                     // Instrument
                     HStack {
@@ -761,7 +777,7 @@ fileprivate struct SessionRow: View {
     //@State private var showDetailFromComment: Bool = false // replaced per instructions
     @State private var isCommentsPresented: Bool = false
     @State private var showPeek: Bool = false
-    @State private var isLikedLocal: Bool = false
+    @State private var isSavedLocal: Bool = false
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
     @ObservedObject private var commentsStore = CommentsStore.shared
@@ -1044,7 +1060,11 @@ fileprivate struct SessionRow: View {
         }
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
-                isLikedLocal = FeedInteractionStore.isHearted(sid)
+                if let vid = viewerUserID {
+                isSavedLocal = FeedInteractionStore.isSaved(sid, viewerUserID: vid)
+            } else {
+                isSavedLocal = false
+            }
                 // 8H-A: no counts
                 commentCountLocal = FeedInteractionStore.commentCount(sid)
             }
@@ -1077,19 +1097,20 @@ fileprivate struct SessionRow: View {
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                let newState = FeedInteractionStore.toggleHeart(sessionID)
-                isLikedLocal = newState
+                let vid = viewerUserID ?? "unknown"
+                let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: vid)
+                isSavedLocal = newState
                 // 8H-A: no counts
 
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: isLikedLocal ? "heart.fill" : "heart")
-                        .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
+                    Image(systemName: isSavedLocal ? "heart.fill" : "heart")
+                        .foregroundStyle(isSavedLocal ? Color.red : Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(isLikedLocal ? "Unlike" : "Like")
+            .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
 
             // Comment (opens comments sheet)
             Button(action: {

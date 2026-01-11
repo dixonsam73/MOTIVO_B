@@ -3,6 +3,7 @@
 //
 //  v7.10F — Local-only feed interactions persisted via UserDefaults.
 //  v8H-A  — Hearts are binary only (no counts anywhere).
+//  v8H-S  — Hearts are reinterpreted as viewer-local Saves (bookmarks); key includes viewerUserID.
 //  Keys are namespaced to avoid collisions.
 
 import Foundation
@@ -12,15 +13,49 @@ struct FeedInteractionStore {
     // Semantics changed in 8H-A: the stored boolean is a binary "heart given by me".
     private static let heartKeyPrefix = "feed.interact.v1.like."
 
+    // v8H-S: viewer-local Save keys (do NOT reflect other users on the same device)
+    private static let saveKeyPrefixV2 = "feed.interact.v2.save."
+
     // Comment count remains for now (will be addressed in 8H-B).
     private static let commentCountKeyPrefix = "feed.interact.v1.commentCount."
 
     private static func heartKey(_ id: UUID) -> String { heartKeyPrefix + id.uuidString }
+    private static func safeUserKeyPart(_ userID: String) -> String {
+        // UserDefaults keys are strings; keep this conservative and stable.
+        let trimmed = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "unknown" }
+        return trimmed
+            .replacingOccurrences(of: ".", with: "_")
+            .replacingOccurrences(of: ":", with: "_")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: " ", with: "_")
+    }
+    private static func saveKey(_ id: UUID, viewerUserID: String) -> String {
+        saveKeyPrefixV2 + safeUserKeyPart(viewerUserID) + "." + id.uuidString
+    }
     private static func commentCountKey(_ id: UUID) -> String { commentCountKeyPrefix + id.uuidString }
 
-    // MARK: - Hearts (binary, no counts)
+    // MARK: - Saves (❤️)
 
-    /// Returns whether the current viewer has hearted the post locally.
+    /// Viewer-local Save (bookmark). This MUST NOT reflect other users on the same device.
+    static func isSaved(_ id: UUID, viewerUserID: String) -> Bool {
+        UserDefaults.standard.bool(forKey: saveKey(id, viewerUserID: viewerUserID))
+    }
+
+    /// Toggle Save. Returns the new state.
+    @discardableResult
+    static func toggleSaved(_ id: UUID, viewerUserID: String) -> Bool {
+        let key = saveKey(id, viewerUserID: viewerUserID)
+        let was = UserDefaults.standard.bool(forKey: key)
+        let now = !was
+        UserDefaults.standard.set(now, forKey: key)
+        return now
+    }
+
+// MARK: - Hearts (legacy shims)
+
+    /// Legacy (v8H-A): device-local heart state keyed only by postID.
+    /// Do not use for new UI (it will leak across identities on the same device).
     static func isHearted(_ id: UUID) -> Bool {
         UserDefaults.standard.bool(forKey: heartKey(id))
     }
