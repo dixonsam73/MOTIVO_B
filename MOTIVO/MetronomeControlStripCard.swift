@@ -160,11 +160,7 @@ struct MetronomeControlStripCard: View {
                             value: $metronomeVolume,
                             onChanged: { _ in
                                 if metronomeIsOn {
-                                    metronomeEngine.update(
-                                        bpm: metronomeBPM,
-                                        accentEvery: metronomeAccentEvery,
-                                        volume: metronomeVolume
-                                    )
+                                    metronomeEngine.updateVolume(metronomeVolume)
                                 }
                             },
                             onEditingEnded: {

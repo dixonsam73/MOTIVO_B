@@ -123,14 +123,24 @@ final class MetronomeEngine {
         isRunning = true
     }
 
-    /// Update parameters while running. Safe to call even if stopped.
+    /// Update tempo/accent (and optionally volume) while running. Safe to call even if stopped.
     func update(bpm: Int, accentEvery: Int, volume: Double) {
+        let oldBPM = self.bpm
+
         self.bpm = max(30, Double(bpm))
         self.accentEvery = max(0, accentEvery)
         self.volume = max(0, min(1, volume))
 
-        // Update timing for new tempo; keep phase as-is.
-        updateTiming()
+        // Only recompute timing if BPM actually changed.
+        if self.bpm != oldBPM {
+            updateTiming()
+        }
+    }
+
+    /// Update volume only (does not touch tempo/timing).
+    func updateVolume(_ volume: Double) {
+        self.volume = max(0, min(1, volume))
+        // Intentionally do NOT call updateTiming()
     }
 
     /// Stop the metronome.
