@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260112_140516_Step9B_BackendFollowGraph
+// SCOPE: Step 9B — Route FollowStore through backend follow service when in Backend Preview; keep local simulation unchanged.
+// SEARCH-TOKEN: 20260112_140516_Step9B_BackendFollowGraph
+//
 // CHANGE-ID: v7.13A-FollowStore-DummyIdentities-20251201_1715
 // SCOPE: Social Hardening — Dummy identities (local-device, user_B, user_C)
 // Fixes: FollowStore now reloads follow/request sets after identity override.
@@ -56,10 +60,60 @@ public final class FollowStore: ObservableObject {
         UserDefaults.standard.set(Array(requests), forKey: _requestsKey)
     }
 
+
+    // MARK: - Backend Preview (Step 9B)
+
+    private var isBackendPreviewActive: Bool {
+        BackendEnvironment.shared.isPreview &&
+        BackendConfig.isConfigured &&
+        (NetworkManager.shared.baseURL != nil)
+    }
+
+    /// Refresh follow state from backend if we're in Backend Preview and configured.
+    /// No-op in Local Simulation.
+    @MainActor
+    public func refreshFromBackendIfPossible() async {
+        guard isBackendPreviewActive else { return }
+        let follow = BackendEnvironment.shared.follow
+
+        // Approved outgoing follows = "following"
+        let followingResult = await follow.fetchFollowingApproved()
+        // Incoming requests = "requests" (people who want to follow me)
+        let incomingResult = await follow.fetchIncomingRequests()
+
+        switch (followingResult, incomingResult) {
+        case (.success(let followingIDs), .success(let incomingIDs)):
+            // Backend is source of truth in preview — do not persist to UserDefaults.
+            self.following = Set(followingIDs.map { $0.lowercased() })
+            self.requests = Set(incomingIDs.map { $0.lowercased() })
+            objectWillChange.send()
+            NSLog("[FollowStore] backend refresh ok (following=%d requests=%d)", self.following.count, self.requests.count)
+
+        case (.failure(let e), _):
+            NSLog("[FollowStore] backend refresh failed (following): %@", String(describing: e))
+
+        case (_, .failure(let e)):
+            NSLog("[FollowStore] backend refresh failed (incoming): %@", String(describing: e))
+        }
+    }
+
     // MARK: - Public API (Simulation Layer)
 
     @discardableResult
     public func requestFollow(to targetUserID: String) -> FollowState {
+        if isBackendPreviewActive {
+            Task { @MainActor in
+                let result = await BackendEnvironment.shared.follow.requestFollow(to: targetUserID)
+                switch result {
+                case .success:
+                    await self.refreshFromBackendIfPossible()
+                case .failure(let e):
+                    NSLog("[FollowStore] backend requestFollow failed: %@", String(describing: e))
+                }
+            }
+            return .requested
+        }
+
         requests.insert(targetUserID)
         save()
         objectWillChange.send()
@@ -69,6 +123,19 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func approveFollow(from requesterUserID: String) -> FollowState {
+        if isBackendPreviewActive {
+            Task { @MainActor in
+                let result = await BackendEnvironment.shared.follow.approveFollow(from: requesterUserID)
+                switch result {
+                case .success:
+                    await self.refreshFromBackendIfPossible()
+                case .failure(let e):
+                    NSLog("[FollowStore] backend approveFollow failed: %@", String(describing: e))
+                }
+            }
+            return .following
+        }
+
         requests.remove(requesterUserID)
         following.insert(requesterUserID)
         save()
@@ -79,6 +146,19 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func declineFollow(from requesterUserID: String) -> FollowState {
+        if isBackendPreviewActive {
+            Task { @MainActor in
+                let result = await BackendEnvironment.shared.follow.declineFollow(from: requesterUserID)
+                switch result {
+                case .success:
+                    await self.refreshFromBackendIfPossible()
+                case .failure(let e):
+                    NSLog("[FollowStore] backend declineFollow failed: %@", String(describing: e))
+                }
+            }
+            return .none
+        }
+
         requests.remove(requesterUserID)
         save()
         objectWillChange.send()
@@ -88,6 +168,19 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func unfollow(_ targetUserID: String) -> FollowState {
+        if isBackendPreviewActive {
+            Task { @MainActor in
+                let result = await BackendEnvironment.shared.follow.unfollow(targetUserID)
+                switch result {
+                case .success:
+                    await self.refreshFromBackendIfPossible()
+                case .failure(let e):
+                    NSLog("[FollowStore] backend unfollow failed: %@", String(describing: e))
+                }
+            }
+            return .none
+        }
+
         following.remove(targetUserID)
         save()
         objectWillChange.send()

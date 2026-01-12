@@ -1,4 +1,12 @@
 //
+// CHANGE-ID: 20260112_141800_Step9B_BackendFollowGraph_Fix1
+// SCOPE: Step 9B — Fix follow service type + actor isolation (BackendFollowService no @MainActor; add HTTPBackendFollowService).
+// SEARCH-TOKEN: 20260112_141800_Step9B_BackendFollowGraph_Fix1
+//
+// CHANGE-ID: 20260112_140516_Step9B_BackendFollowGraph
+// SCOPE: Step 9B — Backend follow table + client wiring (service + FollowStore refresh; no posts RLS changes).
+// SEARCH-TOKEN: 20260112_140516_Step9B_BackendFollowGraph
+//
 // CHANGE-ID: 20260109_121500_Step8G_Phase3_Fix_8G3A
 // SCOPE: Step 8G Phase 3 — Fix BackendShim compile errors (scope/brace hygiene + 409 idempotence NetworkError casting). No behavior changes beyond making Phase 3 compile.
 // SEARCH-TOKEN: 20260109_121500_Step8G_Phase3_Fix_8G3A
@@ -141,7 +149,17 @@ public protocol BackendPublishService {
 }
 
 public protocol BackendProfileService {}
-public protocol BackendFollowService {}
+
+public protocol BackendFollowService {
+    func fetchFollowingApproved() async -> Result<[String], Error>
+    func fetchIncomingRequests() async -> Result<[String], Error>
+    func fetchOutgoingRequests() async -> Result<[String], Error>
+
+    func requestFollow(to targetUserID: String) async -> Result<Void, Error>
+    func approveFollow(from requesterUserID: String) async -> Result<Void, Error>
+    func declineFollow(from requesterUserID: String) async -> Result<Void, Error>
+    func unfollow(_ targetUserID: String) async -> Result<Void, Error>
+}
 
 public final class SimulatedPublishService: BackendPublishService {
     public init() {}
@@ -172,7 +190,263 @@ public final class SimulatedPublishService: BackendPublishService {
 }
 
 public final class SimulatedProfileService: BackendProfileService { public init() {} }
-public final class SimulatedFollowService: BackendFollowService { public init() {} }
+
+public final class SimulatedFollowService: BackendFollowService {
+    public init() {}
+
+    @MainActor
+    public func fetchFollowingApproved() async -> Result<[String], Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.fetchFollowingApproved")
+        return .success([])
+    }
+
+    @MainActor
+    public func fetchIncomingRequests() async -> Result<[String], Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.fetchIncomingRequests")
+        return .success([])
+    }
+
+    @MainActor
+    public func fetchOutgoingRequests() async -> Result<[String], Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.fetchOutgoingRequests")
+        return .success([])
+    }
+
+    @MainActor
+    public func requestFollow(to targetUserID: String) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.requestFollow", meta: ["to": targetUserID])
+        return .success(())
+    }
+
+    @MainActor
+    public func approveFollow(from requesterUserID: String) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.approveFollow", meta: ["from": requesterUserID])
+        return .success(())
+    }
+
+    @MainActor
+    public func declineFollow(from requesterUserID: String) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.declineFollow", meta: ["from": requesterUserID])
+        return .success(())
+    }
+
+    @MainActor
+    public func unfollow(_ targetUserID: String) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.unfollow", meta: ["target": targetUserID])
+        return .success(())
+    }
+}
+
+
+
+
+public final class HTTPBackendFollowService: BackendFollowService {
+    public init() {}
+
+    private func currentBackendUserID() -> String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override.lowercased()
+        }
+        #endif
+
+        // Prefer Supabase user ID if present; fall back to legacy backendUserID.
+        if let supa = UserDefaults.standard.string(forKey: "supabaseUserID_v1")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !supa.isEmpty {
+            return supa.lowercased()
+        }
+        if let legacy = UserDefaults.standard.string(forKey: "backendUserID_v1")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !legacy.isEmpty {
+            return legacy.lowercased()
+        }
+        return nil
+    }
+
+    private func headers(apiKey: String) -> [String: String] {
+        [
+            "apikey": apiKey,
+                        "Prefer": "return=minimal"
+        ]
+    }
+
+    public func fetchFollowingApproved() async -> Result<[String], Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .success([])
+        }
+
+        let path = "rest/v1/follows?select=followed_user_id&follower_user_id=eq.\(me)&status=eq.approved"
+        let result = await NetworkManager.shared.request(path: path, method: "GET", headers: headers(apiKey: apiKey))
+
+        switch result {
+        case .success(let data):
+            do {
+                let obj = try JSONSerialization.jsonObject(with: data, options: [])
+                let rows = obj as? [[String: Any]] ?? []
+                let ids = rows.compactMap { ($0["followed_user_id"] as? String)?.lowercased() }
+                return .success(ids)
+            } catch {
+                return .failure(error)
+            }
+
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    public func fetchIncomingRequests() async -> Result<[String], Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .success([])
+        }
+
+        let path = "rest/v1/follows?select=follower_user_id&followed_user_id=eq.\(me)&status=eq.requested"
+        let result = await NetworkManager.shared.request(path: path, method: "GET", headers: headers(apiKey: apiKey))
+
+        switch result {
+        case .success(let data):
+            do {
+                let obj = try JSONSerialization.jsonObject(with: data, options: [])
+                let rows = obj as? [[String: Any]] ?? []
+                let ids = rows.compactMap { ($0["follower_user_id"] as? String)?.lowercased() }
+                return .success(ids)
+            } catch {
+                return .failure(error)
+            }
+
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    public func fetchOutgoingRequests() async -> Result<[String], Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .success([])
+        }
+
+        let path = "rest/v1/follows?select=followed_user_id&follower_user_id=eq.\(me)&status=eq.requested"
+        let result = await NetworkManager.shared.request(path: path, method: "GET", headers: headers(apiKey: apiKey))
+
+        switch result {
+        case .success(let data):
+            do {
+                let obj = try JSONSerialization.jsonObject(with: data, options: [])
+                let rows = obj as? [[String: Any]] ?? []
+                let ids = rows.compactMap { ($0["followed_user_id"] as? String)?.lowercased() }
+                return .success(ids)
+            } catch {
+                return .failure(error)
+            }
+
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    public func requestFollow(to targetUserID: String) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+
+        let body: [String: Any] = [
+            "follower_user_id": me,
+            "followed_user_id": targetUserID.lowercased(),
+            "status": "requested"
+        ]
+        do {
+            let json = try JSONSerialization.data(withJSONObject: body, options: [])
+            let result = await NetworkManager.shared.request(path: "rest/v1/follows", method: "POST", jsonBody: json, headers: headers(apiKey: apiKey))
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                // Idempotence: if already exists, treat as OK.
+                if let ne = e as? NetworkManager.NetworkError, case .httpError(let status, _) = ne, status == 409 {
+                    return .success(())
+                }
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func approveFollow(from requesterUserID: String) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+
+        let patch: [String: Any] = [
+            "status": "approved",
+            "updated_at": ISO8601DateFormatter().string(from: Date())
+        ]
+        do {
+            let json = try JSONSerialization.data(withJSONObject: patch, options: [])
+            let path = "rest/v1/follows?follower_user_id=eq.\(requesterUserID.lowercased())&followed_user_id=eq.\(me)"
+            let result = await NetworkManager.shared.request(path: path, method: "PATCH", jsonBody: json, headers: headers(apiKey: apiKey))
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func declineFollow(from requesterUserID: String) async -> Result<Void, Error> {
+        // Decline == delete request row.
+        return await deleteRelationship(with: requesterUserID.lowercased())
+    }
+
+    public func unfollow(_ targetUserID: String) async -> Result<Void, Error> {
+        // Unfollow == delete row.
+        return await deleteRelationship(with: targetUserID.lowercased())
+    }
+
+    private func deleteRelationship(with otherUserID: String) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+        guard let me = currentBackendUserID(), !me.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+        }
+
+        // Try both directions (either party can delete).
+        let path1 = "rest/v1/follows?follower_user_id=eq.\(me)&followed_user_id=eq.\(otherUserID)"
+        let r1 = await NetworkManager.shared.request(path: path1, method: "DELETE", headers: headers(apiKey: apiKey))
+        switch r1 {
+        case .success:
+            return .success(())
+        case .failure:
+            break
+        }
+
+        let path2 = "rest/v1/follows?follower_user_id=eq.\(otherUserID)&followed_user_id=eq.\(me)"
+        let r2 = await NetworkManager.shared.request(path: path2, method: "DELETE", headers: headers(apiKey: apiKey))
+        switch r2 {
+        case .success:
+            return .success(())
+        case .failure(let e2):
+            return .failure(e2)
+        }
+    }
+}
 
 public final class HTTPBackendPublishService: BackendPublishService {
     public init() {}
@@ -436,8 +710,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             query: nil,
             jsonBody: body,
             headers: [
-                "Content-Type": "application/json",
-                "Prefer": "return=minimal"
+                    "Prefer": "return=minimal"
             ]
         )
 
@@ -533,6 +806,11 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
         var targetOwnersLower: [String] = [ownerLower]
         if normalized == "all" {
+            // Phase 9B: backend follow graph drives targetOwners in Backend Preview.
+            if BackendEnvironment.shared.isPreview {
+                await FollowStore.shared.refreshFromBackendIfPossible()
+            }
+
             let following = FollowStore.shared.followingIDs()
             let normalizedFollowing = following.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
             var seen = Set<String>()
@@ -625,13 +903,18 @@ public final class BackendEnvironment {
         return SimulatedPublishService()
     }
 
-    public let profile: BackendProfileService
-    public let follow: BackendFollowService
+    public var profile: BackendProfileService { SimulatedProfileService() }
 
-    private init() {
-        self.profile = SimulatedProfileService()
-        self.follow = SimulatedFollowService()
+    public var follow: BackendFollowService {
+        let mode = currentBackendMode()
+        let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
+        if mode == .backendPreview && hasHTTPConfig {
+            return HTTPBackendFollowService()
+        }
+        return SimulatedFollowService()
     }
+
+    private init() {}
 
     @inline(__always)
     public var mode: BackendMode { currentBackendMode() }
