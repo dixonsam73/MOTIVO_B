@@ -1,6 +1,6 @@
 //
-// CHANGE-ID: 20260112_141800_Step9B_BackendFollowGraph_Fix1
-// SCOPE: Step 9B — Fix follow service type + actor isolation (BackendFollowService no @MainActor; add HTTPBackendFollowService).
+// CHANGE-ID: 20260112_201800_9C_RLSFeed
+// SCOPE: Step 9C — RLS-enforced feed visibility (All relies on server; no client allowlist filter)
 // SEARCH-TOKEN: 20260112_141800_Step9B_BackendFollowGraph_Fix1
 //
 // CHANGE-ID: 20260112_140516_Step9B_BackendFollowGraph
@@ -832,12 +832,21 @@ public final class HTTPBackendPublishService: BackendPublishService {
         // Step 8C.1 sanity: Mine uses proper server-side filter + order.
         // NOTE: owner_user_id is uuid, so we MUST use eq., not ilike.
         let queryItems: [URLQueryItem]? = {
-            guard normalized == "mine" else { return nil }
-            return [
-                URLQueryItem(name: "select", value: "*"),
-                URLQueryItem(name: "owner_user_id", value: "eq.\(ownerLower)"),
-                URLQueryItem(name: "order", value: "created_at.desc")
-            ]
+            if normalized == "mine" {
+                return [
+                    URLQueryItem(name: "select", value: "*"),
+                    URLQueryItem(name: "owner_user_id", value: "eq.\(ownerLower)"),
+                    URLQueryItem(name: "order", value: "created_at.desc")
+                ]
+            } else if normalized == "all" {
+                // Phase 9C: rely on server-side RLS to enforce visibility for "All".
+                return [
+                    URLQueryItem(name: "select", value: "*"),
+                    URLQueryItem(name: "order", value: "created_at.desc")
+                ]
+            } else {
+                return nil
+            }
         }()
 
         let result = await NetworkManager.shared.request(
@@ -858,8 +867,8 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
                 let all: [BackendPost]
                 if normalized == "all" {
-                    let allow = Set(targetOwnersLower)
-                    all = rawPosts.filter { allow.contains(($0.ownerUserID ?? "").lowercased()) }
+                    // Phase 9C: server already enforces owner/follow visibility via RLS.
+                    all = rawPosts
                 } else {
                     all = mine
                 }
