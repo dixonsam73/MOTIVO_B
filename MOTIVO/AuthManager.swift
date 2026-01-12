@@ -10,6 +10,10 @@ import AuthenticationServices
 import CryptoKit
 import Combine
 
+// CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
+// SCOPE: Step 9A — Canonicalise backend user identity lookup (single source for backend principal; DEBUG override key)
+// UNIQUE-TOKEN: 20260112_131015_backend_id_canon
+
 #if canImport(Supabase)
 import Supabase
 #endif
@@ -72,6 +76,30 @@ final class AuthManager: NSObject, ObservableObject {
     // Step 7: Supabase session persistence (dev-only; no refresh logic yet)
     private static let supabaseAccessTokenKeychainKey = "supabaseAccessToken_v1"
     private static let supabaseUserIDDefaultsKey = "supabaseUserID_v1"
+
+    /// Canonical backend principal used for all backend/RLS calls.
+    ///
+    /// Order:
+    /// 1) DEBUG override ("Debug.backendUserIDOverride")
+    /// 2) Supabase user ID ("supabaseUserID_v1")
+    /// 3) Legacy backend stub ID ("backendUserID_v1")
+    ///
+    /// Returns a trimmed, lowercased string, or nil if unavailable.
+    static func canonicalBackendUserID() -> String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override.lowercased()
+        }
+        #endif
+
+        let raw = (UserDefaults.standard.string(forKey: Self.supabaseUserIDDefaultsKey) ??
+                   UserDefaults.standard.string(forKey: Self.backendUserDefaultsKey) ??
+                   "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return raw.isEmpty ? nil : raw.lowercased()
+    }
 
     override convenience init() {
         self.init(identityService: LocalStubIdentityService())

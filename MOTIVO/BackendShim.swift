@@ -7,6 +7,10 @@
 // CHANGE-ID: 20260101_141600_Step8B_AllFeed_DebugOnly
 //
 
+// CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
+// SCOPE: Step 9A — Use AuthManager.canonicalBackendUserID() for all backend owner identity reads (publish + feed)
+// UNIQUE-TOKEN: 20260112_131015_backendshim_id_canon
+
 import Foundation
 import CoreData
 import SwiftUI
@@ -179,9 +183,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        let owner = (UserDefaults.standard.string(forKey: "supabaseUserID_v1") ??
-                     UserDefaults.standard.string(forKey: "backendUserID_v1") ??
-                     "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner = (AuthManager.canonicalBackendUserID() ?? "")
 
         if owner.isEmpty {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
@@ -521,9 +523,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        let owner = (UserDefaults.standard.string(forKey: "supabaseUserID_v1") ??
-                     UserDefaults.standard.string(forKey: "backendUserID_v1") ??
-                     "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let owner = (AuthManager.canonicalBackendUserID() ?? "")
 
         if owner.isEmpty {
             return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))

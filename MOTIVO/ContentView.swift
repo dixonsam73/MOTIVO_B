@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
+// SCOPE: Step 9A — Pass backendUserID into SessionsRootView and use it for backend preview ownership checks
+// UNIQUE-TOKEN: 20260112_131015_contentview_backend_id
+
+// CHANGE-ID: 20260112_133000_9A_fix_backendUserID_redecl
+// SCOPE: 9A hotfix — remove duplicate backendUserID property in SessionsRootView to restore init signature (no behavior change).
+// UNIQUE-TOKEN: 20260112_133000_9A_fix_backendUserID_redecl
+
 // CHANGE-ID: 20260111_135903_9c2a7f1e
 // SCOPE: ContentView — Feed Filter visual-only pass (Saved-only row alignment + collapsed header optical centering)
 // UNIQUE-TOKEN: 20260111_135903_feed_filter_visual_pass3
@@ -97,7 +105,7 @@ fileprivate enum ActivityFilter: Hashable, Identifiable {
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
     var body: some View {
-        SessionsRootView(userID: auth.currentUserID)
+        SessionsRootView(userID: auth.currentUserID, backendUserID: auth.backendUserID)
             .id(auth.currentUserID ?? "nil-user")
     }
 }
@@ -109,6 +117,7 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let userID: String?
+    let backendUserID: String?
 
     @AppStorage("filtersExpanded") private var filtersExpanded = false
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
@@ -146,6 +155,19 @@ fileprivate struct SessionsRootView: View {
     #else
     private var effectiveUserID: String? { userID }
     #endif
+
+    /// Canonical backend identity for backend-preview ownership checks and scoping.
+    /// Uses a dedicated DEBUG override so we don't mix local (Apple) IDs with backend UUIDs.
+    private var effectiveBackendUserID: String? {
+        #if DEBUG
+        if let o = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !o.isEmpty {
+            return o.lowercased()
+        }
+        #endif
+        let raw = (backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : raw.lowercased()
+    }
 
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
     @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
@@ -201,9 +223,9 @@ fileprivate struct SessionsRootView: View {
             } else {
                 ForEach(rows, id: \.id) { post in
                     NavigationLink {
-                        BackendSessionDetailView(model: BackendSessionViewModel(post: post, currentUserID: effectiveUserID))
+                        BackendSessionDetailView(model: BackendSessionViewModel(post: post, currentUserID: effectiveBackendUserID))
                     } label: {
-                        BackendPostRow(model: BackendSessionViewModel(post: post, currentUserID: effectiveUserID))
+                        BackendPostRow(model: BackendSessionViewModel(post: post, currentUserID: effectiveBackendUserID))
                     }
                     .buttonStyle(.plain)
                     .listRowSeparator(.hidden)
@@ -1715,5 +1737,4 @@ fileprivate struct BackendPostRow: View {
         .cardSurface()
     }
 }
-
 
