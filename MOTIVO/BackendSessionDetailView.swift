@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260114_103700_9E
+// SCOPE: 9E use signed URLs for backend attachment playback
+
 import SwiftUI
 import Foundation
 
@@ -12,7 +15,7 @@ public struct BackendSessionDetailView: View {
     private var spacingM: CGFloat { 12 }
     private var spacingL: CGFloat { 16 }
 
-    // Step 8G Phase 2: read-only backend attachment playback (download to temp + open AttachmentViewerView).
+    // Step 9E: read-only backend attachment playback (signed URLs at playback time + open AttachmentViewerView).
     @State private var isViewerPresented: Bool = false
     @State private var isLoadingAttachments: Bool = false
     @State private var attachmentLoadError: String? = nil
@@ -161,20 +164,18 @@ public struct BackendSessionDetailView: View {
 
         defer { isLoadingAttachments = false }
 
-        // Download each attachment to a temp file using authenticated storage GET.
-        // NOTE: AVPlayer / AsyncImage can't inject Authorization headers; we stage locally for playback/viewing.
+        // Step 9E: request short-lived signed URLs at playback time (do not persist).
+        // AVPlayer / URLSession can use the signed URL directly; no local staging required.
+        let expiresIn: Int = 60
+
         for ref in model.attachmentRefs {
-            let result = await NetworkManager.shared.downloadAuthenticatedStorageObject(bucket: ref.bucket, path: ref.path)
+            let result = await NetworkManager.shared.createSignedStorageObjectURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: expiresIn)
             switch result {
-            case .success(let data):
-                guard let localURL = writeToTemp(data: data, originalPath: ref.path) else {
-                    attachmentLoadError = "Failed to prepare attachment file."
-                    return
-                }
+            case .success(let signedURL):
                 switch ref.kind {
-                case .image: viewerImageURLs.append(localURL)
-                case .video: viewerVideoURLs.append(localURL)
-                case .audio: viewerAudioURLs.append(localURL)
+                case .image: viewerImageURLs.append(signedURL)
+                case .video: viewerVideoURLs.append(signedURL)
+                case .audio: viewerAudioURLs.append(signedURL)
                 }
             case .failure(let error):
                 attachmentLoadError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)

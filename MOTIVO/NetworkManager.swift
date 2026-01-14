@@ -1,6 +1,9 @@
 //
 //  NetworkManager.swift
 //  MOTIVO
+//  CHANGE-ID: 20260114_131900_9E_SignedURL_Debug
+//  SCOPE: DEBUG-only logging for storage signed URLs (sign response -> final URL) to diagnose backend attachment playback; no logic changes.
+//
 //
 //  CHANGE-ID: 20251230_Step7_NetworkManager_SupabaseHeaders_193205-1c21
 //  SCOPE: Step 7 — add Supabase-ready header handling (apike...arer); keep legacy configure(baseURL:authToken:) compatibility
@@ -23,6 +26,15 @@
 //  CHANGE-ID: 20260101_Step8C1_NetworkManager_QueryItemsAndLegacyPath_150000
 //  SCOPE: Step 8C.1 — support proper URL query parameters via URLQueryItem AND back-compat parsing for paths that include '?...'; prevents '%3F' encoding bug
 //
+//
+//  CHANGE-ID: 20260113_9D_NetworkManager_DEBUG_JWT_164800
+//  SCOPE: Step 9D — DEBUG-only helper to surface Supabase user access token (JWT) via NetworkManager bearer token setter for Edge Function testing
+//  SEARCH-TOKEN: 20260113_9D_NetworkManager_DEBUG_JWT_164800
+//
+
+
+// CHANGE-ID: 20260114_103700_9E
+// SCOPE: 9E signed storage URLs (no Edge Functions)
 
 import Foundation
 
@@ -55,6 +67,11 @@ public final class NetworkManager {
         }
         bearerToken = (t?.isEmpty == true) ? nil : t
         print("[NetworkManager] bearer token \(bearerToken != nil ? "set" : "cleared")")
+#if DEBUG
+        if let jwt = bearerToken {
+            print("[Auth][DEBUG] access_token=\(jwt)")
+        }
+#endif
     }
 
     /// Compatibility shim: AuthManager expects this.
@@ -273,6 +290,119 @@ public final class NetworkManager {
         return await request(path: storagePath, method: "GET")
     }
 
+
+    // MARK: - Step 9E (Signed URL playback, no Edge Functions)
+
+    /// Creates a short-lived signed URL for a private object in Supabase Storage.
+    /// Requires `SELECT` permission on `storage.objects` via RLS.
+    ///
+    /// NOTE: The returned signed URL must be treated as ephemeral. Do not persist it.
+    public func createSignedStorageObjectURL(bucket: String, path: String, expiresInSeconds: Int) async -> Result<URL, Error> {
+        guard let baseURL else {
+            return .failure(NetworkError.notConfigured)
+        }
+
+        let b = bucket.trimmingCharacters(in: .whitespacesAndNewlines)
+        let p = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !b.isEmpty, !p.isEmpty else {
+            return .failure(NetworkError.invalidURL("Empty bucket/path"))
+        }
+
+        let bucketPart = percentEncodePathSegments(b)
+        let pathPart = percentEncodePathSegments(p)
+
+        let signPath = "storage/v1/object/sign/\(bucketPart)/\(pathPart)"
+
+        let payload: [String: Any] = [
+            "expiresIn": max(1, expiresInSeconds)
+        ]
+
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            return .failure(NetworkError.encodingError(String(describing: error)))
+        }
+
+        let result = await request(path: signPath, method: "POST", query: nil, jsonBody: body)
+
+        switch result {
+        case .success(let data):
+            do {
+                let obj = try JSONSerialization.jsonObject(with: data, options: [])
+                let dict = obj as? [String: Any] ?? [:]
+
+                // Common keys across SDK/REST variants.
+                let signed = (dict["signedURL"] as? String)
+                    ?? (dict["signedUrl"] as? String)
+                    ?? (dict["signed_url"] as? String)
+                    ?? (dict["url"] as? String)
+
+                guard let signedStr = signed?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !signedStr.isEmpty else {
+                    return .failure(NetworkError.decodingError("Missing signed URL in response"))
+                }
+
+                // Some deployments return a full URL; others return a path starting with "/".
+                // Treat signed URLs as opaque. Do NOT rebuild with appendingPathComponent.
+                if let u = URL(string: signedStr), u.scheme != nil {
+    #if DEBUG
+                    print("[SignedURL][DEBUG] bucket=\(bucket) path=\(path)")
+                    print("[SignedURL][DEBUG] signedStr=\(signedStr)")
+                    print("[SignedURL][DEBUG] finalURL=\(u.absoluteString)")
+    #endif
+                    return .success(u)
+                }
+
+                // Absolute path returned.
+                if signedStr.hasPrefix("/") {
+                    // Critical fix:
+                    // Supabase may return "/object/sign/..." but the fetchable route is "/storage/v1/object/sign/..."
+                    let pathWithStoragePrefix: String
+                    if signedStr.hasPrefix("/object/sign/") {
+                        pathWithStoragePrefix = "/storage/v1" + signedStr
+                    } else {
+                        pathWithStoragePrefix = signedStr
+                    }
+
+                    let base = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    let full = base + pathWithStoragePrefix
+
+                    guard let u = URL(string: full) else {
+                        return .failure(NetworkError.invalidURL(full))
+                    }
+    #if DEBUG
+                    print("[SignedURL][DEBUG] bucket=\(bucket) path=\(path)")
+                    print("[SignedURL][DEBUG] signedStr=\(signedStr)")
+                    print("[SignedURL][DEBUG] finalURL=\(u.absoluteString)")
+    #endif
+                    return .success(u)
+                }
+
+                // Relative (rare, but handle safely)
+                let full = baseURL.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                    + "/"
+                    + signedStr
+                guard let u = URL(string: full) else {
+                    return .failure(NetworkError.invalidURL(full))
+                }
+    #if DEBUG
+                print("[SignedURL][DEBUG] bucket=\(bucket) path=\(path)")
+                print("[SignedURL][DEBUG] signedStr=\(signedStr)")
+                print("[SignedURL][DEBUG] finalURL=\(u.absoluteString)")
+    #endif
+                return .success(u)
+
+            } catch {
+                return .failure(NetworkError.decodingError(String(describing: error)))
+            }
+
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+
     private func percentEncodePathSegments(_ raw: String) -> String {
         // Preserve "/" separators but percent-encode each segment.
         let trimmed = raw.hasPrefix("/") ? String(raw.dropFirst()) : raw
@@ -286,4 +416,3 @@ public final class NetworkManager {
     }
 
 }
-

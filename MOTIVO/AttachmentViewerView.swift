@@ -1,5 +1,11 @@
+// CHANGE-ID: 20260114_120500_9E_FIX2
+// SCOPE: Fix infinite recursion crash in AttachmentViewerView audio stopPlayback (triggered by rename / stopAllPlayersToggle)
+
 // CHANGE-ID: 20260105_181300-avv-include-thumb-invariant-fix3
 // SCOPE: Enforce attachment inclusion↔thumbnail invariants in AttachmentViewerView (⭐ implies 👁; private clears ⭐; per-item optimistic state; eye-slash only in control panel). No UI/layout, backend, schema, or publish/sync changes.
+
+// CHANGE-ID: 20260114_103700_9E
+// SCOPE: 9E allow audio/video/image playback from signed HTTPS URLs
 
 import SwiftUI
 import AVKit
@@ -953,9 +959,13 @@ struct AttachmentViewerView: View {
             let url = media[i].url as NSURL
             if _ImageCache.shared.cache.object(forKey: url) != nil { continue }
             Task(priority: .background) {
-                if let data = try? Data(contentsOf: url as URL),
-                   let img = UIImage(data: data) {
-                    _ImageCache.shared.cache.setObject(img, forKey: url)
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url as URL)
+                    if let img = UIImage(data: data) {
+                        _ImageCache.shared.cache.setObject(img, forKey: url)
+                    }
+                } catch {
+                    // ignore prefetch failures
                 }
             }
         }
@@ -1569,12 +1579,101 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
     }
 }
 
+
+final class RemoteAudioPlayerController: NSObject, ObservableObject {
+    @Published var isPlaying: Bool = false
+
+    private var player: AVPlayer?
+    private var timeObserver: Any?
+    private var currentURL: URL?
+
+    private(set) var duration: TimeInterval = 0
+    private(set) var currentTime: TimeInterval = 0
+
+    deinit {
+        if let obs = timeObserver, let p = player {
+            p.removeTimeObserver(obs)
+        }
+    }
+
+    func toggle(url: URL) {
+        if player == nil || currentURL != url {
+            prepare(url: url)
+            play()
+            return
+        }
+        if isPlaying {
+            pause()
+        } else {
+            play()
+        }
+    }
+
+    func prepare(url: URL) {
+        currentURL = url
+        let item = AVPlayerItem(url: url)
+        let p = AVPlayer(playerItem: item)
+        player = p
+        attachTimeObserver(to: p)
+        duration = 0
+        currentTime = 0
+    }
+
+    func play() {
+        guard let player else { return }
+        player.play()
+        isPlaying = true
+    }
+
+    func pause() {
+        guard let player else { return }
+        player.pause()
+        isPlaying = false
+    }
+
+    func stop() {
+        guard let player else { return }
+        player.pause()
+        isPlaying = false
+    }
+
+    func setCurrentTime(_ time: TimeInterval) {
+        guard let player else { return }
+        let d = duration > 0 ? duration : max(time, 0)
+        let clamped = max(0, min(time, d))
+        let cm = CMTime(seconds: clamped, preferredTimescale: 600)
+        player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
+        currentTime = clamped
+    }
+
+    private func attachTimeObserver(to player: AVPlayer) {
+        if let obs = timeObserver {
+            player.removeTimeObserver(obs)
+            timeObserver = nil
+        }
+
+        let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
+        timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] t in
+            guard let self else { return }
+            self.currentTime = t.seconds
+
+            if let item = player.currentItem {
+                let dur = item.duration.seconds
+                if dur.isFinite && dur > 0 {
+                    self.duration = dur
+                }
+            }
+        }
+    }
+}
+
 private struct AudioPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
     let displayTitle: String?
     @StateObject private var audioController = AudioPlayerController()
+    @StateObject private var remoteController = RemoteAudioPlayerController()
 
     // Waveform ring buffer
     @State private var waveformSamples: [CGFloat] = Array(repeating: 0.1, count: 120)
@@ -1587,6 +1686,33 @@ private struct AudioPage: View {
     @State private var audioCurrentTime: TimeInterval = 0
     @State private var wasPlayingBeforeScrub: Bool = false
     @State private var isScrubbing: Bool = false
+
+
+    private var isRemoteURL: Bool {
+        let s = url.scheme?.lowercased()
+        return s == "http" || s == "https"
+    }
+
+    private var isPlaybackPlaying: Bool { isRemoteURL ? remoteController.isPlaying : audioController.isPlaying }
+    private var playbackDuration: TimeInterval { isRemoteURL ? remoteController.duration : audioController.duration }
+    private var playbackCurrentTime: TimeInterval { isRemoteURL ? remoteController.currentTime : audioController.currentTime }
+
+    private func stopPlayback() {
+            if isRemoteURL {
+                remoteController.stop()
+            } else {
+                audioController.stop()
+            }
+        }
+
+    private func setPlaybackTime(_ time: TimeInterval) {
+        if isRemoteURL {
+            remoteController.setCurrentTime(time)
+        } else {
+            audioController.setCurrentTime(time)
+        }
+    }
+
 
     var body: some View {
         VStack(spacing: 16) {
@@ -1609,22 +1735,26 @@ private struct AudioPage: View {
 
             HStack(spacing: 16) {
                 Button(action: {
-                    if audioController.isPlaying {
-                        audioController.stop()
+                    if isPlaybackPlaying {
+                        stopPlayback()
                         audioCurrentTime = 0
                         stopWaveform()
                         isAnyPlayerActive = false
                     } else {
-                        guard let resolvedURL = resolveAudioURL(url) else {
-                            return
+                        if isRemoteURL {
+                            remoteController.toggle(url: url)
+                            audioDuration = playbackDuration
+                            isAnyPlayerActive = true
+                        } else {
+                            guard let resolvedURL = resolveAudioURL(url) else { return }
+                            audioController.play(url: resolvedURL)
+                            audioDuration = audioController.duration
+                            isAnyPlayerActive = true
+                            startWaveform()
                         }
-                        audioController.play(url: resolvedURL)
-                        audioDuration = audioController.duration
-                        isAnyPlayerActive = true
-                        startWaveform()
                     }
                 }) {
-                    Image(systemName: audioController.isPlaying ? "pause.fill" : "play.fill")
+                    Image(systemName: isPlaybackPlaying ? "pause.fill" : "play.fill")
                         .font(.system(size: 20, weight: .semibold))
                         .padding(12)
                         .background(.ultraThinMaterial, in: Circle())
@@ -1635,21 +1765,21 @@ private struct AudioPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
         .onChange(of: onRequestStopAll) { _, _ in
-            audioController.stop()
+            stopPlayback()
             audioCurrentTime = 0
             stopWaveform()
             isAnyPlayerActive = false
         }
         .onDisappear {
-            audioController.stop()
+            stopPlayback()
             audioCurrentTime = 0
             stopWaveform()
             isAnyPlayerActive = false
         }
         .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
-            if audioController.isPlaying && !isScrubbing {
-                audioDuration = audioController.duration
-                audioCurrentTime = audioController.currentTime
+            if isPlaybackPlaying && !isScrubbing {
+                audioDuration = playbackDuration
+                audioCurrentTime = playbackCurrentTime
             }
         }
     }
@@ -1722,7 +1852,7 @@ private struct AudioPage: View {
                     stopWaveform()
                     // Cache duration and current time
                     audioDuration = audioController.duration
-                    audioCurrentTime = audioController.currentTime
+                    audioCurrentTime = playbackCurrentTime
                 }
                 guard audioDuration > 0 else { return }
                 // Map horizontal translation to seconds using a slower, more precise scaling
@@ -1732,18 +1862,20 @@ private struct AudioPage: View {
                 let target = (audioCurrentTime + delta)
                 let clamped = max(0, min(target, audioDuration))
                 // Seek the player without updating state to avoid waveform redraws during drag
-                audioController.setCurrentTime(clamped)
+                setPlaybackTime(clamped)
             }
             .onEnded { _ in
                 // Commit: capture final time once, resume metering, and resume playback if needed
-                audioCurrentTime = audioController.currentTime
+                audioCurrentTime = playbackCurrentTime
                 isScrubbing = false
                 startWaveform()
                 // If it was playing before, ensure playback continues from the new time; if not, remain paused at new position.
                 if wasPlayingBeforeScrub {
                     // If a player exists and is playing, we just keep going; if it paused itself, restart.
                     // Restart from currentTime without resetting to beginning.
-                    if let resolvedURL = resolveAudioURL(url), !audioController.isPlaying {
+                    if isRemoteURL {
+                        remoteController.play()
+                    } else if let resolvedURL = resolveAudioURL(url), !audioController.isPlaying {
                         audioController.play(url: resolvedURL)
                         audioController.setCurrentTime(audioCurrentTime)
                     } else {
