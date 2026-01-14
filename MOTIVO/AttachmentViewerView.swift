@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260114_172800_9F_URLRefresh
+// SCOPE: Step 9F Option A — viewer detects signed URL failures and offers calm tap-to-retry which requests a fresh signed URL via injected closure (no backend/schema/social changes).
+
 // CHANGE-ID: 20260114_120500_9E_FIX2
 // SCOPE: Fix infinite recursion crash in AttachmentViewerView audio stopPlayback (triggered by rename / stopAllPlayersToggle)
 
@@ -91,7 +94,117 @@ struct AttachmentViewerView: View {
     var onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil
     var onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil
 
-    private func currentURL() -> URL? {
+    /// Step 9F (Option A): Ask the presenter/store for a fresh signed URL when remote load/playback fails.
+    /// Contract: viewer supplies the AttachmentKind and the *original* URL it was given; the presenter may map that URL
+    /// back to its attachment reference (bucket/path) and return a new signed URL.
+    var onRequestFreshURL: ((AttachmentKind, URL) async -> Result<URL, Error>)? = nil
+
+    // Step 9F local resilience state (viewer-owned; no backend state)
+    @State private var failedKeys: Set<String> = []
+    @State private var isRefreshingKeys: Set<String> = []
+    @State private var errorMessageByKey: [String: String] = [:]
+    @State private var refreshedURLByKey: [String: URL] = [:]
+
+    private func effectiveURL(for original: URL) -> URL {
+        refreshedURLByKey[urlKey(original)] ?? original
+    }
+
+    private func markFailed(_ original: URL, message: String? = nil) {
+        let k = urlKey(original)
+        failedKeys.insert(k)
+        if let m = message, !m.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            errorMessageByKey[k] = m
+        }
+    }
+
+    private func clearFailure(_ original: URL) {
+        let k = urlKey(original)
+        failedKeys.remove(k)
+        errorMessageByKey.removeValue(forKey: k)
+    }
+
+    private func isFailed(_ original: URL) -> Bool {
+        failedKeys.contains(urlKey(original))
+    }
+
+    private func isRefreshing(_ original: URL) -> Bool {
+        isRefreshingKeys.contains(urlKey(original))
+    }
+
+    private func errorMessage(_ original: URL) -> String? {
+        errorMessageByKey[urlKey(original)]
+    }
+
+    private func requestFreshURL(for original: URL, kind: AttachmentKind) {
+        guard let onRequestFreshURL else { return }
+        let k = urlKey(original)
+        guard !isRefreshingKeys.contains(k) else { return }
+
+        isRefreshingKeys.insert(k)
+
+        Task { @MainActor in
+            let result = await onRequestFreshURL(kind, original)
+            switch result {
+            case .success(let newURL):
+                refreshedURLByKey[k] = newURL
+                clearFailure(original)
+                mediaMutationTick &+= 1 // force page re-render
+            case .failure(let err):
+                markFailed(original, message: String(describing: err))
+            }
+            isRefreshingKeys.remove(k)
+        }
+    }
+
+
+    
+    init(
+        imageURLs: [URL],
+        videoURLs: [URL],
+        audioURLs: [URL],
+        startIndex: Int,
+        audioTitles: [String]? = nil,
+        isReadOnly: Bool,
+        canShare: Bool,
+        themeBackground: Color = Color.clear,
+        onDelete: ((URL) -> Void)? = nil,
+        titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
+        onRename: ((URL, String, AttachmentKind) -> Void)? = nil,
+        onRenameLegacy: ((URL, String) -> Void)? = nil,
+        onFavourite: ((URL) -> Void)? = nil,
+        isFavourite: ((URL) -> Bool)? = nil,
+        onTogglePrivacy: ((URL) -> Void)? = nil,
+        isPrivate: ((URL) -> Bool)? = nil,
+        onReplaceAttachment: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachment: ((URL, AttachmentKind) -> Void)? = nil,
+        onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
+        onRequestFreshURL: ((AttachmentKind, URL) async -> Result<URL, Error>)? = nil
+    ) {
+        self.imageURLs = imageURLs
+        self.audioTitles = audioTitles
+        self.isReadOnly = isReadOnly
+        self.canShare = canShare
+        self.themeBackground = themeBackground
+
+        self.onDelete = onDelete
+        self.titleForURL = titleForURL
+        self.onRename = onRename
+        self.onRenameLegacy = onRenameLegacy
+        self.onFavourite = onFavourite
+        self.isFavourite = isFavourite
+        self.onTogglePrivacy = onTogglePrivacy
+        self.isPrivate = isPrivate
+        self.onReplaceAttachment = onReplaceAttachment
+        self.onSaveAsNewAttachment = onSaveAsNewAttachment
+        self.onSaveAsNewAttachmentFromSource = onSaveAsNewAttachmentFromSource
+        self.onRequestFreshURL = onRequestFreshURL
+
+        self._videoURLs = State(initialValue: videoURLs)
+        self._audioURLs = State(initialValue: audioURLs)
+        self._startIndex = State(initialValue: startIndex)
+    }
+
+private func currentURL() -> URL? {
         imageURLs.indices.contains(currentIndex) ? imageURLs[currentIndex] : nil
     }
 
@@ -349,6 +462,27 @@ struct AttachmentViewerView: View {
                             audioTitles: audioTitles,
                             titleForURL: { url, kind in
                                 resolvedTitle(for: url, kind: kind)
+                            },
+                            effectiveURL: { original in
+                                effectiveURL(for: original)
+                            },
+                            isFailed: { original in
+                                isFailed(original)
+                            },
+                            isRefreshing: { original in
+                                isRefreshing(original)
+                            },
+                            errorMessage: { original in
+                                errorMessage(original)
+                            },
+                            markFailed: { original, message in
+                                markFailed(original, message: message)
+                            },
+                            clearFailure: { original in
+                                clearFailure(original)
+                            },
+                            requestFreshURL: { original, kind in
+                                requestFreshURL(for: original, kind: kind)
                             }
                         )
                         .frame(width: proxy.size.width, height: proxy.size.height)
@@ -982,6 +1116,8 @@ private final class _ImageCache {
 private struct URLImageView: View {
     let url: URL
     var background: Color = Color.clear
+    var onFailure: (() -> Void)? = nil
+    var onSuccess: (() -> Void)? = nil
     @State private var uiImage: UIImage?
     @State private var isLoading = false
     @State private var loadTask: Task<Void, Never>? = nil
@@ -1033,11 +1169,14 @@ private struct URLImageView: View {
             if let img = UIImage(data: data) {
                 await setImage(img)
                 _ImageCache.shared.cache.setObject(img, forKey: key)
+                onSuccess?()
             } else {
                 await setImage(UIImage(systemName: "photo"))
+                onFailure?()
             }
         } catch {
             await setImage(UIImage(systemName: "photo"))
+            onFailure?()
         }
         isLoading = false
     }
@@ -1053,32 +1192,93 @@ private struct MediaPage: View {
     let audioTitles: [String]?
     let titleForURL: ((URL, AttachmentKind) -> String?)?
 
+    // Step 9F: resilience hooks
+    let effectiveURL: (URL) -> URL
+    let isFailed: (URL) -> Bool
+    let isRefreshing: (URL) -> Bool
+    let errorMessage: (URL) -> String?
+    let markFailed: (URL, String?) -> Void
+    let clearFailure: (URL) -> Void
+    let requestFreshURL: (URL, AttachmentKind) -> Void
+
     var body: some View {
-        switch attachment.kind {
-        case .image:
-            ImagePage(url: attachment.url, background: background)
-        case .video:
-            VideoPage(
-                url: attachment.url,
-                isAnyPlayerActive: $isAnyPlayerActive,
-                onRequestStopAll: $onRequestStopAll
+        let original = attachment.url
+        let kind = attachment.kind
+
+        if isFailed(original) {
+            RetryPane(
+                isRefreshing: isRefreshing(original),
+                message: errorMessage(original),
+                onRetry: { requestFreshURL(original, kind) }
             )
-        case .audio:
-            let displayTitle: String? = {
-                let raw = titleForURL?(attachment.url, .audio)
-                    ?? AttachmentViewerView.resolvedAudioTitleProxy(url: attachment.url, audioURLs: audioURLs, audioTitles: audioTitles)
-                let t = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                return t.isEmpty ? nil : t
-            }()
-            AudioPage(
-                url: attachment.url,
-                isAnyPlayerActive: $isAnyPlayerActive,
-                onRequestStopAll: $onRequestStopAll,
-                displayTitle: displayTitle
-            )
-        case .file:
-            EmptyView()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(background)
+        } else {
+            switch kind {
+            case .image:
+                ImagePage(
+                    url: effectiveURL(original),
+                    background: background
+                )
+            case .video:
+                VideoPage(
+                    url: effectiveURL(original),
+                    isAnyPlayerActive: $isAnyPlayerActive,
+                    onRequestStopAll: $onRequestStopAll,
+                    onFailure: { markFailed(original, "Video failed to load") }
+                )
+            case .audio:
+                let displayTitle: String? = {
+                    let raw = titleForURL?(original, .audio)
+                    let t = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return t.isEmpty ? nil : t
+                }()
+                AudioPage(
+                    url: effectiveURL(original),
+                    isAnyPlayerActive: $isAnyPlayerActive,
+                    onRequestStopAll: $onRequestStopAll,
+                    displayTitle: displayTitle,
+                    onFailure: { markFailed(original, "Audio failed to load") }
+                )
+            case .file:
+                EmptyView()
+            }
         }
+    }
+}
+
+private struct RetryPane: View {
+    let isRefreshing: Bool
+    let message: String?
+    let onRetry: () -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            Spacer()
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(Theme.Colors.secondaryText)
+            Text(isRefreshing ? "Refreshing…" : "Failed to load — tap to retry")
+                .font(Theme.Text.meta.weight(.semibold))
+                .foregroundStyle(Theme.Colors.secondaryText)
+            if let m = message, !m.isEmpty {
+                Text(m)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .padding(.horizontal, Theme.Spacing.l)
+            }
+            Button(action: onRetry) {
+                Text(isRefreshing ? "Refreshing…" : "Retry")
+                    .font(Theme.Text.meta.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.accent)
+            }
+            .buttonStyle(.plain)
+            .disabled(isRefreshing)
+            Spacer()
+        }
+        .padding(.vertical, Theme.Spacing.l)
     }
 }
 
@@ -1092,6 +1292,7 @@ private struct VideoPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
+    var onFailure: (() -> Void)? = nil
     @State private var player: AVPlayer? = nil
     @State private var isMuted: Bool = false
     @State private var poster: UIImage? = nil
@@ -1517,6 +1718,7 @@ private struct PlayerContainerView: UIViewRepresentable {
 
 private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPlayerDelegate {
     @Published var isPlaying: Bool = false
+    @Published var didFail: Bool = false
     @Published var currentLevel: Float = 0 // 0...1 for waveform
 
     private var player: AVAudioPlayer?
@@ -1672,6 +1874,7 @@ private struct AudioPage: View {
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
     let displayTitle: String?
+    var onFailure: (() -> Void)? = nil
     @StateObject private var audioController = AudioPlayerController()
     @StateObject private var remoteController = RemoteAudioPlayerController()
 

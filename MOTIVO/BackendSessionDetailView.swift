@@ -117,10 +117,18 @@ public struct BackendSessionDetailView: View {
         .fullScreenCover(isPresented: $isViewerPresented) {
             AttachmentViewerView(
                 imageURLs: viewerImageURLs,
-                startIndex: 0,
-                themeBackground: Color(.systemBackground),
+
+                // Correct order
                 videoURLs: viewerVideoURLs,
                 audioURLs: viewerAudioURLs,
+                startIndex: 0,
+
+                audioTitles: nil,
+                isReadOnly: true,
+                canShare: false,
+                themeBackground: Color(.systemBackground),
+
+                // Everything else unchanged / nil as before
                 onDelete: nil,
                 titleForURL: nil,
                 onRename: nil,
@@ -132,12 +140,55 @@ public struct BackendSessionDetailView: View {
                 onReplaceAttachment: nil,
                 onSaveAsNewAttachment: nil,
                 onSaveAsNewAttachmentFromSource: nil,
-                isReadOnly: true,
-                canShare: false
+
+                // Signed URL refresh contract (9F)
+                onRequestFreshURL: { _, failingURL in
+                    guard let components = URLComponents(
+                        url: failingURL,
+                        resolvingAgainstBaseURL: false
+                    ) else {
+                        return .failure(
+                            NSError(
+                                domain: "SignedURLRefresh",
+                                code: 1,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey: "Unable to parse signed URL"
+                                ]
+                            )
+                        )
+                    }
+
+                    let parts = components.path.split(separator: "/")
+                    guard
+                        let signIndex = parts.firstIndex(of: "sign"),
+                        parts.count > signIndex + 1
+                    else {
+                        return .failure(
+                            NSError(
+                                domain: "SignedURLRefresh",
+                                code: 2,
+                                userInfo: [
+                                    NSLocalizedDescriptionKey:
+                                        "Signed URL missing /object/sign components"
+                                ]
+                            )
+                        )
+                    }
+
+                    let bucket = String(parts[signIndex + 1])
+                    let path = parts
+                        .dropFirst(signIndex + 2)
+                        .joined(separator: "/")
+
+                    return await NetworkManager.shared.createSignedStorageObjectURL(
+                        bucket: bucket,
+                        path: path,
+                        expiresInSeconds: 60
+                    )
+                }
             )
         }
     }
-
     // MARK: - Step 8G Phase 2 helpers
 
     private func icon(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
