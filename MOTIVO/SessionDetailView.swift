@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260114_092641_P9D2_CommentsGate_a1717bfd
+// SCOPE: Step 9D.2 — Gate Comments entry points based on backend follow approval (fail closed).
+// SEARCH-TOKEN: 20260114_092641_Step9D2_CommentsGate
+
 ////////
 //  SessionDetailView.swift
 //  MOTIVO
@@ -84,6 +88,31 @@ struct SessionDetailView: View {
     @State private var viewerTappedURL: URL? = nil
 
     @State private var isCommentsPresented: Bool = false
+    // 9D.2: Effective viewer ID for gating (DEBUG override → AuthManager).
+    private var effectiveViewerUserID: String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.isEmpty {
+            return override.lowercased()
+        }
+        #endif
+        return auth.currentUserID?.lowercased()
+    }
+
+    private var viewerIsOwner: Bool {
+        guard let viewer = effectiveViewerUserID,
+              let owner = session.ownerUserID?.lowercased() else { return false }
+        return viewer == owner
+    }
+
+    private var canOpenComments: Bool {
+        if viewerIsOwner { return true }
+        if let owner = session.ownerUserID {
+            return FollowStore.shared.isFollowing(owner)
+        }
+        return false
+    }
+
 
     #if DEBUG
     @State private var isDebugPresented: Bool = false
@@ -973,8 +1002,11 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
 
             // Comment
             Button {
-                if sessionIDForComments != nil {
+                // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
+                if sessionIDForComments != nil, canOpenComments {
                     isCommentsPresented = true
+                } else {
+                    // Fail closed: do nothing.
                 }
             } label: {
                 HStack(spacing: 8) {

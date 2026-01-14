@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260114_092641_P9D2_CommentsGate_8507525b
+// SCOPE: Step 9D.2 — Gate Comments entry points based on backend follow approval (fail closed).
+// SEARCH-TOKEN: 20260114_092641_Step9D2_CommentsGate
+
 // CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
 // SCOPE: Step 9A — Pass backendUserID into SessionsRootView and use it for backend preview ownership checks
 // UNIQUE-TOKEN: 20260112_131015_contentview_backend_id
@@ -1189,8 +1193,15 @@ fileprivate struct SessionRow: View {
 
             // Comment (opens comments sheet)
             Button(action: {
+                // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
                 if sessionIDForComments != nil {
-                    isCommentsPresented = true
+                    if viewerIsOwner {
+                        isCommentsPresented = true
+                    } else if let owner = session.ownerUserID, FollowStore.shared.isFollowing(owner) {
+                        isCommentsPresented = true
+                    } else {
+                        // Fail closed: do nothing.
+                    }
                 }
             }) {
                 HStack(spacing: 6) {
