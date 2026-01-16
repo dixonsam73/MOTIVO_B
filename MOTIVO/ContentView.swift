@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260116_1627_Phase10_TopBarPeopleFix_7e4f15
+// SCOPE: Phase 10: ContentView top-left People (magnifying glass) button — tighten spacing without overlap; ensure tap opens sheet.
+
 // CHANGE-ID: 20260114_092641_P9D2_CommentsGate_8507525b
 // SCOPE: Step 9D.2 — Gate Comments entry points based on backend follow approval (fail closed).
 // SEARCH-TOKEN: 20260114_092641_Step9D2_CommentsGate
@@ -140,6 +143,7 @@ fileprivate struct SessionsRootView: View {
     @State private var showProfile = false
     @State private var showTimer = false
     @State private var showAdd = false
+    @State private var showPeople = false
 
     #if DEBUG
     @State private var isDebugPresented: Bool = false
@@ -398,7 +402,7 @@ fileprivate struct SessionsRootView: View {
             // No big nav title
             
             .safeAreaInset(edge: .top) {
-                HStack {
+                HStack(spacing: TopButtonsUI.spacing) {
                     Button { showProfile = true } label: {
                         #if canImport(UIKit)
                         if let uiImage = ProfileStore.avatarImage(for: userID) {
@@ -453,7 +457,37 @@ fileprivate struct SessionsRootView: View {
                         #endif
                     }
                     .accessibilityLabel("Open profile")
-                    Spacer()
+                    // People (search / follows)
+                    Button {
+                        showPeople = true
+                    } label: {
+                    ZStack(alignment: .topTrailing) {
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 20, weight: .regular))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                        .contentShape(Circle())
+
+                        // Subtle "+" indicator for incoming follow requests (outside the pill)
+                        if !FollowStore.shared.requests.isEmpty {
+                            Text("+")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .offset(x: 8, y: -8)
+                        }
+                    }
+                    }
+                        .contentShape(Rectangle())
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("People")
+Spacer()
                     HStack(spacing: TopButtonsUI.spacing) {
                         Button { showTimer = true } label: {
                             ZStack {
@@ -500,7 +534,7 @@ fileprivate struct SessionsRootView: View {
     GeometryReader { geo in
         // Compute a conservative gap: full width minus left avatar block (~56) and right cluster (~40+spacing+40) and horizontal insets
         let horizontalInset = Theme.Spacing.l
-        let leftBlock: CGFloat = 40 + 16   // avatar size + approximate internal padding
+        let leftBlock: CGFloat = (40 + 16) + TopButtonsUI.spacing + 40   // avatar block + spacing + People button
         let rightBlock: CGFloat = 40 + TopButtonsUI.spacing + 40
         let totalReserved = leftBlock + rightBlock + (horizontalInset * 2)
         let gapWidth = max(0, geo.size.width - totalReserved)
@@ -534,6 +568,11 @@ fileprivate struct SessionsRootView: View {
             }
             .sheet(isPresented: $showProfile) {
                 ProfileView(onClose: { showProfile = false })
+            }
+            .sheet(isPresented: $showPeople) {
+                NavigationStack {
+                    PeoplePlaceholderView()
+                }
             }
 #if DEBUG
             .sheet(isPresented: $isDebugPresented) {
@@ -1748,4 +1787,21 @@ fileprivate struct BackendPostRow: View {
         .cardSurface()
     }
 }
+private struct PeoplePlaceholderView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            Text("People")
+                .font(Theme.Text.pageTitle)
+                .foregroundStyle(Color.primary)
 
+            Text("Placeholder — People hub will live here.")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            Spacer()
+        }
+        .padding(Theme.Spacing.l)
+        .appBackground()
+        .navigationTitle("People")
+    }
+}
