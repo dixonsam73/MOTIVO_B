@@ -571,7 +571,7 @@ Spacer()
             }
             .sheet(isPresented: $showPeople) {
                 NavigationStack {
-                    PeoplePlaceholderView()
+                    PeopleView()
                 }
             }
 #if DEBUG
@@ -1791,8 +1791,8 @@ private struct PeoplePlaceholderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             Text("People")
-                .font(Theme.Text.pageTitle)
-                .foregroundStyle(Color.primary)
+                .font(Theme.Text.sectionHeader)
+                .foregroundStyle(Theme.Colors.secondaryText)
 
             Text("Placeholder — People hub will live here.")
                 .font(Theme.Text.meta)
@@ -1802,6 +1802,6 @@ private struct PeoplePlaceholderView: View {
         }
         .padding(Theme.Spacing.l)
         .appBackground()
-        .navigationTitle("People")
+        // No navigationTitle here — keep it quiet.
     }
 }
