@@ -423,9 +423,9 @@ fileprivate struct SessionsRootView: View {
                                     let first = words.first?.first.map { String($0).uppercased() } ?? ""
                                     let last = words.last?.first.map { String($0).uppercased() } ?? ""
                                     let combo = (first + last)
-                                    return combo.isEmpty ? "Y" : combo
+                                    return combo.isEmpty ? "?" : combo
                                 }
-                                return "Y"
+                                return "?"
                             }()
 
                             ZStack {
