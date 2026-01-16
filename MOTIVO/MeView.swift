@@ -82,6 +82,7 @@ struct MeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { reload() }
         .onChange(of: range) { _, _ in reload() }
+        .appBackground()
     }
 
     private var rangePickerHeader: some View {
