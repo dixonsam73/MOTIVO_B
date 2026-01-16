@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260106_223800-profilepeek-visualrefine
-// SCOPE: UI polish — align ProfilePeekView with ContentView/MeView tone (calmer overview + instrument list).
+// CHANGE-ID: 20260116_221900_phase10C_profilepeek_followactions_polish
+// SCOPE: Phase 10C — remove duplicate follow status label; rename "Requested" to "Request sent"; remove invalid accessibility traits.
 
 import SwiftUI
 import CoreData
@@ -9,6 +9,7 @@ struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject var auth: AuthManager
     @State private var revealSelfName = false
+    @State private var showUnfollowConfirm = false
     @Environment(\.colorScheme) private var colorScheme
 
     let ownerID: String
@@ -80,13 +81,7 @@ struct ProfilePeekView: View {
                         HStack(spacing: 8) {
                             Text(displayName(ownerID))
                                 .font(.headline)
-                            let myID = viewerID
-                            let isOwner = (ownerID == myID)
-                            if !isOwner {
-                                let state = (FollowStore.shared.state(for: ownerID))
-                                FollowBadge(state: state)
-                                    .accessibilityLabel("Follow state: \(state.rawValue)")
-                            }
+                            // NOTE: Keep follow state shown only once via the action pill below.
                         }
                         let loc = ProfileStore.location(for: ownerID)
                         if !loc.isEmpty {
@@ -98,6 +93,12 @@ struct ProfilePeekView: View {
                     Spacer()
                 }
                 .accessibilityElement(children: .combine)
+
+                // Follow action (Phase 10C) — single calm control, no counts
+                if viewerID != ownerID {
+                    followActionRow
+                        .padding(.top, 2)
+                }
 
                 if viewerID == ownerID || canSee {
                     // Visible summary
@@ -153,11 +154,43 @@ struct ProfilePeekView: View {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
             }
+            .confirmationDialog("Unfollow?", isPresented: $showUnfollowConfirm, titleVisibility: .visible) {
+                Button("Unfollow", role: .destructive) {
+                    _ = FollowStore.shared.unfollow(ownerID)
+                }
+                Button("Cancel", role: .cancel) { }
+            }
             .padding(16)
             .cardSurface()
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+    }
+
+    private var followActionRow: some View {
+        let state = FollowStore.shared.state(for: ownerID)
+        return HStack {
+            Spacer(minLength: 0)
+            switch state {
+            case .none:
+                Button {
+                    _ = FollowStore.shared.requestFollow(to: ownerID)
+                } label: {
+                    FollowActionPill(title: "Follow", isEnabled: true)
+                }
+                .buttonStyle(.plain)
+            case .requested:
+                FollowActionPill(title: "Request sent", isEnabled: false)
+            case .following:
+                Button {
+                    showUnfollowConfirm = true
+                } label: {
+                    FollowActionPill(title: "Following", isEnabled: true)
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer(minLength: 0)
         }
     }
 
@@ -172,6 +205,27 @@ struct ProfilePeekView: View {
         // For now, fallback to short ownerID tail for clarity.
         let tail = String(id.suffix(6))
         return "User • \(tail)"
+    }
+}
+
+
+private struct FollowActionPill: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let title: String
+    let isEnabled: Bool
+
+    var body: some View {
+        Text(title)
+            .font(Theme.Text.meta.weight(.semibold))
+            .foregroundStyle(Theme.Colors.secondaryText)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(.thinMaterial, in: Capsule())
+            .overlay(
+                Capsule().stroke(Theme.Colors.stroke(colorScheme).opacity(0.35), lineWidth: 0.5)
+            )
+            .opacity(isEnabled ? 1.0 : 0.55)
+            .disabled(!isEnabled)
     }
 }
 
@@ -249,20 +303,4 @@ private struct ProfileAvatar: View {
     }
 }
 
-// ===== v7.12A • Follow state badge (read-only)
-private struct FollowBadge: View {
-    let state: FollowState
-    var body: some View {
-        switch state {
-        case .following:
-            Text("Following").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.green.opacity(0.15)).clipShape(Capsule())
-        case .requested:
-            Text("Requested").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.yellow.opacity(0.15)).clipShape(Capsule())
-        case .none:
-            Text("Follow").font(.caption2).padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.blue.opacity(0.15)).clipShape(Capsule())
-        }
-    }
-}
+

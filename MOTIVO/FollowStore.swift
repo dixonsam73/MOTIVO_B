@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260116_223900_Phase10C_FollowOutgoingRequestsFix
+// SCOPE: Phase 10C hardening — separate outgoing follow requests from incoming requests in local simulation.
+// SEARCH-TOKEN: 20260116_223900_Phase10C_FollowOutgoingRequestsFix
+//
 // CHANGE-ID: 20260112_140516_Step9B_BackendFollowGraph
 // SCOPE: Step 9B — Route FollowStore through backend follow service when in Backend Preview; keep local simulation unchanged.
 // SEARCH-TOKEN: 20260112_140516_Step9B_BackendFollowGraph
@@ -22,7 +26,8 @@ public final class FollowStore: ObservableObject {
     // MARK: - Published Properties
 
     @Published private(set) public var following: Set<String> = []
-    @Published private(set) public var requests: Set<String> = []
+    @Published private(set) public var requests: Set<String> = []              // incoming requests (people who want to follow me)
+    @Published private(set) public var outgoingRequests: Set<String> = []      // outgoing requests (I asked to follow them)
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -45,21 +50,25 @@ public final class FollowStore: ObservableObject {
 
     private var _followingKey: String { "FollowStore.following::\(currentUserID)" }
     private var _requestsKey: String { "FollowStore.requests::\(currentUserID)" }
+    private var _outgoingRequestsKey: String { "FollowStore.outgoingRequests::\(currentUserID)" }
 
     // MARK: - Load / Save
 
     private func load() {
         let followArray = UserDefaults.standard.stringArray(forKey: _followingKey) ?? []
         let requestArray = UserDefaults.standard.stringArray(forKey: _requestsKey) ?? []
+        let outgoingArray = UserDefaults.standard.stringArray(forKey: _outgoingRequestsKey) ?? []
+
         following = Set(followArray)
         requests = Set(requestArray)
+        outgoingRequests = Set(outgoingArray)
     }
 
     private func save() {
         UserDefaults.standard.set(Array(following), forKey: _followingKey)
         UserDefaults.standard.set(Array(requests), forKey: _requestsKey)
+        UserDefaults.standard.set(Array(outgoingRequests), forKey: _outgoingRequestsKey)
     }
-
 
     // MARK: - Backend Preview (Step 9B)
 
@@ -86,6 +95,8 @@ public final class FollowStore: ObservableObject {
             // Backend is source of truth in preview — do not persist to UserDefaults.
             self.following = Set(followingIDs.map { $0.lowercased() })
             self.requests = Set(incomingIDs.map { $0.lowercased() })
+            // Outgoing requests are not yet fetched in preview mode (backend wiring later).
+            self.outgoingRequests = []
             objectWillChange.send()
             NSLog("[FollowStore] backend refresh ok (following=%d requests=%d)", self.following.count, self.requests.count)
 
@@ -114,7 +125,8 @@ public final class FollowStore: ObservableObject {
             return .requested
         }
 
-        requests.insert(targetUserID)
+        // Local simulation: requesting to follow someone is an OUTGOING request.
+        outgoingRequests.insert(targetUserID)
         save()
         objectWillChange.send()
         NSLog("[FollowStore] request → %@", targetUserID)
@@ -136,6 +148,7 @@ public final class FollowStore: ObservableObject {
             return .following
         }
 
+        // Local simulation: approving someone means accepting an INCOMING request.
         requests.remove(requesterUserID)
         following.insert(requesterUserID)
         save()
@@ -182,6 +195,8 @@ public final class FollowStore: ObservableObject {
         }
 
         following.remove(targetUserID)
+        // If we unfollow in local sim, also clear any outgoing request record to keep UI coherent.
+        outgoingRequests.remove(targetUserID)
         save()
         objectWillChange.send()
         NSLog("[FollowStore] unfollow × %@", targetUserID)
@@ -190,9 +205,11 @@ public final class FollowStore: ObservableObject {
 
     // MARK: - State Query
 
+    /// Relationship state from the active viewer → target.
+    /// IMPORTANT: incoming requests do NOT mean I have requested them.
     public func state(for targetUserID: String) -> FollowState {
         if following.contains(targetUserID) { return .following }
-        if requests.contains(targetUserID) { return .requested }
+        if outgoingRequests.contains(targetUserID) { return .requested }
         return .none
     }
 
@@ -206,8 +223,10 @@ public final class FollowStore: ObservableObject {
     public func _debug_resetLocalFollows() {
         UserDefaults.standard.removeObject(forKey: _followingKey)
         UserDefaults.standard.removeObject(forKey: _requestsKey)
+        UserDefaults.standard.removeObject(forKey: _outgoingRequestsKey)
         following.removeAll()
         requests.removeAll()
+        outgoingRequests.removeAll()
         objectWillChange.send()
         NSLog("[FollowStore] DEBUG reset local follows")
     }
@@ -226,6 +245,7 @@ public enum FollowState: String, Codable {
 
 extension FollowStore {
 
+    /// Simulate an INCOMING request (someone wants to follow me).
     @discardableResult
     public func simulateRequestFollow(to targetUserID: String) -> FollowState {
         var reqs = Set(UserDefaults.standard.stringArray(forKey: _requestsKey) ?? [])
