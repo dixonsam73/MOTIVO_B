@@ -3,6 +3,8 @@
  //  MOTIVO
  //
  //  [ROLLBACK ANCHOR] v7.8 Scope1 — pre-primary-activity (no primary activity selector; icons on manage rows; account at top)
+// CHANGE-ID: 20260117_172700_Phase11B_PrivacyRows_MatchInstrumentGrammar
+// SCOPE: Phase 11B visual-only — match Privacy & connection row grammar to Instruments/Activities (value+chevron adjacent; remove iOS blue)
  //
  //  v7.8 Stage 2 — Primary fallback notice + live sync (kept)
  //  v7.8 DesignLite — visual polish only (headers/background/spacing).
@@ -15,48 +17,38 @@
  import PhotosUI
  #endif
  
- // MARK: - Privacy Settings (local-first)
- 
- fileprivate enum ProfileVisibility: Int, CaseIterable, Identifiable {
-     case publicProfile = 0
-     case followersOnly = 1
-     case privateProfile = 2
-     var id: Int { rawValue }
-     var label: String {
-         switch self {
-         case .publicProfile:  return "Public"
-         case .followersOnly:  return "Followers only"
-         case .privateProfile: return "Private"
-         }
-     }
- }
- 
- fileprivate enum FollowRequestMode: Int, CaseIterable, Identifiable {
-     case autoApproveContacts = 0
-     case manual = 1
-     var id: Int { rawValue }
-     var label: String {
-         switch self {
-         case .autoApproveContacts: return "Auto-approve"
-         case .manual:              return "Manual"
-         }
-     }
- }
- 
- fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
-     case none = 0
-     case search = 1
-     case contacts = 2
-     var id: Int { rawValue }
-     var label: String {
-         switch self {
-         case .none:     return "Off"
-         case .search:   return "Search"
-         case .contacts: return "Contacts"
-         }
-     }
- }
- 
+// MARK: - Privacy Settings (local-first)
+
+// NOTE: profileVisibility_v1 is retained for legacy compatibility, but is not surfaced in UI.
+
+fileprivate enum FollowRequestMode: Int, CaseIterable, Identifiable {
+    case autoApproveContacts = 0
+    case manual = 1
+    case closed = 2
+    var id: Int { rawValue }
+    var label: String {
+        switch self {
+        case .autoApproveContacts: return "Approve follow requests" // legacy mapping
+        case .manual:              return "Approve follow requests"
+        case .closed:              return "Not accepting requests"
+        }
+    }
+}
+
+fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
+    case none = 0
+    case search = 1
+    case contacts = 2 // stored for forward compatibility; hidden from UI until implemented
+    var id: Int { rawValue }
+    var label: String {
+        switch self {
+        case .none:     return "Lookup off"
+        case .search:   return "Allow handle lookup"
+        case .contacts: return "Email invites"
+        }
+    }
+}
+
  // MARK: - Setting Row (label + value, single-line, calm)
  fileprivate struct SettingRow: View {
      let title: String
@@ -123,24 +115,25 @@
      @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
      @State private var showPrimaryFallbackAlert: Bool = false
  
-     // Privacy & Discovery (local-first; future-sync to backend)
-     @AppStorage("profileVisibility_v1") private var profileVisibilityRaw: Int = ProfileVisibility.followersOnly.rawValue
-     @AppStorage("followRequestMode_v1") private var followRequestModeRaw: Int = FollowRequestMode.manual.rawValue
-     @AppStorage("allowDiscovery_v1") private var allowDiscoveryRaw: Int = DiscoveryMode.none.rawValue
- 
-     private var profileVisibility: ProfileVisibility {
-         get { ProfileVisibility(rawValue: profileVisibilityRaw) ?? .followersOnly }
-         set { profileVisibilityRaw = newValue.rawValue }
-     }
-     private var followRequestMode: FollowRequestMode {
-         get { FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual }
-         set { followRequestModeRaw = newValue.rawValue }
-     }
-     private var discoveryMode: DiscoveryMode {
-         get { DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none }
-         set { allowDiscoveryRaw = newValue.rawValue }
-     }
- 
+     
+    // Privacy & Discovery (local-first; future-sync to backend)
+    // NOTE: profileVisibility_v1 is retained for legacy compatibility, but is not surfaced in UI.
+    @AppStorage("profileVisibility_v1") private var profileVisibilityRaw: Int = 1
+    @AppStorage("followRequestMode_v1") private var followRequestModeRaw: Int = FollowRequestMode.manual.rawValue
+    @AppStorage("allowDiscovery_v1") private var allowDiscoveryRaw: Int = DiscoveryMode.none.rawValue
+
+    private var followRequestMode: FollowRequestMode {
+        get {
+            let mode = FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual
+            // Map legacy auto-approve to manual (Motivo never auto-approves follows).
+            return mode == .autoApproveContacts ? .manual : mode
+        }
+        set { followRequestModeRaw = newValue.rawValue }
+    }
+    private var discoveryMode: DiscoveryMode {
+        get { DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none }
+        set { allowDiscoveryRaw = newValue.rawValue }
+    }
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
  
@@ -306,84 +299,130 @@
  
      @ViewBuilder
      private var privacySection: some View {
-         Section(header: Text("Privacy").sectionHeader()) {
-             Toggle("Default to Private Posts", isOn: $defaultPrivacy)
- 
+         Section(header: Text("Privacy & connection").sectionHeader()) {
+
+             // 1) Posting defaults card (unchanged behaviour)
              VStack(alignment: .leading, spacing: Theme.Spacing.s) {
- 
-                 // Profile Visibility
-                 Menu {
-                     ForEach(ProfileVisibility.allCases) { option in
-                         Button {
-                             profileVisibilityRaw = option.rawValue
-                         } label: {
-                             let isCurrent = (ProfileVisibility(rawValue: profileVisibilityRaw) ?? .followersOnly) == option
-                             Label(option.label, systemImage: isCurrent ? "checkmark" : "")
-                         }
-                     }
-                 } label: {
-                     SettingRow(
-                         title: "Profile Visibility",
-                         value: (ProfileVisibility(rawValue: profileVisibilityRaw) ?? .followersOnly).label
-                     )
-                     .tint(.primary)
-                 }
-                 .accessibilityLabel("Profile Visibility")
-                 .accessibilityValue((ProfileVisibility(rawValue: profileVisibilityRaw) ?? .followersOnly).label)
- 
-                 // Follow Requests
-                 Menu {
-                     ForEach(FollowRequestMode.allCases) { option in
-                         Button {
-                             followRequestModeRaw = option.rawValue
-                         } label: {
-                             let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == option
-                             Label(option.label, systemImage: isCurrent ? "checkmark" : "")
-                         }
-                     }
-                 } label: {
-                     SettingRow(
-                         title: "Follow Requests",
-                         value: (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual).label
-                     )
-                     .tint(.primary)
-                 }
-                 .accessibilityLabel("Follow Requests")
-                 .accessibilityValue((FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual).label)
- 
-                 // Find Friends (formerly "Discovery")
-                 Menu {
-                     ForEach(DiscoveryMode.allCases) { option in
-                         Button {
-                             allowDiscoveryRaw = option.rawValue
-                         } label: {
-                             let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == option
-                             Label(option.label, systemImage: isCurrent ? "checkmark" : "")
-                         }
-                     }
-                 } label: {
-                     SettingRow(
-                         title: "Find Friends",
-                         value: (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none).label
-                     )
-                     .tint(.primary)
-                 }
-                 .accessibilityLabel("Find Friends")
-                 .accessibilityValue((DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none).label)
- 
+                 // Title + control (same family grammar as other cards: title then control/value)
+                 Text("Posting defaults")
+                     .font(.subheadline.weight(.medium))
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+
+                 Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                     .tint(Theme.Colors.accent)
+
+                 Text("New sessions default to private. You can choose to share a session when you publish.")
+                     .font(.caption)
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
              }
              .padding(.vertical, Theme.Spacing.s)
-             .padding(.top, Theme.Spacing.s)
-             .padding(.bottom, Theme.Spacing.m)
              .cardSurface(padding: Theme.Spacing.m)
              .listRowSeparator(.hidden)
- 
-             Text("Motivo is private by default. Control profile visibility, follow approvals, and how others can find you.")
+
+             // 2) Follow Requests card (separate, Instruments/Activities-style grammar)
+             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                 Text("Follow Requests")
+                     .font(.subheadline.weight(.medium))
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+
+                 Menu {
+                     // NOTE: this file’s enum is FollowRequestMode { autoApproveContacts=0, manual=1 }.
+                     // We present spec-truthful labels without changing state shape or adding new keys.
+                     Button {
+                         followRequestModeRaw = FollowRequestMode.manual.rawValue
+                     } label: {
+                         let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
+                         Label("Approve follow requests", systemImage: isCurrent ? "checkmark" : "")
+                     }
+
+                     Button {
+                         followRequestModeRaw = FollowRequestMode.autoApproveContacts.rawValue
+                     } label: {
+                         let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
+                         Label("Not accepting requests", systemImage: isCurrent ? "checkmark" : "")
+                     }
+                 } label: {
+                     HStack(spacing: 2) {
+                         Text(
+                             (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
+                             ? "Not accepting requests"
+                             : "Approve follow requests"
+                         )
+                         .font(Theme.Text.body)
+                         .foregroundStyle(.primary)
+
+                         Image(systemName: "chevron.up.chevron.down")
+                             .font(.caption2)
+                             .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .frame(maxWidth: .infinity, alignment: .leading)
+                 }
+                 .tint(.primary)
+
+                 Text("Motivo never auto-approves follows.")
+                     .font(.caption)
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+             }
+             .padding(.vertical, Theme.Spacing.s)
+             .cardSurface(padding: Theme.Spacing.m)
+             .listRowSeparator(.hidden)
+
+             // 3) Lookup card (separate, hide Contacts option from UI)
+             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                 Text("Lookup")
+                     .font(.subheadline.weight(.medium))
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+
+                 Menu {
+                     Button {
+                         allowDiscoveryRaw = DiscoveryMode.search.rawValue
+                     } label: {
+                         let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
+                         Label("Allow handle lookup", systemImage: isCurrent ? "checkmark" : "")
+                     }
+
+                     Button {
+                         allowDiscoveryRaw = DiscoveryMode.none.rawValue
+                     } label: {
+                         let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .none
+                         Label("Lookup off", systemImage: isCurrent ? "checkmark" : "")
+                     }
+
+                     // NOTE: DiscoveryMode.contacts exists in this file but is intentionally hidden from UI here.
+                 } label: {
+                     HStack(spacing: 2) {
+                         Text(
+                             (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
+                             ? "Allow handle lookup"
+                             : "Lookup off"
+                         )
+                         .font(Theme.Text.body)
+                         .foregroundStyle(.primary)
+
+                         Image(systemName: "chevron.up.chevron.down")
+                             .font(.caption2)
+                             .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .frame(maxWidth: .infinity, alignment: .leading)
+                 }
+                 .tint(.primary)
+
+                 Text("There is no browsing or suggestions. People must search for you directly.")
+                     .font(.caption)
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+             }
+             .padding(.vertical, Theme.Spacing.s)
+             .cardSurface(padding: Theme.Spacing.m)
+             .listRowSeparator(.hidden)
+
+             // 4) Philosophy line OUTSIDE the cards (quiet footer)
+             Text("Profiles are private by default. Connection is intentional.")
                  .font(.caption)
                  .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                 .padding(.top, Theme.Spacing.s)
+                 .padding(.top, Theme.Spacing.xs)
          }
      }
+
  
      @ViewBuilder
      private var instrumentsSection: some View {

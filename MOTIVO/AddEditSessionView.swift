@@ -400,8 +400,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                 // ---------- Visibility ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Visibility").sectionHeader()
-                    Toggle("Public", isOn: $isPublic)
+                    Text("Share with followers").sectionHeader()
+                    Toggle("On", isOn: $isPublic)
                         .font(Theme.Text.body)
                 }
                 .cardSurface()
