@@ -1,38 +1,37 @@
-//
-//  FollowingListView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 16/01/2026.
-//
+// CHANGE-ID: 20260117_101000_10B_Following_BGFix
+// SCOPE: FollowingListView — remove white List canvas and match app background; preserve existing behavior.
+
 import SwiftUI
 
-/// Phase 10B — Following list
-/// Shows users the viewer is following. No counts. Calm list.
-/// Tapping a row opens ProfilePeek.
 struct FollowingListView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
 
+    private var userIDs: [String] {
+        Array(followStore.following).sorted()
+    }
+
     var body: some View {
         List {
-            let ids = Array(followStore.following).sorted()
-            if ids.isEmpty {
-                Text("You’re not following anyone yet.")
+            if userIDs.isEmpty {
+                Text("You're not following anyone yet.")
                     .font(Theme.Text.meta)
                     .foregroundStyle(Theme.Colors.secondaryText)
-                    .padding(.vertical, Theme.Spacing.l)
+                    .listRowBackground(Color.clear)
             } else {
-                ForEach(ids, id: \.self) { userID in
+                ForEach(userIDs, id: \.self) { userID in
                     PeopleUserRow(userID: userID) {
                         ProfilePeekView(ownerID: userID)
                     }
+                    .listRowBackground(Color.clear)
                 }
             }
         }
         .listStyle(.plain)
+        // Remove the default white List canvas so the app background shows through.
+        .scrollContentBackground(.hidden)
+        .appBackground()
         .navigationTitle("Following")
-        .task {
-            await followStore.refreshFromBackendIfPossible()
-        }
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

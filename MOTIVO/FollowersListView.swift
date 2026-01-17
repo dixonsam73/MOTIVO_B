@@ -1,30 +1,21 @@
-//
-//  FollowersListView.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 16/01/2026.
-//
+// CHANGE-ID: 20260117_090800_10B_FollowersList_PlaceholderAlign
+// SCOPE: FollowersListView — remove duplicate in-body title; match Following list style; placeholder only.
+
 import SwiftUI
 
-/// Phase 10B — Followers list (placeholder)
-/// Wiring deferred until backend/store exposes approved followers list.
-/// No counts.
 struct FollowersListView: View {
-
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            Text("Followers")
-                .font(Theme.Text.pageTitle)
-                .foregroundStyle(Color.primary)
-
+        List {
             Text("Coming soon.")
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText)
-
-            Spacer()
+                .padding(.vertical, 6)
+                .listRowBackground(Color.clear)
         }
-        .padding(Theme.Spacing.l)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .appBackground()
         .navigationTitle("Followers")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

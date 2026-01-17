@@ -4,6 +4,10 @@
 //
 //  Created by Samuel Dixon on 16/01/2026.
 //
+// CHANGE-ID: 20260117_122600_Phase10D_PeopleView_RequestFilter_LookupStyle
+// SCOPE: Phase 10D.1 + 10D.3 — Defensive incoming-requests filtering and remove remaining system-default controls in PeopleView.
+// SEARCH-TOKEN: 20260117_122600_Phase10D_PeopleView_RequestFilter_LookupStyle
+
 import SwiftUI
 
 /// Phase 10B — People Hub
@@ -26,8 +30,8 @@ struct PeopleView: View {
                     .font(Theme.Text.sectionHeader)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 
-                // Incoming requests
-                if !followStore.requests.isEmpty {
+                // Incoming requests (defensive: never surface outgoing requests here)
+                if !incomingRequestIDs.isEmpty {
                     requestsSection
                 }
 
@@ -51,11 +55,20 @@ struct PeopleView: View {
 
     // MARK: - Sections
 
+    /// Phase 10D.1: Incoming requests only (defensive filter).
+    /// Requests UI must never surface outgoing requests.
+    private var incomingRequestIDs: [String] {
+        Array(followStore.requests.subtracting(followStore.outgoingRequests))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
     private var requestsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Requests").sectionHeader()
 
-            ForEach(Array(followStore.requests).sorted(), id: \.self) { userID in
+            ForEach(incomingRequestIDs, id: \.self) { userID in
                 PeopleUserRow(userID: userID) {
                     ProfilePeekView(ownerID: userID)
                 } trailing: {
@@ -97,7 +110,7 @@ struct PeopleView: View {
                         .buttonStyle(.plain)
                         .accessibilityLabel("Decline follow request")
                     }
-                    .frame(width: 96, alignment: .trailing) 
+                    .frame(width: 96, alignment: .trailing)
                 }
             }
         }
@@ -112,13 +125,38 @@ struct PeopleView: View {
                 TextField("Paste user ID (temporary)", text: $lookupText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
-                    .textFieldStyle(.roundedBorder)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Color.primary)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.thinMaterial)
+                            .opacity(colorScheme == .dark ? 0.12 : 0.85)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.secondary.opacity(colorScheme == .dark ? 0.20 : 0.12), lineWidth: 0.7)
+                    )
 
-                Button("Lookup") {
+                Button {
                     performLookup()
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(.thinMaterial)
+                            .opacity(colorScheme == .dark ? 0.12 : 0.85)
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .frame(width: 40, height: 40)
+                    .contentShape(Circle())
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.plain)
                 .disabled(lookupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityLabel("Lookup user")
             }
 
             if let uid = lookupResultUserID {
@@ -184,4 +222,10 @@ struct PeopleView: View {
         .contentShape(Rectangle())
         .padding(.vertical, Theme.Spacing.s)
     }
+
+    // MARK: - Derived
+
+    /// Defensive: requests must be incoming-only.
+    /// If local simulation or future wiring ever accidentally mixes sets, we still never show outgoing here.
+
 }
