@@ -311,7 +311,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  Toggle("Default to Private Posts", isOn: $defaultPrivacy)
                      .tint(Theme.Colors.accent)
 
-                 Text("New sessions default to private. You can choose to share a session when you publish.")
+                 Text("Makes new sessions default to private when on. You can still choose to publish a session when you save.")
                      .font(.caption)
                      .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
              }
@@ -332,21 +332,21 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                          followRequestModeRaw = FollowRequestMode.manual.rawValue
                      } label: {
                          let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
-                         Label("Approve follow requests", systemImage: isCurrent ? "checkmark" : "")
+                         Label("Allow follow requests", systemImage: isCurrent ? "checkmark" : "")
                      }
 
                      Button {
                          followRequestModeRaw = FollowRequestMode.autoApproveContacts.rawValue
                      } label: {
                          let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
-                         Label("Not accepting requests", systemImage: isCurrent ? "checkmark" : "")
+                         Label("Follow requests off", systemImage: isCurrent ? "checkmark" : "")
                      }
                  } label: {
                      HStack(spacing: 2) {
                          Text(
                              (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
-                             ? "Not accepting requests"
-                             : "Approve follow requests"
+                             ? "Follow requests off"
+                             : "Allow follow requests"
                          )
                          .font(Theme.Text.body)
                          .foregroundStyle(.primary)
@@ -369,7 +369,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 
              // 3) Lookup card (separate, hide Contacts option from UI)
              VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                 Text("Lookup")
+                 Text("Account visibility")
                      .font(.subheadline.weight(.medium))
                      .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
 
@@ -378,14 +378,14 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                          allowDiscoveryRaw = DiscoveryMode.search.rawValue
                      } label: {
                          let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
-                         Label("Allow handle lookup", systemImage: isCurrent ? "checkmark" : "")
+                         Label("Searchable by name", systemImage: isCurrent ? "checkmark" : "")
                      }
 
                      Button {
                          allowDiscoveryRaw = DiscoveryMode.none.rawValue
                      } label: {
                          let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .none
-                         Label("Lookup off", systemImage: isCurrent ? "checkmark" : "")
+                         Label("Hidden from search", systemImage: isCurrent ? "checkmark" : "")
                      }
 
                      // NOTE: DiscoveryMode.contacts exists in this file but is intentionally hidden from UI here.
@@ -393,8 +393,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      HStack(spacing: 2) {
                          Text(
                              (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
-                             ? "Allow handle lookup"
-                             : "Lookup off"
+                             ? "Searchable by name"
+                             : "Hidden from search"
                          )
                          .font(Theme.Text.body)
                          .foregroundStyle(.primary)
@@ -407,7 +407,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  }
                  .tint(.primary)
 
-                 Text("There is no browsing or suggestions. People must search for you directly.")
+                 Text("There’s no browsing of accounts or follow suggestions — you’re only found through search.")
                      .font(.caption)
                      .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
              }
@@ -416,7 +416,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
              .listRowSeparator(.hidden)
 
              // 4) Philosophy line OUTSIDE the cards (quiet footer)
-             Text("Profiles are private by default. Connection is intentional.")
+             Text("Your profile is private by default, and follows are always intentional.")
                  .font(.caption)
                  .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                  .padding(.top, Theme.Spacing.xs)
