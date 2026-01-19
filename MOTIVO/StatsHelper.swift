@@ -34,9 +34,17 @@ enum StatsHelper {
     static func dateBounds(for range: StatsRange, now: Date = Date(), cal: Calendar = .current) -> (start: Date?, end: Date?) {
         switch range {
         case .week:
-            let start = cal.date(byAdding: .day, value: -6, to: cal.startOfDay(for: now))
-            let end = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: now))
-            return (start, end)
+            var cal = cal
+            cal.firstWeekday = 2              // Monday
+            cal.minimumDaysInFirstWeek = 4    // ISO-8601 standard
+
+            let startOfToday = cal.startOfDay(for: now)
+
+            guard let weekInterval = cal.dateInterval(of: .weekOfYear, for: startOfToday) else {
+                return (startOfToday, startOfToday)
+            }
+
+            return (weekInterval.start, weekInterval.end)
         case .month:
             let comps = cal.dateComponents([.year, .month], from: now)
             let start = cal.date(from: comps)!
