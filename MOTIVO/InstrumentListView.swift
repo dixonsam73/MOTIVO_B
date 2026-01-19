@@ -5,6 +5,9 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+// CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Instruments
+// SCOPE: Correctness/hygiene — Instruments Manager renders empty when signed out; no other UI/logic changes
+
 import SwiftUI
 import CoreData
 
@@ -24,6 +27,10 @@ struct InstrumentListView: View {
 
     @State private var newInstrument: String = ""
 
+    private var isSignedIn: Bool {
+        PersistenceController.shared.currentUserID != nil
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -31,9 +38,10 @@ struct InstrumentListView: View {
                     HStack {
                         TextField("e.g. Bass, Piano", text: $newInstrument)
                             .font(Theme.Text.body)
+                            .disabled(!isSignedIn)
                             .textInputAutocapitalization(.words)
                         Button(action: { add() }) { Text("Add").font(Theme.Text.body) }
-                            .disabled(newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            .disabled(!isSignedIn || newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
 
@@ -64,11 +72,13 @@ struct InstrumentListView: View {
     }
 
     private func instrumentsForProfile() -> [Instrument] {
+        guard isSignedIn else { return [] }
         guard let p = profiles.first else { return [] }
         return instruments.filter { $0.profile == p }
     }
 
     private func add() {
+        guard isSignedIn else { return }
         let name = newInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         guard let profile = fetchOrCreateProfile() else { return }
@@ -102,6 +112,7 @@ struct InstrumentListView: View {
     }
 
     private func delete(at offsets: IndexSet) {
+        guard isSignedIn else { return }
         let list = instrumentsForProfile()
         for index in offsets {
             let inst = list[index]
@@ -125,6 +136,7 @@ struct InstrumentListView: View {
     }
 
     private func fetchOrCreateProfile() -> Profile? {
+        guard isSignedIn else { return nil }
         if let p = profiles.first { return p }
         let p = Profile(context: moc)
         p.id = UUID()

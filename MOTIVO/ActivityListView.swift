@@ -10,6 +10,10 @@
 //  - No schema/migrations. User-local customs only.
 //
 
+
+// CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Activities
+// SCOPE: Correctness/hygiene — Activities Manager renders empty when signed out; list is owner-scoped when signed in
+
 import SwiftUI
 import CoreData
 
@@ -33,8 +37,18 @@ struct ActivityListView: View {
     // One-time notice flag to be consumed by ProfileView
     @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
 
+    private var isSignedIn: Bool {
+        PersistenceController.shared.currentUserID != nil
+    }
+
+    private func scopedActivities() -> [UserActivity] {
+        guard let owner = PersistenceController.shared.currentUserID else { return [] }
+        return Array(activities).filter { ($0.ownerUserID ?? "") == owner }
+    }
+
+
+
     var body: some View {
-        let isSignedIn = (PersistenceController.shared.currentUserID != nil)
         NavigationStack {
             Form {
                 Section(header: Text("Add Activity").sectionHeader()) {
@@ -50,11 +64,11 @@ struct ActivityListView: View {
                         Button(action: { if isSignedIn { add() } }) {
                             Text("Add").font(Theme.Text.body)
                         }
-                        .disabled(newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!isSignedIn || newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 Section(header: Text("Your Activities").sectionHeader()) {
-                    let items = Array(activities)
+                    let items = scopedActivities()
                     if items.isEmpty {
                         Text("No custom activities yet.")
                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -89,6 +103,7 @@ struct ActivityListView: View {
     }
 
     private func add() {
+        guard PersistenceController.shared.currentUserID != nil else { return }
         let name = newActivity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         do {
@@ -101,7 +116,9 @@ struct ActivityListView: View {
     }
 
     private func delete(at offsets: IndexSet) {
-        let items = Array(activities)
+        guard isSignedIn else { return }
+        guard isSignedIn else { return }
+        let items = scopedActivities()
         for i in offsets {
             let activityObj = items[i]
             let name = (activityObj.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)

@@ -5,6 +5,8 @@
  //  [ROLLBACK ANCHOR] v7.8 Scope1 — pre-primary-activity (no primary activity selector; icons on manage rows; account at top)
 // CHANGE-ID: 20260117_172700_Phase11B_PrivacyRows_MatchInstrumentGrammar
 // SCOPE: Phase 11B visual-only — match Privacy & connection row grammar to Instruments/Activities (value+chevron adjacent; remove iOS blue)
+// CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Profile
+// SCOPE: Correctness/hygiene — clear Profile UI state on sign-out; repopulate on sign-in; no UI/logic changes beyond identity gating
  //
  //  v7.8 Stage 2 — Primary fallback notice + live sync (kept)
  //  v7.8 DesignLite — visual polish only (headers/background/spacing).
@@ -719,6 +721,12 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      // MARK: - Lifecycle / Data
  
      private func onAppearLoad() {
+         // Identity scoping hygiene: when signed out, Profile must render empty (no user data).
+         guard auth.currentUserID != nil else {
+             clearUserPresentedStateForSignOut()
+             return
+         }
+
          load()
          refreshUserActivities()
          primaryActivityChoice = normalizedPrimaryActivityRef()
@@ -728,6 +736,24 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          }
          self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
          self.locationText = ProfileStore.location(for: auth.currentUserID)
+     }
+
+     private func clearUserPresentedStateForSignOut() {
+         // Clear all user-presented state without mutating persisted device-level Profile.
+         profile = nil
+         name = ""
+         primaryInstrumentName = ""
+         defaultPrivacy = false
+         avatarImage = nil
+         locationText = ""
+
+         userActivities = []
+         // Keep AppStorage primaryActivityRef unchanged; normalize displayed choice only.
+         primaryActivityChoice = normalizedPrimaryActivityRef()
+
+         // Clear any in-flight UI surfaces.
+         showPhotoPicker = false
+         showAvatarEditor = false
      }
  
      private func handleActivityManagerChange(_ wasPresented: Bool, _ isPresented: Bool) {
@@ -797,6 +823,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      }
 
      private func persistProfileEdits() {
+         // Do not persist user-presented state when signed out.
+         guard auth.currentUserID != nil else { return }
          save()
          ProfileStore.setLocation(locationText, for: auth.currentUserID)
      }
@@ -883,6 +911,22 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          view = AnyView(view
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
+            .onChange(of: auth.currentUserID) { oldValue, newValue in
+                // Identity scoping: clear on sign-out; repopulate on sign-in.
+                // Hygiene: persist any in-memory edits for the *previous* signed-in identity
+                // before we clear UI state (location is stored per-user in ProfileStore).
+                if newValue == nil {
+                    if let oldID = oldValue {
+                        ProfileStore.setLocation(locationText, for: oldID)
+                    }
+                    // Device-level Profile: keep existing behaviour by saving pending edits
+                    // before clearing the view's presented state.
+                    save()
+                    clearUserPresentedStateForSignOut()
+                } else {
+                    onAppearLoad()
+                }
+            }
              .onChange(of: showActivityManager) { oldValue, newValue in
                  handleActivityManagerChange(oldValue, newValue)
              }
