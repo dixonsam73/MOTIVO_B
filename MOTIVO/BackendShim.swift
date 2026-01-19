@@ -66,6 +66,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     public let activityType: String?
     public let activityDetail: String?
     public let instrumentLabel: String?
+    public let effort: Int?
 
     // Step 12 (beta parity): notes
     public let notes: String?
@@ -87,6 +88,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
         case instrumentLabel = "instrument_label"
         case notes = "notes"
         case attachments = "attachments"
+        case effort = "effort"
     }
 }
 

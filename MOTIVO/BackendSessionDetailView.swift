@@ -36,6 +36,8 @@ public struct BackendSessionDetailView: View {
                     VStack(alignment: .leading, spacing: spacingS) {
                         // Activity / instrument
                         labeledLine(label: "Activity", value: model.activityLabel)
+                        labeledLine(label: "Detail", value: model.activityDetail ?? "—")
+                        labeledLine(label: "Focus", value: model.effortDotIndex.map(String.init) ?? "—")
                         labeledLine(label: "Instrument", value: model.instrumentLabel ?? "—")
 
                         // Ownership
@@ -318,7 +320,9 @@ public struct BackendSessionDetailView: View {
       "updated_at": "2026-01-01 00:01",
       "is_public": true,
       "activity_label": "Practice",
-      "instrument_label": "Bass"
+      "instrument_label": "Bass",
+      "activity_detail": "Afternoon Practice",
+      "effort": 8
     }
     """.data(using: .utf8)!
 

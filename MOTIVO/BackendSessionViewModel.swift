@@ -40,7 +40,9 @@ public struct BackendSessionViewModel: Identifiable {
     // Metadata parity (Step 8F)
     public let activityLabel: String
     public let instrumentLabel: String?
-
+    // Extra metadata (backend viewer only)
+    public let activityDetail: String?
+    public let effortDotIndex: Int?
     // Optional content
     public let notes: String?
 
@@ -66,6 +68,10 @@ public struct BackendSessionViewModel: Identifiable {
 
         let instrument = (post.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         self.instrumentLabel = instrument.isEmpty ? nil : instrument
+        let rawActivityDetail = (post.activityDetail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.activityDetail = rawActivityDetail.isEmpty ? nil : rawActivityDetail
+
+        self.effortDotIndex = post.effort
 
         let rawNotes = (post.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         self.notes = rawNotes.isEmpty ? nil : rawNotes
