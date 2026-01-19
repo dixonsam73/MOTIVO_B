@@ -557,7 +557,12 @@ struct SessionDetailView: View {
             .cardSurface()
 
             let originalNotes = session.notes ?? ""
-            let (focusDotIndex, displayNotes) = extractFocusDotIndex(from: originalNotes)
+            let (focusDotIndexFromNotes, displayNotes) = extractFocusDotIndex(from: originalNotes)
+
+            // Prefer legacy token if present; otherwise fall back to persisted effort.
+            // Treat default effort (5) as "unset" to preserve prior semantics.
+            let effortDot = Int(session.effort)
+            let focusDotIndex: Int? = focusDotIndexFromNotes ?? ((effortDot == 5) ? nil : effortDot)
             let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
             if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if areNotesPrivate && !isOwner {

@@ -231,14 +231,9 @@ struct AddEditSessionView: View {
 
     /// Apply/replace the FocusDotIndex line before saving
     private func applyFocusToNotesBeforeSave_edit() {
-        guard let dot = selectedDotIndex_edit else {
-            stripFocusTokensFromNotes_edit()
-            return
-        }
-
+        // Notes must remain user-entered text only.
+        // Focus is stored structurally (Session.effort / publish payload effort).
         stripFocusTokensFromNotes_edit()
-        if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
-        notes.append("FocusDotIndex: \(dot)")
     }
 
     init(session: Session? = nil) {
@@ -1225,6 +1220,15 @@ private var instrumentPicker: some View {
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
+        // Persist focus structurally (do NOT encode into notes)
+        if s.entity.attributesByName.keys.contains("effort") {
+            if let idx = selectedDotIndex_edit {
+                s.setValue(Int16(idx), forKey: "effort")
+            } else {
+                // Treat nil as "unset" (default effort = 5)
+                s.setValue(Int16(5), forKey: "effort")
+            }
+        }
 
         if selectedDotIndex_edit != nil {
             applyFocusToNotesBeforeSave_edit()

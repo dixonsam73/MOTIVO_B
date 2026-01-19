@@ -1382,14 +1382,9 @@ isPrivate: { url in
     }
 
     private func applyFocusToNotesBeforeSave() {
-        guard let dot = selectedDotIndex else {
-            stripFocusTokensFromNotes()
-            return
-        }
-
+        // Notes must remain user-entered text only.
+        // Focus is already stored structurally (Session.effort / publish payload effort).
         stripFocusTokensFromNotes()
-        if !notes.isEmpty && !notes.hasSuffix("\n") { notes.append("\n") }
-        notes.append("FocusDotIndex: \(dot)")
     }
 
     @MainActor
@@ -1407,7 +1402,11 @@ isPrivate: { url in
         s.durationSeconds = Int64(durationSeconds)
         s.isPublic = isPublic
         s.mood = Int16(mood)
-        s.effort = Int16(effort)
+        if let idx = selectedDotIndex {
+            s.effort = Int16(idx)
+        } else {
+            s.effort = Int16(effort)
+        }
 
         applyFocusToNotesBeforeSave()
         if s.entity.attributesByName.keys.contains("areNotesPrivate") {
