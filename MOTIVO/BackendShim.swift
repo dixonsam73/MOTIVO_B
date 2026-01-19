@@ -19,6 +19,10 @@
 // SCOPE: Step 9A — Use AuthManager.canonicalBackendUserID() for all backend owner identity reads (publish + feed)
 // UNIQUE-TOKEN: 20260112_131015_backendshim_id_canon
 
+// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
+// SCOPE: Add posts.notes decode + include notes in publish POST body (gated by areNotesPrivate)
+// SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
+
 import Foundation
 import CoreData
 import SwiftUI
@@ -57,6 +61,9 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     public let activityLabel: String?
     public let instrumentLabel: String?
 
+    // Step 12 (beta parity): notes
+    public let notes: String?
+
     // Step 8G: attachments (jsonb)
     public let attachments: [[String: String]]?
 
@@ -70,6 +77,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
         case isPublic = "is_public"
         case activityLabel = "activity_label"
         case instrumentLabel = "instrument_label"
+        case notes = "notes"
         case attachments = "attachments"
     }
 }
@@ -497,6 +505,15 @@ public final class HTTPBackendPublishService: BackendPublishService {
         }
         if let effort = payload.effort {
             body["effort"] = effort
+        }
+
+        // Step 12 parity: only publish notes when they are not marked private.
+        // If notes are private (or empty), omit the key so the backend column remains NULL.
+        if !payload.areNotesPrivate, let notes = payload.notes {
+            let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                body["notes"] = trimmed
+            }
         }
 
         let jsonData: Data

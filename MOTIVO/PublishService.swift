@@ -10,6 +10,9 @@
 // CHANGE-ID: 20251110_190650-PublishService_v712A-MainActor
 // SCOPE: v7.12A — Social Pilot (local-only). Main-actor updates to avoid cross-thread publishes.
 // SEARCH-TOKEN: PUBLISH-SVC-712A
+// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
+// SCOPE: Populate publish payload notes from Core Data via objectID (no UI changes)
+// SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
 
 import Foundation
 import CoreData
@@ -228,15 +231,56 @@ final class PublishService: ObservableObject {
 
         Task { @MainActor in
             if shouldPublish {
-                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ title=%@ dur=%@ act=%@ mood=%@ effort=%@",
-                      payload.id.uuidString,
-                      payload.title ?? "nil",
-                      payload.durationSeconds != nil ? String(payload.durationSeconds!) : "nil",
-                      payload.activityType ?? "nil",
-                      payload.mood != nil ? String(payload.mood!) : "nil",
-                      payload.effort != nil ? String(payload.effort!) : "nil")
-                SessionSyncQueue.shared.enqueue(payload)
+                // Step 12 parity: enrich payload with Core Data Session.notes + areNotesPrivate via objectID.
+                // This avoids UI changes (views can keep constructing payload without notes).
+                var resolvedNotes: String? = nil
+                var resolvedAreNotesPrivate: Bool = false
+
+                do {
+                    let viewContext = PersistenceController.shared.container.viewContext
+                    let obj = try viewContext.existingObject(with: objectID)
+                    viewContext.refresh(obj, mergeChanges: true)
+
+                    func hasAttr(_ name: String) -> Bool { (obj.entity.attributesByName[name] != nil) }
+                    if hasAttr("notes"), let val = obj.value(forKey: "notes") as? String {
+                        let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
+                        resolvedNotes = trimmed.isEmpty ? nil : trimmed
+                    }
+                    if hasAttr("areNotesPrivate"), let val = obj.value(forKey: "areNotesPrivate") as? Bool {
+                        resolvedAreNotesPrivate = val
+                    }
+                } catch {
+                    // If we can't resolve notes, proceed with the incoming payload unchanged.
+                }
+
+                let effectivePayload = SessionSyncQueue.PostPublishPayload(
+                    id: payload.id,
+                    sessionID: payload.sessionID,
+                    sessionTimestamp: payload.sessionTimestamp,
+                    title: payload.title,
+                    durationSeconds: payload.durationSeconds,
+                    activityType: payload.activityType,
+                    activityDetail: payload.activityDetail,
+                    instrumentLabel: payload.instrumentLabel,
+                    mood: payload.mood,
+                    effort: payload.effort,
+                    notes: resolvedNotes,
+                    areNotesPrivate: resolvedAreNotesPrivate
+                )
+
+                NSLog("[PublishService][8F] enqueue payload keys • postID=%@ title=%@ dur=%@ act=%@ mood=%@ effort=%@ notes=%@ notesPrivate=%@",
+                      effectivePayload.id.uuidString,
+                      effectivePayload.title ?? "nil",
+                      effectivePayload.durationSeconds != nil ? String(effectivePayload.durationSeconds!) : "nil",
+                      effectivePayload.activityType ?? "nil",
+                      effectivePayload.mood != nil ? String(effectivePayload.mood!) : "nil",
+                      effectivePayload.effort != nil ? String(effectivePayload.effort!) : "nil",
+                      effectivePayload.notes != nil ? "present" : "nil",
+                      effectivePayload.areNotesPrivate ? "true" : "false")
+
+                SessionSyncQueue.shared.enqueue(effectivePayload)
             }
+
 
             await SessionSyncQueue.shared.flushNow()
 

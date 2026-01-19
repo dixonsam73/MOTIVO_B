@@ -9,6 +9,10 @@
 //  CHANGE-ID: 20251230_210900-SessionSyncQueue-NSLogFlush
 //  SCOPE: Step 7 — Ensure flush path is visible in Xcode console and always attempts upload in Backend Preview
 //
+//  CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
+//  SCOPE: Include Session.notes in backend publish queue payload (no UI changes)
+//  SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
+//
 
 import Foundation
 
@@ -28,7 +32,24 @@ public final class SessionSyncQueue: ObservableObject {
       public let mood: Int?
       public let effort: Int?
 
-      public init(id: UUID, sessionID: UUID?, sessionTimestamp: Date?, title: String?, durationSeconds: Int?, activityType: String?, activityDetail: String?, instrumentLabel: String?, mood: Int?, effort: Int?) {
+      // Step 12 (beta parity): notes
+      public let notes: String?
+      public let areNotesPrivate: Bool
+
+      public init(
+          id: UUID,
+          sessionID: UUID?,
+          sessionTimestamp: Date?,
+          title: String?,
+          durationSeconds: Int?,
+          activityType: String?,
+          activityDetail: String?,
+          instrumentLabel: String?,
+          mood: Int?,
+          effort: Int?,
+          notes: String? = nil,
+          areNotesPrivate: Bool = false
+      ) {
           self.id = id
           self.sessionID = sessionID
           self.sessionTimestamp = sessionTimestamp
@@ -39,6 +60,8 @@ public final class SessionSyncQueue: ObservableObject {
           self.instrumentLabel = instrumentLabel
           self.mood = mood
           self.effort = effort
+          self.notes = notes
+          self.areNotesPrivate = areNotesPrivate
       }
     }
 
@@ -66,7 +89,9 @@ public final class SessionSyncQueue: ObservableObject {
                 activityDetail: payload.activityDetail ?? existing.activityDetail,
                 instrumentLabel: payload.instrumentLabel ?? existing.instrumentLabel,
                 mood: payload.mood ?? existing.mood,
-                effort: payload.effort ?? existing.effort
+                effort: payload.effort ?? existing.effort,
+                notes: payload.notes ?? existing.notes,
+                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate)
             )
             items[index] = merged
             persist()
@@ -172,7 +197,7 @@ public final class SessionSyncQueue: ObservableObject {
         }
         if let old = try? decoder.decode([UUID].self, from: data) {
             return old.map { uuid in
-                PostPublishPayload(id: uuid, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil)
+                PostPublishPayload(id: uuid, sessionID: nil, sessionTimestamp: nil, title: nil, durationSeconds: nil, activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil, notes: nil, areNotesPrivate: false)
             }
         }
         // If neither format matches, propagate a decoding error

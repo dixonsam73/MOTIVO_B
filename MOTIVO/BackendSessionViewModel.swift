@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
+// SCOPE: Surface backend post notes in backend preview view model
+// SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
+
 import Foundation
 
 // A lightweight, read-only adapter that maps a BackendPost into a UI-friendly “session-like” shape.
@@ -61,7 +65,8 @@ public struct BackendSessionViewModel: Identifiable {
         let instrument = (post.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         self.instrumentLabel = instrument.isEmpty ? nil : instrument
 
-        self.notes = nil
+        let rawNotes = (post.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        self.notes = rawNotes.isEmpty ? nil : rawNotes
 
         // Step 8G Phase 2: extract attachments without hard-coupling to BackendPost's concrete schema.
         // This uses runtime reflection so this file can be green even if BackendPost evolves.
