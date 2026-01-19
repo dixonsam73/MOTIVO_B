@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
+// SCOPE: Decode activity_type/activity_detail on BackendPost for backend preview parity
+// SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
+
 //
 // CHANGE-ID: 20260112_201800_9C_RLSFeed
 // SCOPE: Step 9C — RLS-enforced feed visibility (All relies on server; no client allowlist filter)
@@ -19,9 +23,9 @@
 // SCOPE: Step 9A — Use AuthManager.canonicalBackendUserID() for all backend owner identity reads (publish + feed)
 // UNIQUE-TOKEN: 20260112_131015_backendshim_id_canon
 
-// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
+// CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
 // SCOPE: Add posts.notes decode + include notes in publish POST body (gated by areNotesPrivate)
-// SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
+// SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
 
 import Foundation
 import CoreData
@@ -59,6 +63,8 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     public let updatedAt: String?
     public let isPublic: Bool?
     public let activityLabel: String?
+    public let activityType: String?
+    public let activityDetail: String?
     public let instrumentLabel: String?
 
     // Step 12 (beta parity): notes
@@ -76,6 +82,8 @@ public struct BackendPost: Codable, Identifiable, Hashable {
         case updatedAt = "updated_at"
         case isPublic = "is_public"
         case activityLabel = "activity_label"
+        case activityType = "activity_type"
+        case activityDetail = "activity_detail"
         case instrumentLabel = "instrument_label"
         case notes = "notes"
         case attachments = "attachments"

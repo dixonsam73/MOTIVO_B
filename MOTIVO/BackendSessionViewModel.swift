@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
-// SCOPE: Surface backend post notes in backend preview view model
-// SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
+// CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
+// SCOPE: Read activity_type from backend posts when activity_label is absent (backend preview parity)
+// SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
 
 import Foundation
 
@@ -59,8 +59,10 @@ public struct BackendSessionViewModel: Identifiable {
         self.updatedAtRaw = post.updatedAt
 
         // Step 8F: map backend labels (safe if absent)
-        let activity = (post.activityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        self.activityLabel = activity.isEmpty ? "—" : activity
+        let activityLabelRaw = (post.activityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let activityTypeRaw = (post.activityType ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let effectiveActivity = !activityLabelRaw.isEmpty ? activityLabelRaw : activityTypeRaw
+        self.activityLabel = effectiveActivity.isEmpty ? "—" : effectiveActivity
 
         let instrument = (post.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         self.instrumentLabel = instrument.isEmpty ? nil : instrument
