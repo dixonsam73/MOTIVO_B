@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260120_124800_Phase12C_ProfileStore_PerUserLookup
+// SCOPE: Phase 12C — per-backend-user lookup settings + account_id storage; legacy allowDiscovery_v1 adopted as initial default.
+// SEARCH-TOKEN: 20260120_124800_Phase12C_ProfileStore_PerUserLookup
+
 import Foundation
 #if canImport(UIKit)
 import UIKit
@@ -12,6 +16,47 @@ import UIKit
 struct ProfileStore {
     // MARK: - Keys
     private static func locationKey(for userID: String) -> String { "profile.\(userID).location" }
+
+    // MARK: - Phase 12C (Per-backend-user Lookup Keys)
+    private static let legacyAllowDiscoveryKey = "allowDiscovery_v1"
+    private static func discoveryModeKey(for backendUserID: String) -> String { "profile.\(backendUserID).discoveryMode_v1" }
+    private static func accountIDKey(for backendUserID: String) -> String { "profile.\(backendUserID).account_id_v1" }
+
+    // MARK: - Phase 12C (Per-backend-user Lookup Settings)
+    /// Per-backend-user lookup mode (int raw value).
+    /// Backward-compat: if per-user value missing, we adopt the legacy device-level allowDiscovery_v1 as the initial default.
+    static func discoveryModeRaw(for backendUserID: String?) -> Int {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return 0 }
+        let key = discoveryModeKey(for: bid)
+        if let v = UserDefaults.standard.object(forKey: key) as? Int { return v }
+        if let legacy = UserDefaults.standard.object(forKey: legacyAllowDiscoveryKey) as? Int {
+            UserDefaults.standard.set(legacy, forKey: key)
+            return legacy
+        }
+        return 0
+    }
+
+    static func setDiscoveryModeRaw(_ raw: Int, for backendUserID: String?) {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        UserDefaults.standard.set(raw, forKey: discoveryModeKey(for: bid))
+    }
+
+    /// Per-backend-user handle/account_id (stored lowercase). Empty/whitespace clears the stored value.
+    static func accountID(for backendUserID: String?) -> String {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return "" }
+        return UserDefaults.standard.string(forKey: accountIDKey(for: bid)) ?? ""
+    }
+
+    static func setAccountID(_ value: String, for backendUserID: String?) {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let key = accountIDKey(for: bid)
+        if trimmed.isEmpty {
+            UserDefaults.standard.removeObject(forKey: key)
+        } else {
+            UserDefaults.standard.set(trimmed, forKey: key)
+        }
+    }
 
     // MARK: - Public API (Location)
     static func location(for userID: String?) -> String {

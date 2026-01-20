@@ -4,6 +4,10 @@
 //
 //  Created by Samuel Dixon on 16/01/2026.
 //
+// CHANGE-ID: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
+// SCOPE: Phase 12C — Allow PeopleUserRow to display directory-provided displayName/handle subtitle when available; preserves existing fallbacks.
+// SEARCH-TOKEN: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
+
 import SwiftUI
 
 /// Shared row for People hub:
@@ -12,15 +16,21 @@ import SwiftUI
 struct PeopleUserRow<Destination: View, Trailing: View>: View {
 
     let userID: String
+    let overrideDisplayName: String?
+    let overrideSubtitle: String?
     let destination: () -> Destination
     let trailing: () -> Trailing
 
     init(
         userID: String,
+        overrideDisplayName: String? = nil,
+        overrideSubtitle: String? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
     ) {
         self.userID = userID
+        self.overrideDisplayName = overrideDisplayName
+        self.overrideSubtitle = overrideSubtitle
         self.destination = destination
         self.trailing = trailing
     }
@@ -53,11 +63,17 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
     }
 
     private var displayName: String {
-        // We don’t have a remote “name directory” yet. Keep it calm and non-performative.
-        "User • \(String(userID.suffix(6)))"
+        if let s = overrideDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
+        }
+        // Default fallback: calm and non-performative.
+        return "User • \(String(userID.suffix(6)))"
     }
 
     private var subtitle: String {
+        if let s = overrideSubtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
+        }
         let loc = ProfileStore.location(for: userID)
         return loc.isEmpty ? "" : loc
     }

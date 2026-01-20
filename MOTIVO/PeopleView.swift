@@ -4,6 +4,10 @@
 //
 //  Created by Samuel Dixon on 16/01/2026.
 //
+// CHANGE-ID: 20260120_113200_Phase12C_PeopleView_DirectorySearch
+// SCOPE: Phase 12C — Wire People "Find" to backend account_directory RPC (search_account_directory). UI remains explicit-query only; no discovery.
+// SEARCH-TOKEN: 20260120_113200_Phase12C_PeopleView_DirectorySearch
+
 // CHANGE-ID: 20260117_122600_Phase10D_PeopleView_RequestFilter_LookupStyle
 // SCOPE: Phase 10D.1 + 10D.3 — Defensive incoming-requests filtering and remove remaining system-default controls in PeopleView.
 // SEARCH-TOKEN: 20260117_122600_Phase10D_PeopleView_RequestFilter_LookupStyle
@@ -11,15 +15,16 @@
 import SwiftUI
 
 /// Phase 10B — People Hub
-/// Requests (conditional) · Intentional lookup (temporary: userID) · Connections
+/// Requests (conditional) · Intentional lookup (directory) · Connections
 /// No counts. No discovery. Calm, ContentView-aligned UI.
 struct PeopleView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
 
-    @State private var lookupText: String = ""
-    @State private var lookupResultUserID: String? = nil
-    @State private var lookupError: String? = nil
+    @State private var searchText: String = ""
+    @State private var searchResults: [DirectoryAccount] = []
+    @State private var searchError: String? = nil
+    @State private var isSearching: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -35,7 +40,7 @@ struct PeopleView: View {
                     requestsSection
                 }
 
-                // Intentional lookup (temporary)
+                // Intentional lookup (directory-backed)
                 lookupSection
 
                 // Connections
@@ -122,7 +127,7 @@ struct PeopleView: View {
             Text("Find").sectionHeader()
 
             HStack(spacing: Theme.Spacing.s) {
-                TextField("Paste user ID (temporary)", text: $lookupText)
+                TextField("Search name or account ID", text: $searchText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(Theme.Text.meta)
@@ -140,33 +145,48 @@ struct PeopleView: View {
                     )
 
                 Button {
-                    performLookup()
+                    Task { await performLookup() }
                 } label: {
                     ZStack {
                         Circle()
                             .fill(.thinMaterial)
                             .opacity(colorScheme == .dark ? 0.12 : 0.85)
                             .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                        if isSearching {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                        } else {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
                     }
                     .frame(width: 40, height: 40)
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(lookupText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(isSearching || searchText.trimmingCharacters(in: .whitespacesAndNewlines).count < 3)
                 .accessibilityLabel("Lookup user")
             }
 
-            if let uid = lookupResultUserID {
-                PeopleUserRow(userID: uid) {
-                    ProfilePeekView(ownerID: uid)
-                }
-            } else if let err = lookupError {
+            if let err = searchError {
                 Text(err)
                     .font(Theme.Text.meta)
                     .foregroundStyle(Theme.Colors.secondaryText)
+            } else {
+                ForEach(searchResults, id: \.userID) { acct in
+                    PeopleUserRow(
+                        userID: acct.userID,
+                        overrideDisplayName: acct.displayName,
+                        overrideSubtitle: acct.accountID.map { "@\($0)" }
+                    ) {
+                        ProfilePeekView(
+                            ownerID: acct.userID,
+                            directoryDisplayName: acct.displayName,
+                            directoryAccountID: acct.accountID
+                        )
+                    }
+                }
             }
 
             Text("Intentional lookup only — no browsing.")
@@ -197,16 +217,27 @@ struct PeopleView: View {
 
     // MARK: - Helpers
 
-    private func performLookup() {
-        lookupError = nil
-        lookupResultUserID = nil
+    private func performLookup() async {
+        searchError = nil
+        searchResults = []
 
-        let raw = lookupText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard q.count >= 3 else {
+            searchError = "Enter at least 3 characters."
+            return
+        }
 
-        // We don’t have directory/handle lookup wired yet.
-        // Keep this as explicit userID paste (still aligns with “intentional connection” policy).
-        lookupResultUserID = raw
+        isSearching = true
+        defer { isSearching = false }
+
+        let result = await AccountDirectoryService.shared.search(query: q)
+        switch result {
+        case .success(let rows):
+            searchResults = rows
+            searchError = rows.isEmpty ? "No results." : nil
+        case .failure:
+            searchError = "Search unavailable."
+        }
     }
 
     private func rowLinkLabel(_ title: String) -> some View {

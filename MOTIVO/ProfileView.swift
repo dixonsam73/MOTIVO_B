@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260120_142900_Phase12C_CommitOnlyAccountID_BlurGuard
+// SCOPE: Phase 12C hygiene — commit-only directory upsert for Account ID; never POST invalid account_id (send null until valid)
+// CHANGE-ID: 20260120_124300_Phase12C_ProfileView_DirectoryOptIn
+// SCOPE: Phase 12C — per-backend-user lookup opt-in + account ID field; upsert account_directory using backendUserID; no profile sync.
 ////
  //  ProfileView.swift
  //  MOTIVO
@@ -14,6 +18,7 @@
  //
  import SwiftUI
  import CoreData
+import Foundation
  import AuthenticationServices
  #if canImport(PhotosUI)
  import PhotosUI
@@ -94,6 +99,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @AppStorage("appSettings_showWelcomeSection") private var showWelcomeSection: Bool = true
 
 @FocusState private var isNameFocused: Bool
+@FocusState private var isAccountIDFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
      @State private var showActivityManager: Bool = false
@@ -122,8 +128,13 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     // NOTE: profileVisibility_v1 is retained for legacy compatibility, but is not surfaced in UI.
     @AppStorage("profileVisibility_v1") private var profileVisibilityRaw: Int = 1
     @AppStorage("followRequestMode_v1") private var followRequestModeRaw: Int = FollowRequestMode.manual.rawValue
-    @AppStorage("allowDiscovery_v1") private var allowDiscoveryRaw: Int = DiscoveryMode.none.rawValue
+    @AppStorage("allowDiscovery_v1") private var allowDiscoveryLegacyRaw: Int = DiscoveryMode.none.rawValue
+    @State private var discoveryModeRawPerUser: Int = DiscoveryMode.none.rawValue
+    @State private var accountIDText: String = ""
 
+    @State private var directorySyncDebounceTask: Task<Void, Never>? = nil
+    @State private var lastDirectorySyncFingerprint: String? = nil
+    @State private var lastAccountIDSubmitAt: Date? = nil
     private var followRequestMode: FollowRequestMode {
         get {
             let mode = FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual
@@ -133,8 +144,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
         set { followRequestModeRaw = newValue.rawValue }
     }
     private var discoveryMode: DiscoveryMode {
-        get { DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none }
-        set { allowDiscoveryRaw = newValue.rawValue }
+        get { DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none }
+        set { discoveryModeRawPerUser = newValue.rawValue }
     }
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
@@ -295,6 +306,34 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
              TextField("Location (optional)", text: $locationText)
                  .textInputAutocapitalization(.words)
                  .disableAutocorrection(true)
+
+             TextField("Account ID (optional)", text: $accountIDText)
+                 .textInputAutocapitalization(.never)
+                 .autocorrectionDisabled(true)
+                 .keyboardType(.asciiCapable)
+                 .onChange(of: accountIDText) { _, newValue in
+                     let normalized = normalizeAccountID(newValue)
+                     if normalized != newValue { accountIDText = normalized }
+                     ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
+                 }
+                 .focused($isAccountIDFocused)
+                 .onChange(of: isAccountIDFocused) { oldValue, newValue in
+                     // Commit-only: on blur, sync once with the latest sanitized state.
+                     // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
+                     if oldValue == true && newValue == false {
+                         if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
+                             return
+                         }
+                         Task { await syncDirectoryFromCurrentState() }
+                     }
+                 }
+                 .onSubmit {
+                     // Commit-only: on Return/Done, sync once.
+                     lastAccountIDSubmitAt = Date()
+                     Task { await syncDirectoryFromCurrentState() }
+                 }
+                 .font(Theme.Text.meta)
+                 .foregroundStyle(Color.primary)
          }
          .listRowSeparator(.hidden)
      }
@@ -377,16 +416,16 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 
                  Menu {
                      Button {
-                         allowDiscoveryRaw = DiscoveryMode.search.rawValue
+                         discoveryModeRawPerUser = DiscoveryMode.search.rawValue
                      } label: {
-                         let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
+                         let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
                          Label("Searchable by name", systemImage: isCurrent ? "checkmark" : "")
                      }
 
                      Button {
-                         allowDiscoveryRaw = DiscoveryMode.none.rawValue
+                         discoveryModeRawPerUser = DiscoveryMode.none.rawValue
                      } label: {
-                         let isCurrent = (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .none
+                         let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .none
                          Label("Hidden from search", systemImage: isCurrent ? "checkmark" : "")
                      }
 
@@ -394,7 +433,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  } label: {
                      HStack(spacing: 2) {
                          Text(
-                             (DiscoveryMode(rawValue: allowDiscoveryRaw) ?? .none) == .search
+                             (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
                              ? "Searchable by name"
                              : "Hidden from search"
                          )
@@ -736,6 +775,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          }
          self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
          self.locationText = ProfileStore.location(for: auth.currentUserID)
+
+         // Phase 12C: per-backend-user lookup state (per-user; legacy allowDiscovery_v1 adopted as initial default)
+         discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
+         accountIDText = ProfileStore.accountID(for: auth.backendUserID)
      }
 
      private func clearUserPresentedStateForSignOut() {
@@ -746,6 +789,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          defaultPrivacy = false
          avatarImage = nil
          locationText = ""
+         accountIDText = ""
+         discoveryModeRawPerUser = DiscoveryMode.none.rawValue
 
          userActivities = []
          // Keep AppStorage primaryActivityRef unchanged; normalize displayed choice only.
@@ -886,6 +931,44 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          }
      }
  
+     // Phase 12C — Handle normalization (client-side). Server enforces strict rules; this keeps UI deterministic.
+     private func normalizeAccountID(_ raw: String) -> String {
+         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+         if s.hasPrefix("@") { s = String(s.dropFirst()) }
+         // Allowed: a–z, 0–9, underscore
+         s = String(s.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" })
+         // Max length 24
+         if s.count > 24 { s = String(s.prefix(24)) }
+         return s
+     }
+
+ 
+    // Phase 12C hygiene: avoid directory upserts on every keystroke.
+    @MainActor
+    private func scheduleDirectorySyncDebounced(nanoseconds: UInt64 = 650_000_000) {
+        directorySyncDebounceTask?.cancel()
+        directorySyncDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: nanoseconds)
+            guard !Task.isCancelled else { return }
+            await syncDirectoryFromCurrentState()
+        }
+    }
+
+    // Phase 12C — Owner-only directory upsert/disable. No profile sync; only minimal identity surface.
+     @MainActor
+     private func syncDirectoryFromCurrentState() async {
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+         let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
+         // If user hasn’t opted in, ensure lookup is disabled (row may still exist).
+         let enabled = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
+         let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
+         let acctOrNil: String? = (acct.count >= 3) ? acct : nil
+         let fingerprint = "\(backendID)|\(display)|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
+         if fingerprint == lastDirectorySyncFingerprint { return }
+         let result = await AccountDirectoryService.shared.upsertSelfRow(userID: backendID, displayName: display, accountID: acctOrNil, lookupEnabled: enabled)
+         if case .success = result { lastDirectorySyncFingerprint = fingerprint }
+     }
+
      // New helper method to compute initials from a string
      private func initials(from string: String) -> String {
          let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -927,11 +1010,28 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                     onAppearLoad()
                 }
             }
+            .onChange(of: auth.backendUserID) { _, newValue in
+                // Phase 12C: user-scoped lookup state (per backend identity)
+                if newValue == nil {
+                    accountIDText = ""
+                    discoveryModeRawPerUser = DiscoveryMode.none.rawValue
+                } else {
+                    discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
+                    accountIDText = ProfileStore.accountID(for: auth.backendUserID)
+                }
+            }
              .onChange(of: showActivityManager) { oldValue, newValue in
                  handleActivityManagerChange(oldValue, newValue)
              }
              .onChange(of: primaryActivityRef) { _ in
                  primaryActivityChoice = normalizedPrimaryActivityRef()
+             }
+             .onChange(of: name) { _, _ in
+                 Task { @MainActor in scheduleDirectorySyncDebounced() }
+             }
+             .onChange(of: discoveryModeRawPerUser) { _, newValue in
+                 ProfileStore.setDiscoveryModeRaw(newValue, for: auth.backendUserID)
+                 Task { await syncDirectoryFromCurrentState() }
              }
              .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
                  Button("OK", role: .cancel) {}

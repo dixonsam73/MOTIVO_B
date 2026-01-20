@@ -1,6 +1,12 @@
 // CHANGE-ID: 20260116_221900_phase10C_profilepeek_followactions_polish
 // SCOPE: Phase 10C — remove duplicate follow status label; rename "Requested" to "Request sent"; remove invalid accessibility traits.
 
+// CHANGE-ID: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
+// SCOPE: Phase 12C — Allow ProfilePeek header to show directory-provided display name and optional @account_id; no additional data fetch.
+// SEARCH-TOKEN: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
+
+// CHANGE-ID: 20260120_124300_Phase12C_ProfilePeek_UseBackendUserID
+// SCOPE: Phase 12C correctness — use auth.backendUserID (Supabase UUID) as viewerID for follow/directory logic; avoid Apple subject IDs.
 import SwiftUI
 import CoreData
 import Combine
@@ -13,18 +19,24 @@ struct ProfilePeekView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     let ownerID: String
+    let directoryDisplayName: String?
+    let directoryAccountID: String?
 
     // Derived
-    /// Effective viewer ID, respecting DEBUG override, then Auth, then PersistenceController.
+    /// Effective viewer ID for backend follow/directory logic (Supabase auth.users UUID).
+    /// Order: DEBUG backend override → Auth.backendUserID → AuthManager.canonicalBackendUserID() → local fallback.
     private var viewerID: String {
         #if DEBUG
-        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+        if let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride"),
            !override.isEmpty {
-            return override
+            return override.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         }
         #endif
-        if let authID = auth.currentUserID, !authID.isEmpty {
-            return authID
+        if let bid = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty {
+            return bid.lowercased()
+        }
+        if let canon = AuthManager.canonicalBackendUserID() {
+            return canon
         }
         return (try? PersistenceController.shared.currentUserID) ?? "localUser"
     }
@@ -37,8 +49,10 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil) {
         self.ownerID = ownerID
+        self.directoryDisplayName = directoryDisplayName
+        self.directoryAccountID = directoryAccountID
         // fetch sessions for this owner (lightweight)
         let sReq = NSFetchRequest<Session>(entityName: "Session")
         sReq.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
@@ -78,10 +92,14 @@ struct ProfilePeekView: View {
                     .buttonStyle(.plain)
 
                     VStack(alignment: .leading, spacing: 4) {
-                        HStack(spacing: 8) {
+                        VStack(alignment: .leading, spacing: 2) {
                             Text(displayName(ownerID))
                                 .font(.headline)
-                            // NOTE: Keep follow state shown only once via the action pill below.
+                            if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
+                                Text("@\(handle)")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
                         }
                         let loc = ProfileStore.location(for: ownerID)
                         if !loc.isEmpty {
@@ -150,7 +168,7 @@ struct ProfilePeekView: View {
             .task {
                 // Trigger a one-time backfill only when peeking our own profile
                 if viewerID == ownerID,
-                   let uid = auth.currentUserID ?? (try? PersistenceController.shared.currentUserID) {
+                   let uid = auth.backendUserID ?? AuthManager.canonicalBackendUserID() ?? (try? PersistenceController.shared.currentUserID) {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
             }
@@ -198,8 +216,11 @@ struct ProfilePeekView: View {
 
     private func displayName(_ id: String) -> String {
         // Prefer AuthManager displayName if self; else Profile name; fallback short ID
-        if id == (auth.currentUserID ?? "") {
+        if id == (auth.backendUserID ?? "") {
             return revealSelfName ? (auth.displayName ?? "You") : "You"
+        }
+        if let s = directoryDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+            return s
         }
         // If you maintain a Profile entity for others, fetch that name.
         // For now, fallback to short ownerID tail for clarity.
