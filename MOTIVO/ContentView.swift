@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260121_115517_P13D2_ContentView
+// SCOPE: Phase 13D.2 — Gate backend feed rendering on BackendEnvironment.isConnected (shipping) instead of isPreview (debug-only). No other UI/logic changes.
+// SEARCH-TOKEN: 20260121_115517_P13D2_ContentView
+
 // CHANGE-ID: 20260116_1627_Phase10_TopBarPeopleFix_7e4f15
 // SCOPE: Phase 10: ContentView top-left People (magnifying glass) button — tighten spacing without overlap; ensure tap opens sheet.
 
@@ -182,7 +186,7 @@ fileprivate struct SessionsRootView: View {
 
     private var useBackendFeed: Bool {
         _ = backendModeChangeTick
-        return BackendEnvironment.shared.isPreview &&
+        return BackendEnvironment.shared.isConnected &&
         BackendConfig.isConfigured &&
         (NetworkManager.shared.baseURL != nil)
     }

@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260121_124000_P13F_FollowStoreFollowersWire
+// SCOPE: Phase 13F — Store followers set; refresh from backend; wire failure logging.
+// SEARCH-TOKEN: 20260121_124000_P13F_FollowStoreFollowersWire
+
+// CHANGE-ID: 20260121_121200_P13B1_FollowOptimisticRequestedState
+// SCOPE: Phase 13B.1 — In HTTP backend modes, flip ProfilePeek follow state to "Request sent" immediately on tap by optimistic outgoingRequests insert; rollback on failure.
+// SEARCH-TOKEN: 20260121_121200_P13B1_FollowOptimisticRequestedState
+//
 // CHANGE-ID: 20260116_223900_Phase10C_FollowOutgoingRequestsFix
 // SCOPE: Phase 10C hardening — separate outgoing follow requests from incoming requests in local simulation.
 // SEARCH-TOKEN: 20260116_223900_Phase10C_FollowOutgoingRequestsFix
@@ -26,6 +34,7 @@ public final class FollowStore: ObservableObject {
     // MARK: - Published Properties
 
     @Published private(set) public var following: Set<String> = []
+    @Published private(set) public var followers: Set<String> = []
     @Published private(set) public var requests: Set<String> = []              // incoming requests (people who want to follow me)
     @Published private(set) public var outgoingRequests: Set<String> = []      // outgoing requests (I asked to follow them)
 
@@ -72,39 +81,48 @@ public final class FollowStore: ObservableObject {
 
     // MARK: - Backend Preview (Step 9B)
 
-    private var isBackendPreviewActive: Bool {
-        BackendEnvironment.shared.isPreview &&
-        BackendConfig.isConfigured &&
-        (NetworkManager.shared.baseURL != nil)
+    private var isBackendHTTPActive: Bool {
+        BackendEnvironment.shared.isHTTPEnabled
     }
 
-    /// Refresh follow state from backend if we're in Backend Preview and configured.
+    /// Refresh follow state from backend when the HTTP backend is enabled.
     /// No-op in Local Simulation.
     @MainActor
     public func refreshFromBackendIfPossible() async {
-        guard isBackendPreviewActive else { return }
+        guard isBackendHTTPActive else { return }
         let follow = BackendEnvironment.shared.follow
 
         // Approved outgoing follows = "following"
         let followingResult = await follow.fetchFollowingApproved()
+        // Approved incoming follows = "followers"
+        let followersResult = await follow.fetchFollowersApproved()
         // Incoming requests = "requests" (people who want to follow me)
         let incomingResult = await follow.fetchIncomingRequests()
+        // Outgoing requests = "outgoingRequests" (people I asked to follow)
+        let outgoingResult = await follow.fetchOutgoingRequests()
 
-        switch (followingResult, incomingResult) {
-        case (.success(let followingIDs), .success(let incomingIDs)):
-            // Backend is source of truth in preview — do not persist to UserDefaults.
+        switch (followingResult, followersResult, incomingResult, outgoingResult) {
+        case (.success(let followingIDs), .success(let followerIDs), .success(let incomingIDs), .success(let outgoingIDs)):
+            // Backend is source of truth when HTTP backend is enabled — do not persist to UserDefaults.
             self.following = Set(followingIDs.map { $0.lowercased() })
+            self.followers = Set(followerIDs.map { $0.lowercased() })
             self.requests = Set(incomingIDs.map { $0.lowercased() })
-            // Outgoing requests are not yet fetched in preview mode (backend wiring later).
-            self.outgoingRequests = []
+            self.outgoingRequests = Set(outgoingIDs.map { $0.lowercased() })
             objectWillChange.send()
-            NSLog("[FollowStore] backend refresh ok (following=%d requests=%d)", self.following.count, self.requests.count)
+            NSLog("[FollowStore] backend refresh ok (following=%d followers=%d incoming=%d outgoing=%d)",
+                  self.following.count, self.followers.count, self.requests.count, self.outgoingRequests.count)
 
-        case (.failure(let e), _):
+        case (.failure(let e), _, _, _):
             NSLog("[FollowStore] backend refresh failed (following): %@", String(describing: e))
 
-        case (_, .failure(let e)):
+        case (_, .failure(let e), _, _):
+            NSLog("[FollowStore] backend refresh failed (followers): %@", String(describing: e))
+
+        case (_, _, .failure(let e), _):
             NSLog("[FollowStore] backend refresh failed (incoming): %@", String(describing: e))
+
+        case (_, _, _, .failure(let e)):
+            NSLog("[FollowStore] backend refresh failed (outgoing): %@", String(describing: e))
         }
     }
 
@@ -112,13 +130,22 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func requestFollow(to targetUserID: String) -> FollowState {
-        if isBackendPreviewActive {
+        if isBackendHTTPActive {
+            // Optimistic UI: flip to "requested" immediately.
+            // Backend refresh will confirm/correct state, but we want instant feedback on tap.
+            let normalized = targetUserID.lowercased()
+            self.outgoingRequests.insert(normalized)
+            self.objectWillChange.send()
+
             Task { @MainActor in
                 let result = await BackendEnvironment.shared.follow.requestFollow(to: targetUserID)
                 switch result {
                 case .success:
                     await self.refreshFromBackendIfPossible()
                 case .failure(let e):
+                    // Roll back optimistic state on failure.
+                    self.outgoingRequests.remove(normalized)
+                    self.objectWillChange.send()
                     NSLog("[FollowStore] backend requestFollow failed: %@", String(describing: e))
                 }
             }
@@ -135,7 +162,7 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func approveFollow(from requesterUserID: String) -> FollowState {
-        if isBackendPreviewActive {
+        if isBackendHTTPActive {
             Task { @MainActor in
                 let result = await BackendEnvironment.shared.follow.approveFollow(from: requesterUserID)
                 switch result {
@@ -159,7 +186,7 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func declineFollow(from requesterUserID: String) -> FollowState {
-        if isBackendPreviewActive {
+        if isBackendHTTPActive {
             Task { @MainActor in
                 let result = await BackendEnvironment.shared.follow.declineFollow(from: requesterUserID)
                 switch result {
@@ -181,7 +208,7 @@ public final class FollowStore: ObservableObject {
 
     @discardableResult
     public func unfollow(_ targetUserID: String) -> FollowState {
-        if isBackendPreviewActive {
+        if isBackendHTTPActive {
             Task { @MainActor in
                 let result = await BackendEnvironment.shared.follow.unfollow(targetUserID)
                 switch result {

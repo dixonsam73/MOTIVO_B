@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260121_124000_P13F_BackendFollowersFetch
+// SCOPE: Phase 13F — Add fetchFollowersApproved to BackendFollowService and HTTP/Simulated implementations.
+// SEARCH-TOKEN: 20260121_124000_P13F_BackendFollowersFetch
+
+// CHANGE-ID: 20260121_114321_P13D1_BackendConnectedMode
+// SCOPE: Phase 13D.1 — Add BackendMode.backendConnected (shipping) distinct from backendPreview; enable HTTP services in connected/preview; add isConnected/isHTTPEnabled
+// SEARCH-TOKEN: P13D1-CONNECTED-MODE-20260121_114321
+
 // CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
 // SCOPE: Decode activity_type/activity_detail on BackendPost for backend preview parity
 // SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
@@ -42,6 +50,7 @@ public func setBackendMode(_ mode: BackendMode) {
 
 public enum BackendMode: String, CaseIterable, Identifiable {
     case localSimulation
+    case backendConnected
     case backendPreview
 
     public var id: String { rawValue }
@@ -49,6 +58,7 @@ public enum BackendMode: String, CaseIterable, Identifiable {
     public var title: String {
         switch self {
         case .localSimulation: return "Local Simulation"
+        case .backendConnected: return "Connected"
         case .backendPreview: return "Backend Preview"
         }
     }
@@ -170,6 +180,7 @@ public protocol BackendProfileService {}
 
 public protocol BackendFollowService {
     func fetchFollowingApproved() async -> Result<[String], Error>
+    func fetchFollowersApproved() async -> Result<[String], Error>
     func fetchIncomingRequests() async -> Result<[String], Error>
     func fetchOutgoingRequests() async -> Result<[String], Error>
 
@@ -215,6 +226,12 @@ public final class SimulatedFollowService: BackendFollowService {
     @MainActor
     public func fetchFollowingApproved() async -> Result<[String], Error> {
         await BackendDiagnostics.shared.simulatedCall("FollowService.fetchFollowingApproved")
+        return .success([])
+    }
+
+    @MainActor
+    public func fetchFollowersApproved() async -> Result<[String], Error> {
+        await BackendDiagnostics.shared.simulatedCall("FollowService.fetchFollowersApproved")
         return .success([])
     }
 
@@ -315,7 +332,35 @@ public final class HTTPBackendFollowService: BackendFollowService {
         }
     }
 
-    public func fetchIncomingRequests() async -> Result<[String], Error> {
+    
+public func fetchFollowersApproved() async -> Result<[String], Error> {
+    guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+        return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+    }
+    guard let me = currentBackendUserID(), !me.isEmpty else {
+        return .success([])
+    }
+
+    let path = "rest/v1/follows?select=follower_user_id&followed_user_id=eq.\(me)&status=eq.approved"
+    let result = await NetworkManager.shared.request(path: path, method: "GET", headers: headers(apiKey: apiKey))
+
+    switch result {
+    case .success(let data):
+        do {
+            let obj = try JSONSerialization.jsonObject(with: data, options: [])
+            let rows = obj as? [[String: Any]] ?? []
+            let ids = rows.compactMap { ($0["follower_user_id"] as? String)?.lowercased() }
+            return .success(ids)
+        } catch {
+            return .failure(error)
+        }
+
+    case .failure(let e):
+        return .failure(e)
+    }
+}
+
+public func fetchIncomingRequests() async -> Result<[String], Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
@@ -933,7 +978,7 @@ public final class BackendEnvironment {
         let mode = currentBackendMode()
         let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
 
-        if mode == .backendPreview && hasHTTPConfig {
+        if (mode == .backendPreview || mode == .backendConnected) && hasHTTPConfig {
             return HTTPBackendPublishService()
         }
         return SimulatedPublishService()
@@ -944,7 +989,7 @@ public final class BackendEnvironment {
     public var follow: BackendFollowService {
         let mode = currentBackendMode()
         let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
-        if mode == .backendPreview && hasHTTPConfig {
+        if (mode == .backendPreview || mode == .backendConnected) && hasHTTPConfig {
             return HTTPBackendFollowService()
         }
         return SimulatedFollowService()
@@ -957,6 +1002,12 @@ public final class BackendEnvironment {
 
     @inline(__always)
     public var isPreview: Bool { mode == .backendPreview }
+
+    @inline(__always)
+    public var isConnected: Bool { mode == .backendConnected }
+
+    @inline(__always)
+    public var isHTTPEnabled: Bool { (mode == .backendPreview || mode == .backendConnected) }
 }
 
 @inline(__always)

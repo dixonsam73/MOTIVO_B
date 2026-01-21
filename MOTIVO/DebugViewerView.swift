@@ -675,9 +675,11 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
     @ViewBuilder private var backendStep6ABlock: some View {
         // Precompute mode line to ease type-checking
         let modeRaw: String = BackendEnvironment.shared.mode.rawValue
-        let isBackendEnabled: Bool = (BackendEnvironment.shared.mode == .backendPreview)
-        let enabledString: String = isBackendEnabled ? "true" : "false"
-        let modeLine: String = "mode: \(modeRaw) • backend enabled: \(enabledString)"
+        let isHTTPEnabled: Bool = BackendEnvironment.shared.isHTTPEnabled
+        let httpEnabledString: String = isHTTPEnabled ? "true" : "false"
+        let isConnectedString: String = BackendEnvironment.shared.isConnected ? "true" : "false"
+        let isPreviewString: String = BackendEnvironment.shared.isPreview ? "true" : "false"
+        let modeLine: String = "mode: \(modeRaw) • http enabled: \(httpEnabledString) • connected: \(isConnectedString) • preview: \(isPreviewString)"
 
         // Backend • Step 6A diagnostics
         VStack(alignment: .leading, spacing: 8) {
@@ -713,7 +715,7 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
             }
 
             // 5) Hint
-            Text("Note: publish service selection is decided at app launch; relaunch after changing preview/config.")
+            Text("Note: publish service selection is decided at app launch; relaunch after changing mode/config.")
                 .font(.footnote)
                 .opacity(0.7)
         }

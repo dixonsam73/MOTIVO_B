@@ -1,12 +1,12 @@
-// CHANGE-ID: 20260116_221900_phase10C_profilepeek_followactions_polish
-// SCOPE: Phase 10C — remove duplicate follow status label; rename "Requested" to "Request sent"; remove invalid accessibility traits.
+// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
+// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
 
-// CHANGE-ID: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
-// SCOPE: Phase 12C — Allow ProfilePeek header to show directory-provided display name and optional @account_id; no additional data fetch.
+// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
+// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
 // SEARCH-TOKEN: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
 
-// CHANGE-ID: 20260120_124300_Phase12C_ProfilePeek_UseBackendUserID
-// SCOPE: Phase 12C correctness — use auth.backendUserID (Supabase UUID) as viewerID for follow/directory logic; avoid Apple subject IDs.
+// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
+// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
 import SwiftUI
 import CoreData
 import Combine
@@ -14,6 +14,7 @@ import Combine
 struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject var auth: AuthManager
+    @ObservedObject private var followStore = FollowStore.shared
     @State private var revealSelfName = false
     @State private var showUnfollowConfirm = false
     @Environment(\.colorScheme) private var colorScheme
@@ -42,7 +43,7 @@ struct ProfilePeekView: View {
     }
 
     private var canSee: Bool {
-        viewerID == ownerID || FollowStore.shared.state(for: ownerID) == .following
+        viewerID == ownerID || followStore.state(for: ownerID) == .following
     }
 
     // Fetch a few lightweight stats locally
@@ -174,7 +175,7 @@ struct ProfilePeekView: View {
             }
             .confirmationDialog("Unfollow?", isPresented: $showUnfollowConfirm, titleVisibility: .visible) {
                 Button("Unfollow", role: .destructive) {
-                    _ = FollowStore.shared.unfollow(ownerID)
+                    _ = followStore.unfollow(ownerID)
                 }
                 Button("Cancel", role: .cancel) { }
             }
@@ -187,13 +188,13 @@ struct ProfilePeekView: View {
     }
 
     private var followActionRow: some View {
-        let state = FollowStore.shared.state(for: ownerID)
+        let state = followStore.state(for: ownerID)
         return HStack {
             Spacer(minLength: 0)
             switch state {
             case .none:
                 Button {
-                    _ = FollowStore.shared.requestFollow(to: ownerID)
+                    _ = followStore.requestFollow(to: ownerID)
                 } label: {
                     FollowActionPill(title: "Follow", isEnabled: true)
                 }
@@ -323,5 +324,4 @@ private struct ProfileAvatar: View {
         }
     }
 }
-
 
