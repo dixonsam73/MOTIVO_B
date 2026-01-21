@@ -1,4 +1,6 @@
 // CHANGE-ID: 20260120_142900_Phase12C_CommitOnlyAccountID_BlurGuard
+// CHANGE-ID: 20260121_132406_P13A_AccountIDCollisionUX
+// SCOPE: Phase 13A — surface account_id collision (HTTP 409 / 23505) inline under Account ID field; no backend/schema changes.
 // SCOPE: Phase 12C hygiene — commit-only directory upsert for Account ID; never POST invalid account_id (send null until valid)
 // CHANGE-ID: 20260120_124300_Phase12C_ProfileView_DirectoryOptIn
 // SCOPE: Phase 12C — per-backend-user lookup opt-in + account ID field; upsert account_directory using backendUserID; no profile sync.
@@ -131,6 +133,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @AppStorage("allowDiscovery_v1") private var allowDiscoveryLegacyRaw: Int = DiscoveryMode.none.rawValue
     @State private var discoveryModeRawPerUser: Int = DiscoveryMode.none.rawValue
     @State private var accountIDText: String = ""
+
+    // Phase 13A — Account ID collision UX (shipping)
+    @State private var accountIDSyncMessage: String? = nil
+    @State private var accountIDSyncIsError: Bool = false
 
     @State private var directorySyncDebounceTask: Task<Void, Never>? = nil
     @State private var lastDirectorySyncFingerprint: String? = nil
@@ -314,6 +320,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  .onChange(of: accountIDText) { _, newValue in
                      let normalized = normalizeAccountID(newValue)
                      if normalized != newValue { accountIDText = normalized }
+                     // Clear any prior sync feedback as the user edits.
+                     accountIDSyncMessage = nil
+                     accountIDSyncIsError = false
                      ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
                  }
                  .focused($isAccountIDFocused)
@@ -334,6 +343,13 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  }
                  .font(Theme.Text.meta)
                  .foregroundStyle(Color.primary)
+
+             if let msg = accountIDSyncMessage {
+                 Text(msg)
+                     .font(Theme.Text.meta)
+                     .foregroundStyle(accountIDSyncIsError ? Color.red : Theme.Colors.secondaryText)
+                     .padding(.top, 2)
+             }
          }
          .listRowSeparator(.hidden)
      }
@@ -966,8 +982,44 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          let fingerprint = "\(backendID)|\(display)|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
          if fingerprint == lastDirectorySyncFingerprint { return }
          let result = await AccountDirectoryService.shared.upsertSelfRow(userID: backendID, displayName: display, accountID: acctOrNil, lookupEnabled: enabled)
-         if case .success = result { lastDirectorySyncFingerprint = fingerprint }
+         switch result {
+case .success:
+    lastDirectorySyncFingerprint = fingerprint
+    accountIDSyncMessage = nil
+    accountIDSyncIsError = false
+case .failure(let error):
+    if isAccountIDCollision(error) {
+        accountIDSyncMessage = "That account ID is already taken."
+    } else {
+        accountIDSyncMessage = "Couldn’t update your Account ID. Please try again."
+    }
+    accountIDSyncIsError = true
+}
      }
+
+
+
+
+     // Phase 13A — Detect account_id collision (unique constraint) from NetworkManager error.
+     private func isAccountIDCollision(_ error: Error) -> Bool {
+        // NetworkError is nested in NetworkManager.
+        if let net = error as? NetworkManager.NetworkError {
+            switch net {
+            case .httpError(let status, let body):
+                guard status == 409, let body, !body.isEmpty else { return false }
+                // Supabase/Postgres unique violation on account_directory.account_id.
+                if body.contains("\"code\":\"23505\"") { return true }
+                if body.contains("account_directory_account_id_key") { return true }
+                return false
+            default:
+                return false
+            }
+        }
+        return false
+    }
+
+
+
 
      // New helper method to compute initials from a string
      private func initials(from string: String) -> String {
