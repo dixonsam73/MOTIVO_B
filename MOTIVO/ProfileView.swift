@@ -313,7 +313,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  .textInputAutocapitalization(.words)
                  .disableAutocorrection(true)
 
-             TextField("Account ID (optional)", text: $accountIDText)
+             TextField("Account ID : How people find you.", text: $accountIDText)
                  .textInputAutocapitalization(.never)
                  .autocorrectionDisabled(true)
                  .keyboardType(.asciiCapable)
