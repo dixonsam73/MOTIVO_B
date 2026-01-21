@@ -1,12 +1,14 @@
-// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
-// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
+// CHANGE-ID: 20260116_221900_phase10C_profilepeek_followactions_polish
+// SCOPE: Phase 10C — remove duplicate follow status label; rename "Requested" to "Request sent"; remove invalid accessibility traits.
 
-// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
-// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
+// CHANGE-ID: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
+// SCOPE: Phase 12C — Allow ProfilePeek header to show directory-provided display name and optional @account_id; no additional data fetch.
 // SEARCH-TOKEN: 20260120_113400_Phase12C_ProfilePeek_DirectoryHeader
 
-// CHANGE-ID: 20260121_122215_P13B2_ProfilePeekView_ObservedFollowStore
-// SCOPE: Phase 13B.2 — ProfilePeekView observes FollowStore so follow/unfollow/request state updates immediately
+// CHANGE-ID: 20260120_124300_Phase12C_ProfilePeek_UseBackendUserID
+// SCOPE: Phase 12C correctness — use auth.backendUserID (Supabase UUID) as viewerID for follow/directory logic; avoid Apple subject IDs.
+// CHANGE-ID: 20260121_135214_P13C_AvatarInitials_ProfilePeek
+// SCOPE: 13C — Use initials for missing avatar in ProfilePeek header; no backend fetch.
 import SwiftUI
 import CoreData
 import Combine
@@ -14,7 +16,6 @@ import Combine
 struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject var auth: AuthManager
-    @ObservedObject private var followStore = FollowStore.shared
     @State private var revealSelfName = false
     @State private var showUnfollowConfirm = false
     @Environment(\.colorScheme) private var colorScheme
@@ -43,7 +44,7 @@ struct ProfilePeekView: View {
     }
 
     private var canSee: Bool {
-        viewerID == ownerID || followStore.state(for: ownerID) == .following
+        viewerID == ownerID || FollowStore.shared.state(for: ownerID) == .following
     }
 
     // Fetch a few lightweight stats locally
@@ -86,7 +87,7 @@ struct ProfilePeekView: View {
                             revealSelfName.toggle()
                         }
                     }) {
-                        ProfileAvatar(ownerID: ownerID)
+                        ProfileAvatar(ownerID: ownerID, displayName: displayName(ownerID))
                             .frame(width: 44, height: 44)
                             .clipShape(Circle())
                     }
@@ -175,7 +176,7 @@ struct ProfilePeekView: View {
             }
             .confirmationDialog("Unfollow?", isPresented: $showUnfollowConfirm, titleVisibility: .visible) {
                 Button("Unfollow", role: .destructive) {
-                    _ = followStore.unfollow(ownerID)
+                    _ = FollowStore.shared.unfollow(ownerID)
                 }
                 Button("Cancel", role: .cancel) { }
             }
@@ -188,13 +189,13 @@ struct ProfilePeekView: View {
     }
 
     private var followActionRow: some View {
-        let state = followStore.state(for: ownerID)
+        let state = FollowStore.shared.state(for: ownerID)
         return HStack {
             Spacer(minLength: 0)
             switch state {
             case .none:
                 Button {
-                    _ = followStore.requestFollow(to: ownerID)
+                    _ = FollowStore.shared.requestFollow(to: ownerID)
                 } label: {
                     FollowActionPill(title: "Follow", isEnabled: true)
                 }
@@ -309,6 +310,8 @@ private struct FlexibleChipsView: View {
 // Minimal avatar helper using ProfileStore cache if present.
 private struct ProfileAvatar: View {
     let ownerID: String
+    let displayName: String
+
     var body: some View {
         Group {
             if let img = ProfileStore.avatarImage(for: ownerID) {
@@ -316,12 +319,28 @@ private struct ProfileAvatar: View {
             } else {
                 ZStack {
                     Circle().fill(.secondary.opacity(0.15))
-                    Image(systemName: "person.crop.circle")
-                        .imageScale(.large)
-                        .foregroundStyle(.secondary)
+                    Text(initials(from: displayName))
+                        .font(.system(size: 24, weight: .bold))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .minimumScaleFactor(0.5)
+                        .lineLimit(1)
                 }
             }
         }
+    }
+
+    private func initials(from name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        let words = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        if words.isEmpty { return "?" }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let combo = first + last
+        return combo.isEmpty ? "?" : combo
     }
 }
 

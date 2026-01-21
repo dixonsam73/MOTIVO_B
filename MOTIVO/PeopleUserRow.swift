@@ -7,6 +7,8 @@
 // CHANGE-ID: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
 // SCOPE: Phase 12C — Allow PeopleUserRow to display directory-provided displayName/handle subtitle when available; preserves existing fallbacks.
 // SEARCH-TOKEN: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
+// CHANGE-ID: 20260121_135214_P13C_AvatarInitials_PeopleUserRow
+// SCOPE: 13C — Replace '?' avatar placeholder with initials derived from display name; no logic changes.
 
 import SwiftUI
 
@@ -77,7 +79,19 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         let loc = ProfileStore.location(for: userID)
         return loc.isEmpty ? "" : loc
     }
-
+    private func initials(from name: String) -> String {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return "?" }
+            let words = trimmed
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+            if words.isEmpty { return "?" }
+            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+            let first = words.first?.first.map { String($0).uppercased() } ?? ""
+            let last = words.last?.first.map { String($0).uppercased() } ?? ""
+            let combo = first + last
+            return combo.isEmpty ? "?" : combo
+        }
     @ViewBuilder
     private var avatar: some View {
         if let img = ProfileStore.avatarImage(for: userID) {
@@ -92,7 +106,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
                 .fill(.thinMaterial)
                 .frame(width: 36, height: 36)
                 .overlay(
-                    Text("?")
+                    Text(initials(from: displayName))
                         .font(.system(size: 14, weight: .bold))
                         .foregroundStyle(Theme.Colors.secondaryText)
                 )
