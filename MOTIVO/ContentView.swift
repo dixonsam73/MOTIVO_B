@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260121_183500_Phase14_Step4_IdentityInBackendFeed
+// SCOPE: Phase 14 Step 4 — show account_directory identity (display_name + optional @account_id) in backend feed rows; no location; no behavior changes.
+
 // CHANGE-ID: 20260121_115517_P13D2_ContentView
 // SCOPE: Phase 13D.2 — Gate backend feed rendering on BackendEnvironment.isConnected (shipping) instead of isPreview (debug-only). No other UI/logic changes.
 // SEARCH-TOKEN: 20260121_115517_P13D2_ContentView
@@ -212,45 +215,6 @@ fileprivate struct SessionsRootView: View {
     // UI state
    
 
-// Step 8C: Backend feed list (read-only rows; no navigation yet)
-@ViewBuilder private var backendFeedList: some View {
-    let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-    let rows: [BackendPost] = (selectedScope == .mine)
-        ? backendFeedStore.minePosts
-        : backendFeedStore.allPosts
-
-    List {
-        Section {
-            if rows.isEmpty {
-                if backendFeedStore.isFetching {
-                    Text("Fetching…")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                } else if let err = backendFeedStore.lastError, !err.isEmpty {
-                    Text(err)
-                        .foregroundStyle(.red)
-                } else {
-                    Text("No backend posts yet.")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-            } else {
-                ForEach(rows, id: \.id) { post in
-                    NavigationLink {
-                        BackendSessionDetailView(model: BackendSessionViewModel(post: post, currentUserID: effectiveBackendUserID))
-                    } label: {
-                        BackendPostRow(model: BackendSessionViewModel(post: post, currentUserID: effectiveBackendUserID))
-                    }
-                    .buttonStyle(.plain)
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                }
-            }
-        }
-        .listSectionSeparator(.hidden, edges: .all)
-    }
-    .refreshable {
-        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
-    }
-}
 
     var body: some View {
         NavigationStack {
@@ -337,23 +301,6 @@ fileprivate struct SessionsRootView: View {
                 .padding(.bottom, Theme.Spacing.s)
 // ---------- Sessions List ----------
                 Group {
-                if useBackendFeed {
-                    backendFeedList
-                        .task(id: selectedScope) {
-                            let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-                            let key = "auto:\(scopeKey)"
-
-                            // Debounce: prevent rapid consecutive auto-fetches for the same scope
-                           
-                            if key == lastBackendAutoFetchKey && Date().timeIntervalSince(lastBackendAutoFetchAt) < 1.5 {
-                                return
-                            }
-                            lastBackendAutoFetchKey = key
-                            lastBackendAutoFetchAt = Date()
-
-                            _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
-                        }
-                } else {
                     List {
                         Section {
                             let rows: [Session] = filteredSessions
@@ -386,8 +333,25 @@ fileprivate struct SessionsRootView: View {
                         }
                         .listSectionSeparator(.hidden, edges: .all)
                     }
+                    .task(id: selectedScope) {
+                        guard useBackendFeed else { return }
+
+                        let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                        let key = "auto:\(scopeKey)"
+
+                        // Debounce: prevent rapid consecutive auto-fetches for the same scope
+                        if key == lastBackendAutoFetchKey &&
+                           Date().timeIntervalSince(lastBackendAutoFetchAt) < 1.5 {
+                            return
+                        }
+
+                        lastBackendAutoFetchKey = key
+                        lastBackendAutoFetchAt = Date()
+
+                        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+                    }
                 }
-                }
+                
                 .id(backendModeChangeTick)
                 .listStyle(.plain)
                 .listRowSeparator(.hidden)
@@ -1752,9 +1716,28 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 
 fileprivate struct BackendPostRow: View {
     let model: BackendSessionViewModel
+    let directoryAccount: DirectoryAccount?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            // Identity (Phase 14): display_name primary; @account_id optional secondary (demoted)
+            if let acct = directoryAccount {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(acct.displayName)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    if let handle = acct.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !handle.isEmpty {
+                        Text("@\(handle)")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.75))
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+
             // Header: activity on the left, session time (if available) on the right
             HStack(alignment: .firstTextBaseline) {
                 Text(model.activityLabel)

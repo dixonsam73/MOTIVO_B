@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260121_181200_Phase14_Step3_FixUserIDType
+// SCOPE: Phase 14 Step 3 — fix AccountDirectoryService resolveAccounts callsite to pass [String] user_id values (uuid strings), not [UUID].
+
+// CHANGE-ID: 20260121_180200_Phase14_Step3_DirectoryBatchCache
+// SCOPE: Phase 14 Step 3 — Batch directory identity lookup after feed fetch; in-memory cache in BackendFeedStore (no UI changes).
+// SEARCH-TOKEN: 20260121_180200_Phase14_Step3_DirectoryBatchCache
 // CHANGE-ID: 20260121_124000_P13F_BackendFollowersFetch
 // SCOPE: Phase 13F — Add fetchFollowersApproved to BackendFollowService and HTTP/Simulated implementations.
 // SEARCH-TOKEN: 20260121_124000_P13F_BackendFollowersFetch
@@ -109,6 +115,9 @@ public final class BackendFeedStore: ObservableObject {
     @Published public private(set) var minePosts: [BackendPost] = []
     @Published public private(set) var allPosts: [BackendPost] = []
 
+    // Phase 14 Step 3: Directory identity cache (viewer-side)
+    @Published public private(set) var directoryAccountsByUserID: [String: DirectoryAccount] = [:]
+
     @Published public private(set) var lastRawCount: Int = 0
     @Published public private(set) var lastMineCount: Int = 0
     @Published public private(set) var lastOwnerKey: String? = nil
@@ -145,6 +154,7 @@ public final class BackendFeedStore: ObservableObject {
 
         minePosts = []
         allPosts = []
+        directoryAccountsByUserID = [:]
     }
 
     public func endFetchSuccess(rawPosts: [BackendPost], minePosts: [BackendPost], allPosts: [BackendPost]) {
@@ -163,7 +173,16 @@ public final class BackendFeedStore: ObservableObject {
         self.lastError = nil
     }
 
-    public func endFetchFailure(_ error: Error) {
+    
+
+    // Phase 14 Step 3: Merge directory accounts into the in-memory cache.
+    public func mergeDirectoryAccounts(_ accounts: [String: DirectoryAccount]) {
+        guard !accounts.isEmpty else { return }
+        var merged = directoryAccountsByUserID
+        for (k, v) in accounts { merged[k] = v }
+        directoryAccountsByUserID = merged
+    }
+public func endFetchFailure(_ error: Error) {
         isFetching = false
         lastError = error.localizedDescription
     }
@@ -958,6 +977,21 @@ public final class HTTPBackendPublishService: BackendPublishService {
                 let sortedAll = sortByCreatedDesc(all)
 
                 BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
+
+                // Phase 14 Step 3: Batch-resolve directory identities for authors visible in the feed.
+                // AccountDirectoryService expects [String] user IDs (uuid strings) matching the RPC signature (uuid[]).
+                let uniqueAuthorUserIDs: [String] = Array(Set(rawPosts.compactMap { post in
+                    guard let s = post.ownerUserID, UUID(uuidString: s) != nil else { return nil }
+                    return s
+                }))
+
+                if !uniqueAuthorUserIDs.isEmpty {
+                    let resolved = await AccountDirectoryService.shared.resolveAccounts(userIDs: uniqueAuthorUserIDs)
+                    if case .success(let map) = resolved {
+                        BackendFeedStore.shared.mergeDirectoryAccounts(map)
+                    }
+                }
+
                 return .success(())
             } catch {
                 BackendFeedStore.shared.endFetchFailure(error)

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260121_172500_Phase14_Step2_DirectoryBatchCache
+// SCOPE: Phase 14 Step 2 — add batch account_directory RPC lookup + in-memory cache for DirectoryAccount (user_id, display_name, account_id)
+// SEARCH-TOKEN: 20260121_172500_Phase14_Step2_DirectoryBatchCache
+
 // CHANGE-ID: 20260120_133525_Phase12C_Hygiene
 // SCOPE: Phase 12C hygiene — sanitize account_id; fix upsert request call
 // CHANGE-ID: 20260120_124800_Phase12C_AccountDirectoryService_ReadWrite
@@ -43,6 +47,89 @@ public final class AccountDirectoryService {
 
     public static let shared = AccountDirectoryService()
     private init() {}
+
+    // Phase 14 Step 2 — batch directory lookup cache (viewer-local, in-memory only).
+    // Note: This cache is intentionally ephemeral (clears on cold start).
+    private actor DirectoryAccountCache {
+        private var store: [String: DirectoryAccount] = [:]
+
+        func getMany(_ userIDs: [String]) -> [String: DirectoryAccount] {
+            var out: [String: DirectoryAccount] = [:]
+            for id in userIDs {
+                if let v = store[id] { out[id] = v }
+            }
+            return out
+        }
+
+        func setMany(_ accounts: [DirectoryAccount]) {
+            for a in accounts {
+                store[a.userID] = a
+            }
+        }
+    }
+
+    private let cache = DirectoryAccountCache()
+
+    /// Resolve directory identity for a set of backend user IDs via SECURITY DEFINER RPC.
+    /// - Returns: Map keyed by user_id (string UUID) for fast lookup in feed/profile-peek.
+    /// - Important: This read path does NOT apply lookup_enabled filtering (People search only).
+    public func resolveAccounts(userIDs: [String]) async -> Result<[String: DirectoryAccount], Error> {
+        let trimmed = userIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !trimmed.isEmpty else {
+            return .success([:])
+        }
+
+        // Preserve first-seen order while de-duping.
+        var orderedUnique: [String] = []
+        var seen: Set<String> = []
+        for id in trimmed {
+            if !seen.contains(id) {
+                seen.insert(id)
+                orderedUnique.append(id)
+            }
+        }
+
+        let cached = await cache.getMany(orderedUnique)
+        let missing = orderedUnique.filter { cached[$0] == nil }
+
+        var merged = cached
+
+        if !missing.isEmpty {
+            let payload: [String: Any] = ["user_ids": missing]
+
+            let body: Data
+            do {
+                body = try JSONSerialization.data(withJSONObject: payload, options: [])
+            } catch {
+                return .failure(error)
+            }
+
+            let path = "rest/v1/rpc/get_account_directory_by_user_ids"
+            let result = await NetworkManager.shared.request(path: path, method: "POST", query: nil, jsonBody: body)
+
+            switch result {
+            case .success(let data):
+                do {
+                    let rows = try JSONDecoder().decode([DirectoryAccount].self, from: data)
+                    await cache.setMany(rows)
+                    for r in rows {
+                        merged[r.userID] = r
+                    }
+                } catch {
+                    return .failure(error)
+                }
+
+            case .failure(let error):
+                return .failure(error)
+            }
+        }
+
+        return .success(merged)
+    }
+
 
     /// Search the backend account directory via RPC.
     /// - Important: This is the only non-owner read surface by design.
