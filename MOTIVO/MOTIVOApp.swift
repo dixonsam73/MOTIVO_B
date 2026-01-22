@@ -13,6 +13,13 @@ import Foundation
 // SCOPE: Step 5 — Inject LocalStubIdentityService into AuthManager (no behaviour/UI changes)
 
 // CHANGE-ID: 20251230_Step7_BackendConfigApplyAtLaunch
+
+// CHANGE-ID: 20260122_113000_Phase142_ConnectedBootstrap_Liveness_Guardrails
+// SCOPE: Phase 14.2 — Non-DEBUG backend config bootstrap, app-foreground connected liveness (apply+feed refresh+queue flush)
+// SEARCH-TOKEN: 20260122_113000_Phase142_AppBootstrap_Liveness
+// CHANGE-ID: 20260122_173200_Phase1421_DefaultConnectedMode
+// SCOPE: Phase 14.2.1 — In non-DEBUG builds, default backendMode_v1 to backendConnected when missing (fresh install) so queue can flush without DebugViewer.
+// SEARCH-TOKEN: 20260122_173200_Phase1421_DefaultConnectedMode
 // SCOPE: Step 7 — Apply BackendConfig at app launch so NetworkManager.baseURL/authToken are configured before backend services select simulated vs HTTP
 
 @main
@@ -20,10 +27,28 @@ struct MOTIVOApp: App {
     let persistenceController = PersistenceController.shared
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
+    @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     init() {
         // Step 7: ensure live HTTP configuration is applied before any backend services initialize
+        // Phase 14.2: Non-DEBUG bootstrap of backend config for fresh installs (Info.plist / xcconfig injected)
+#if !DEBUG
+        let d = UserDefaults.standard
+        if BackendConfig.isConfigured == false {
+            let rawURL = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawKey = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !rawURL.isEmpty, !rawKey.isEmpty {
+                d.set(rawURL, forKey: BackendConfigKeys.baseURL)
+                d.set(rawKey, forKey: BackendConfigKeys.token)
+            }
+        }
+        // Phase 14.2.1: Fresh installs default backend mode to Connected in non-DEBUG builds when config is present.
+        // Ignore-only: if a mode is already set in UserDefaults (e.g., from debug tooling), do not override it.
+        if (d.string(forKey: BackendKeys.modeKey)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true), BackendConfig.isConfigured {
+            d.set(BackendMode.backendConnected.rawValue, forKey: BackendKeys.modeKey)
+        }
+#endif
         BackendConfig.apply()
         let identityService = LocalStubIdentityService()
         self.identityService = identityService
@@ -126,6 +151,16 @@ struct MOTIVOApp: App {
                 .onAppear {
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
+                }
+                .onChange(of: scenePhase) { phase in
+                    guard phase == .active else { return }
+                    // Phase 14.2: Connected-mode liveness trigger (idempotent apply + lightweight refresh/flush)
+                    BackendConfig.apply()
+                    guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }
+                    Task {
+                        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "all")
+                        await SessionSyncQueue.shared.flushNow()
+                    }
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     persistenceController.currentUserID = uid

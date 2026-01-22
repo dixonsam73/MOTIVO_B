@@ -5,6 +5,10 @@
 //  Created by Samuel Dixon on 22/09/2025.
 //
 
+// CHANGE-ID: 20260122_113000_Phase142_IgnoreBackendOverrideInConnected
+// SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true
+// SEARCH-TOKEN: 20260122_113000_Phase142_AuthIgnoreOverride
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -87,7 +91,8 @@ final class AuthManager: NSObject, ObservableObject {
     /// Returns a trimmed, lowercased string, or nil if unavailable.
     static func canonicalBackendUserID() -> String? {
         #if DEBUG
-        if let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if BackendEnvironment.shared.isConnected == false,
+           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty {
             return override.lowercased()
         }

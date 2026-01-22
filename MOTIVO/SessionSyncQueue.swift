@@ -14,6 +14,10 @@
 //  SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
 //
 
+// CHANGE-ID: 20260122_113000_Phase142_ConnectedFlushEnabled
+// SCOPE: Phase 14.2 — Allow publish queue flush in backendConnected (not preview-only)
+// SEARCH-TOKEN: 20260122_113000_Phase142_QueueFlushConnected
+
 import Foundation
 
 @MainActor
@@ -128,7 +132,7 @@ public final class SessionSyncQueue: ObservableObject {
         NSLog("[SessionSyncQueue] flushNow requested • mode=%@ • queued=%d", String(describing: mode), items.count)
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
 
-        if mode == .backendPreview {
+        if mode == .backendPreview || mode == .backendConnected {
             for payload in items {
                 let result = await BackendEnvironment.shared.publish.uploadPost(payload)
                 switch result {

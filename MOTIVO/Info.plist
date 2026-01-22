@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>SUPABASE_URL</key>
+	<string>https://rlwtqxumfobakvdueugm.supabase.co</string>
+	<key>SUPABASE_ANON_KEY</key>
+	<string>eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsd3RxeHVtZm9iYWt2ZHVldWdtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjcxMTYzNDAsImV4cCI6MjA4MjY5MjM0MH0.vsecaUKX0YQOGLOhNn-r5081JFInjkiLt3DRI1xtxCY</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>

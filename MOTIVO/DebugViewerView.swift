@@ -7,6 +7,10 @@
 // SEARCH-TOKEN: 20260108_134900_Step8G_StorageHello_DebugViewer
 
 #if DEBUG
+// CHANGE-ID: 20260122_113000_Phase142_DebugOverridesIgnoredInConnected
+// SCOPE: Phase 14.2 — Label debug identity overrides as ignored in Connected mode and disable interaction
+// SEARCH-TOKEN: 20260122_113000_Phase142_DebugViewerGuardrails
+
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -200,6 +204,7 @@ using (
                         storageHelloIsWorking = false
                         attachPostStatusText = nil
                     }
+                    .disabled(BackendEnvironment.shared.isConnected)
                     .disabled(storageHelloIsBusy)
 
                     Text(objectPath)
@@ -251,6 +256,7 @@ using (
                 Button("Attach to Post") {
                     Task { await attachLastDebugUploadToPost() }
                 }
+                    .disabled(BackendEnvironment.shared.isConnected)
                 .disabled(storageHelloIsBusy || storageHelloObjectPath == nil || attachPostIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 if storageHelloIsBusy {
@@ -740,10 +746,12 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                     FollowStore.shared.simulateRequestFollow(to: targetID)
                     FollowStore.shared.debugReload()
                 }
+                    .disabled(BackendEnvironment.shared.isConnected)
                 Button("Unfollow") {
                     FollowStore.shared.simulateUnfollow(targetID)
                     FollowStore.shared.debugReload()
                 }
+                    .disabled(BackendEnvironment.shared.isConnected)
             }
 
             HStack {
@@ -753,6 +761,7 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                     FollowStore.shared.simulateAcceptFollow(from: acceptFromID)
                     FollowStore.shared.debugReload()
                 }
+                    .disabled(BackendEnvironment.shared.isConnected)
             }
         }
         .padding(.horizontal)
@@ -797,6 +806,7 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                 Button("Copy") {
                     copyToClipboard(displayText)
                 }
+                    .disabled(BackendEnvironment.shared.isConnected)
                 .accessibilityLabel("Copy JSON")
 
                 // Share button
@@ -804,27 +814,37 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
 
                 // Identity menu
                 Menu("Identity") {
+                    if BackendEnvironment.shared.isConnected {
+                        Text("Ignored in Connected mode")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
                     Button("local-device") {
                         UserDefaults.standard.set("local-device", forKey: "Debug.currentUserIDOverride")
                         PublishService.shared.setOwnerKey("local-device")
                         FollowStore.shared.debugReload()
                     }
+                    .disabled(BackendEnvironment.shared.isConnected)
                     Button("user_B") {
                         UserDefaults.standard.set("user_B", forKey: "Debug.currentUserIDOverride")
                         PublishService.shared.setOwnerKey("user_B")
                         FollowStore.shared.debugReload()
                     }
+                    .disabled(BackendEnvironment.shared.isConnected)
                     Button("user_C") {
                         UserDefaults.standard.set("user_C", forKey: "Debug.currentUserIDOverride")
                         PublishService.shared.setOwnerKey("user_C")
                         FollowStore.shared.debugReload()
                     }
+                    .disabled(BackendEnvironment.shared.isConnected)
                     Divider()
                     Button("Clear Override") {
                         UserDefaults.standard.removeObject(forKey: "Debug.currentUserIDOverride")
                         PublishService.shared.setOwnerKey(PersistenceController.shared.currentUserID ?? "local-device")
                         FollowStore.shared.debugReload()
                     }
+                    .disabled(BackendEnvironment.shared.isConnected)
                 }
             }
         }

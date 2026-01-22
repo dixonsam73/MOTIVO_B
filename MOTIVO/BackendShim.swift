@@ -41,6 +41,10 @@
 // SCOPE: Add posts.notes decode + include notes in publish POST body (gated by areNotesPrivate)
 // SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
 
+// CHANGE-ID: 20260122_113000_Phase142_IgnoreBackendOverrideInConnected_FollowService
+// SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true (HTTPBackendFollowService)
+// SEARCH-TOKEN: 20260122_113000_Phase142_BackendShimIgnoreOverride
+
 import Foundation
 import CoreData
 import SwiftUI
@@ -299,7 +303,8 @@ public final class HTTPBackendFollowService: BackendFollowService {
 
     private func currentBackendUserID() -> String? {
         #if DEBUG
-        if let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if BackendEnvironment.shared.isConnected == false,
+           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty {
             return override.lowercased()
         }
