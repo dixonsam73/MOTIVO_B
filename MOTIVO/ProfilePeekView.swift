@@ -9,6 +9,10 @@
 // SCOPE: Phase 12C correctness — use auth.backendUserID (Supabase UUID) as viewerID for follow/directory logic; avoid Apple subject IDs.
 // CHANGE-ID: 20260121_135214_P13C_AvatarInitials_ProfilePeek
 // SCOPE: 13C — Use initials for missing avatar in ProfilePeek header; no backend fetch.
+// CHANGE-ID: 20260121_203420_Phase141_ProfilePeek_OwnerExplicit_FollowReactive
+// SCOPE: Phase 14.1 — Observe FollowStore for immediate follow UI invalidation; explicit owner path to prevent self-peek gating in any mode.
+// SEARCH-TOKEN: 20260121_203420_Phase141_ProfilePeek_OwnerExplicit_FollowReactive
+
 import SwiftUI
 import CoreData
 import Combine
@@ -16,6 +20,8 @@ import Combine
 struct ProfilePeekView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject var auth: AuthManager
+@ObservedObject private var followStore = FollowStore.shared
+
     @State private var revealSelfName = false
     @State private var showUnfollowConfirm = false
     @Environment(\.colorScheme) private var colorScheme
@@ -43,8 +49,25 @@ struct ProfilePeekView: View {
         return (try? PersistenceController.shared.currentUserID) ?? "localUser"
     }
 
+    private func normalizeID(_ s: String?) -> String {
+        (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var localCurrentUserID: String {
+        (try? PersistenceController.shared.currentUserID) ?? "localUser"
+    }
+
+    /// Invariant: self-peek must never render follow gating or “private profile” messaging in any mode.
+    /// Owner path is explicit.
+    private var isOwner: Bool {
+        let owner = normalizeID(ownerID)
+        return owner == normalizeID(viewerID)
+            || owner == normalizeID(auth.backendUserID)
+            || owner == normalizeID(localCurrentUserID)
+    }
+
     private var canSee: Bool {
-        viewerID == ownerID || FollowStore.shared.state(for: ownerID) == .following
+        isOwner || followStore.state(for: ownerID) == .following
     }
 
     // Fetch a few lightweight stats locally
@@ -83,7 +106,7 @@ struct ProfilePeekView: View {
                 HStack(spacing: Theme.Spacing.m) {
                     // Avatar
                     Button(action: {
-                        if viewerID == ownerID {
+                        if isOwner {
                             revealSelfName.toggle()
                         }
                     }) {
@@ -120,7 +143,7 @@ struct ProfilePeekView: View {
                         .padding(.top, 2)
                 }
 
-                if viewerID == ownerID || canSee {
+                if canSee {
                     // Visible summary
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Overview").sectionHeader()
@@ -142,7 +165,7 @@ struct ProfilePeekView: View {
 
                     Divider().overlay(Theme.Colors.stroke(colorScheme).opacity(0.5)).padding(.vertical, Theme.Spacing.s)
 
-                    if (viewerID == ownerID || canSee), !ownerInstruments.isEmpty {
+                    if canSee, !ownerInstruments.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             Text("Instruments").sectionHeader()
                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
@@ -169,7 +192,7 @@ struct ProfilePeekView: View {
             }
             .task {
                 // Trigger a one-time backfill only when peeking our own profile
-                if viewerID == ownerID,
+                if isOwner,
                    let uid = auth.backendUserID ?? AuthManager.canonicalBackendUserID() ?? (try? PersistenceController.shared.currentUserID) {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
@@ -218,7 +241,7 @@ struct ProfilePeekView: View {
 
     private func displayName(_ id: String) -> String {
         // Prefer AuthManager displayName if self; else Profile name; fallback short ID
-        if id == (auth.backendUserID ?? "") {
+        if isOwner && normalizeID(id) == normalizeID(ownerID) {
             return revealSelfName ? (auth.displayName ?? "You") : "You"
         }
         if let s = directoryDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {

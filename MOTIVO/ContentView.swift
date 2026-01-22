@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
+// SCOPE: Phase 14.1 — Requests '+' badge freshness: refresh FollowStore on pull-to-refresh and on app foreground (scenePhase active). No polling.
+// SEARCH-TOKEN: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
+
 // CHANGE-ID: 20260121_183500_Phase14_Step4_IdentityInBackendFeed
 // SCOPE: Phase 14 Step 4 — show account_directory identity (display_name + optional @account_id) in backend feed rows; no location; no behavior changes.
 
@@ -46,6 +50,10 @@
 // CHANGE-ID: 20260111_132050_feed_filter_visual_overhaul
 // SCOPE: Visual-only — shrink/soften Feed Filter collapsed+open states; no logic/behavior changes
 // UNIQUE-TOKEN: 20260111_132050_feed_filter_visual_overhaul
+// CHANGE-ID: 20260121_203420_Phase141_ContentView_FollowBadgeReactive_OwnerPeekFix
+// SCOPE: Phase 14.1 — Observe FollowStore for reactive request '+' badge; unify viewerID for owner checks; ensure self-peek never gated.
+// SEARCH-TOKEN: 20260121_203420_Phase141_ContentView_FollowBadgeReactive_OwnerPeekFix
+
 import SwiftUI
 import CoreData
 import Combine
@@ -118,6 +126,8 @@ fileprivate enum ActivityFilter: Hashable, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
+@ObservedObject private var followStore = FollowStore.shared
+
     var body: some View {
         SessionsRootView(userID: auth.currentUserID, backendUserID: auth.backendUserID)
             .id(auth.currentUserID ?? "nil-user")
@@ -129,6 +139,10 @@ struct ContentView: View {
 fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+
+    // Phase 14.1: make follow requests reactive in this view (badge)
+    @ObservedObject private var followStore = FollowStore.shared
 
     let userID: String?
     let backendUserID: String?
@@ -351,7 +365,15 @@ fileprivate struct SessionsRootView: View {
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
                     }
                 }
-                
+
+                .refreshable {
+                    // User-initiated refresh (pull-to-refresh)
+                    if useBackendFeed {
+                        let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+                    }
+                    await followStore.refreshFromBackendIfPossible()
+                }
                 .id(backendModeChangeTick)
                 .listStyle(.plain)
                 .listRowSeparator(.hidden)
@@ -444,7 +466,7 @@ fileprivate struct SessionsRootView: View {
                         .contentShape(Circle())
 
                         // Subtle "+" indicator for incoming follow requests (outside the pill)
-                        if !FollowStore.shared.requests.isEmpty {
+                        if !followStore.requests.isEmpty {
                             Text("+")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -565,6 +587,14 @@ Spacer()
                 debounceCancellable = Just(searchText)
                     .delay(for: .milliseconds(250), scheduler: RunLoop.main)
                     .sink { debouncedQuery = $0 }
+            }
+
+            .onChange(of: scenePhase) { phase in
+                // Phase 14.1: refresh incoming follow requests when returning to foreground (no polling)
+                guard phase == .active else { return }
+                Task { @MainActor in
+                    await followStore.refreshFromBackendIfPossible()
+                }
             }
             .appBackground()
         }
@@ -933,6 +963,9 @@ fileprivate struct SessionRow: View {
             return override
         }
         #endif
+        if let bid = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty {
+            return bid.lowercased()
+        }
         if let authID = auth.currentUserID, !authID.isEmpty {
             return authID
         }
@@ -1169,7 +1202,12 @@ fileprivate struct SessionRow: View {
             }
         }
         .sheet(isPresented: $showPeek) {
-            ProfilePeekView(ownerID: session.ownerUserID ?? (viewerUserID ?? ""))
+            let viewer = viewerUserID ?? ""
+            let owner = session.ownerUserID ?? ""
+            // Invariant: self-peek must never render follow gating in any mode.
+            let ownerForPeek = (owner.isEmpty || owner == viewer) ? (viewer.isEmpty ? owner : viewer) : owner
+
+            ProfilePeekView(ownerID: ownerForPeek)
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
         }

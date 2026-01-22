@@ -1,12 +1,18 @@
 // CHANGE-ID: 20260117_101000_10B_Following_BGFix
 // SCOPE: FollowingListView — remove white List canvas and match app background; preserve existing behavior.
 
+// CHANGE-ID: 20260121_203420_Phase141_FollowingListView_DirectoryIdentityWiring
+// SCOPE: Phase 14.1 — Resolve directory identity for list rows and pass into PeopleUserRow/ProfilePeek; avoid opaque ID fallback.
+// SEARCH-TOKEN: 20260121_203420_Phase141_FollowingListView_DirectoryIdentityWiring
+
 import SwiftUI
 
 struct FollowingListView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
 
+
+    @State private var directory: [String: DirectoryAccount] = [:]
     private var userIDs: [String] {
         Array(followStore.following).sorted()
     }
@@ -20,8 +26,17 @@ struct FollowingListView: View {
                     .listRowBackground(Color.clear)
             } else {
                 ForEach(userIDs, id: \.self) { userID in
-                    PeopleUserRow(userID: userID) {
-                        ProfilePeekView(ownerID: userID)
+                    let acct = directory[userID]
+                    PeopleUserRow(
+                        userID: userID,
+                        overrideDisplayName: acct?.displayName,
+                        overrideSubtitle: acct?.accountID.map { "@\($0)" }
+                    ) {
+                        ProfilePeekView(
+                            ownerID: userID,
+                            directoryDisplayName: acct?.displayName,
+                            directoryAccountID: acct?.accountID
+                        )
                     }
                     .listRowBackground(Color.clear)
                 }
@@ -31,6 +46,17 @@ struct FollowingListView: View {
         // Remove the default white List canvas so the app background shows through.
         .scrollContentBackground(.hidden)
         .appBackground()
+        .task(id: userIDs) {
+            let ids = userIDs
+            guard !ids.isEmpty else {
+                directory = [:]
+                return
+            }
+            let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+            if case .success(let map) = result {
+                directory = map
+            }
+        }
         .navigationTitle("Following")
         .navigationBarTitleDisplayMode(.inline)
     }

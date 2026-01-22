@@ -12,6 +12,10 @@
 // SCOPE: Phase 10D.1 + 10D.3 — Defensive incoming-requests filtering and remove remaining system-default controls in PeopleView.
 // SEARCH-TOKEN: 20260117_122600_Phase10D_PeopleView_RequestFilter_LookupStyle
 
+// CHANGE-ID: 20260121_203420_Phase141_PeopleView_RequestIdentityWiring
+// SCOPE: Phase 14.1 — Reuse directory batch resolver for Requests rows; avoid UI fallback to opaque user IDs.
+// SEARCH-TOKEN: 20260121_203420_Phase141_PeopleView_RequestIdentityWiring
+
 import SwiftUI
 
 /// Phase 10B — People Hub
@@ -24,6 +28,8 @@ struct PeopleView: View {
     @State private var searchText: String = ""
     @State private var searchResults: [DirectoryAccount] = []
     @State private var searchError: String? = nil
+@State private var requestDirectory: [String: DirectoryAccount] = [:]
+
     @State private var isSearching: Bool = false
     @Environment(\.colorScheme) private var colorScheme
 
@@ -56,6 +62,17 @@ struct PeopleView: View {
             // In Backend Preview, this keeps requests/following fresh when opening People.
             await followStore.refreshFromBackendIfPossible()
         }
+        .task(id: incomingRequestIDs) {
+            let ids = incomingRequestIDs
+            guard !ids.isEmpty else {
+                requestDirectory = [:]
+                return
+            }
+            let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+            if case .success(let map) = result {
+                requestDirectory = map
+            }
+        }
     }
 
     // MARK: - Sections
@@ -74,8 +91,17 @@ struct PeopleView: View {
             Text("Requests").sectionHeader()
 
             ForEach(incomingRequestIDs, id: \.self) { userID in
-                PeopleUserRow(userID: userID) {
-                    ProfilePeekView(ownerID: userID)
+                let acct = requestDirectory[userID]
+                PeopleUserRow(
+                    userID: userID,
+                    overrideDisplayName: acct?.displayName,
+                    overrideSubtitle: acct?.accountID.map { "@\($0)" }
+                ) {
+                    ProfilePeekView(
+                        ownerID: userID,
+                        directoryDisplayName: acct?.displayName,
+                        directoryAccountID: acct?.accountID
+                    )
                 } trailing: {
                     HStack(spacing: Theme.Spacing.s) {
                         Button {
