@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260122_220200_14_2_1c_RemoteTitlesParity
+// SCOPE: Phase 14.2.1 — RemotePostRowTwin: derive feedTitle/feedSubtitle using the same rules as SessionActivityHelpers (default description vs custom) and reuse the same subtitle splitting for instrument/date lines. No other UI/nav changes.
+// SEARCH-TOKEN: 20260122_220200_14_2_1c_RemoteTitlesParity
+
 // CHANGE-ID: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
 // SCOPE: Phase 14.2.1 — ContentView Connected feed parity: render remote backend posts inline with local sessions using a unified row source; keep UI chrome and local SessionRow/navigation untouched; remote rows use SessionRow-twin layout and navigate to BackendSessionDetailView.
 // SEARCH-TOKEN: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
@@ -1974,30 +1978,121 @@ fileprivate struct RemotePostRowTwin: View {
         BackendSessionViewModel(post: post, currentUserID: (viewerUserID ?? ""))
     }
 
+    private var activityName: String {
+        if let label = post.activityLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !label.isEmpty {
+            return label
+        }
+        if let type = post.activityType?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !type.isEmpty {
+            return type
+        }
+        return "Practice"
+    }
+
+    private var postDescription: String {
+        post.activityDetail?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var instrumentName: String {
+        if let inst = post.instrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !inst.isEmpty {
+            return inst
+        }
+        return "Instrument"
+    }
+
+    private var timestampDate: Date {
+        FeedRowItem.parseBackendDate(post.sessionTimestamp)
+            ?? FeedRowItem.parseBackendDate(post.createdAt)
+            ?? Date()
+    }
+
+    private var defaultDescription: String {
+        "\(dayPart(for: timestampDate)) \(activityName)"
+    }
+
+    private var isUsingDefaultDescription: Bool {
+        let desc = postDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !desc.isEmpty else { return false }
+        return desc.caseInsensitiveCompare(defaultDescription) == .orderedSame
+    }
+
     private var feedTitle: String {
-        // Backend posts do not carry the local 'title' field; use the backend's activityLabel as the row title.
-        (post.activityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "Session"
+        // Mirror SessionActivity.feedTitle(for:) rules for BackendPost.
+        let d = postDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if d.isEmpty { return "\(instrumentName) : \(activityName)" }
+        if isUsingDefaultDescription { return d }
+        return d
+    }
+
+    private var feedSubtitle: String {
+        // Mirror SessionActivity.feedSubtitle(for:) rules for BackendPost.
+        let (timeStr, dateStr) = timeAndDateStrings(for: timestampDate)
+        let d = postDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if d.isEmpty {
+            return [timeStr, dateStr].joined(separator: ", ")
+        } else if isUsingDefaultDescription {
+            return [instrumentName, timeStr, dateStr].joined(separator: ", ")
+        } else {
+            return [instrumentName, activityName, timeStr, dateStr].joined(separator: ", ")
+        }
+    }
+
+    private var subtitleParts: [String] {
+        // Split the existing subtitle by commas, trimming whitespace
+        feedSubtitle
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
     }
 
     private var dateTimeLine: String? {
-        guard let d = FeedRowItem.parseBackendDate(post.sessionTimestamp) ?? FeedRowItem.parseBackendDate(post.createdAt) else { return nil }
-        let dfDate = DateFormatter()
-        dfDate.dateStyle = .medium
-        dfDate.timeStyle = .none
-        let dfTime = DateFormatter()
-        dfTime.dateStyle = .none
-        dfTime.timeStyle = .short
-        return "\(dfDate.string(from: d)) at \(dfTime.string(from: d))"
+        // Expect last two parts to be time then date; produce 'DATE at TIME'
+        let parts = subtitleParts
+        guard parts.count >= 2 else { return nil }
+        let time = parts[parts.count - 2]
+        let date = parts[parts.count - 1]
+        return "\(date) at \(time)"
     }
 
     private var instrumentActivityLine: String {
-        var parts: [String] = []
-        if let inst = post.instrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !inst.isEmpty { parts.append(inst) }
-        if let detail = post.activityDetail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty { parts.append(detail) }
-        return parts.joined(separator: ", ")
+        // Everything except the last two parts (time/date)
+        let parts = subtitleParts
+        if parts.count <= 2 {
+            return parts.dropLast(max(0, parts.count - 2)).joined(separator: ", ")
+        } else {
+            return parts.dropLast(2).joined(separator: ", ")
+        }
     }
 
-    private var extraAttachmentCount: Int {
+    private func dayPart(for date: Date) -> String {
+        // Local time components
+        let cal = Calendar.current
+        let comps = cal.dateComponents([.hour], from: date)
+        let hour = comps.hour ?? 0
+        switch hour {
+        case 0...4: return "Late Night"
+        case 5...11: return "Morning"
+        case 12...17: return "Afternoon"
+        default: return "Evening" // 18...23
+        }
+    }
+
+    private func timeAndDateStrings(for date: Date) -> (String, String) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.doesRelativeDateFormatting = true
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .none
+        timeFormatter.timeStyle = .short
+
+        return (timeFormatter.string(from: date), dateFormatter.string(from: date))
+    }
+
+private var extraAttachmentCount: Int {
         let total = model.attachmentRefs.count
         return max(total - 1, 0)
     }
