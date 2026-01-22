@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
+// SCOPE: Phase 14.2.1 — ContentView Connected feed parity: render remote backend posts inline with local sessions using a unified row source; keep UI chrome and local SessionRow/navigation untouched; remote rows use SessionRow-twin layout and navigate to BackendSessionDetailView.
+// SEARCH-TOKEN: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
+// CHANGE-ID: 20260122_190500_14_2_1_HeadlessConnectedRevert
+// SCOPE: Phase 14.2.1 — Revert Connected feed UI to canonical local SessionRow + SessionDetailView navigation; keep headless connected-mode backend fetch/refresh triggers; do not render backend-specific feed rows in Connected mode.
+// SEARCH-TOKEN: 20260122_190500_HeadlessConnectedRevert
 // CHANGE-ID: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
 // SCOPE: Phase 14.1 — Requests '+' badge freshness: refresh FollowStore on pull-to-refresh and on app foreground (scenePhase active). No polling.
 // SEARCH-TOKEN: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
@@ -54,6 +60,10 @@
 // SCOPE: Phase 14.1 — Observe FollowStore for reactive request '+' badge; unify viewerID for owner checks; ensure self-peek never gated.
 // SEARCH-TOKEN: 20260121_203420_Phase141_ContentView_FollowBadgeReactive_OwnerPeekFix
 
+// CHANGE-ID: 20260122_113000_Phase142_ContentViewIgnoreOverridesInConnected
+// SCOPE: Phase 14.2 — Ignore debug identity overrides in connected mode (owner checks + viewer-local state)
+// SEARCH-TOKEN: 20260122_113000_Phase142_ContentViewGuardrails
+
 import SwiftUI
 import CoreData
 import Combine
@@ -98,6 +108,52 @@ fileprivate enum FeedScope: String, CaseIterable, Identifiable {
     case mine = "Mine"
     var id: String { rawValue }
 }
+
+// Unified feed rows for ContentView List rendering (Local Core Data sessions + Remote backend posts).
+fileprivate struct FeedRowItem: Identifiable {
+    enum Kind {
+        case local(Session)
+        case remote(BackendPost)
+    }
+
+    let id: String
+    let kind: Kind
+    let sortDate: Date
+
+    static func build(local: [Session], remote: [BackendPost]) -> [FeedRowItem] {
+        var out: [FeedRowItem] = []
+
+        out.append(contentsOf: local.map { s in
+            let sid = s.objectID.uriRepresentation().absoluteString
+            let ts = (s.value(forKey: "timestamp") as? Date) ?? Date.distantPast
+            return FeedRowItem(id: "local:\(sid)", kind: .local(s), sortDate: ts)
+        })
+
+        out.append(contentsOf: remote.map { p in
+            let ts = FeedRowItem.parseBackendDate(p.sessionTimestamp) ??
+                     FeedRowItem.parseBackendDate(p.createdAt) ??
+                     Date.distantPast
+            return FeedRowItem(id: "remote:\(p.id.uuidString)", kind: .remote(p), sortDate: ts)
+        })
+
+        // Newest first.
+        out.sort { $0.sortDate > $1.sortDate }
+        return out
+    }
+
+    private static let iso = ISO8601DateFormatter()
+
+    static func parseBackendDate(_ s: String?) -> Date? {
+        guard let s, !s.isEmpty else { return nil }
+        // Most Supabase timestamps are ISO8601; be forgiving.
+        if let d = iso.date(from: s) { return d }
+        // Attempt to handle fractional seconds if not handled by default formatter.
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f.date(from: s)
+    }
+}
+
 
 // Unified filter type for Activity (core or custom)
 fileprivate enum ActivityFilter: Hashable, Identifiable {
@@ -156,6 +212,7 @@ fileprivate struct SessionsRootView: View {
     @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
     @State private var debouncedQuery: String = ""
     @State private var pushSessionID: UUID? = nil
+    @State private var pushRemotePostID: UUID? = nil
 
     @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
@@ -178,7 +235,8 @@ fileprivate struct SessionsRootView: View {
 
     #if DEBUG
     private var effectiveUserID: String? {
-        if let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
+        if BackendEnvironment.shared.isConnected == false,
+           let o = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride") { return o }
         return userID
     }
     #else
@@ -189,7 +247,8 @@ fileprivate struct SessionsRootView: View {
     /// Uses a dedicated DEBUG override so we don't mix local (Apple) IDs with backend UUIDs.
     private var effectiveBackendUserID: String? {
         #if DEBUG
-        if let o = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if BackendEnvironment.shared.isConnected == false,
+           let o = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
            !o.isEmpty {
             return o.lowercased()
         }
@@ -317,32 +376,105 @@ fileprivate struct SessionsRootView: View {
                 Group {
                     List {
                         Section {
-                            let rows: [Session] = filteredSessions
-                            if rows.isEmpty {
+                            let localRows: [Session] = filteredSessions
+
+                            // Connected-mode remote posts (do not materialize into Core Data)
+                            let remotePostsRaw: [BackendPost] = {
+                                guard useBackendFeed else { return [] }
+                                return (selectedScope == .mine) ? backendFeedStore.minePosts : backendFeedStore.allPosts
+                            }()
+
+                            // Dedupe: if a backend post corresponds to a local session on this device, prefer the local row.
+                            let localSessionIDs: Set<UUID> = Set(localRows.compactMap { $0.value(forKey: "id") as? UUID })
+                            let remotePosts: [BackendPost] = remotePostsRaw.filter { post in
+                                guard let sid = post.sessionID else { return true }
+                                return !localSessionIDs.contains(sid)
+                            }
+
+                            // Build unified row source (Local sessions + Remote posts)
+                            let feedItems: [FeedRowItem] = FeedRowItem.build(
+                                local: localRows,
+                                remote: remotePosts
+                            )
+
+                            if feedItems.isEmpty {
                                 Text("No sessions match your filters yet.")
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             } else {
-                                ForEach(rows, id: \.objectID) { session in
-                                    ZStack {
-                                        NavigationLink(
-                                            destination: SessionDetailView(session: session),
-                                            isActive: Binding(
-                                                get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                set: { active in if !active { pushSessionID = nil } }
-                                            )
-                                        ) { EmptyView() }
-                                        .opacity(0)
+                                ForEach(feedItems) { item in
+                                    switch item.kind {
+                                    case .local(let session):
+                                        ZStack {
+                                            NavigationLink(
+                                                destination: SessionDetailView(session: session),
+                                                isActive: Binding(
+                                                    get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                    set: { active in if !active { pushSessionID = nil } }
+                                                )
+                                            ) { EmptyView() }
+                                            .opacity(0)
 
-                                        SessionRow(session: session, scope: selectedScope)
+                                            SessionRow(session: session, scope: selectedScope)
+                                                .contentShape(Rectangle())
+                                                .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
+                                                .cardSurface()
+                                                .padding(.bottom, Theme.Spacing.section)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowSeparator(.hidden)
+                                        .deleteDisabled(false)
+
+                                    case .remote(let post):
+                                        ZStack {
+                                            NavigationLink(
+                                                destination: BackendSessionDetailView(
+                                                    model: BackendSessionViewModel(
+                                                        post: post,
+                                                        currentUserID: (effectiveUserID ?? "")
+                                                    )
+                                                ),
+                                                isActive: Binding(
+                                                    get: { pushRemotePostID == post.id },
+                                                    set: { active in if !active { pushRemotePostID = nil } }
+                                                )
+                                            ) { EmptyView() }
+                                            .opacity(0)
+
+                                            RemotePostRowTwin(
+                                                post: post,
+                                                scope: selectedScope,
+                                                directoryAccount: {
+                                                    if let owner = post.ownerUserID {
+                                                        return backendFeedStore.directoryAccountsByUserID[owner]
+                                                    }
+                                                    return nil
+                                                }(),
+                                                viewerUserID: effectiveUserID
+                                            )
                                             .contentShape(Rectangle())
-                                            .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
+                                            .onTapGesture { pushRemotePostID = post.id }
                                             .cardSurface()
                                             .padding(.bottom, Theme.Spacing.section)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .listRowSeparator(.hidden)
+                                        .deleteDisabled(true)
                                     }
-                                    .buttonStyle(.plain)
-                                    .listRowSeparator(.hidden)
                                 }
-                                .onDelete(perform: deleteSessions)
+                                .onDelete { offsets in
+                                    // Local sessions only — remote rows are deleteDisabled(true)
+                                    var localOffsets = IndexSet()
+                                    for idx in offsets {
+                                        guard idx < feedItems.count else { continue }
+                                        if case .local(let s) = feedItems[idx].kind,
+                                           let localIndex = localRows.firstIndex(where: { $0.objectID == s.objectID }) {
+                                            localOffsets.insert(localIndex)
+                                        }
+                                    }
+                                    if !localOffsets.isEmpty {
+                                        deleteSessions(at: localOffsets)
+                                    }
+                                }
                             }
                         }
                         .listSectionSeparator(.hidden, edges: .all)
@@ -1812,6 +1944,326 @@ fileprivate struct BackendPostRow: View {
         .cardSurface()
     }
 }
+
+// Phase 14.2.1 — Remote post row that is a visual twin of SessionRow (read-only)
+fileprivate struct RemotePostRowTwin: View {
+    let post: BackendPost
+    let scope: FeedScope
+    let directoryAccount: DirectoryAccount?
+    let viewerUserID: String?
+
+    @Environment(\.managedObjectContext) private var ctx
+    @EnvironmentObject private var auth: AuthManager
+
+    @State private var showPeek: Bool = false
+    @State private var isSavedLocal: Bool = false
+
+    private var viewerIsOwner: Bool {
+        guard let viewer = viewerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              let owner = post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !viewer.isEmpty, !owner.isEmpty else { return false }
+        return viewer == owner
+    }
+
+    private var ownerIDNonEmpty: String? {
+        if let o = post.ownerUserID, !o.isEmpty { return o }
+        return viewerIsOwner ? (viewerUserID ?? nil) : nil
+    }
+
+    private var model: BackendSessionViewModel {
+        BackendSessionViewModel(post: post, currentUserID: (viewerUserID ?? ""))
+    }
+
+    private var feedTitle: String {
+        // Backend posts do not carry the local 'title' field; use the backend's activityLabel as the row title.
+        (post.activityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 } ?? "Session"
+    }
+
+    private var dateTimeLine: String? {
+        guard let d = FeedRowItem.parseBackendDate(post.sessionTimestamp) ?? FeedRowItem.parseBackendDate(post.createdAt) else { return nil }
+        let dfDate = DateFormatter()
+        dfDate.dateStyle = .medium
+        dfDate.timeStyle = .none
+        let dfTime = DateFormatter()
+        dfTime.dateStyle = .none
+        dfTime.timeStyle = .short
+        return "\(dfDate.string(from: d)) at \(dfTime.string(from: d))"
+    }
+
+    private var instrumentActivityLine: String {
+        var parts: [String] = []
+        if let inst = post.instrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines), !inst.isEmpty { parts.append(inst) }
+        if let detail = post.activityDetail?.trimmingCharacters(in: .whitespacesAndNewlines), !detail.isEmpty { parts.append(detail) }
+        return parts.joined(separator: ", ")
+    }
+
+    private var extraAttachmentCount: Int {
+        let total = model.attachmentRefs.count
+        return max(total - 1, 0)
+    }
+
+    private var favAttachmentRef: BackendSessionViewModel.BackendAttachmentRef? {
+        model.attachmentRefs.first
+    }
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Identity header (match SessionRow: only when not in Mine)
+                if scope != .mine,
+                   let owner = ownerIDNonEmpty,
+                   !owner.isEmpty {
+
+                    HStack(alignment: .center, spacing: 8) {
+                        // Avatar 32pt circle
+                        Button(action: { showPeek = true }) {
+                            Group {
+                                #if canImport(UIKit)
+                                if let img = ProfileStore.avatarImage(for: owner) {
+                                    Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else {
+                                    let initials: String = {
+                                        if let acct = directoryAccount {
+                                            let words = acct.displayName
+                                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                                                .components(separatedBy: .whitespacesAndNewlines)
+                                                .filter { !$0.isEmpty }
+                                            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                            let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                            let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                            let combo = (first + last)
+                                            return combo.isEmpty ? "U" : combo
+                                        }
+                                        return viewerIsOwner ? "Y" : "U"
+                                    }()
+                                    ZStack {
+                                        Circle().fill(Color.gray.opacity(0.2))
+                                        Text(initials)
+                                            .font(.system(size: 16, weight: .bold))
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                }
+                                #else
+                                ZStack {
+                                    Circle().fill(Color.gray.opacity(0.2))
+                                    Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+                                }
+                                #endif
+                            }
+                            .frame(width: 32, height: 32)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
+                        }
+                        .buttonStyle(.plain)
+
+                        // Name and optional location on one line
+                        let realName: String = {
+                            if viewerIsOwner { return "You" }
+                            if let acct = directoryAccount { return acct.displayName }
+                            return "User"
+                        }()
+
+                        let loc = ProfileStore.location(for: owner)
+
+                        HStack(spacing: 6) {
+                            Text(realName).font(.subheadline.weight(.semibold))
+                            if !loc.isEmpty {
+                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                                Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        }
+
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.bottom, 2)
+                }
+
+                if let dt = dateTimeLine {
+                    Text(dt)
+                        .font(.caption2)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                        .padding(.bottom, 2)
+                        .accessibilityLabel("Date and time")
+                        .accessibilityIdentifier("row.datetime")
+                }
+
+                // Title only (paperclip removed)
+                Text(feedTitle)
+                    .font(.headline)
+                    .lineLimit(2)
+                    .accessibilityLabel("Session title")
+                    .accessibilityIdentifier("row.title")
+
+                // Activity subtitle (metadata)
+                if !instrumentActivityLine.isEmpty {
+                    Text(instrumentActivityLine)
+                        .font(Theme.Text.meta)
+                        .lineLimit(2)
+                        .padding(.top, 3)
+                        .accessibilityLabel(instrumentActivityLine)
+                        .accessibilityIdentifier("row.subtitle")
+                }
+
+                // Attachment preview (twin placement to SessionRow)
+                if let fav = favAttachmentRef {
+                    HStack(alignment: .center, spacing: 8) {
+                        RemoteAttachmentPreview(ref: fav)
+                        Spacer()
+                    }
+                    .padding(.top, 2)
+
+                    interactionRow(postID: post.id, attachmentCount: extraAttachmentCount)
+                        .padding(.top, 6)
+                } else {
+                    interactionRow(postID: post.id, attachmentCount: extraAttachmentCount)
+                        .padding(.top, 6)
+                }
+            }
+        }
+        .padding(.vertical, !model.attachmentRefs.isEmpty ? 10 : 6)
+        .onAppear {
+            // Keep initial saved state in sync for this viewer + post.
+            let vid = (viewerUserID ?? "unknown")
+            isSavedLocal = FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("row.openDetail")
+        .sheet(isPresented: $showPeek) {
+            let viewer = viewerUserID ?? ""
+            let owner = post.ownerUserID ?? ""
+            // Invariant: self-peek must never render follow gating in any mode.
+            let ownerForPeek = (owner.isEmpty || owner == viewer) ? (viewer.isEmpty ? owner : viewer) : owner
+
+            ProfilePeekView(ownerID: ownerForPeek)
+                .environment(\.managedObjectContext, ctx)
+                .environmentObject(auth)
+        }
+    }
+
+    private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            // Save (viewer-local)
+            Button(action: {
+                #if canImport(UIKit)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                let vid = viewerUserID ?? "unknown"
+                let newState = FeedInteractionStore.toggleSaved(postID, viewerUserID: vid)
+                isSavedLocal = newState
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: isSavedLocal ? "heart.fill" : "heart")
+                        .foregroundStyle(isSavedLocal ? Color.red : Theme.Colors.secondaryText)
+                }
+                .font(.system(size: 18, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
+
+            // Comment (read-only row parity; backend comment UI is handled elsewhere)
+            Button(action: {
+                // Intentionally no-op in feed row; navigation to detail is the interaction surface.
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bubble.right")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .font(.system(size: 18, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Comments")
+
+            // Share (owner-only)
+            if viewerIsOwner {
+                ShareLink(item: shareText()) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .contentShape(Rectangle())
+                    .font(.system(size: 18, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Export")
+            }
+
+            Spacer(minLength: 0)
+
+            if attachmentCount > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "paperclip")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                    Text("\(attachmentCount)")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .font(.caption2)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.thinMaterial, in: Capsule())
+                .overlay(Capsule().stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
+                .padding(6)
+                .accessibilityLabel("\(attachmentCount) attachments")
+            }
+        }
+        .padding(.top, -2)
+        .font(.subheadline)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func shareText() -> String {
+        // Keep this conservative: title + date only.
+        var out: [String] = [feedTitle]
+        if let dt = dateTimeLine { out.append(dt) }
+        return out.joined(separator: "\n")
+    }
+}
+
+fileprivate struct RemoteAttachmentPreview: View {
+    let ref: BackendSessionViewModel.BackendAttachmentRef
+
+    var body: some View {
+        let kind = ref.kind
+        let isAudio = (kind == .audio)
+        let size: CGFloat = isAudio ? FEED_AUDIO_THUMB : FEED_IMAGE_VIDEO_THUMB
+
+        ZStack(alignment: .center) {
+            RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+
+            if kind == .video {
+                Image(systemName: "video")
+                    .imageScale(.large)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .shadow(radius: 2)
+            } else {
+                Image(systemName: iconName(for: kind))
+                    .imageScale(.large)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+        .accessibilityLabel("Attachment preview")
+        .accessibilityIdentifier("row.attachmentPreview")
+    }
+
+    private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
+        switch kind {
+        case .audio: return "waveform"
+        case .video: return "video"
+        case .image: return "photo"
+        default:     return "doc"
+        }
+    }
+}
+
 private struct PeoplePlaceholderView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
