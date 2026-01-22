@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260122_220200_14_2_1c_RemoteTitlesParity
-// SCOPE: Phase 14.2.1 — RemotePostRowTwin: derive feedTitle/feedSubtitle using the same rules as SessionActivityHelpers (default description vs custom) and reuse the same subtitle splitting for instrument/date lines. No other UI/nav changes.
+// CHANGE-ID: 20260122_223700_14_2_1d_RemoteThumbSignedURL
+// SCOPE: Phase 14.2.1 — RemoteAttachmentPreview: load signed URL thumbnails for remote image attachments (feed parity); fallback to icon; cache by bucket|path.
 // SEARCH-TOKEN: 20260122_220200_14_2_1c_RemoteTitlesParity
 
 // CHANGE-ID: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
@@ -2316,8 +2316,31 @@ private var extraAttachmentCount: Int {
     }
 }
 
-fileprivate struct RemoteAttachmentPreview: View {
+fileprivate final class RemoteSignedURLCache {
+    static let shared = RemoteSignedURLCache()
+
+    private var map: [String: URL] = [:]
+    private let lock = NSLock()
+
+    func get(_ key: String) -> URL? {
+        lock.lock(); defer { lock.unlock() }
+        return map[key]
+    }
+
+    func set(_ key: String, url: URL) {
+        lock.lock(); defer { lock.unlock() }
+        map[key] = url
+    }
+}
+
+struct RemoteAttachmentPreview: View {
     let ref: BackendSessionViewModel.BackendAttachmentRef
+
+    @State private var signedURL: URL? = nil
+
+    private var cacheKey: String {
+        "20260122_223700_14_2_1d_RemoteThumbSignedURL|" + ref.bucket + "|" + ref.path
+    }
 
     var body: some View {
         let kind = ref.kind
@@ -2328,7 +2351,23 @@ fileprivate struct RemoteAttachmentPreview: View {
             RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
 
-            if kind == .video {
+            if kind == .image, let url = signedURL {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .empty:
+                        placeholderIcon(kind: kind)
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    case .failure:
+                        placeholderIcon(kind: kind)
+                    @unknown default:
+                        placeholderIcon(kind: kind)
+                    }
+                }
+                .clipped()
+            } else if kind == .video {
                 Image(systemName: "video")
                     .imageScale(.large)
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -2337,9 +2376,7 @@ fileprivate struct RemoteAttachmentPreview: View {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             } else {
-                Image(systemName: iconName(for: kind))
-                    .imageScale(.large)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                placeholderIcon(kind: kind)
             }
         }
         .frame(width: size, height: size)
@@ -2347,6 +2384,36 @@ fileprivate struct RemoteAttachmentPreview: View {
         .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
         .accessibilityLabel("Attachment preview")
         .accessibilityIdentifier("row.attachmentPreview")
+        .task(id: cacheKey) {
+            await loadSignedURLIfNeeded()
+        }
+    }
+
+    @ViewBuilder
+    private func placeholderIcon(kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> some View {
+        Image(systemName: iconName(for: kind))
+            .imageScale(.large)
+            .foregroundStyle(Theme.Colors.secondaryText)
+    }
+
+    private func loadSignedURLIfNeeded() async {
+        guard ref.kind == .image else { return }
+
+        if let cached = RemoteSignedURLCache.shared.get(cacheKey) {
+            if signedURL != cached { signedURL = cached }
+            return
+        }
+
+        let result = await NetworkManager.shared.createSignedStorageObjectURL(
+            bucket: ref.bucket,
+            path: ref.path,
+            expiresInSeconds: 60
+        )
+
+        guard case .success(let url) = result else { return }
+        RemoteSignedURLCache.shared.set(cacheKey, url: url)
+
+        if signedURL != url { signedURL = url }
     }
 
     private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
