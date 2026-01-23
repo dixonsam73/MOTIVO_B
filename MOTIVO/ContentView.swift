@@ -185,8 +185,6 @@ fileprivate enum ActivityFilter: Hashable, Identifiable {
 // MARK: - Entry
 
 struct ContentView: View {
-    @State private var attachmentPreviewCache: [String: UIImage] = [:]
-    @State private var attachmentPosterURLCache: [String: URL] = [:]
     @EnvironmentObject private var auth: AuthManager
 @ObservedObject private var followStore = FollowStore.shared
 
@@ -2321,38 +2319,67 @@ private var extraAttachmentCount: Int {
 fileprivate final class RemoteSignedURLCache {
     static let shared = RemoteSignedURLCache()
 
-    private var map: [String: URL] = [:]
+    private struct Entry {
+        let url: URL
+        let createdAt: Date
+    }
+
+    private var map: [String: Entry] = [:]
     private let lock = NSLock()
 
-    func get(_ key: String) -> URL? {
+    /// Signed URLs expire quickly. Treat cached entries as stale after ~55s so we refresh.
+    func get(_ key: String, maxAgeSeconds: TimeInterval = 55) -> URL? {
         lock.lock(); defer { lock.unlock() }
-        return map[key]
+        guard let entry = map[key] else { return nil }
+        if Date().timeIntervalSince(entry.createdAt) > maxAgeSeconds {
+            map.removeValue(forKey: key)
+            return nil
+        }
+        return entry.url
     }
 
     func set(_ key: String, url: URL) {
         lock.lock(); defer { lock.unlock() }
-        map[key] = url
+        map[key] = Entry(url: url, createdAt: Date())
+    }
+}
+
+class RemotePosterCache {
+    static let shared = RemotePosterCache()
+
+    private var map: [String: UIImage] = [:]
+    private let lock = NSLock()
+
+    func get(_ key: String) -> UIImage? {
+        lock.lock(); defer { lock.unlock() }
+        return map[key]
+    }
+
+    func set(_ key: String, image: UIImage) {
+        lock.lock(); defer { lock.unlock() }
+        map[key] = image
     }
 }
 
 struct RemoteAttachmentPreview: View {
     let ref: BackendSessionViewModel.BackendAttachmentRef
-
+    
     @State private var signedURL: URL? = nil
-
+    @State private var videoPoster: UIImage? = nil
+    
     private var cacheKey: String {
         "20260122_223700_14_2_1d_RemoteThumbSignedURL|" + ref.bucket + "|" + ref.path
     }
-
+    
     var body: some View {
         let kind = ref.kind
         let isAudio = (kind == .audio)
         let size: CGFloat = isAudio ? FEED_AUDIO_THUMB : FEED_IMAGE_VIDEO_THUMB
-
+        
         ZStack(alignment: .center) {
             RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
-
+            
             if kind == .image, let url = signedURL {
                 AsyncImage(url: url) { phase in
                     switch phase {
@@ -2370,9 +2397,17 @@ struct RemoteAttachmentPreview: View {
                 }
                 .clipped()
             } else if kind == .video {
-                Image(systemName: "video")
-                    .imageScale(.large)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                if let poster = videoPoster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                } else {
+                    Image(systemName: "video")
+                        .imageScale(.large)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
@@ -2390,34 +2425,59 @@ struct RemoteAttachmentPreview: View {
             await loadSignedURLIfNeeded()
         }
     }
-
+    
     @ViewBuilder
     private func placeholderIcon(kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> some View {
         Image(systemName: iconName(for: kind))
             .imageScale(.large)
             .foregroundStyle(Theme.Colors.secondaryText)
     }
-
+    
     private func loadSignedURLIfNeeded() async {
-        guard ref.kind == .image else { return }
-
+        guard (ref.kind == .image) || (ref.kind == .video) else { return }
+        
         if let cached = RemoteSignedURLCache.shared.get(cacheKey) {
             if signedURL != cached { signedURL = cached }
+            
+            if ref.kind == .video, videoPoster == nil {
+                if let cachedPoster = RemotePosterCache.shared.get(cacheKey) {
+                    videoPoster = cachedPoster
+                }
+            }
             return
         }
-
+        
         let result = await NetworkManager.shared.createSignedStorageObjectURL(
             bucket: ref.bucket,
             path: ref.path,
             expiresInSeconds: 60
         )
-
+        
         guard case .success(let url) = result else { return }
         RemoteSignedURLCache.shared.set(cacheKey, url: url)
-
+        
         if signedURL != url { signedURL = url }
+        
+        // Video: generate poster frame for feed thumbnail (cached by ref)
+        if ref.kind == .video {
+            if let cachedPoster = RemotePosterCache.shared.get(cacheKey) {
+                videoPoster = cachedPoster
+                return
+            }
+            
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .userInitiated).async {
+                    let img = AttachmentStore.generateVideoPoster(url: url)
+                    DispatchQueue.main.async {
+                        if let img { RemotePosterCache.shared.set(cacheKey, image: img) }
+                        videoPoster = img
+                        continuation.resume()
+                    }
+                }
+            }
+        }
     }
-
+    
     private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
         switch kind {
         case .audio: return "waveform"
@@ -2427,22 +2487,23 @@ struct RemoteAttachmentPreview: View {
         }
     }
 }
-
-private struct PeoplePlaceholderView: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-            Text("People")
-                .font(Theme.Text.sectionHeader)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            Text("Placeholder — People hub will live here.")
-                .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            Spacer()
+    
+    private struct PeoplePlaceholderView: View {
+        var body: some View {
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                Text("People")
+                    .font(Theme.Text.sectionHeader)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                
+                Text("Placeholder — People hub will live here.")
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                
+                Spacer()
+            }
+            .padding(Theme.Spacing.l)
+            .appBackground()
+            // No navigationTitle here — keep it quiet.
         }
-        .padding(Theme.Spacing.l)
-        .appBackground()
-        // No navigationTitle here — keep it quiet.
     }
-}
+
