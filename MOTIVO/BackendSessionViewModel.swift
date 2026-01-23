@@ -34,6 +34,7 @@ public struct BackendSessionViewModel: Identifiable {
 
     // Timestamps (raw strings from backend; parsing/formatting can be layered later)
     public let sessionTimestampRaw: String?
+    public let durationSeconds: Int?
     public let createdAtRaw: String?
     public let updatedAtRaw: String?
 
@@ -57,6 +58,7 @@ public struct BackendSessionViewModel: Identifiable {
         self.id = post.id
 
         self.sessionTimestampRaw = post.sessionTimestamp
+        self.durationSeconds = post.durationSeconds
         self.createdAtRaw = post.createdAt
         self.updatedAtRaw = post.updatedAt
 

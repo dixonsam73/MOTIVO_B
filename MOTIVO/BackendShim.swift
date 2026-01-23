@@ -79,6 +79,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
     public let ownerUserID: String?
     public let sessionID: UUID?
     public let sessionTimestamp: String?
+    public let durationSeconds: Int?
     public let createdAt: String?
     public let updatedAt: String?
     public let isPublic: Bool?
@@ -99,6 +100,7 @@ public struct BackendPost: Codable, Identifiable, Hashable {
         case ownerUserID = "owner_user_id"
         case sessionID = "session_id"
         case sessionTimestamp = "session_timestamp"
+        case durationSeconds = "duration_seconds"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case isPublic = "is_public"

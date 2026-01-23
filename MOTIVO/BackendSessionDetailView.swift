@@ -1,334 +1,519 @@
-// CHANGE-ID: 20260114_103700_9E
-// SCOPE: 9E use signed URLs for backend attachment playback
+// CHANGE-ID: 20260123_114306_14_2_2_BackendDetailParity
+// SCOPE: Phase 14.2.2 — Mirror SessionDetailView UI for BackendSessionDetailView (read-only; display name only; duration + notes + attachments)
+// SEARCH-TOKEN: 20260123_114306_BackendDetailParity
 
 import SwiftUI
 import Foundation
 
-// Read-only detail view for a BackendSessionViewModel.
-// - No CoreData imports
-// - Step 8G Phase 2: download backend attachments (authenticated) to temp files and open AttachmentViewerView in strict read-only mode.
-public struct BackendSessionDetailView: View {
-    public let model: BackendSessionViewModel
+/// Connected-mode detail view for *non-owner* posts.
+/// Mirrors SessionDetailView’s card layout and typography, but is strictly read-only.
+struct BackendSessionDetailView: View {
+    let model: BackendSessionViewModel
 
-    // Local shims to avoid hard dependencies on Theme while keeping visual consistency.
-    private var spacingS: CGFloat { 8 }
-    private var spacingM: CGFloat { 12 }
-    private var spacingL: CGFloat { 16 }
+    @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var auth: AuthManager
 
-    // Step 9E: read-only backend attachment playback (signed URLs at playback time + open AttachmentViewerView).
+    // Phase 14 directory (display-name only; no avatar until Phase 15)
+    @State private var directoryAccount: DirectoryAccount? = nil
+    @State private var isLoadingDirectory: Bool = false
+
+    // Comments sheet
+    @State private var isCommentsPresented: Bool = false
+
+    // Attachment viewer state
     @State private var isViewerPresented: Bool = false
-    @State private var isLoadingAttachments: Bool = false
-    @State private var attachmentLoadError: String? = nil
     @State private var viewerImageURLs: [URL] = []
     @State private var viewerVideoURLs: [URL] = []
     @State private var viewerAudioURLs: [URL] = []
+    @State private var viewerAudioTitles: [String]? = nil
+    @State private var isLoadingAttachments: Bool = false
+    @State private var attachmentLoadError: String? = nil
 
-    public init(model: BackendSessionViewModel) {
-        self.model = model
+    // Thumbnail signed URLs (images only)
+    @State private var thumbSignedURLs: [String: URL] = [:]
+
+    // MARK: - Derived display fields (mirror SessionDetailView rules)
+
+    private var ownerUserID: String {
+        (model.ownerUserID ?? "")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
     }
 
-    public var body: some View {
+    private var displayName: String {
+        let n = (directoryAccount?.displayName ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return n.isEmpty ? "User" : n
+    }
+
+    private var activityName: String {
+        let raw = (model.activityLabel ?? "")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return raw.isEmpty ? "Practice" : raw
+    }
+
+    private var instrumentName: String {
+        let raw = (model.instrumentLabel ?? "")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return raw.isEmpty ? "Instrument" : raw
+    }
+
+    private var headerLine: String {
+        "\(activityName) • \(instrumentName)"
+    }
+
+    private var titleLine: String {
+        let detail = (model.activityDetail ?? "")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return detail.isEmpty ? "" : detail
+    }
+
+    private var sessionDate: Date {
+        parseBackendDate(model.sessionTimestampRaw) ??
+        parseBackendDate(model.createdAtRaw) ??
+        Date()
+    }
+
+    private var metaLine: String {
+        let (time, date) = timeAndDateStrings(for: sessionDate)
+        let duration = durationString(seconds: model.durationSeconds)
+        // SessionDetailView shows: "19 Jan 2026 • 17:18 • 32m"
+        if duration.isEmpty {
+            return "\(date) • \(time)"
+        } else {
+            return "\(date) • \(time) • \(duration)"
+        }
+    }
+
+    // MARK: - Body
+
+    var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: spacingL) {
-                titleRow
+            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+                // Header card
+                VStack(alignment: .leading, spacing: 10) {
+                    identityHeader()
 
-                section(header: Text("Metadata")) {
-                    VStack(alignment: .leading, spacing: spacingS) {
-                        // Activity / instrument
-                        labeledLine(label: "Activity", value: model.activityLabel)
-                        labeledLine(label: "Detail", value: model.activityDetail ?? "—")
-                        labeledLine(label: "Focus", value: model.effortDotIndex.map(String.init) ?? "—")
-                        labeledLine(label: "Instrument", value: model.instrumentLabel ?? "—")
-
-                        // Ownership
-                        labeledLine(label: "Owner", value: model.ownerUserID.isEmpty ? "—" : model.ownerUserID)
-                        labeledLine(label: "Is mine", value: model.isMine ? "true" : "false")
-
-                        // Timestamps
-                        labeledLine(label: "Session time", value: model.sessionTimestampRaw ?? "—")
-                        labeledLine(label: "Created", value: model.createdAtRaw ?? "—")
-                        labeledLine(label: "Updated", value: model.updatedAtRaw ?? "—")
+                    if !titleLine.isEmpty {
+                        Text(titleLine)
+                            .font(.headline)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Theme.Colors.surface(colorScheme))
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+                            )
+                            .accessibilityIdentifier("detail.titleChip")
                     }
+
+                    Text(headerLine)
+                        .font(.headline)
+                        .lineLimit(2)
+                        .accessibilityIdentifier("detail.headerLine")
+
+                    Text(metaLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityIdentifier("detail.metaLine")
+                }
+                .cardSurface()
+
+                // Notes card
+                let notesText = (model.notes ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+                if !notesText.isEmpty {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        Text("Notes").sectionHeader()
+                        Text(notesText)
+                    }
+                    .cardSurface()
                 }
 
-                // Notes section (placeholder until backend provides it)
-                section(header: Text("Notes")) {
-                    if let notes = model.notes, !notes.isEmpty {
-                        Text(notes)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        Text("No notes.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+// Attachments
+                attachmentsCard()
+
+                // Interactions row (Save + Comments). Share is owner-only and this view is for non-owners.
+                interactionsCard()
+            }
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.m)
+        }
+        .background(Theme.Colors.background(colorScheme))
+        .navigationTitle("Session")
+        .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadDirectoryAccountIfNeeded()
+            await loadThumbURLsIfNeeded()
+        }
+        .sheet(isPresented: $isCommentsPresented) {
+            // Placeholder author for composer; actual identity in comments comes from stores/backends.
+            CommentsView(sessionID: model.id, placeholderAuthor: "You")
+        }
+        .sheet(isPresented: $isViewerPresented) {
+            AttachmentViewerView(
+                imageURLs: viewerImageURLs,
+                videoURLs: viewerVideoURLs,
+                audioURLs: viewerAudioURLs,
+                startIndex: 0,
+                audioTitles: viewerAudioTitles,
+                isReadOnly: true,
+                canShare: false
+            )
+        }
+    }
+
+    // MARK: - Identity header (display name only; Phase 15 adds avatar)
+
+    @ViewBuilder
+    private func identityHeader() -> some View {
+        HStack(spacing: 8) {
+            Text(displayName)
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("detail.displayName")
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    // MARK: - Attachments
+
+    private func kindEnum(_ ref: BackendSessionViewModel.BackendAttachmentRef) -> BackendSessionViewModel.BackendAttachmentRef.Kind {
+        ref.kind
+    }
+
+    private func cacheKey(_ ref: BackendSessionViewModel.BackendAttachmentRef) -> String {
+        "\(ref.bucket)|\(ref.path)"
+    }
+
+    private func filename(from path: String) -> String {
+        let comps = path.split(separator: "/")
+        return comps.last.map(String.init) ?? path
+    }
+
+    @ViewBuilder
+    private func attachmentsCard() -> some View {
+        let refs = model.attachmentRefs
+
+        if refs.isEmpty {
+            EmptyView()
+        } else {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Attachments").sectionHeader()
+
+                // Images / Videos grid
+                let visual = refs.filter { r in
+                    let k = kindEnum(r)
+                    return k == .image || k == .video
                 }
 
-                // Attachments section (Step 8G Phase 2: read-only backend playback)
-                section(header: Text("Attachments")) {
-                    if model.attachmentRefs.isEmpty {
-                        Text("No attachments.")
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        VStack(alignment: .leading, spacing: spacingS) {
-                            Button {
-                                Task { await openAttachmentsViewer() }
-                            } label: {
-                                HStack(spacing: spacingS) {
-                                    Image(systemName: "paperclip")
-                                        .foregroundStyle(.secondary)
-                                    Text(isLoadingAttachments ? "Loading…" : "View attachments (\(model.attachmentRefs.count))")
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .foregroundStyle(.secondary)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .disabled(isLoadingAttachments)
-
-                            if let err = attachmentLoadError, !err.isEmpty {
-                                Text(err)
-                                    .font(.footnote)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                            }
-
-                            // Light disclosure list (filenames) — presentation-only.
-                            ForEach(model.attachmentRefs, id: \.self) { ref in
-                                HStack(spacing: spacingS) {
-                                    Image(systemName: icon(for: ref.kind))
-                                        .foregroundStyle(.secondary)
-                                    Text(filename(for: ref.path))
-                                        .font(.footnote)
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
+                if !visual.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 12)], spacing: 12) {
+                        ForEach(visual, id: \.self) { ref in
+                            BackendThumbCell(
+                                kind: kindEnum(ref),
+                                url: thumbSignedURLs[cacheKey(ref)],
+                                showViewIcon: true
+                            )
+                            .onTapGesture {
+                                Task {
+                                    await presentViewer()
                                 }
                             }
                         }
                     }
                 }
-            }
-            .padding(.horizontal, spacingM)
-            .padding(.vertical, spacingL)
-        }
-        .navigationTitle("Backend Detail")
-        .navigationBarTitleDisplayMode(.inline)
-        .fullScreenCover(isPresented: $isViewerPresented) {
-            AttachmentViewerView(
-                imageURLs: viewerImageURLs,
 
-                // Correct order
-                videoURLs: viewerVideoURLs,
-                audioURLs: viewerAudioURLs,
-                startIndex: 0,
-
-                audioTitles: nil,
-                isReadOnly: true,
-                canShare: false,
-                themeBackground: Color(.systemBackground),
-
-                // Everything else unchanged / nil as before
-                onDelete: nil,
-                titleForURL: nil,
-                onRename: nil,
-                onRenameLegacy: nil,
-                onFavourite: nil,
-                isFavourite: nil,
-                onTogglePrivacy: nil,
-                isPrivate: nil,
-                onReplaceAttachment: nil,
-                onSaveAsNewAttachment: nil,
-                onSaveAsNewAttachmentFromSource: nil,
-
-                // Signed URL refresh contract (9F)
-                onRequestFreshURL: { _, failingURL in
-                    guard let components = URLComponents(
-                        url: failingURL,
-                        resolvingAgainstBaseURL: false
-                    ) else {
-                        return .failure(
-                            NSError(
-                                domain: "SignedURLRefresh",
-                                code: 1,
-                                userInfo: [
-                                    NSLocalizedDescriptionKey: "Unable to parse signed URL"
-                                ]
-                            )
-                        )
+                // Audio list (simple rows)
+                let audios = refs.filter { kindEnum($0) == .audio }
+                if !audios.isEmpty {
+                    VStack(spacing: 10) {
+                        ForEach(audios, id: \.self) { ref in
+                            HStack(spacing: 10) {
+                                Image(systemName: "waveform")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                Text(filename(from: ref.path))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.primary)
+                                    .lineLimit(1)
+                                Spacer(minLength: 0)
+                                Image(systemName: "eye")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                Task {
+                                    await presentViewer()
+                                }
+                            }
+                        }
                     }
-
-                    let parts = components.path.split(separator: "/")
-                    guard
-                        let signIndex = parts.firstIndex(of: "sign"),
-                        parts.count > signIndex + 1
-                    else {
-                        return .failure(
-                            NSError(
-                                domain: "SignedURLRefresh",
-                                code: 2,
-                                userInfo: [
-                                    NSLocalizedDescriptionKey:
-                                        "Signed URL missing /object/sign components"
-                                ]
-                            )
-                        )
-                    }
-
-                    let bucket = String(parts[signIndex + 1])
-                    let path = parts
-                        .dropFirst(signIndex + 2)
-                        .joined(separator: "/")
-
-                    return await NetworkManager.shared.createSignedStorageObjectURL(
-                        bucket: bucket,
-                        path: path,
-                        expiresInSeconds: 60
-                    )
+                    .padding(.top, 4)
                 }
-            )
-        }
-    }
-    // MARK: - Step 8G Phase 2 helpers
 
-    private func icon(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
-        switch kind {
-        case .image: return "photo"
-        case .video: return "video"
-        case .audio: return "waveform"
-        }
-    }
-
-    private func filename(for path: String) -> String {
-        let comps = path.split(separator: "/")
-        return comps.last.map(String.init) ?? path
-    }
-
-    private func openAttachmentsViewer() async {
-        attachmentLoadError = nil
-        isLoadingAttachments = true
-
-        // Clear previous
-        viewerImageURLs = []
-        viewerVideoURLs = []
-        viewerAudioURLs = []
-
-        defer { isLoadingAttachments = false }
-
-        // Step 9E: request short-lived signed URLs at playback time (do not persist).
-        // AVPlayer / URLSession can use the signed URL directly; no local staging required.
-        let expiresIn: Int = 60
-
-        for ref in model.attachmentRefs {
-            let result = await NetworkManager.shared.createSignedStorageObjectURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: expiresIn)
-            switch result {
-            case .success(let signedURL):
-                switch ref.kind {
-                case .image: viewerImageURLs.append(signedURL)
-                case .video: viewerVideoURLs.append(signedURL)
-                case .audio: viewerAudioURLs.append(signedURL)
+                if let msg = attachmentLoadError {
+                    Text(msg)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(.red)
+                        .padding(.top, 6)
                 }
-            case .failure(let error):
-                attachmentLoadError = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
-                return
             }
+            .cardSurface()
         }
+    }
 
+    private func presentViewer() async {
+        await loadViewerSignedURLsIfNeeded()
+        if viewerImageURLs.isEmpty && viewerVideoURLs.isEmpty && viewerAudioURLs.isEmpty {
+            attachmentLoadError = attachmentLoadError ?? "Unable to load attachment URLs."
+            return
+        }
         isViewerPresented = true
     }
 
-    private func writeToTemp(data: Data, originalPath: String) -> URL? {
-        let name = filename(for: originalPath)
-        let safe = name.isEmpty ? UUID().uuidString : name
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("motivo_backend_\(UUID().uuidString)_\(safe)")
-        do {
-            try data.write(to: url, options: [.atomic])
+    private func loadThumbURLsIfNeeded() async {
+        let refs = model.attachmentRefs.filter { kindEnum($0) == .image }
+        guard !refs.isEmpty else { return }
+
+        for ref in refs {
+            let key = cacheKey(ref)
+            if thumbSignedURLs[key] != nil { continue }
+
+            if let url = await signedURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: 300) {
+                thumbSignedURLs[key] = url
+            }
+        }
+    }
+
+    private func loadViewerSignedURLsIfNeeded() async {
+        guard !isLoadingAttachments else { return }
+        isLoadingAttachments = true
+        attachmentLoadError = nil
+        defer { isLoadingAttachments = false }
+
+        let refs = model.attachmentRefs
+        guard !refs.isEmpty else { return }
+
+        var images: [URL] = []
+        var videos: [URL] = []
+        var audios: [URL] = []
+        var audioTitles: [String] = []
+
+        for ref in refs {
+            let k = kindEnum(ref)
+            if let url = await signedURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: 120) {
+                switch k {
+                case .image: images.append(url)
+                case .video: videos.append(url)
+                case .audio:
+                    audios.append(url)
+                    audioTitles.append(filename(from: ref.path))
+                }
+            }
+        }
+
+        viewerImageURLs = images
+        viewerVideoURLs = videos
+        viewerAudioURLs = audios
+        viewerAudioTitles = audioTitles.isEmpty ? nil : audioTitles
+
+        if images.isEmpty && videos.isEmpty && audios.isEmpty {
+            attachmentLoadError = "Unable to load attachment URLs."
+        }
+    }
+
+    private func signedURL(bucket: String, path: String, expiresInSeconds: Int) async -> URL? {
+        let result = await NetworkManager.shared.createSignedStorageObjectURL(
+            bucket: bucket,
+            path: path,
+            expiresInSeconds: expiresInSeconds
+        )
+
+        switch result {
+        case .success(let url):
             return url
-        } catch {
+        case .failure:
             return nil
         }
     }
 
-    // MARK: - Small UI helpers
+    // MARK: - Interactions (Save + Comment)
 
-    private var titleRow: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(model.activityLabel)
-                .font(.headline)
-                .foregroundStyle(.primary)
-
-            if let instrument = model.instrumentLabel, !instrument.isEmpty {
-                Text("•")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text(instrument)
-                    .font(.headline)
-                    .foregroundStyle(.primary)
+    @ViewBuilder
+    private func interactionsCard() -> some View {
+        HStack(spacing: 0) {
+            Button {
+                FeedInteractionStore.toggleHeart(model.id)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: FeedInteractionStore.isHearted(model.id) ? "heart.fill" : "heart")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("Save")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
             }
+            .buttonStyle(.plain)
 
-            Spacer()
+            Divider()
+                .frame(width: 1)
+                .background(Theme.Colors.cardStroke(colorScheme))
 
-            // Prefer sessionTimestamp in the header when available; fall back to createdAt.
-            Text(model.sessionTimestampRaw ?? model.createdAtRaw ?? "")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+            Button {
+                isCommentsPresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "bubble.left")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.primary)
+                    Text("Comment")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 10)
+            }
+            .buttonStyle(.plain)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+        )
+        .cardSurface(padding: 0)
+    }
+
+    // MARK: - Directory lookup (Phase 14)
+
+    private func loadDirectoryAccountIfNeeded() async {
+        guard !isLoadingDirectory else { return }
+        guard !ownerUserID.isEmpty else { return }
+        isLoadingDirectory = true
+        defer { isLoadingDirectory = false }
+
+        let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: [ownerUserID])
+        switch result {
+        case .success(let map):
+            directoryAccount = map[ownerUserID]
+        case .failure:
+            break
         }
     }
 
-    private func section<Content: View>(header: Text, @ViewBuilder content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: spacingS) {
-            header
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+    // MARK: - Date + Duration formatting
 
-            VStack(alignment: .leading, spacing: spacingS) {
-                content()
-            }
-            .padding(spacingM)
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    private func parseBackendDate(_ raw: String?) -> Date? {
+        guard let s = raw?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty else {
+            return nil
         }
+
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = iso.date(from: s) { return d }
+        iso.formatOptions = [.withInternetDateTime]
+        if let d = iso.date(from: s) { return d }
+
+        let df = DateFormatter()
+        df.locale = Locale(identifier: "en_US_POSIX")
+        df.timeZone = TimeZone(secondsFromGMT: 0)
+
+        df.dateFormat = "yyyy-MM-dd HH:mm:ssXXXXX"
+        if let d = df.date(from: s) { return d }
+
+        df.dateFormat = "yyyy-MM-dd HH:mm:ss.SSSSSSXXXXX"
+        if let d = df.date(from: s) { return d }
+
+        return nil
     }
 
-    private func labeledLine(label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: spacingS) {
-            Text(label + ":")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .frame(width: 92, alignment: .leading)
+    private func timeAndDateStrings(for date: Date) -> (time: String, date: String) {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+        dateFormatter.doesRelativeDateFormatting = false
 
-            Text(value)
-                .font(.footnote)
-                .foregroundStyle(.primary)
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .none
+        timeFormatter.timeStyle = .short
 
-            Spacer(minLength: 0)
+        return (timeFormatter.string(from: date), dateFormatter.string(from: date))
+    }
+
+    private func durationString(seconds: Int?) -> String {
+        guard let seconds, seconds > 0 else { return "" }
+        let mins = seconds / 60
+        let hrs = mins / 60
+        let remMins = mins % 60
+        if hrs > 0 {
+            if remMins == 0 {
+                return "\(hrs)h"
+            } else {
+                return "\(hrs)h \(remMins)m"
+            }
+        } else {
+            return "\(mins)m"
         }
     }
 }
 
-#if DEBUG
-#Preview("BackendSessionDetailView") {
-    let json = """
-    {
-      "id": "00000000-0000-0000-0000-000000000001",
-      "owner_user_id": "user_123",
-      "session_id": "00000000-0000-0000-0000-000000000002",
-      "session_timestamp": "2025-12-31 23:58",
-      "created_at": "2025-12-31 23:59",
-      "updated_at": "2026-01-01 00:01",
-      "is_public": true,
-      "activity_label": "Practice",
-      "instrument_label": "Bass",
-      "activity_detail": "Afternoon Practice",
-      "effort": 8
-    }
-    """.data(using: .utf8)!
+private struct BackendThumbCell: View {
+    let kind: BackendSessionViewModel.BackendAttachmentRef.Kind
+    let url: URL?
+    let showViewIcon: Bool
 
-    let decoder = JSONDecoder()
-    let post = try! decoder.decode(BackendPost.self, from: json)
-    let model = BackendSessionViewModel(post: post, currentUserID: "user_123")
-    return NavigationStack { BackendSessionDetailView(model: model) }
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Theme.Colors.surface(colorScheme))
+
+            if kind == .image, let url {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .scaledToFill()
+                    default:
+                        Image(systemName: "photo")
+                            .imageScale(.large)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else {
+                Image(systemName: iconName(for: kind))
+                    .imageScale(.large)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+
+            if showViewIcon {
+                Image(systemName: "eye")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(8)
+            }
+        }
+        .frame(height: 108)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+        )
+        .clipped()
+    }
+
+    private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
+        switch kind {
+        case .audio: return "waveform"
+        case .video: return "video"
+        case .image: return "photo"
+        }
+    }
 }
-#endif
