@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260123_132542_14_2_2_BackendDetail_SDVParity
-// SCOPE: Phase 14.2.2 — Make BackendSessionDetailView mirror SessionDetailView 1:1 (read-only; display-name-only header; no Edit button for non-owner posts).
-// SEARCH-TOKEN: 20260123_132542_14_2_2_BackendDetail_SDVParity
+// CHANGE-ID: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
+// SCOPE: Phase 14.2.2 — Make BackendSessionDetailView mirror SessionDetailView 1:1 (read-only; display-name-only header; no Edit button for non-owner posts). + fix4 (render backend video thumbnails via AttachmentStore.generateVideoPoster; no logic changes).
+// SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
 
 import SwiftUI
 import Foundation
@@ -214,7 +214,17 @@ struct BackendSessionDetailView: View {
                 .cardSurface()
             }
 
-            if let dot = focusDotIndexFromNotes {
+            // Prefer legacy token if present; otherwise fall back to persisted effort on the backend post.
+            // Treat default effort (5) as "unset" to preserve SessionDetailView semantics.
+            let focusDotIndex: Int? = {
+                if let legacy = focusDotIndexFromNotes { return legacy }
+                if let effortDot = model.effortDotIndex {
+                    return (effortDot == 5) ? nil : effortDot
+                }
+                return nil
+            }()
+
+            if let dot = focusDotIndex {
                 FocusSectionCard(dotIndex: dot, colorScheme: colorScheme)
             }
 
@@ -649,50 +659,98 @@ private struct BackendThumbCell: View {
     let url: URL?
     let showViewIcon: Bool
 
+    @State private var poster: UIImage? = nil
+
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            Group {
-                if kind == .image, let url {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().scaledToFill()
-                        default:
-                            Image(systemName: kind == .video ? "video" : "photo")
-                                .imageScale(.large)
-                                .foregroundStyle(.secondary)
+            ZStack(alignment: .center) {
+                Group {
+                    switch kind {
+                    case .image:
+                        if let url {
+                            AsyncImage(url: url) { phase in
+                                switch phase {
+                                case .success(let image):
+                                    image.resizable().scaledToFill()
+                                default:
+                                    placeholderIcon(systemName: "photo")
+                                }
+                            }
+                        } else {
+                            placeholderIcon(systemName: "photo")
                         }
+
+                    case .video:
+                        if let poster {
+                            Image(uiImage: poster).resizable().scaledToFill()
+                        } else {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                    .fill(Color.secondary.opacity(0.08))
+                                Image(systemName: "video")
+                                    .imageScale(.large)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        }
+
+                    case .audio:
+                        placeholderIcon(systemName: "waveform")
                     }
-                } else {
-                    Image(systemName: iconName(for: kind))
-                        .imageScale(.large)
-                        .foregroundStyle(.secondary)
+                }
+                .frame(width: 128, height: 128)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12, style: .continuous)
+                        .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                )
+                .clipped()
+
+                if kind == .video {
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .shadow(radius: 2)
                 }
             }
-            .frame(width: 128, height: 128)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
-            )
-            .clipped()
 
             if showViewIcon {
-                Text("★")
-                    .font(.system(size: 16))
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
+                Image(systemName: "eye")
+                    .imageScale(.small)
+                    .foregroundStyle(Theme.Colors.secondaryText)
                     .padding(4)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding([.top, .trailing], 4)
             }
+        }
+        .frame(width: 128, height: 128)
+        .task(id: url) {
+            guard kind == .video else { return }
+            guard poster == nil, let u = url else { return }
+            await generatePoster(u)
         }
     }
 
-    private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
-        switch kind {
-        case .audio: return "waveform"
-        case .video: return "video"
-        case .image: return "photo"
+    private func placeholderIcon(systemName: String) -> some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color.secondary.opacity(0.08))
+            Image(systemName: systemName)
+                .imageScale(.large)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+    }
+
+    private func generatePoster(_ url: URL) async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                DispatchQueue.main.async {
+                    self.poster = img
+                    continuation.resume()
+                }
+            }
         }
     }
 }
+
