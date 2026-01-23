@@ -2323,20 +2323,31 @@ private var extraAttachmentCount: Int {
 fileprivate final class RemoteSignedURLCache {
     static let shared = RemoteSignedURLCache()
 
-    private var map: [String: URL] = [:]
+    private struct Entry {
+        let url: URL
+        let expiresAt: Date
+    }
+
+    private var map: [String: Entry] = [:]
     private let lock = NSLock()
 
+    /// Returns a cached URL only if it is still valid (not expired).
     func get(_ key: String) -> URL? {
         lock.lock(); defer { lock.unlock() }
-        return map[key]
+        guard let entry = map[key] else { return nil }
+        if Date() >= entry.expiresAt {
+            map.removeValue(forKey: key)
+            return nil
+        }
+        return entry.url
     }
 
-    func set(_ key: String, url: URL) {
+    /// Stores a URL with an explicit TTL (seconds).
+    func set(_ key: String, url: URL, ttlSeconds: Int) {
         lock.lock(); defer { lock.unlock() }
-        map[key] = url
+        map[key] = Entry(url: url, expiresAt: Date().addingTimeInterval(TimeInterval(ttlSeconds)))
     }
 }
-
 struct RemoteAttachmentPreview: View {
     // FIX-D: persistent in-memory thumbnail cache (keyed by postID + bucket + path)
     // Goal: prevent placeholder flashes and eliminate any chance of cross-row/cross-owner thumbnail reuse.
@@ -2454,14 +2465,16 @@ struct RemoteAttachmentPreview: View {
             return
         }
 
+        let ttlSeconds = 300
+
         let result = await NetworkManager.shared.createSignedStorageObjectURL(
             bucket: ref.bucket,
             path: ref.path,
-            expiresInSeconds: 60
+            expiresInSeconds: ttlSeconds
         )
 
         guard case .success(let url) = result else { return }
-        RemoteSignedURLCache.shared.set(cacheKey, url: url)
+        RemoteSignedURLCache.shared.set(cacheKey, url: url, ttlSeconds: ttlSeconds)
 
         if signedURL != url { signedURL = url }
     }
