@@ -185,6 +185,8 @@ fileprivate enum ActivityFilter: Hashable, Identifiable {
 // MARK: - Entry
 
 struct ContentView: View {
+    @State private var attachmentPreviewCache: [String: UIImage] = [:]
+    @State private var attachmentPosterURLCache: [String: URL] = [:]
     @EnvironmentObject private var auth: AuthManager
 @ObservedObject private var followStore = FollowStore.shared
 

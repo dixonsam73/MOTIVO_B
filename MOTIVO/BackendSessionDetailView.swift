@@ -151,7 +151,15 @@ struct BackendSessionDetailView: View {
         .sheet(isPresented: $isCommentsPresented) {
             CommentsView(sessionID: model.id, placeholderAuthor: "You")
         }
-        .fullScreenCover(isPresented: $isViewerPresented) {
+        .fullScreenCover(
+        isPresented: Binding(
+            get: {
+                isViewerPresented &&
+                (!viewerImageURLs.isEmpty || !viewerVideoURLs.isEmpty || !viewerAudioURLs.isEmpty)
+            },
+            set: { isViewerPresented = $0 }
+        )
+    ) {
             AttachmentViewerView(
                 imageURLs: viewerImageURLs,
                 videoURLs: viewerVideoURLs,
