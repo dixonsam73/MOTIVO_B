@@ -1,6 +1,10 @@
 // CHANGE-ID: 20260122_223700_14_2_1d_RemoteThumbSignedURL
 // SCOPE: Phase 14.2.1 — RemoteAttachmentPreview: load signed URL thumbnails for remote image attachments (feed parity); fallback to icon; cache by bucket|path.
 // SEARCH-TOKEN: 20260122_220200_14_2_1c_RemoteTitlesParity
+// CHANGE-ID: 20260123_174900_FixD_RemoteThumbCache_NoFlicker
+// SCOPE: Fix D — RemoteAttachmentPreview: cache decoded image/video poster by postID+bucket+path to prevent placeholder flashes and eliminate cross-row thumbnail bleed; no UI/layout changes.
+// SEARCH-TOKEN: 20260123_174900_FixD_RemoteThumbCache_NoFlicker
+
 
 // CHANGE-ID: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
 // SCOPE: Phase 14.2.1 — ContentView Connected feed parity: render remote backend posts inline with local sessions using a unified row source; keep UI chrome and local SessionRow/navigation untouched; remote rows use SessionRow-twin layout and navigate to BackendSessionDetailView.
@@ -2205,7 +2209,7 @@ private var extraAttachmentCount: Int {
                 // Attachment preview (twin placement to SessionRow)
                 if let fav = favAttachmentRef {
                     HStack(alignment: .center, spacing: 8) {
-                        RemoteAttachmentPreview(ref: fav)
+                        RemoteAttachmentPreview(ref: fav, postID: post.id)
                         Spacer()
                     }
                     .padding(.top, 2)
@@ -2319,85 +2323,70 @@ private var extraAttachmentCount: Int {
 fileprivate final class RemoteSignedURLCache {
     static let shared = RemoteSignedURLCache()
 
-    private struct Entry {
-        let url: URL
-        let createdAt: Date
-    }
-
-    private var map: [String: Entry] = [:]
+    private var map: [String: URL] = [:]
     private let lock = NSLock()
 
-    /// Signed URLs expire quickly. Treat cached entries as stale after ~55s so we refresh.
-    func get(_ key: String, maxAgeSeconds: TimeInterval = 55) -> URL? {
-        lock.lock(); defer { lock.unlock() }
-        guard let entry = map[key] else { return nil }
-        if Date().timeIntervalSince(entry.createdAt) > maxAgeSeconds {
-            map.removeValue(forKey: key)
-            return nil
-        }
-        return entry.url
-    }
-
-    func set(_ key: String, url: URL) {
-        lock.lock(); defer { lock.unlock() }
-        map[key] = Entry(url: url, createdAt: Date())
-    }
-}
-
-class RemotePosterCache {
-    static let shared = RemotePosterCache()
-
-    private var map: [String: UIImage] = [:]
-    private let lock = NSLock()
-
-    func get(_ key: String) -> UIImage? {
+    func get(_ key: String) -> URL? {
         lock.lock(); defer { lock.unlock() }
         return map[key]
     }
 
-    func set(_ key: String, image: UIImage) {
+    func set(_ key: String, url: URL) {
         lock.lock(); defer { lock.unlock() }
-        map[key] = image
+        map[key] = url
     }
 }
 
 struct RemoteAttachmentPreview: View {
+    // FIX-D: persistent in-memory thumbnail cache (keyed by postID + bucket + path)
+    // Goal: prevent placeholder flashes and eliminate any chance of cross-row/cross-owner thumbnail reuse.
+    #if canImport(UIKit)
+    private static let imageThumbCache = NSCache<NSString, UIImage>()
+    private static let videoPosterCache = NSCache<NSString, UIImage>()
+    #endif
+
     let ref: BackendSessionViewModel.BackendAttachmentRef
-    
+    let postID: UUID
+
     @State private var signedURL: URL? = nil
+    #if canImport(UIKit)
+    @State private var resolvedImage: UIImage? = nil
     @State private var videoPoster: UIImage? = nil
-    
+    #endif
+
     private var cacheKey: String {
-        "20260122_223700_14_2_1d_RemoteThumbSignedURL|" + ref.bucket + "|" + ref.path
+        "feedThumb|" + postID.uuidString + "|" + ref.bucket + "|" + ref.path
     }
-    
+
     var body: some View {
         let kind = ref.kind
         let isAudio = (kind == .audio)
         let size: CGFloat = isAudio ? FEED_AUDIO_THUMB : FEED_IMAGE_VIDEO_THUMB
-        
+
         ZStack(alignment: .center) {
             RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
-            
-            if kind == .image, let url = signedURL {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .empty:
-                        placeholderIcon(kind: kind)
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    case .failure:
-                        placeholderIcon(kind: kind)
-                    @unknown default:
-                        placeholderIcon(kind: kind)
-                    }
+
+            // IMAGE
+            if kind == .image {
+                #if canImport(UIKit)
+                if let ui = resolvedImage ?? Self.imageThumbCache.object(forKey: cacheKey as NSString) {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .scaledToFill()
+                        .clipped()
+                } else {
+                    placeholderIcon(kind: kind)
                 }
-                .clipped()
-            } else if kind == .video {
-                if let poster = videoPoster {
+                #else
+                placeholderIcon(kind: kind)
+                #endif
+            }
+
+            // VIDEO
+            else if kind == .video {
+                #if canImport(UIKit)
+                if let poster = videoPoster ?? Self.videoPosterCache.object(forKey: cacheKey as NSString) {
                     Image(uiImage: poster)
                         .resizable()
                         .scaledToFill()
@@ -2407,77 +2396,128 @@ struct RemoteAttachmentPreview: View {
                         .imageScale(.large)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
-                
+                #else
+                Image(systemName: "video")
+                    .imageScale(.large)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                #endif
+
                 Image(systemName: "play.circle.fill")
                     .font(.system(size: 18, weight: .semibold))
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
-            } else {
+            }
+
+            // AUDIO / PDF / OTHER
+            else {
                 placeholderIcon(kind: kind)
             }
         }
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+        .overlay(
+            RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
+                .stroke(.black.opacity(0.05), lineWidth: 1)
+        )
         .accessibilityLabel("Attachment preview")
         .accessibilityIdentifier("row.attachmentPreview")
+        .onChange(of: cacheKey) { _ in
+            // Defensive reset: if SwiftUI reuses the view instance across rows, never show stale media.
+            signedURL = nil
+            #if canImport(UIKit)
+            resolvedImage = nil
+            videoPoster = nil
+            #endif
+        }
         .task(id: cacheKey) {
             await loadSignedURLIfNeeded()
+            #if canImport(UIKit)
+            await loadImageThumbIfNeeded()
+            await loadVideoPosterIfNeeded()
+            #endif
         }
     }
-    
+
     @ViewBuilder
     private func placeholderIcon(kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> some View {
         Image(systemName: iconName(for: kind))
             .imageScale(.large)
             .foregroundStyle(Theme.Colors.secondaryText)
     }
-    
+
     private func loadSignedURLIfNeeded() async {
         guard (ref.kind == .image) || (ref.kind == .video) else { return }
-        
+
+        // Keep the signed URL cached separately (short TTL) so we don't hammer RPCs.
         if let cached = RemoteSignedURLCache.shared.get(cacheKey) {
             if signedURL != cached { signedURL = cached }
-            
-            if ref.kind == .video, videoPoster == nil {
-                if let cachedPoster = RemotePosterCache.shared.get(cacheKey) {
-                    videoPoster = cachedPoster
-                }
-            }
             return
         }
-        
+
         let result = await NetworkManager.shared.createSignedStorageObjectURL(
             bucket: ref.bucket,
             path: ref.path,
             expiresInSeconds: 60
         )
-        
+
         guard case .success(let url) = result else { return }
         RemoteSignedURLCache.shared.set(cacheKey, url: url)
-        
+
         if signedURL != url { signedURL = url }
-        
-        // Video: generate poster frame for feed thumbnail (cached by ref)
-        if ref.kind == .video {
-            if let cachedPoster = RemotePosterCache.shared.get(cacheKey) {
-                videoPoster = cachedPoster
-                return
-            }
-            
-            await withCheckedContinuation { continuation in
-                DispatchQueue.global(qos: .userInitiated).async {
-                    let img = AttachmentStore.generateVideoPoster(url: url)
-                    DispatchQueue.main.async {
-                        if let img { RemotePosterCache.shared.set(cacheKey, image: img) }
-                        videoPoster = img
-                        continuation.resume()
+    }
+
+    #if canImport(UIKit)
+    private func loadImageThumbIfNeeded() async {
+        guard ref.kind == .image else { return }
+
+        // 1) Prefer immediate in-memory cache.
+        if let cached = Self.imageThumbCache.object(forKey: cacheKey as NSString) {
+            if resolvedImage !== cached { resolvedImage = cached }
+            return
+        }
+
+        // 2) Need a signed URL to fetch bytes.
+        guard let url = signedURL else { return }
+
+        do {
+            let (data, resp) = try await URLSession.shared.data(from: url)
+            guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
+            guard let ui = UIImage(data: data) else { return }
+
+            Self.imageThumbCache.setObject(ui, forKey: cacheKey as NSString)
+            if resolvedImage !== ui { resolvedImage = ui }
+        } catch {
+            // Ignore transient failures — placeholder remains; next navigation/refresh will retry.
+        }
+    }
+
+    private func loadVideoPosterIfNeeded() async {
+        guard ref.kind == .video else { return }
+
+        // 1) Prefer immediate in-memory cache.
+        if let cached = Self.videoPosterCache.object(forKey: cacheKey as NSString) {
+            if videoPoster !== cached { videoPoster = cached }
+            return
+        }
+
+        // 2) Need a signed URL to generate the poster.
+        guard let url = signedURL else { return }
+
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generateVideoPoster(url: url)
+                DispatchQueue.main.async {
+                    if let img {
+                        Self.videoPosterCache.setObject(img, forKey: cacheKey as NSString)
+                        self.videoPoster = img
                     }
+                    continuation.resume()
                 }
             }
         }
     }
-    
+    #endif
+
     private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
         switch kind {
         case .audio: return "waveform"
@@ -2487,23 +2527,22 @@ struct RemoteAttachmentPreview: View {
         }
     }
 }
-    
-    private struct PeoplePlaceholderView: View {
-        var body: some View {
-            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                Text("People")
-                    .font(Theme.Text.sectionHeader)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                
-                Text("Placeholder — People hub will live here.")
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                
-                Spacer()
-            }
-            .padding(Theme.Spacing.l)
-            .appBackground()
-            // No navigationTitle here — keep it quiet.
-        }
-    }
 
+private struct PeoplePlaceholderView: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+            Text("People")
+                .font(Theme.Text.sectionHeader)
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            Text("Placeholder — People hub will live here.")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            Spacer()
+        }
+        .padding(Theme.Spacing.l)
+        .appBackground()
+        // No navigationTitle here — keep it quiet.
+    }
+}

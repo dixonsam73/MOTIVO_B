@@ -171,6 +171,15 @@ struct BackendSessionDetailView: View {
             )
         }
         .appBackground()
+        .onDisappear { resetViewerState() }
+    }
+
+    private func resetViewerState() {
+        isViewerPresented = false
+        viewerImageURLs.removeAll()
+        viewerVideoURLs.removeAll()
+        viewerAudioURLs.removeAll()
+        viewerAudioTitles = nil
     }
 
     // Type-erased wrapper to help Xcode's type-checker on large view trees.
