@@ -1,17 +1,22 @@
-// CHANGE-ID: 20260123_114306_14_2_2_BackendDetailParity
-// SCOPE: Phase 14.2.2 — Mirror SessionDetailView UI for BackendSessionDetailView (read-only; display name only; duration + notes + attachments)
-// SEARCH-TOKEN: 20260123_114306_BackendDetailParity
+// CHANGE-ID: 20260123_132542_14_2_2_BackendDetail_SDVParity
+// SCOPE: Phase 14.2.2 — Make BackendSessionDetailView mirror SessionDetailView 1:1 (read-only; display-name-only header; no Edit button for non-owner posts).
+// SEARCH-TOKEN: 20260123_132542_14_2_2_BackendDetail_SDVParity
 
 import SwiftUI
 import Foundation
+import UIKit
 
-/// Connected-mode detail view for *non-owner* posts.
-/// Mirrors SessionDetailView’s card layout and typography, but is strictly read-only.
+/// Connected-mode detail view for backend posts (read-only).
+/// Parity target: SessionDetailView (UI), with the only allowed differences:
+/// - No Edit button / no edit flow when viewing non-owner posts.
+/// - Identity header is display-name only (no avatar yet; Phase 15 later).
 struct BackendSessionDetailView: View {
     let model: BackendSessionViewModel
 
-    @Environment(\.colorScheme) private var colorScheme
+        @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
+
+    @ObservedObject private var commentsStore = CommentsStore.shared
 
     // Phase 14 directory (display-name only; no avatar until Phase 15)
     @State private var directoryAccount: DirectoryAccount? = nil
@@ -26,45 +31,67 @@ struct BackendSessionDetailView: View {
     @State private var viewerVideoURLs: [URL] = []
     @State private var viewerAudioURLs: [URL] = []
     @State private var viewerAudioTitles: [String]? = nil
+
+    // Signed URL caches
     @State private var isLoadingAttachments: Bool = false
     @State private var attachmentLoadError: String? = nil
-
-    // Thumbnail signed URLs (images only)
     @State private var thumbSignedURLs: [String: URL] = [:]
 
-    // MARK: - Derived display fields (mirror SessionDetailView rules)
+    // Mirrors SessionDetailView’s local interaction state
+    @State private var isLikedLocal: Bool = false
+
+    private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
 
     private var ownerUserID: String {
-        (model.ownerUserID ?? "")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        (model.ownerUserID ?? "").lowercased()
     }
 
-    private var displayName: String {
-        let n = (directoryAccount?.displayName ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        return n.isEmpty ? "User" : n
+    private var effectiveViewerUserID: String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+           !override.isEmpty {
+            return override.lowercased()
+        }
+        #endif
+        return auth.currentUserID?.lowercased()
     }
 
-    private var activityName: String {
-        let raw = (model.activityLabel ?? "")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        return raw.isEmpty ? "Practice" : raw
+    private var viewerIsOwner: Bool {
+        guard let viewer = effectiveViewerUserID, !viewer.isEmpty else { return false }
+        guard !ownerUserID.isEmpty else { return false }
+        return viewer == ownerUserID
     }
 
-    private var instrumentName: String {
-        let raw = (model.instrumentLabel ?? "")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        return raw.isEmpty ? "Instrument" : raw
+    // MARK: - SessionActivity-style header + chip (parity with SessionDetailView)
+
+    private var headerTitle: String {
+        let instrument = (model.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let activity = (model.activityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !instrument.isEmpty && !activity.isEmpty {
+            return "\(instrument): \(activity)"
+        }
+        return instrument.isEmpty ? activity : instrument
     }
 
     private var headerLine: String {
-        "\(activityName) • \(instrumentName)"
+        let line = headerTitle
+        let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        guard parts.count == 2 else { return line }
+        let instrument = parts[0]
+        let activity = parts[1]
+        let title = (model.activityDetail ?? "")
+        if title.range(of: activity, options: .caseInsensitive) != nil {
+            return String(instrument)
+        }
+        return line
     }
 
-    private var titleLine: String {
-        let detail = (model.activityDetail ?? "")
-            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        return detail.isEmpty ? "" : detail
+    /// Parity rule: chip text is trimmed; if empty → chip hidden.
+    private var activityDescriptionText: String {
+        (model.activityDetail ?? "")
     }
+
+    // MARK: - Date • time • duration (must match SessionDetailView exactly)
 
     private var sessionDate: Date {
         parseBackendDate(model.sessionTimestampRaw) ??
@@ -73,84 +100,58 @@ struct BackendSessionDetailView: View {
     }
 
     private var metaLine: String {
-        let (time, date) = timeAndDateStrings(for: sessionDate)
-        let duration = durationString(seconds: model.durationSeconds)
-        // SessionDetailView shows: "19 Jan 2026 • 17:18 • 32m"
-        if duration.isEmpty {
-            return "\(date) • \(time)"
-        } else {
-            return "\(date) • \(time) • \(duration)"
-        }
+        let ts = sessionDate
+
+        let dateFormatter = DateFormatter()
+        dateFormatter.doesRelativeDateFormatting = true
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .none
+
+        let timeFormatter = DateFormatter()
+        timeFormatter.dateStyle = .none
+        timeFormatter.timeStyle = .short
+
+        let dateStr = dateFormatter.string(from: ts)
+        let timeStr = timeFormatter.string(from: ts)
+        let durStr = formattedDurationDisplay(Int(model.durationSeconds ?? 0))
+
+        return "\(dateStr) • \(timeStr) • \(durStr)"
+    }
+
+    private func formattedDurationDisplay(_ seconds: Int) -> String {
+        let h = seconds / 3600
+        let m = (seconds % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+
+    // MARK: - Comments
+
+    private var commentsCount: Int {
+        commentsStore.comments(for: model.id).count
     }
 
     // MARK: - Body
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                // Header card
-                VStack(alignment: .leading, spacing: 10) {
-                    identityHeader()
-
-                    if !titleLine.isEmpty {
-                        Text(titleLine)
-                            .font(.headline)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(
-                                Capsule(style: .continuous)
-                                    .fill(Theme.Colors.surface(colorScheme))
-                            )
-                            .overlay(
-                                Capsule(style: .continuous)
-                                    .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-                            )
-                            .accessibilityIdentifier("detail.titleChip")
-                    }
-
-                    Text(headerLine)
-                        .font(.headline)
-                        .lineLimit(2)
-                        .accessibilityIdentifier("detail.headerLine")
-
-                    Text(metaLine)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .accessibilityIdentifier("detail.metaLine")
-                }
-                .cardSurface()
-
-                // Notes card
-                let notesText = (model.notes ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                if !notesText.isEmpty {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Notes").sectionHeader()
-                        Text(notesText)
-                    }
-                    .cardSurface()
-                }
-
-// Attachments
-                attachmentsCard()
-
-                // Interactions row (Save + Comments). Share is owner-only and this view is for non-owners.
-                interactionsCard()
-            }
-            .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.m)
+            mainContentErased()
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.top, Theme.Spacing.m)
+                .padding(.bottom, Theme.Spacing.xl)
         }
-        .background(Theme.Colors.background(colorScheme))
         .navigationTitle("Session")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await loadDirectoryAccountIfNeeded()
-            await loadThumbURLsIfNeeded()
+        .onAppear {
+            isLikedLocal = FeedInteractionStore.isHearted(model.id)
+            Task {
+                await loadThumbURLsIfNeeded()
+                await loadDirectoryAccountIfNeeded()
+            }
         }
         .sheet(isPresented: $isCommentsPresented) {
-            // Placeholder author for composer; actual identity in comments comes from stores/backends.
             CommentsView(sessionID: model.id, placeholderAuthor: "You")
         }
-        .sheet(isPresented: $isViewerPresented) {
+        .fullScreenCover(isPresented: $isViewerPresented) {
             AttachmentViewerView(
                 imageURLs: viewerImageURLs,
                 videoURLs: viewerVideoURLs,
@@ -161,22 +162,99 @@ struct BackendSessionDetailView: View {
                 canShare: false
             )
         }
+        .appBackground()
+    }
+
+    // Type-erased wrapper to help Xcode's type-checker on large view trees.
+    private func mainContentErased() -> AnyView {
+        AnyView(mainContent())
+    }
+
+    @ViewBuilder
+    private func mainContent() -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            identityHeader()
+                .padding(.bottom, 4)
+
+            if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .cardSurface()
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Group {
+                    HStack {
+                        Text(headerLine)
+                            .accessibilitySortPriority(2)
+                        Spacer()
+                    }
+                    Text(metaLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(.secondary)
+                        .accessibilitySortPriority(1)
+                }
+                .accessibilityElement(children: .contain)
+            }
+            .cardSurface()
+
+            let originalNotes = model.notes ?? ""
+            let (focusDotIndexFromNotes, displayNotes) = extractFocusDotIndex(from: originalNotes)
+
+            if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Notes").sectionHeader()
+                        Spacer(minLength: 0)
+                    }
+                    Text(displayNotes)
+                }
+                .cardSurface()
+            }
+
+            if let dot = focusDotIndexFromNotes {
+                FocusSectionCard(dotIndex: dot, colorScheme: colorScheme)
+            }
+
+            attachmentsCard()
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                interactionRow()
+            }
+            .cardSurface(padding: Theme.Spacing.m)
+        }
     }
 
     // MARK: - Identity header (display name only; Phase 15 adds avatar)
 
     @ViewBuilder
     private func identityHeader() -> some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Text(displayName)
                 .font(.subheadline.weight(.semibold))
                 .accessibilityIdentifier("detail.displayName")
 
             Spacer(minLength: 0)
         }
+        .padding(.bottom, 2)
     }
 
-    // MARK: - Attachments
+    private var displayName: String {
+        if viewerIsOwner {
+            return "You"
+        }
+        if let account = directoryAccount {
+            let name = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty {
+                return name
+            }
+        }
+        return "User"
+    }
+
+    // MARK: - Attachments (parity layout with SessionDetailView)
 
     private func kindEnum(_ ref: BackendSessionViewModel.BackendAttachmentRef) -> BackendSessionViewModel.BackendAttachmentRef.Kind {
         ref.kind
@@ -201,57 +279,68 @@ struct BackendSessionDetailView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 Text("Attachments").sectionHeader()
 
-                // Images / Videos grid
-                let visual = refs.filter { r in
-                    let k = kindEnum(r)
-                    return k == .image || k == .video
-                }
-
-                if !visual.isEmpty {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 12)], spacing: 12) {
-                        ForEach(visual, id: \.self) { ref in
-                            BackendThumbCell(
-                                kind: kindEnum(ref),
-                                url: thumbSignedURLs[cacheKey(ref)],
-                                showViewIcon: true
-                            )
-                            .onTapGesture {
-                                Task {
-                                    await presentViewer()
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Audio list (simple rows)
+                let images = refs.filter { kindEnum($0) == .image }
+                let videos = refs.filter { kindEnum($0) == .video }
                 let audios = refs.filter { kindEnum($0) == .audio }
-                if !audios.isEmpty {
-                    VStack(spacing: 10) {
-                        ForEach(audios, id: \.self) { ref in
-                            HStack(spacing: 10) {
-                                Image(systemName: "waveform")
-                                    .font(.system(size: 16, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                Text(filename(from: ref.path))
-                                    .font(.subheadline)
-                                    .foregroundStyle(.primary)
-                                    .lineLimit(1)
-                                Spacer(minLength: 0)
-                                Image(systemName: "eye")
-                                    .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                            .padding(.vertical, 8)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                Task {
-                                    await presentViewer()
+
+                if !images.isEmpty || !videos.isEmpty {
+                    LazyVGrid(columns: grid, spacing: 12) {
+                        ForEach(Array(images.enumerated()), id: \.offset) { (_, ref) in
+                            BackendThumbCell(kind: .image, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    Task { await presentViewer() }
                                 }
-                            }
+                        }
+                        ForEach(Array(videos.enumerated()), id: \.offset) { (_, ref) in
+                            BackendThumbCell(kind: .video, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    Task { await presentViewer() }
+                                }
                         }
                     }
-                    .padding(.top, 4)
+                    .padding(.vertical, 4)
+                }
+
+                if !audios.isEmpty {
+                    ForEach(audios, id: \.self) { ref in
+                        let title = {
+                            let stem = URL(fileURLWithPath: filename(from: ref.path)).deletingPathExtension().lastPathComponent
+                            let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+                            return trimmed.isEmpty ? "Audio clip" : trimmed
+                        }()
+
+                        HStack(alignment: .center, spacing: 12) {
+                            Button {
+                                Task { await presentViewer() }
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Image(systemName: "waveform")
+                                        .font(.system(size: 16, weight: .semibold))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(title)
+                                            .font(.footnote)
+                                            .foregroundStyle(.primary)
+                                            .lineLimit(1)
+                                            .truncationMode(.tail)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                            .accessibilityLabel("Open audio clip \(title)")
+
+                            Spacer(minLength: 8)
+                        }
+                        .padding(12)
+                        .background(Color.secondary.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                        )
+                    }
                 }
 
                 if let msg = attachmentLoadError {
@@ -261,7 +350,7 @@ struct BackendSessionDetailView: View {
                         .padding(.top, 6)
                 }
             }
-            .cardSurface()
+            .cardSurface(padding: Theme.Spacing.m)
         }
     }
 
@@ -275,7 +364,7 @@ struct BackendSessionDetailView: View {
     }
 
     private func loadThumbURLsIfNeeded() async {
-        let refs = model.attachmentRefs.filter { kindEnum($0) == .image }
+        let refs = model.attachmentRefs.filter { kindEnum($0) == .image || kindEnum($0) == .video }
         guard !refs.isEmpty else { return }
 
         for ref in refs {
@@ -340,53 +429,59 @@ struct BackendSessionDetailView: View {
         }
     }
 
-    // MARK: - Interactions (Save + Comment)
+    // MARK: - Interactions row (must match SessionDetailView)
 
-    @ViewBuilder
-    private func interactionsCard() -> some View {
+    private func interactionRow() -> some View {
         HStack(spacing: 0) {
-            Button {
-                FeedInteractionStore.toggleHeart(model.id)
-            } label: {
+            Button(action: {
+                #if canImport(UIKit)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                let newState = FeedInteractionStore.toggleHeart(model.id)
+                isLikedLocal = newState
+            }) {
                 HStack(spacing: 8) {
-                    Image(systemName: FeedInteractionStore.isHearted(model.id) ? "heart.fill" : "heart")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("Save")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                    Image(systemName: isLikedLocal ? "heart.fill" : "heart")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-
-            Divider()
-                .frame(width: 1)
-                .background(Theme.Colors.cardStroke(colorScheme))
+            .accessibilityLabel("Open comments")
 
             Button {
                 isCommentsPresented = true
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: "bubble.left")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(.primary)
-                    Text("Comment")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
+                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open comments")
+
+            ShareLink(item: shareText()) {
+                HStack(spacing: 8) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 20, weight: .regular))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
         }
-        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-        )
-        .cardSurface(padding: 0)
+        .accessibilityElement(children: .contain)
+    }
+
+    private func shareText() -> String {
+        let title = headerTitle
+        return "Check out my session: \(title) — via Motivo"
     }
 
     // MARK: - Directory lookup (Phase 14)
@@ -406,7 +501,7 @@ struct BackendSessionDetailView: View {
         }
     }
 
-    // MARK: - Date + Duration formatting
+    // MARK: - Date parsing (unchanged)
 
     private func parseBackendDate(_ raw: String?) -> Date? {
         guard let s = raw?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty else {
@@ -431,82 +526,166 @@ struct BackendSessionDetailView: View {
 
         return nil
     }
+}
 
-    private func timeAndDateStrings(for date: Date) -> (time: String, date: String) {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateStyle = .medium
-        dateFormatter.timeStyle = .none
-        dateFormatter.doesRelativeDateFormatting = false
+// MARK: - Focus token extraction (copied from SessionDetailView for parity)
 
-        let timeFormatter = DateFormatter()
-        timeFormatter.dateStyle = .none
-        timeFormatter.timeStyle = .short
+/// Extracts FocusDotIndex (0…11) if present; falls back to legacy StateIndex (0…3 → mapped to center dots).
+/// Returns (dotIndex?, cleanedNotesWithoutTokens)
+private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
+    var working = notes
 
-        return (timeFormatter.string(from: date), dateFormatter.string(from: date))
+    // 1) Prefer FocusDotIndex: n (0…11)
+    if let r = working.range(of: "FocusDotIndex:") {
+        let tail = working[r.upperBound...]
+        let end = tail.firstIndex(of: "\n") ?? working.endIndex
+        let raw = String(working[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let n = Int(raw), (0...11).contains(n) {
+            // Remove the token line
+            working.removeSubrange(r.lowerBound..<end)
+            while working.contains("\n\n") { working = working.replacingOccurrences(of: "\n\n", with: "\n") }
+            working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (n, working)
+        }
     }
 
-    private func durationString(seconds: Int?) -> String {
-        guard let seconds, seconds > 0 else { return "" }
-        let mins = seconds / 60
-        let hrs = mins / 60
-        let remMins = mins % 60
-        if hrs > 0 {
-            if remMins == 0 {
-                return "\(hrs)h"
-            } else {
-                return "\(hrs)h \(remMins)m"
-            }
-        } else {
-            return "\(mins)m"
+    // 2) Fallback: legacy StateIndex: n (0…3) → map to representative center dots [1,4,7,10]
+    if let r = working.range(of: "StateIndex:") {
+        let tail = working[r.upperBound...]
+        let end = tail.firstIndex(of: "\n") ?? working.endIndex
+        let raw = String(working[r.upperBound..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if let n = Int(raw), (0...3).contains(n) {
+            let centers = [1, 4, 7, 10]
+            let dot = centers[n]
+            // Remove the token line
+            working.removeSubrange(r.lowerBound..<end)
+            while working.contains("\n\n") { working = working.replacingOccurrences(of: "\n\n", with: "\n") }
+            working = working.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (dot, working)
+        }
+    }
+
+    // 3) No tokens found → return original notes
+    return (nil, notes)
+}
+
+private struct FocusSectionCard: View {
+    let dotIndex: Int
+    let colorScheme: ColorScheme
+
+    private let count: Int = 12
+    private let spacing: CGFloat = 8
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Focus").sectionHeader()
+            FocusDotStripView(dotIndex: dotIndex, count: count, spacing: spacing, colorScheme: colorScheme)
+                .frame(height: 44)
+                .accessibilityLabel(Text(bucketLabel(for: dotIndex)))
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+    }
+
+    private func bucketLabel(for dot: Int) -> String {
+        switch (dot / 3) {
+        case 0: return "State: Searching"
+        case 1: return "State: Working"
+        case 2: return "State: Flowing"
+        default: return "State: Breakthrough"
         }
     }
 }
+
+private struct FocusDotStripView: View {
+    let dotIndex: Int
+    let count: Int
+    let spacing: CGFloat
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        GeometryReader { geo in
+            let totalWidth = geo.size.width
+            let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(max(0, count - 1))) / CGFloat(max(1, count))))
+            let ringDot = max(0, min(count - 1, dotIndex))
+
+            HStack(spacing: spacing) {
+                ForEach(0..<count, id: \.self) { i in
+                    dotView(index: i, ringDot: ringDot, diameter: diameter)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private func dotView(index i: Int, ringDot: Int, diameter: CGFloat) -> some View {
+        let isRinged = (i == ringDot)
+        let baseScale: CGFloat = isRinged ? 1.18 : 1.0
+
+        Circle()
+            .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
+            .overlay(Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth))
+            .overlay(ringOverlay(isRinged: isRinged))
+            .frame(width: diameter, height: diameter)
+            .scaleEffect(baseScale)
+            .accessibilityHidden(true)
+    }
+
+    @ViewBuilder
+    private func ringOverlay(isRinged: Bool) -> some View {
+        if isRinged {
+            Circle().stroke(
+                FocusDotStyle.ringColor(for: colorScheme),
+                lineWidth: FocusDotStyle.ringWidth
+            )
+        }
+    }
+}
+
+// MARK: - Backend attachment thumb cell (parity with SessionDetailView thumb styling)
 
 private struct BackendThumbCell: View {
     let kind: BackendSessionViewModel.BackendAttachmentRef.Kind
     let url: URL?
     let showViewIcon: Bool
 
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Theme.Colors.surface(colorScheme))
-
-            if kind == .image, let url {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image
-                            .resizable()
-                            .scaledToFill()
-                    default:
-                        Image(systemName: "photo")
-                            .imageScale(.large)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+            Group {
+                if kind == .image, let url {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image.resizable().scaledToFill()
+                        default:
+                            Image(systemName: kind == .video ? "video" : "photo")
+                                .imageScale(.large)
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                } else {
+                    Image(systemName: iconName(for: kind))
+                        .imageScale(.large)
+                        .foregroundStyle(.secondary)
                 }
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            } else {
-                Image(systemName: iconName(for: kind))
-                    .imageScale(.large)
-                    .foregroundStyle(Theme.Colors.secondaryText)
             }
+            .frame(width: 128, height: 128)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
+            )
+            .clipped()
 
             if showViewIcon {
-                Image(systemName: "eye")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .padding(8)
+                Text("★")
+                    .font(.system(size: 16))
+                    .padding(6)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .padding(4)
             }
         }
-        .frame(height: 108)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-        )
-        .clipped()
     }
 
     private func iconName(for kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> String {
