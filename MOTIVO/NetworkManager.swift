@@ -36,6 +36,10 @@
 // CHANGE-ID: 20260114_103700_9E
 // SCOPE: 9E signed storage URLs (no Edge Functions)
 
+// CHANGE-ID: 20260127_130352_NetworkAuthChallenge_RefreshRetry
+// SCOPE: Phase 14.2.2 — Add 401/403 auth-challenge hook and single retry to avoid zombie signed-in state; no behavioural changes beyond auth correctness.
+// SEARCH-TOKEN: 20260127_130352_NetworkAuthChallenge_RefreshRetry
+
 import Foundation
 
 public final class NetworkManager {
@@ -50,6 +54,10 @@ public final class NetworkManager {
 
     // Step 7: user session bearer token (access token from Supabase Auth)
     private var bearerToken: String? = nil
+
+    /// Optional auth challenge handler used to refresh a session after a 401/403.
+    /// If it returns true, the original request will be retried once.
+    public var onAuthChallenge: (() async -> Bool)? = nil
 
     /// Legacy configure: treats `authToken` as the project API key (publishable key).
     public func configure(baseURL: URL?, authToken: String?) {
@@ -132,6 +140,7 @@ public final class NetworkManager {
         return (pathPart, items?.isEmpty == false ? items : nil)
     }
 
+    
     public func request(
         path: String,
         method: String,
@@ -171,83 +180,98 @@ public final class NetworkManager {
             return .failure(NetworkError.invalidURL("components failed: \(components)"))
         }
 
-        var request = URLRequest(url: finalURL)
-        request.httpMethod = method
-
-        // Headers
-        var allHeaders: [String:String] = [:]
-
-        // Supabase REST expects `apikey` for project key. Safe to include on all requests.
-        if let apiKey = authToken, !apiKey.isEmpty {
-            allHeaders["apikey"] = apiKey
-        }
-
-        // RLS-protected calls need a bearer access token.
-        if let bearer = bearerToken, !bearer.isEmpty {
-            allHeaders["Authorization"] = "Bearer \(bearer)"
-        }
-
+        var baseRequest = URLRequest(url: finalURL)
+        baseRequest.httpMethod = method
         if let jsonBody {
-            request.httpBody = jsonBody
-            allHeaders["Content-Type"] = "application/json"
+            baseRequest.httpBody = jsonBody
         }
 
-        // Merge custom headers (custom overrides defaults if key duplicates)
-        for (k, v) in headers { allHeaders[k] = v }
-        for (k, v) in allHeaders { request.setValue(v, forHTTPHeaderField: k) }
+        func performOnce() async -> Result<Data, Error> {
+            var request = baseRequest
 
-        #if DEBUG
-        // DEBUG: Log POST /rest/v1/posts request details without exposing secrets
-        if method.uppercased() == "POST", finalURL.path.contains("/rest/v1/posts") {
-            print("[NetworkManager][DEBUG] ▶︎ POST Request: \(finalURL.absoluteString)")
-            if let body = request.httpBody, !body.isEmpty {
-                if let bodyString = String(data: body, encoding: .utf8) {
-                    print("[NetworkManager][DEBUG] body=\(bodyString)")
-                } else {
-                    print("[NetworkManager][DEBUG] body=(non-UTF8, \(body.count) bytes)")
-                }
-                do {
-                    let obj = try JSONSerialization.jsonObject(with: body, options: [])
-                    if let dict = obj as? [String: Any] {
-                        let keys = Array(dict.keys)
-                        print("[NetworkManager][DEBUG] jsonKeys=\(keys)")
-                    } else if let arr = obj as? [[String: Any]], let first = arr.first {
-                        let keys = Array(first.keys)
-                        print("[NetworkManager][DEBUG] jsonKeys(first item)=\(keys)")
+            // Headers
+            var allHeaders: [String:String] = [:]
+
+            // Supabase REST expects `apikey` for project key. Safe to include on all requests.
+            if let apiKey = authToken, !apiKey.isEmpty {
+                allHeaders["apikey"] = apiKey
+            }
+
+            // RLS-protected calls need a bearer access token.
+            if let bearer = bearerToken, !bearer.isEmpty {
+                allHeaders["Authorization"] = "Bearer \(bearer)"
+            }
+
+            if jsonBody != nil {
+                allHeaders["Content-Type"] = "application/json"
+            }
+
+            // Merge custom headers (custom overrides defaults if key duplicates)
+            for (k, v) in headers { allHeaders[k] = v }
+            for (k, v) in allHeaders { request.setValue(v, forHTTPHeaderField: k) }
+
+            #if DEBUG
+            // DEBUG: Log POST /rest/v1/posts request details without exposing secrets
+            if method.uppercased() == "POST", finalURL.path.contains("/rest/v1/posts") {
+                print("[NetworkManager][DEBUG] ▶︎ POST Request: \(finalURL.absoluteString)")
+                if let body = request.httpBody, !body.isEmpty {
+                    if let bodyString = String(data: body, encoding: .utf8) {
+                        print("[NetworkManager][DEBUG] body=\(bodyString)")
                     } else {
-                        print("[NetworkManager][DEBUG] jsonKeys=(not a top-level object)")
+                        print("[NetworkManager][DEBUG] body=(non-UTF8, \(body.count) bytes)")
                     }
-                } catch {
-                    print("[NetworkManager][DEBUG] json parse error=\(error)")
+                    do {
+                        let obj = try JSONSerialization.jsonObject(with: body, options: [])
+                        print("[NetworkManager][DEBUG] json=\(obj)")
+                    } catch {
+                        // ignore
+                    }
                 }
-            } else {
-                print("[NetworkManager][DEBUG] body=(none)")
+            }
+            #endif
+
+            // Logging (no tokens printed)
+            print("[NetworkManager] ▶︎ \(method) \(finalURL.absoluteString)")
+
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                print("[NetworkManager] ◀︎ status=\(status) for \(finalURL.lastPathComponent)")
+
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    let bodyString = String(data: data, encoding: .utf8)
+                    #if DEBUG
+                    if let bodyString, !bodyString.isEmpty {
+                        print("[NetworkManager] ◀︎ body=\(bodyString)")
+                    }
+                    #endif
+                    return .failure(NetworkError.httpError(status: http.statusCode, body: bodyString))
+                }
+                return .success(data)
+            } catch {
+                return .failure(NetworkError.transportError(String(describing: error)))
             }
         }
-        #endif
 
-        // Logging (no tokens printed)
-        print("[NetworkManager] ▶︎ \(method) \(finalURL.absoluteString)")
+        // First attempt
+        let first = await performOnce()
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            print("[NetworkManager] ◀︎ status=\(status) for \(finalURL.lastPathComponent)")
+        // Auth-challenge path: refresh session and retry once on 401/403.
+        if case .failure(let err) = first,
+           let ne = err as? NetworkError,
+           case .httpError(let status, _) = ne,
+           (status == 401 || status == 403),
+           let handler = onAuthChallenge {
 
-            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                let bodyString = String(data: data, encoding: .utf8)
-                #if DEBUG
-                if let bodyString, !bodyString.isEmpty {
-                    print("[NetworkManager] ◀︎ body=\(bodyString)")
-                }
-                #endif
-                return .failure(NetworkError.httpError(status: http.statusCode, body: bodyString))
+            let refreshed = await handler()
+            if refreshed {
+                return await performOnce()
             }
-            return .success(data)
-        } catch {
-            return .failure(NetworkError.transportError(String(describing: error)))
         }
+
+        return first
     }
+
 
     public func decodeJSON<T: Decodable>(_ type: T.Type, from data: Data) -> Result<T, Error> {
         do {

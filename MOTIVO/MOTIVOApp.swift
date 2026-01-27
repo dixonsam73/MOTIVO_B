@@ -20,6 +20,10 @@ import Foundation
 // CHANGE-ID: 20260122_173200_Phase1421_DefaultConnectedMode
 // SCOPE: Phase 14.2.1 — In non-DEBUG builds, default backendMode_v1 to backendConnected when missing (fresh install) so queue can flush without DebugViewer.
 // SEARCH-TOKEN: 20260122_173200_Phase1421_DefaultConnectedMode
+
+// CHANGE-ID: 20260127_130352_AppAuthLiveness_LaunchForeground
+// SCOPE: Phase 14.2.2 — Ensure Supabase session refresh on launch + foreground before connected liveness calls; no UI changes.
+// SEARCH-TOKEN: 20260127_130352_AppAuthLiveness_LaunchForeground
 // SCOPE: Step 7 — Apply BackendConfig at app launch so NetworkManager.baseURL/authToken are configured before backend services select simulated vs HTTP
 
 @main
@@ -149,6 +153,9 @@ struct MOTIVOApp: App {
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
                 .onAppear {
+                    // Phase 14.2.2: Session liveness — refresh Supabase session on launch to prevent zombie auth.
+                    Task { _ = await auth.ensureValidSession(reason: "launch") }
+
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
                 }
@@ -158,6 +165,9 @@ struct MOTIVOApp: App {
                     BackendConfig.apply()
                     guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }
                     Task {
+                        // Phase 14.2.2: Session liveness — refresh before issuing connected requests.
+                        let ok = await auth.ensureValidSession(reason: "foreground")
+                        guard ok else { return }
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: "all")
                         await SessionSyncQueue.shared.flushNow()
                     }

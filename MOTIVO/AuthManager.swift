@@ -9,6 +9,10 @@
 // SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true
 // SEARCH-TOKEN: 20260122_113000_Phase142_AuthIgnoreOverride
 
+// CHANGE-ID: 20260127_130352_AuthLiveness_RefreshRetry
+// SCOPE: Phase 14.2.2 — Fix zombie auth by persisting refresh token, refreshing on launch/foreground, and supporting 401/403 refresh+retry once; no UI changes.
+// SEARCH-TOKEN: 20260127_130352_AuthLiveness_RefreshRetry
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -80,6 +84,7 @@ final class AuthManager: NSObject, ObservableObject {
     // Step 7: Supabase session persistence (dev-only; no refresh logic yet)
     private static let supabaseAccessTokenKeychainKey = "supabaseAccessToken_v1"
     private static let supabaseUserIDDefaultsKey = "supabaseUserID_v1"
+    private static let supabaseRefreshTokenKeychainKey = "supabaseRefreshToken_v1"
 
     /// Canonical backend principal used for all backend/RLS calls.
     ///
@@ -128,7 +133,15 @@ final class AuthManager: NSObject, ObservableObject {
         // If we have a stored Supabase access token, apply it to NetworkManager for RLS-protected calls.
         if let token = Keychain.get(Self.supabaseAccessTokenKeychainKey), !token.isEmpty {
             NetworkManager.shared.setBearerToken(token)
+        
+        // Phase 14.2.2 — Auth/session liveness: allow NetworkManager to challenge auth on 401/403.
+        // This is intentionally lightweight: refresh once, retry once; otherwise collapse to signed-out.
+        NetworkManager.shared.onAuthChallenge = { [weak self] in
+            guard let self else { return false }
+            return await self.ensureValidSession(reason: "network-auth-challenge")
         }
+
+}
 
         // Existing users (signed in before Step 5): perform a one-time handshake
         // if we already have an Apple user ID but no backend ID yet.
@@ -138,6 +151,93 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     var isSignedIn: Bool { currentUserID != nil }
+
+    // MARK: - Session liveness
+
+    private var sessionRefreshInFlight: Task<Bool, Never>?
+
+    /// Ensures the Supabase session is valid for connected-mode network calls.
+    /// - Returns: true if a valid bearer token is available after the check.
+    func ensureValidSession(reason: String) async -> Bool {
+        // Only meaningful in Connected mode.
+        guard BackendEnvironment.shared.isConnected else {
+            return self.isSignedIn
+        }
+
+        // If the user is not locally signed in, nothing to refresh.
+        guard self.currentUserID != nil else {
+            return false
+        }
+
+        // If backend isn't configured, collapse state (prevents zombie UI in Connected builds).
+        guard BackendConfig.isConfigured else {
+            NSLog("[Auth] ensureValidSession: BackendConfig not configured; signing out. reason=%@", reason)
+            await MainActor.run { self.signOut() }
+            return false
+        }
+
+        // Coalesce concurrent refresh attempts.
+        if let existing = sessionRefreshInFlight {
+            return await existing.value
+        }
+
+        let task = Task<Bool, Never> { [weak self] in
+            guard let self else { return false }
+            return await self.refreshSupabaseSession(reason: reason)
+        }
+        sessionRefreshInFlight = task
+        let ok = await task.value
+        sessionRefreshInFlight = nil
+        return ok
+    }
+
+    private func refreshSupabaseSession(reason: String) async -> Bool {
+        #if canImport(Supabase)
+        guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
+            NSLog("[Auth] refreshSupabaseSession: missing refresh token; signing out. reason=%@", reason)
+            await MainActor.run { self.signOut() }
+            return false
+        }
+        guard let url = BackendConfig.apiBaseURL, let key = BackendConfig.apiToken else {
+            NSLog("[Auth] refreshSupabaseSession: BackendConfig missing URL/key; signing out. reason=%@", reason)
+            await MainActor.run { self.signOut() }
+            return false
+        }
+
+        do {
+            let supabase = SupabaseClient(supabaseURL: url, supabaseKey: key)
+            let session = try await supabase.auth.refreshSession(refreshToken: refreshToken)
+
+            let accessToken = session.accessToken
+            let newRefresh = session.refreshToken
+            let supaUserID = session.user.id.uuidString
+
+            Keychain.set(accessToken, for: Self.supabaseAccessTokenKeychainKey)
+            Keychain.set(newRefresh, for: Self.supabaseRefreshTokenKeychainKey)
+            UserDefaults.standard.set(supaUserID, forKey: Self.supabaseUserIDDefaultsKey)
+            UserDefaults.standard.set(supaUserID, forKey: Self.backendUserDefaultsKey)
+
+            NetworkManager.shared.setBearerToken(accessToken)
+
+            await MainActor.run {
+                self.backendUserID = supaUserID
+            }
+
+            NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
+            return true
+        } catch {
+            NSLog("[Auth] refreshSupabaseSession FAILED: %@ reason=%@", String(describing: error), reason)
+            await MainActor.run { self.signOut() }
+            return false
+        }
+        #else
+        // If Supabase is not linked, we cannot refresh; sign out to avoid zombie UI.
+        NSLog("[Auth] refreshSupabaseSession: Supabase module missing; signing out. reason=%@", reason)
+        await MainActor.run { self.signOut() }
+        return false
+        #endif
+    }
+
 
     // Configure SwiftUI Sign in with Apple button
     func configure(_ request: ASAuthorizationAppleIDRequest) {
@@ -167,6 +267,7 @@ final class AuthManager: NSObject, ObservableObject {
 
         // Step 7: clear Supabase session (dev-only)
         Keychain.delete(Self.supabaseAccessTokenKeychainKey)
+        Keychain.delete(Self.supabaseRefreshTokenKeychainKey)
         UserDefaults.standard.removeObject(forKey: Self.supabaseUserIDDefaultsKey)
         NetworkManager.shared.clearBearerToken()
 
@@ -264,6 +365,7 @@ final class AuthManager: NSObject, ObservableObject {
             let supaUserID = session.user.id.uuidString
 
             Keychain.set(accessToken, for: Self.supabaseAccessTokenKeychainKey)
+            Keychain.set(session.refreshToken, for: Self.supabaseRefreshTokenKeychainKey)
             UserDefaults.standard.set(supaUserID, forKey: Self.supabaseUserIDDefaultsKey)
             UserDefaults.standard.set(supaUserID, forKey: Self.backendUserDefaultsKey)
 
