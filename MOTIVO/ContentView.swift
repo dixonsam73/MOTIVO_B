@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
+// SCOPE: Phase 14.3C — Fix connected feed owner-name resolution (self shows Profile.name, not 'User') and propagate local session delete to backend post DELETE; no UI/layout or schema changes.
+// SEARCH-TOKEN: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
+
 // CHANGE-ID: 20260122_223700_14_2_1d_RemoteThumbSignedURL
 // SCOPE: Phase 14.2.1 — RemoteAttachmentPreview: load signed URL thumbnails for remote image attachments (feed parity); fallback to icon; cache by bucket|path.
 // SEARCH-TOKEN: 20260122_220200_14_2_1c_RemoteTitlesParity
@@ -438,7 +442,7 @@ fileprivate struct SessionsRootView: View {
                                                 destination: BackendSessionDetailView(
                                                     model: BackendSessionViewModel(
                                                         post: post,
-                                                        currentUserID: (effectiveUserID ?? "")
+                                                        currentUserID: (effectiveBackendUserID ?? effectiveUserID ?? "")
                                                     )
                                                 ),
                                                 isActive: Binding(
@@ -457,7 +461,7 @@ fileprivate struct SessionsRootView: View {
                                                     }
                                                     return nil
                                                 }(),
-                                                viewerUserID: effectiveUserID
+                                                viewerUserID: effectiveBackendUserID ?? effectiveUserID
                                             )
                                             .contentShape(Rectangle())
                                             .onTapGesture { pushRemotePostID = post.id }
@@ -834,23 +838,45 @@ Spacer()
     // MARK: - Delete
 
     private func deleteSessions(at offsets: IndexSet) {
+        // Keep List's onDelete handler synchronous; do async backend delete + Core Data work on MainActor.
+        Task { @MainActor in
+            await deleteSessionsWithBackendIfNeeded(at: offsets)
+        }
+    }
+
+    @MainActor
+    private func deleteSessionsWithBackendIfNeeded(at offsets: IndexSet) async {
         let rows = filteredSessions
         do {
             for idx in offsets {
+                guard idx < rows.count else { continue }
                 let session = rows[idx]
-                // Gather attachment file paths for this session and delete from disk before deleting the Core Data objects
+
+                // Connected mode: delete matching backend post first (post id == session.id UUID).
+                if useBackendFeed, let postID = session.value(forKey: "id") as? UUID {
+                    _ = await BackendEnvironment.shared.publish.deletePost(postID)
+                }
+
+                // Gather attachment file paths for this session and delete from disk before deleting Core Data objects.
                 let attachments = (session.attachments as? Set<Attachment>) ?? []
                 let paths: [String] = attachments.compactMap { att in
-                    // Access KVC-safe String attribute `fileURL` if present
                     if let s = att.value(forKey: "fileURL") as? String, !s.isEmpty { return s }
                     return nil
                 }
                 if !paths.isEmpty {
                     AttachmentStore.deleteAttachmentFiles(atPaths: paths)
                 }
+
                 viewContext.delete(session)
             }
+
             try viewContext.save()
+
+            // Refresh backend feed after deletions so remote rows don't rehydrate.
+            if useBackendFeed {
+                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+            }
         } catch {
             print("Delete error: \(error)")
         }
@@ -2159,12 +2185,25 @@ private var extraAttachmentCount: Int {
 
                         // Name and optional location on one line
                         let realName: String = {
-                            if viewerIsOwner { return "You" }
-                            if let acct = directoryAccount { return acct.displayName }
+                            if viewerIsOwner {
+                                let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                                req.fetchLimit = 1
+                                if let p = try? ctx.fetch(req).first,
+                                   let nRaw = p.name {
+                                    let n = nRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !n.isEmpty { return n }
+                                }
+                                return "User"
+                            }
+
+                            if let acct = directoryAccount {
+                                let dn = acct.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !dn.isEmpty { return dn }
+                            }
+
                             return "User"
                         }()
-
-                        let loc = ProfileStore.location(for: owner)
+let loc = ProfileStore.location(for: owner)
 
                         HStack(spacing: 6) {
                             Text(realName).font(.subheadline.weight(.semibold))
