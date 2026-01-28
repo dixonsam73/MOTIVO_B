@@ -13,6 +13,10 @@
 // SCOPE: Phase 14.2.2 — Fix zombie auth by persisting refresh token, refreshing on launch/foreground, and supporting 401/403 refresh+retry once; no UI changes.
 // SEARCH-TOKEN: 20260127_130352_AuthLiveness_RefreshRetry
 
+// CHANGE-ID: 20260128_194500_14_3A_AuthMainActor
+// SCOPE: Phase 14.3A — AuthManager: enforce MainActor for published state to eliminate background-thread publishing warnings; no UI changes.
+// SEARCH-TOKEN: 20260128_194500_14_3A_AuthMainActor
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -71,6 +75,7 @@ enum Keychain {
 
 // MARK: - Auth Manager
 
+@MainActor
 final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
@@ -253,8 +258,8 @@ final class AuthManager: NSObject, ObservableObject {
         case .failure:
             return
         case .success(let authorization):
-            // Ensure we publish on the main thread (UI updates)
-            DispatchQueue.main.async {
+            // Ensure we publish on MainActor (UI updates)
+            Task { @MainActor in
                 self.process(authorization)
             }
         }
@@ -273,11 +278,9 @@ final class AuthManager: NSObject, ObservableObject {
 
         UserDefaults.standard.removeObject(forKey: Self.backendUserDefaultsKey)
 
-        DispatchQueue.main.async {
-            self.currentUserID = nil
-            self.displayName = nil
-            self.backendUserID = nil
-        }
+        self.currentUserID = nil
+        self.displayName = nil
+        self.backendUserID = nil
     }
 
     // MARK: - Internal processing

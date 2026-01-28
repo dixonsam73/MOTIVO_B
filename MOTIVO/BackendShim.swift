@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260128_192500_14_3A_MainActorPublishingFix
+// SCOPE: Phase 14.3A — Fix runtime warning "Publishing changes from background threads" by ensuring all BackendFeedStore (@MainActor) mutations are performed via MainActor hops in HTTP feed fetch. No UI or logic changes.
+// SEARCH-TOKEN: 20260128_192500_14_3A_MainActorPublishingFix
+
 // CHANGE-ID: 20260121_181200_Phase14_Step3_FixUserIDType
 // SCOPE: Phase 14 Step 3 — fix AccountDirectoryService resolveAccounts callsite to pass [String] user_id values (uuid strings), not [UUID].
 
@@ -920,7 +924,9 @@ public final class HTTPBackendPublishService: BackendPublishService {
             targetOwnersLower = merged
         }
 
-        BackendFeedStore.shared.beginFetch(ownerKey: owner, scope: normalized, targetOwners: targetOwnersLower)
+        await MainActor.run {
+            BackendFeedStore.shared.beginFetch(ownerKey: owner, scope: normalized, targetOwners: targetOwnersLower)
+        }
 
         let headers: [String: String] = [
             "apikey": apiKey,
@@ -983,7 +989,9 @@ public final class HTTPBackendPublishService: BackendPublishService {
                 let sortedMine = sortByCreatedDesc(mine)
                 let sortedAll = sortByCreatedDesc(all)
 
-                BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
+                await MainActor.run {
+                    BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
+                }
 
                 // Phase 14 Step 3: Batch-resolve directory identities for authors visible in the feed.
                 // AccountDirectoryService expects [String] user IDs (uuid strings) matching the RPC signature (uuid[]).
@@ -995,18 +1003,24 @@ public final class HTTPBackendPublishService: BackendPublishService {
                 if !uniqueAuthorUserIDs.isEmpty {
                     let resolved = await AccountDirectoryService.shared.resolveAccounts(userIDs: uniqueAuthorUserIDs)
                     if case .success(let map) = resolved {
-                        BackendFeedStore.shared.mergeDirectoryAccounts(map)
+                        await MainActor.run {
+                            BackendFeedStore.shared.mergeDirectoryAccounts(map)
+                        }
                     }
                 }
 
                 return .success(())
             } catch {
-                BackendFeedStore.shared.endFetchFailure(error)
+                await MainActor.run {
+                    BackendFeedStore.shared.endFetchFailure(error)
+                }
                 return .failure(error)
             }
 
         case .failure(let e):
-            BackendFeedStore.shared.endFetchFailure(e)
+            await MainActor.run {
+                BackendFeedStore.shared.endFetchFailure(e)
+            }
             return .failure(e)
         }
     }

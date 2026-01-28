@@ -18,6 +18,9 @@
 // SCOPE: Social Hardening — Dummy identities (local-device, user_B, user_C)
 // Fixes: FollowStore now reloads follow/request sets after identity override.
 
+// CHANGE-ID: 20260128_193300_14_3A_FollowStore_RemoveManualObjectWillChange
+// SCOPE: Phase 14.3A — FollowStore: remove manual objectWillChange.send() calls; rely on @Published + load() refresh to avoid background-thread publish warnings; no UI/layout changes.
+// SEARCH-TOKEN: 20260128_193300_14_3A_FollowStore_RemoveManualObjectWillChange
 import Foundation
 import Combine
 
@@ -108,7 +111,6 @@ public final class FollowStore: ObservableObject {
             self.followers = Set(followerIDs.map { $0.lowercased() })
             self.requests = Set(incomingIDs.map { $0.lowercased() })
             self.outgoingRequests = Set(outgoingIDs.map { $0.lowercased() })
-            objectWillChange.send()
             NSLog("[FollowStore] backend refresh ok (following=%d followers=%d incoming=%d outgoing=%d)",
                   self.following.count, self.followers.count, self.requests.count, self.outgoingRequests.count)
 
@@ -135,7 +137,6 @@ public final class FollowStore: ObservableObject {
             // Backend refresh will confirm/correct state, but we want instant feedback on tap.
             let normalized = targetUserID.lowercased()
             self.outgoingRequests.insert(normalized)
-            self.objectWillChange.send()
 
             Task { @MainActor in
                 let result = await BackendEnvironment.shared.follow.requestFollow(to: targetUserID)
@@ -145,7 +146,6 @@ public final class FollowStore: ObservableObject {
                 case .failure(let e):
                     // Roll back optimistic state on failure.
                     self.outgoingRequests.remove(normalized)
-                    self.objectWillChange.send()
                     NSLog("[FollowStore] backend requestFollow failed: %@", String(describing: e))
                 }
             }
@@ -155,7 +155,6 @@ public final class FollowStore: ObservableObject {
         // Local simulation: requesting to follow someone is an OUTGOING request.
         outgoingRequests.insert(targetUserID)
         save()
-        objectWillChange.send()
         NSLog("[FollowStore] request → %@", targetUserID)
         return .requested
     }
@@ -179,7 +178,6 @@ public final class FollowStore: ObservableObject {
         requests.remove(requesterUserID)
         following.insert(requesterUserID)
         save()
-        objectWillChange.send()
         NSLog("[FollowStore] approve ← %@", requesterUserID)
         return .following
     }
@@ -201,7 +199,6 @@ public final class FollowStore: ObservableObject {
 
         requests.remove(requesterUserID)
         save()
-        objectWillChange.send()
         NSLog("[FollowStore] decline ← %@", requesterUserID)
         return .none
     }
@@ -225,7 +222,6 @@ public final class FollowStore: ObservableObject {
         // If we unfollow in local sim, also clear any outgoing request record to keep UI coherent.
         outgoingRequests.remove(targetUserID)
         save()
-        objectWillChange.send()
         NSLog("[FollowStore] unfollow × %@", targetUserID)
         return .none
     }
@@ -254,7 +250,6 @@ public final class FollowStore: ObservableObject {
         following.removeAll()
         requests.removeAll()
         outgoingRequests.removeAll()
-        objectWillChange.send()
         NSLog("[FollowStore] DEBUG reset local follows")
     }
     #endif
@@ -278,7 +273,7 @@ extension FollowStore {
         var reqs = Set(UserDefaults.standard.stringArray(forKey: _requestsKey) ?? [])
         reqs.insert(targetUserID)
         UserDefaults.standard.set(Array(reqs), forKey: _requestsKey)
-        objectWillChange.send()
+        load()
         NSLog("[FollowStore] simulateRequestFollow → %@", targetUserID)
         return .requested
     }
@@ -290,8 +285,9 @@ extension FollowStore {
         reqs.remove(requesterUserID)
         fol.insert(requesterUserID)
         UserDefaults.standard.set(Array(reqs), forKey: _requestsKey)
+        load()
         UserDefaults.standard.set(Array(fol), forKey: _followingKey)
-        objectWillChange.send()
+        load()
         NSLog("[FollowStore] simulateAcceptFollow ← %@", requesterUserID)
         return .following
     }
@@ -301,7 +297,8 @@ extension FollowStore {
         var fol = Set(UserDefaults.standard.stringArray(forKey: _followingKey) ?? [])
         fol.remove(targetUserID)
         UserDefaults.standard.set(Array(fol), forKey: _followingKey)
-        objectWillChange.send()
+        load()
+        load()
         NSLog("[FollowStore] simulateUnfollow × %@", targetUserID)
         return .none
     }
@@ -311,7 +308,6 @@ extension FollowStore {
     /// Ensures dummy identities actually switch follow/request sets.
     public func debugReload() {
         load()
-        objectWillChange.send()
         NSLog("[FollowStore] debugReload → active user = %@", currentUserID)
     }
     #endif
