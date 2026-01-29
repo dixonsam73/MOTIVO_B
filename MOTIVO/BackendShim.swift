@@ -49,6 +49,10 @@
 // SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true (HTTPBackendFollowService)
 // SEARCH-TOKEN: 20260122_113000_Phase142_BackendShimIgnoreOverride
 
+// CHANGE-ID: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+// SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+
 import Foundation
 import CoreData
 import SwiftUI
@@ -144,6 +148,30 @@ public final class BackendFeedStore: ObservableObject {
     @Published public private(set) var lastFetchAt: Date? = nil
 
     private init() {}
+
+    // Phase 14.3H (A): Connected-mode sign-out must clear feed state.
+    // This is a pure in-memory reset (no backend calls).
+    public func resetForSignOut() {
+        minePosts = []
+        allPosts = []
+        directoryAccountsByUserID = [:]
+
+        lastRawCount = 0
+        lastMineCount = 0
+        lastOwnerKey = nil
+        lastOwnerSamples = []
+        lastCreatedAtSamples = []
+
+        lastScope = nil
+        lastAllCount = 0
+        lastTargetOwnerCount = 0
+        lastTargetOwnerSamples = []
+
+        isFetching = false
+        lastError = nil
+        lastFetchAt = nil
+    }
+
 
     public func beginFetch(ownerKey: String, scope: String, targetOwners: [String]) {
         isFetching = true

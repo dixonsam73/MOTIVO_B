@@ -21,6 +21,10 @@
 // CHANGE-ID: 20260128_193300_14_3A_FollowStore_RemoveManualObjectWillChange
 // SCOPE: Phase 14.3A — FollowStore: remove manual objectWillChange.send() calls; rely on @Published + load() refresh to avoid background-thread publish warnings; no UI/layout changes.
 // SEARCH-TOKEN: 20260128_193300_14_3A_FollowStore_RemoveManualObjectWillChange
+// CHANGE-ID: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+// SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+
 import Foundation
 import Combine
 
@@ -40,6 +44,18 @@ public final class FollowStore: ObservableObject {
     @Published private(set) public var followers: Set<String> = []
     @Published private(set) public var requests: Set<String> = []              // incoming requests (people who want to follow me)
     @Published private(set) public var outgoingRequests: Set<String> = []      // outgoing requests (I asked to follow them)
+
+
+    // Phase 14.3H (A): Connected-mode sign-out must clear any retained follow state
+    // so signed-out UI cannot render stale relationship-driven affordances.
+    // Pure in-memory reset (no persistence writes; no backend calls).
+    public func resetForSignOut() {
+        following = []
+        followers = []
+        requests = []
+        outgoingRequests = []
+    }
+
 
     private var cancellables = Set<AnyCancellable>()
 

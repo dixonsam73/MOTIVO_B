@@ -23,6 +23,10 @@
 // SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
 
 
+// CHANGE-ID: 20260129_121332_14_3H_B2_AccessTokenGate
+// SCOPE: Phase 14.3H (B2) — Gate directory/profile sync on presence of Supabase access token to prevent unauthenticated upserts; no UI changes.
+// SEARCH-TOKEN: 20260129_121332_14_3H_B2_AccessTokenGate
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -96,6 +100,16 @@ final class AuthManager: NSObject, ObservableObject {
     private static let supabaseAccessTokenKeychainKey = "supabaseAccessToken_v1"
     private static let supabaseUserIDDefaultsKey = "supabaseUserID_v1"
     private static let supabaseRefreshTokenKeychainKey = "supabaseRefreshToken_v1"
+
+    // CHANGE-ID: 20260129_121332_14_3H_B2_AccessTokenGate
+    // SCOPE: Phase 14.3H (B) — Expose whether we currently have a non-empty Supabase access token (for gating directory/profile sync); no UI changes.
+    var hasSupabaseAccessToken: Bool {
+        if let token = Keychain.get(Self.supabaseAccessTokenKeychainKey), !token.isEmpty {
+            return true
+        }
+        return false
+    }
+
 
     /// Canonical backend principal used for all backend/RLS calls.
     ///

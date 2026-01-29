@@ -5,6 +5,10 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+// CHANGE-ID: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+// SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
+
 import SwiftUI
 import CoreData
 import Foundation
@@ -176,8 +180,16 @@ struct MOTIVOApp: App {
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
+                    } else {
+                        // Phase 14.3H (A): Connected-mode sign-out must clear any retained feed/follow state.
+                        // Triggered by auth state transition (not UI navigation).
+                        if BackendEnvironment.shared.isConnected {
+                            BackendFeedStore.shared.resetForSignOut()
+                            FollowStore.shared.resetForSignOut()
+                        }
                     }
+                }
                 }
         }
     }
-}
+

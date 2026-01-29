@@ -28,6 +28,10 @@ import Foundation
  
 // MARK: - Privacy Settings (local-first)
 
+// CHANGE-ID: 20260129_121332_14_3H_B2_ProfileUpsertGate
+// SCOPE: Phase 14.3H (B2) — Gate account_directory upsert on Supabase bearer token to avoid 401 during sign-in transition; no UI changes.
+// SEARCH-TOKEN: 20260129_121332_14_3H_B2_ProfileUpsertGate
+
 // NOTE: profileVisibility_v1 is retained for legacy compatibility, but is not surfaced in UI.
 
 fileprivate enum FollowRequestMode: Int, CaseIterable, Identifiable {
@@ -973,6 +977,12 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     // Phase 12C — Owner-only directory upsert/disable. No profile sync; only minimal identity surface.
      @MainActor
      private func syncDirectoryFromCurrentState() async {
+        // Phase 14.3H (B2) — Never attempt account_directory upsert unless we have a valid Supabase bearer token.
+        // Prevents unauthenticated upsert attempts during the sign-in transition (which can leave ProfileView in an empty limbo on first sign-in).
+        let auth = _auth.wrappedValue
+        guard BackendEnvironment.shared.isConnected else { return }
+        guard auth.hasSupabaseAccessToken else { return }
+
          guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
          // If user hasn’t opted in, ensure lookup is disabled (row may still exist).
