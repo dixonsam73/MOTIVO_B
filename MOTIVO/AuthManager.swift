@@ -17,6 +17,12 @@
 // SCOPE: Phase 14.3A — AuthManager: enforce MainActor for published state to eliminate background-thread publishing warnings; no UI changes.
 // SEARCH-TOKEN: 20260128_194500_14_3A_AuthMainActor
 
+
+// CHANGE-ID: 20260128_190000_14_3B_BackendOwnerID
+// SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
+// SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
+
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -138,6 +144,16 @@ final class AuthManager: NSObject, ObservableObject {
         // If we have a stored Supabase access token, apply it to NetworkManager for RLS-protected calls.
         if let token = Keychain.get(Self.supabaseAccessTokenKeychainKey), !token.isEmpty {
             NetworkManager.shared.setBearerToken(token)
+
+            // Phase 14.3B — If backendUserID is missing but we have a Supabase access token,
+            // derive the user UUID from the JWT subject ("sub") so backend ownership checks
+            // never fall back to the Apple ID.
+            if (self.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let derived = Self.supabaseUserIDFromAccessToken(token)?.lowercased() {
+                UserDefaults.standard.set(derived, forKey: Self.supabaseUserIDDefaultsKey)
+                UserDefaults.standard.set(derived, forKey: Self.backendUserDefaultsKey)
+                self.backendUserID = derived
+            }
         
         // Phase 14.2.2 — Auth/session liveness: allow NetworkManager to challenge auth on 401/403.
         // This is intentionally lightweight: refresh once, retry once; otherwise collapse to signed-out.
@@ -389,7 +405,37 @@ final class AuthManager: NSObject, ObservableObject {
         #endif
     }
 
-    // MARK: - Nonce helpers
+    
+    // MARK: - Token parsing (hydration)
+
+    /// Best-effort: derive the Supabase user UUID from a stored Supabase access token (JWT).
+    /// This avoids transient nil backendUserID during cold launch when the access token is present
+    /// but the user ID defaults key is missing.
+    private static func supabaseUserIDFromAccessToken(_ accessToken: String) -> String? {
+        let parts = accessToken.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+
+        var payload = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        // Pad base64 string to a multiple of 4.
+        let remainder = payload.count % 4
+        if remainder != 0 {
+            payload += String(repeating: "=", count: 4 - remainder)
+        }
+
+        guard let data = Data(base64Encoded: payload) else { return nil }
+        guard let obj = try? JSONSerialization.jsonObject(with: data, options: []),
+              let dict = obj as? [String: Any] else { return nil }
+
+        guard let sub = dict["sub"] as? String else { return nil }
+        guard UUID(uuidString: sub) != nil else { return nil }
+        return sub
+    }
+
+
+// MARK: - Nonce helpers
 
     private static func sha256(_ input: String) -> String {
         let data = Data(input.utf8)

@@ -11,6 +11,13 @@
 // SCOPE: Phase 14.2 — Label debug identity overrides as ignored in Connected mode and disable interaction
 // SEARCH-TOKEN: 20260122_113000_Phase142_DebugViewerGuardrails
 
+// CHANGE-ID: 20260129_064800_14_3E_DebugViewer_ShowBackendUUID
+// SCOPE: Phase 14.3E — DEBUG: Feed Debug shows appleUserID + backendUserID + effective backend viewer ID; no behavior changes.
+// SEARCH-TOKEN: 20260129_064800_14_3E_DebugViewer_ShowBackendUUID
+// CHANGE-ID: 20260129_070200_14_3E1_DebugViewer_ApplyAugment
+// SCOPE: Phase 14.3E.1 — DEBUG: actually apply augmented Feed Debug JSON (show appleUserID/backendUserID/effective backend viewer ID); no behavior changes.
+// SEARCH-TOKEN: 20260129_070200_14_3E1_DebugViewer_ApplyAugment
+
 import SwiftUI
 #if canImport(UIKit)
 import UIKit
@@ -50,6 +57,7 @@ extension DebugDump {
 }
 
 public struct DebugViewerView: View {
+    @EnvironmentObject private var auth: AuthManager
     private let title: String
     @Binding private var jsonString: String
     @State private var isPretty: Bool = true
@@ -131,15 +139,31 @@ public struct DebugViewerView: View {
     }
 
     private var displayText: String {
-        if isPretty, let pretty = Self.prettyPrinted(jsonString: jsonString), !pretty.isEmpty {
+        // Apply DEBUG-only augmentation for the top-level "Feed Debug" viewer so it shows
+        // appleUserID vs backendUserID (Supabase UUID) and the effective backend viewer ID.
+        // This does not change any runtime behavior; it only changes what is displayed here.
+        let augmentedRaw: String = Self.augmentedFeedDebugJSONStringIfNeeded(
+            original: jsonString,
+            title: title,
+            isConnected: BackendEnvironment.shared.isConnected,
+            appleUserID: auth.currentUserID,
+            backendUserID: auth.backendUserID
+        )
+
+        if isPretty,
+           let pretty = Self.prettyPrinted(jsonString: augmentedRaw),
+           !pretty.isEmpty {
             return pretty
         }
-        if !jsonString.isEmpty {
-            return jsonString
+
+        if !augmentedRaw.isEmpty {
+            return augmentedRaw
         }
+
         // Fallback so we *see* something if the buffer is never populated
         return "(debugJSONBuffer is empty – no debug payload received)"
     }
+
 
 
 
@@ -854,7 +878,49 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
         isPretty.toggle()
     }
 
-    private static func prettyPrinted(jsonString: String) -> String? {
+    
+    private static func augmentedFeedDebugJSONStringIfNeeded(
+        original: String,
+        title: String,
+        isConnected: Bool,
+        appleUserID: String?,
+        backendUserID: String?
+    ) -> String {
+        // Only mutate the top JSON dump used by the "Feed Debug" viewer.
+        guard title == "Feed Debug" else { return original }
+
+        guard let data = original.data(using: .utf8) else { return original }
+        guard let objAny = try? JSONSerialization.jsonObject(with: data, options: []) else { return original }
+        guard var obj = objAny as? [String: Any] else { return original }
+
+        // Preserve the original field (commonly "userID") but relabel it as appleUserID for clarity.
+        if let legacy = obj["userID"] as? String, obj["appleUserID"] == nil {
+            obj["appleUserID"] = legacy
+        } else if obj["appleUserID"] == nil {
+            obj["appleUserID"] = appleUserID
+        }
+
+        // Always expose backendUserID (Supabase UUID) separately.
+        obj["backendUserID"] = backendUserID
+
+        // The viewer ID used for backend ownership checks must never be Apple ID in Connected mode.
+        // This makes the bug state visible without changing runtime behavior.
+        if isConnected {
+            obj["effectiveViewerUserID_backend"] = backendUserID
+        } else {
+            obj["effectiveViewerUserID_backend"] = nil
+        }
+
+        obj["isConnected"] = isConnected
+
+        if let out = try? JSONSerialization.data(withJSONObject: obj, options: [.withoutEscapingSlashes]),
+           let s = String(data: out, encoding: .utf8) {
+            return s
+        }
+        return original
+    }
+
+private static func prettyPrinted(jsonString: String) -> String? {
         guard let data = jsonString.data(using: .utf8) else { return nil }
         do {
             let obj = try JSONSerialization.jsonObject(with: data, options: [])

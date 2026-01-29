@@ -1,6 +1,25 @@
+// CHANGE-ID: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
+// SCOPE: Phase 14.3G — Connected-mode feed: SessionRow must use Apple (local) user ID for local-session ownership checks so owner rows never fall into non-owner "User" fallback (no UI/layout changes; backend posts unaffected).
+// SEARCH-TOKEN: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
+
+// CHANGE-ID: 20260129_072500_14_3F_ReactiveDirectoryInRemoteRow
+// SCOPE: Phase 14.3F — Fix connected feed owner row name staleness by making RemotePostRowTwin observe BackendFeedStore and resolve DirectoryAccount reactively (no UI/layout changes; no auth/backend behavior changes).
+// SEARCH-TOKEN: 20260129_072500_14_3F_ReactiveDirectoryInRemoteRow
+
+// CHANGE-ID: 20260128_195000_14_3D_OwnerFeedNamePrecedence
+// SCOPE: Phase 14.3D — Connected feed owner row name precedence: Profile.name → directoryAccount.displayName → "You"; remove "User" owner fallback; no UI/layout, schema, or non-owner behavior changes.
+// SEARCH-TOKEN: 20260128_195000_14_3D_OwnerFeedNamePrecedence
+
+
 // CHANGE-ID: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
 // SCOPE: Phase 14.3C — Fix connected feed owner-name resolution (self shows Profile.name, not 'User') and propagate local session delete to backend post DELETE; no UI/layout or schema changes.
 // SEARCH-TOKEN: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
+
+
+// CHANGE-ID: 20260128_190000_14_3B_BackendOwnerID
+// SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
+// SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
+
 
 // CHANGE-ID: 20260122_223700_14_2_1d_RemoteThumbSignedURL
 // SCOPE: Phase 14.2.1 — RemoteAttachmentPreview: load signed URL thumbnails for remote image attachments (feed parity); fallback to icon; cache by bucket|path.
@@ -194,6 +213,9 @@ fileprivate enum ActivityFilter: Hashable, Identifiable {
 
 struct ContentView: View {
     @EnvironmentObject private var auth: AuthManager
+
+
+  
 @ObservedObject private var followStore = FollowStore.shared
 
     var body: some View {
@@ -270,7 +292,7 @@ fileprivate struct SessionsRootView: View {
     }
 
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
-    @ObservedObject private var backendFeedStore: BackendFeedStore = .shared
+    @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
 
     private var useBackendFeed: Bool {
         _ = backendModeChangeTick
@@ -442,7 +464,7 @@ fileprivate struct SessionsRootView: View {
                                                 destination: BackendSessionDetailView(
                                                     model: BackendSessionViewModel(
                                                         post: post,
-                                                        currentUserID: (effectiveBackendUserID ?? effectiveUserID ?? "")
+                                                        currentUserID: (effectiveBackendUserID ?? "")
                                                     )
                                                 ),
                                                 isActive: Binding(
@@ -455,13 +477,7 @@ fileprivate struct SessionsRootView: View {
                                             RemotePostRowTwin(
                                                 post: post,
                                                 scope: selectedScope,
-                                                directoryAccount: {
-                                                    if let owner = post.ownerUserID {
-                                                        return backendFeedStore.directoryAccountsByUserID[owner]
-                                                    }
-                                                    return nil
-                                                }(),
-                                                viewerUserID: effectiveBackendUserID ?? effectiveUserID
+                                                viewerUserID: effectiveBackendUserID
                                             )
                                             .contentShape(Rectangle())
                                             .onTapGesture { pushRemotePostID = post.id }
@@ -1129,12 +1145,15 @@ fileprivate struct SessionRow: View {
             return override
         }
         #endif
-        if let bid = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty {
-            return bid.lowercased()
-        }
-        if let authID = auth.currentUserID, !authID.isEmpty {
+
+        // Local sessions are keyed by the Apple (local) user ID, not the Supabase UUID.
+        // Using backendUserID here causes SessionRow to treat the owner as a non-owner in connected mode.
+        if let authID = auth.currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !authID.isEmpty {
             return authID
         }
+
+        // Fallback (mirrors legacy behavior when AuthManager hasn't populated currentUserID yet)
         return try? PersistenceController.shared.currentUserID
     }
 
@@ -1983,11 +2002,11 @@ fileprivate struct BackendPostRow: View {
 fileprivate struct RemotePostRowTwin: View {
     let post: BackendPost
     let scope: FeedScope
-    let directoryAccount: DirectoryAccount?
     let viewerUserID: String?
 
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
+    @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
 
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
@@ -2002,6 +2021,17 @@ fileprivate struct RemotePostRowTwin: View {
     private var ownerIDNonEmpty: String? {
         if let o = post.ownerUserID, !o.isEmpty { return o }
         return viewerIsOwner ? (viewerUserID ?? nil) : nil
+    }
+
+    private var resolvedDirectoryAccount: DirectoryAccount? {
+        // Resolve reactively from BackendFeedStore so the row updates when directory hydration completes.
+        if let ownerRaw = post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !ownerRaw.isEmpty {
+            if let exact = backendFeedStore.directoryAccountsByUserID[ownerRaw] { return exact }
+            let lower = ownerRaw.lowercased()
+            if let byLower = backendFeedStore.directoryAccountsByUserID[lower] { return byLower }
+        }
+        return nil
     }
 
     private var model: BackendSessionViewModel {
@@ -2150,7 +2180,7 @@ private var extraAttachmentCount: Int {
                                         .scaledToFill()
                                 } else {
                                     let initials: String = {
-                                        if let acct = directoryAccount {
+                                        if let acct = resolvedDirectoryAccount {
                                             let words = acct.displayName
                                                 .trimmingCharacters(in: .whitespacesAndNewlines)
                                                 .components(separatedBy: .whitespacesAndNewlines)
@@ -2186,6 +2216,10 @@ private var extraAttachmentCount: Int {
                         // Name and optional location on one line
                         let realName: String = {
                             if viewerIsOwner {
+                                // Owner precedence:
+                                // 1) Local Profile.name (Core Data)
+                                // 2) resolvedDirectoryAccount.displayName
+                                // 3) "You"
                                 let req: NSFetchRequest<Profile> = Profile.fetchRequest()
                                 req.fetchLimit = 1
                                 if let p = try? ctx.fetch(req).first,
@@ -2193,17 +2227,24 @@ private var extraAttachmentCount: Int {
                                     let n = nRaw.trimmingCharacters(in: .whitespacesAndNewlines)
                                     if !n.isEmpty { return n }
                                 }
-                                return "User"
+
+                                if let acct = resolvedDirectoryAccount {
+                                    let dn = acct.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !dn.isEmpty { return dn }
+                                }
+
+                                return "You"
                             }
 
-                            if let acct = directoryAccount {
+                            if let acct = resolvedDirectoryAccount {
                                 let dn = acct.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
                                 if !dn.isEmpty { return dn }
                             }
 
                             return "User"
                         }()
-let loc = ProfileStore.location(for: owner)
+                        let loc = ProfileStore.location(for: owner)
+
 
                         HStack(spacing: 6) {
                             Text(realName).font(.subheadline.weight(.semibold))

@@ -2,6 +2,12 @@
 // SCOPE: Phase 14.2.2 — Make BackendSessionDetailView mirror SessionDetailView 1:1 (read-only; display-name-only header; no Edit button for non-owner posts). + fix4 (render backend video thumbnails via AttachmentStore.generateVideoPoster; no logic changes).
 // SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
 
+
+// CHANGE-ID: 20260128_190000_14_3B_BackendOwnerID
+// SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
+// SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
+
+
 import SwiftUI
 import Foundation
 import UIKit
@@ -48,12 +54,14 @@ struct BackendSessionDetailView: View {
 
     private var effectiveViewerUserID: String? {
         #if DEBUG
-        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride"),
+        if BackendEnvironment.shared.isConnected == false,
+           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
            !override.isEmpty {
             return override.lowercased()
         }
         #endif
-        return auth.currentUserID?.lowercased()
+        let raw = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : raw.lowercased()
     }
 
     private var viewerIsOwner: Bool {
