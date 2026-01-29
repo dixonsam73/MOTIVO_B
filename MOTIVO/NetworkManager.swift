@@ -40,6 +40,10 @@
 // SCOPE: Phase 14.2.2 — Add 401/403 auth-challenge hook and single retry to avoid zombie signed-in state; no behavioural changes beyond auth correctness.
 // SEARCH-TOKEN: 20260127_130352_NetworkAuthChallenge_RefreshRetry
 
+// CHANGE-ID: 20260129_140900_14_3H_B6c_BearerReason
+// SCOPE: Phase 14.3H — Add clearBearerToken(reason:) overload + reason-tagged log; keep legacy clearBearerToken() shim; no networking behavior change.
+// SEARCH-TOKEN: 20260129_140900_14_3H_B6c_BearerReason
+
 import Foundation
 
 public final class NetworkManager {
@@ -74,7 +78,9 @@ public final class NetworkManager {
             t = String(tt.dropFirst("bearer ".count)).trimmingCharacters(in: .whitespacesAndNewlines)
         }
         bearerToken = (t?.isEmpty == true) ? nil : t
-        print("[NetworkManager] bearer token \(bearerToken != nil ? "set" : "cleared")")
+        if bearerToken != nil {
+            print("[NetworkManager] bearer token set")
+        }
 #if DEBUG
         if let jwt = bearerToken {
             print("[Auth][DEBUG] access_token=\(jwt)")
@@ -84,6 +90,11 @@ public final class NetworkManager {
 
     /// Compatibility shim: AuthManager expects this.
     public func clearBearerToken() {
+        clearBearerToken(reason: "unspecified")
+    }
+
+    public func clearBearerToken(reason: String) {
+        print("[NetworkManager] bearer token cleared reason=\(reason)")
         setBearerToken(nil)
     }
 
