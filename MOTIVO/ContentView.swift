@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260129_171107_14_3I_FilterParity
+// SCOPE: Phase 14.3I — Connected feed filter parity: apply instrument/activity/search/saved filters to remote posts and align local instrument filter with userInstrumentLabel for parity; no UI/layout changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260129_171107_14_3I_FilterParity
+
 // CHANGE-ID: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
 // SCOPE: Phase 14.3G — Connected-mode feed: SessionRow must use Apple (local) user ID for local-session ownership checks so owner rows never fall into non-owner "User" fallback (no UI/layout changes; backend posts unaffected).
 // SEARCH-TOKEN: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
@@ -420,10 +424,13 @@ fileprivate struct SessionsRootView: View {
 
                             // Dedupe: if a backend post corresponds to a local session on this device, prefer the local row.
                             let localSessionIDs: Set<UUID> = Set(localRows.compactMap { $0.value(forKey: "id") as? UUID })
-                            let remotePosts: [BackendPost] = remotePostsRaw.filter { post in
+                            let dedupedRemotePosts: [BackendPost] = remotePostsRaw.filter { post in
                                 guard let sid = post.sessionID else { return true }
                                 return !localSessionIDs.contains(sid)
                             }
+
+                            // Apply the same filter semantics to remote posts as local sessions.
+                            let remotePosts: [BackendPost] = filteredRemotePosts(dedupedRemotePosts)
 
                             // Build unified row source (Local sessions + Remote posts)
                             let feedItems: [FeedRowItem] = FeedRowItem.build(
@@ -811,7 +818,20 @@ Spacer()
         // Instrument (core)
         if let inst = selectedInstrument {
             let id = inst.objectID
-            out = out.filter { $0.instrument?.objectID == id }
+            let targetName = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetNorm = targetName.lowercased()
+
+            out = out.filter { s in
+                // Primary: exact core instrument relationship match (existing behavior)
+                if s.instrument?.objectID == id { return true }
+
+                // Parity: also match on userInstrumentLabel so local sessions saved/published by label
+                // are filter-consistent with remote posts (which only carry instrument_label).
+                let label = ((s.value(forKey: "userInstrumentLabel") as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                return !targetNorm.isEmpty && label == targetNorm
+            }
         }
 
         // Activity (core enum or custom name)
@@ -850,6 +870,89 @@ Spacer()
 
         return out
     }
+
+
+    // MARK: - Remote filtering (connected feed parity)
+
+    private func normalize(_ s: String?) -> String {
+        (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private func remoteMatchesSelectedInstrument(_ post: BackendPost) -> Bool {
+        guard let inst = selectedInstrument else { return true }
+        let target = normalize(inst.name)
+        guard !target.isEmpty else { return true }
+        return normalize(post.instrumentLabel) == target
+    }
+
+    private func remoteMatchesSelectedActivity(_ post: BackendPost) -> Bool {
+        switch selectedActivity {
+        case .any:
+            return true
+
+        case .core(let act):
+            // Remote posts may carry either activity_label or activity_type (or neither).
+            let candidates: [String] = [
+                normalize(post.activityLabel),
+                normalize(post.activityType),
+                normalize(post.activityDetail)
+            ]
+
+            let label = normalize(act.label)
+            let raw = String(act.rawValue).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let caseName = String(describing: act).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+            return candidates.contains(where: { c in
+                guard !c.isEmpty else { return false }
+                return c == label || c == raw || c == caseName
+            })
+
+        case .custom(let name):
+            let target = normalize(name)
+            guard !target.isEmpty else { return true }
+            let candidates: [String] = [
+                normalize(post.activityLabel),
+                normalize(post.activityType),
+                normalize(post.activityDetail)
+            ]
+            return candidates.contains(where: { $0 == target })
+        }
+    }
+
+    private func remoteMatchesSavedOnly(_ post: BackendPost) -> Bool {
+        guard savedOnly else { return true }
+        guard let vid = effectiveBackendUserID else { return false }
+        return FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
+    }
+
+    private func remoteMatchesSearch(_ post: BackendPost) -> Bool {
+        let q = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return true }
+
+        // BackendPost does not currently decode "title". Search is therefore based on
+        // activity fields, instrument label, and notes (if present).
+        let haystacks: [String] = [
+            post.activityLabel ?? "",
+            post.activityType ?? "",
+            post.activityDetail ?? "",
+            post.instrumentLabel ?? "",
+            post.notes ?? ""
+        ]
+        return haystacks.contains(where: { $0.localizedCaseInsensitiveContains(q) })
+    }
+
+    private func filteredRemotePosts(_ posts: [BackendPost]) -> [BackendPost] {
+        // Ensure no data is shown when signed out
+        guard userID != nil else { return [] }
+
+        return posts.filter { post in
+            remoteMatchesSelectedInstrument(post) &&
+            remoteMatchesSelectedActivity(post) &&
+            remoteMatchesSavedOnly(post) &&
+            remoteMatchesSearch(post)
+        }
+    }
+
 
     // MARK: - Delete
 
