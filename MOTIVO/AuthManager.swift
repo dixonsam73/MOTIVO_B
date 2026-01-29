@@ -5,6 +5,10 @@
 //  Created by Samuel Dixon on 22/09/2025.
 //
 
+// CHANGE-ID: 20260129_133308_14_3H_B5_SignInRaceGuard
+// SCOPE: Phase 14.3H (B5) — Prevent foreground/launch session refresh from signing out during in-flight Supabase sign-in (missing refresh token race).
+// SEARCH-TOKEN: 20260129_133308_14_3H_B5_SignInRaceGuard
+
 // CHANGE-ID: 20260122_113000_Phase142_IgnoreBackendOverrideInConnected
 // SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true
 // SEARCH-TOKEN: 20260122_113000_Phase142_AuthIgnoreOverride
@@ -22,10 +26,6 @@
 // SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
 // SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
 
-
-// CHANGE-ID: 20260129_121332_14_3H_B2_AccessTokenGate
-// SCOPE: Phase 14.3H (B2) — Gate directory/profile sync on presence of Supabase access token to prevent unauthenticated upserts; no UI changes.
-// SEARCH-TOKEN: 20260129_121332_14_3H_B2_AccessTokenGate
 
 import Foundation
 import AuthenticationServices
@@ -90,6 +90,19 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
     @Published private(set) var backendUserID: String?
+    @Published private(set) var isSigningIn: Bool = false
+
+
+    // CHANGE-ID: 20260129_221500_14_3H_B4_fixTokenGuard
+    // SCOPE: Phase 14.3H (B4) — Provide explicit, truth-based helpers for UI gating:
+    //  - isConnected mirrors BackendEnvironment.shared.isConnected
+    //  - hasSupabaseAccessToken checks for a non-empty stored Supabase access token in Keychain
+    var isConnected: Bool { BackendEnvironment.shared.isConnected }
+
+    var hasSupabaseAccessToken: Bool {
+        guard let token = Keychain.get(Self.supabaseAccessTokenKeychainKey) else { return false }
+        return token.isEmpty == false
+    }
 
     private var currentNonce: String?
     private let identityService: IdentityService
@@ -100,16 +113,6 @@ final class AuthManager: NSObject, ObservableObject {
     private static let supabaseAccessTokenKeychainKey = "supabaseAccessToken_v1"
     private static let supabaseUserIDDefaultsKey = "supabaseUserID_v1"
     private static let supabaseRefreshTokenKeychainKey = "supabaseRefreshToken_v1"
-
-    // CHANGE-ID: 20260129_121332_14_3H_B2_AccessTokenGate
-    // SCOPE: Phase 14.3H (B) — Expose whether we currently have a non-empty Supabase access token (for gating directory/profile sync); no UI changes.
-    var hasSupabaseAccessToken: Bool {
-        if let token = Keychain.get(Self.supabaseAccessTokenKeychainKey), !token.isEmpty {
-            return true
-        }
-        return false
-    }
-
 
     /// Canonical backend principal used for all backend/RLS calls.
     ///
@@ -204,6 +207,13 @@ final class AuthManager: NSObject, ObservableObject {
             return false
         }
 
+        // If a sign-in is currently in-flight, do not attempt a refresh.
+        // This avoids racing foreground/launch liveness refresh against the initial Supabase sign-in.
+        guard !self.isSigningIn else {
+            NSLog("[Auth] ensureValidSession: sign-in in flight; skipping refresh. reason=%@", reason)
+            return false
+        }
+
         // If backend isn't configured, collapse state (prevents zombie UI in Connected builds).
         guard BackendConfig.isConfigured else {
             NSLog("[Auth] ensureValidSession: BackendConfig not configured; signing out. reason=%@", reason)
@@ -229,6 +239,10 @@ final class AuthManager: NSObject, ObservableObject {
     private func refreshSupabaseSession(reason: String) async -> Bool {
         #if canImport(Supabase)
         guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
+            if self.isSigningIn {
+                NSLog("[Auth] refreshSupabaseSession: missing refresh token while sign-in in flight; not signing out. reason=%@", reason)
+                return false
+            }
             NSLog("[Auth] refreshSupabaseSession: missing refresh token; signing out. reason=%@", reason)
             await MainActor.run { self.signOut() }
             return false
@@ -311,6 +325,7 @@ final class AuthManager: NSObject, ObservableObject {
         self.currentUserID = nil
         self.displayName = nil
         self.backendUserID = nil
+        self.isSigningIn = false
     }
 
     // MARK: - Internal processing
@@ -341,6 +356,7 @@ final class AuthManager: NSObject, ObservableObject {
 
         // Step 7: If backend config is present, bridge Apple → Supabase Auth (native idToken flow).
         if BackendConfig.isConfigured {
+            self.isSigningIn = true
             Task {
                 await self.signInToSupabaseIfPossible(credential: credential)
             }
@@ -367,6 +383,7 @@ final class AuthManager: NSObject, ObservableObject {
     // MARK: - Supabase Auth (native idToken flow)
 
     private func signInToSupabaseIfPossible(credential: ASAuthorizationAppleIDCredential) async {
+        defer { self.isSigningIn = false }
         guard let nonce = currentNonce, !nonce.isEmpty else {
             NSLog("[Auth] Supabase sign-in skipped: missing nonce")
             return

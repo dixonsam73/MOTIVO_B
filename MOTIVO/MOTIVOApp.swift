@@ -5,8 +5,13 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
-// CHANGE-ID: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
-// SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
+// CHANGE-ID: 20260129_133308_14_3H_B5_ForegroundGuard
+// SCOPE: Phase 14.3H (B5) — Skip launch/foreground liveness refresh while AuthManager sign-in is in-flight (prevents missing-refresh-token signOut race).
+// SEARCH-TOKEN: 20260129_133308_14_3H_B5_ForegroundGuard
+
+// CHANGE-ID: 20260129_213500_14_3H_B3_InitMirrorCurrentUserID
+// SCOPE: Phase 14.3H (B3) — Mirror initial AuthManager.currentUserID into PersistenceController during app init (pre-onReceive).
+// SEARCH-TOKEN: 20260129_213500_14_3H_B3_InitMirrorCurrentUserID
 // SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
 
 import SwiftUI
@@ -60,7 +65,16 @@ struct MOTIVOApp: App {
         BackendConfig.apply()
         let identityService = LocalStubIdentityService()
         self.identityService = identityService
-        _auth = StateObject(wrappedValue: AuthManager(identityService: identityService))
+        let authManager = AuthManager(identityService: identityService)
+        _auth = StateObject(wrappedValue: authManager)
+
+        // Phase 14.3H (B3): Ensure PersistenceController mirrors the initial AuthManager.currentUserID
+        // even when AuthManager initializes from Keychain before SwiftUI onReceive subscribers attach.
+        let pc = persistenceController
+        pc.currentUserID = authManager.currentUserID
+        if let id = authManager.currentUserID {
+            Task { await pc.runOneTimeBackfillIfNeeded(for: id) }
+        }
 
         // [ROLLBACK ANCHOR] v7.8 pre-hotfix — launch stall (profile-id backfill)
 
@@ -158,7 +172,13 @@ struct MOTIVOApp: App {
                 .environmentObject(auth)
                 .onAppear {
                     // Phase 14.2.2: Session liveness — refresh Supabase session on launch to prevent zombie auth.
-                    Task { _ = await auth.ensureValidSession(reason: "launch") }
+                    Task {
+                        if auth.isSigningIn {
+                            NSLog("[App] launch: sign-in in flight; skipping ensureValidSession")
+                        } else {
+                            _ = await auth.ensureValidSession(reason: "launch")
+                        }
+                    }
 
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
@@ -169,6 +189,11 @@ struct MOTIVOApp: App {
                     BackendConfig.apply()
                     guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }
                     Task {
+                        // Phase 14.3H (B5): Avoid racing foreground liveness refresh against an in-flight sign-in.
+                        guard !auth.isSigningIn else {
+                            NSLog("[App] foreground: sign-in in flight; skipping ensureValidSession")
+                            return
+                        }
                         // Phase 14.2.2: Session liveness — refresh before issuing connected requests.
                         let ok = await auth.ensureValidSession(reason: "foreground")
                         guard ok else { return }
@@ -192,4 +217,3 @@ struct MOTIVOApp: App {
                 }
         }
     }
-
