@@ -1,16 +1,4 @@
-// CHANGE-ID: 20260105_prdv_staged_to_final_thumbnail_mapping
-// SCOPE: PRDV commit-time staged→final thumbnail ID mapping + enforce ⭐⇒👁 at commit.
-// CHANGE-ID: 20260105_prdv_star_toggle_sync
-// SCOPE: PRDV attachments card star toggle is bidirectional and stays in sync with viewer (no UI change).
-// CHANGE-ID: 20260105_prdv_final_key_inclusion_for_thumbnail
-// SCOPE: Persist inclusion on FINAL (id+fileURL) keys for the chosen thumbnail attachment at commit.
-// CHANGE-ID: 20260105_prdv_hide_eye_when_starred
-// SCOPE: PRDV attachments card hides 👁 badge when ⭐ (thumbnail) is present to reduce noise.
-// CHANGE-ID: 20260103_205708
-// SCOPE: Fix PRDV AttachmentViewer privacy default + fallback so viewer and thumbnails stay consistent. Default unknown => private.
 
-// CHANGE-ID: 20251212_122700-prdv-viewerreq-04
-// SCOPE: Step 4 — Wire PRDV audio attachment row taps to viewerRequest (audio-only viewer)
 
 //  PostRecordDetailsView_20251004c.swift
 //  MOTIVO
@@ -18,6 +6,8 @@
 //  Visual polish + Instrument row chevron fix
 //  Silent if one instrument, chevron row if multiple.
 
+// CHANGE-ID: 20260130_164830_PRDV_ShareDebug
+// SCOPE: PRDV — Add definitive debug logging for Share toggle (isPublic) at toggle-change, draft hydration, and save-tap to identify where it flips to true.
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -106,6 +96,7 @@ struct PostRecordDetailsView: View {
 
     private let draftNotesKey = "PostRecordDetailsView.draft.notes"
     private let draftFocusKey = "PostRecordDetailsView.draft.focusDot"
+    private let draftIsPublicKey = "PostRecordDetailsView.draft.isPublic_v1"
 
     private let sessionIDKey = "PracticeTimer.currentSessionID"
     private let lastSeenSessionIDKey = "PostRecordDetailsView.lastSeenSessionID"
@@ -114,6 +105,25 @@ struct PostRecordDetailsView: View {
     private func currentSessionID() -> String? {
         UserDefaults.standard.string(forKey: sessionIDKey)
     }
+
+    private func loadDraftIsPublicIfNeeded() {
+        // Default is ON (true). If user flipped OFF and the view was recreated before Save,
+        // rehydrate from draft storage to avoid snapping back to true.
+        if UserDefaults.standard.object(forKey: draftIsPublicKey) != nil {
+            isPublic = UserDefaults.standard.bool(forKey: draftIsPublicKey)
+        } else {
+            // Keep existing default (true) unless a future caller explicitly sets it.
+        }
+    }
+
+    private func persistDraftIsPublic() {
+        UserDefaults.standard.set(isPublic, forKey: draftIsPublicKey)
+    }
+
+    private func clearDraftIsPublic() {
+        UserDefaults.standard.removeObject(forKey: draftIsPublicKey)
+    }
+
 
     // v7.9E — State circles (neutral greys)
     private let stateOpacities: [Double] = [0.80, 0.60, 0.30, 0.05] // 0=Searching (dark) → 3=Breakthrough (clear)
@@ -474,7 +484,8 @@ struct PostRecordDetailsView: View {
 
                 ToolbarItem(placement: .confirmationAction) {
                     Button(action: {
-                        saveToCoreData()
+                        let visibility = isPublic
+                        saveToCoreData(visibility: visibility)
                         DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
                     }) {
                         Text("Save")
@@ -482,6 +493,12 @@ struct PostRecordDetailsView: View {
                     }
                     .disabled(durationSeconds == 0 || instrument == nil)
                 }
+            }
+            .onAppear {
+                loadDraftIsPublicIfNeeded()
+            }
+            .onChange(of: isPublic) { _ in
+                persistDraftIsPublic()
             }
             .fullScreenCover(item: $viewerRequest) { request in
                 let imageURLs = (request.mode == .visual) ? request.imageURLs : []
@@ -1388,7 +1405,7 @@ isPrivate: { url in
     }
 
     @MainActor
-    private func saveToCoreData() {
+    private func saveToCoreData(visibility: Bool) {
         let s = Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1400,7 +1417,7 @@ isPrivate: { url in
         s.title = title.isEmpty ? defaultTitle(for: instrument, activity: activity) : title
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
-        s.isPublic = isPublic
+        s.isPublic = visibility
         s.mood = Int16(mood)
         if let idx = selectedDotIndex {
             s.effort = Int16(idx)
@@ -1436,6 +1453,7 @@ isPrivate: { url in
         do {
             try viewContext.save()
             viewContext.processPendingChanges()
+            clearDraftIsPublic()
             // v7.12A — Social Pilot (local-only)
             if let sid = s.id {
                 let resolvedTitle = s.title ?? ""
@@ -1458,13 +1476,14 @@ isPrivate: { url in
                     activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
                     instrumentLabel: instLabel,
                     mood: nil,
-                    effort: focusValue
+                    effort: focusValue,
+                    isPublic: visibility
                 )
 
                 PublishService.shared.publish(
                     payload: payload,
                     objectID: s.objectID,
-                    shouldPublish: isPublic
+                    shouldPublish: true
                 )
             } else {
                 print("Publish skipped: missing Session.id")

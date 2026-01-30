@@ -1,19 +1,10 @@
-// CHANGE-ID: 20251230_6A-PublishService-SessionIDOverload
-// SCOPE: Step 6A — add sessionID overload; make local-only default; remove heuristics
-// CHANGE-ID: 20251230_6A-PublishService-PreviewBackend
-// CHANGE-ID: 20251230_210900-PublishService-NSLogPreviewGate
-// SCOPE: Step 7 — add explicit logs for preview gate + ensure flush is attempted
 // SCOPE: Step 6A — backend preview wiring for publish/unpublish (non-blocking)
-// CHANGE-ID: v7.12B-PublishService-DebugGlobal-20251112_133247
-// SCOPE: Add DEBUG helper to read other owners' published sets
 // PublishService.swift
-// CHANGE-ID: 20251110_190650-PublishService_v712A-MainActor
-// SCOPE: v7.12A — Social Pilot (local-only). Main-actor updates to avoid cross-thread publishes.
 // SEARCH-TOKEN: PUBLISH-SVC-712A
-// CHANGE-ID: 20260119_132532_Step12_NotesPublishParity
-// SCOPE: Populate publish payload notes from Core Data via objectID (no UI changes)
 // SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
 
+// CHANGE-ID: 20260130_143500_PubPrivacyFinal
+// SCOPE: Decouple publish vs share: always publish session-backed post; is_public reflects Share toggle; eliminate stub posts from Share OFF.
 import Foundation
 import CoreData
 import Combine
@@ -129,6 +120,7 @@ final class PublishService: ObservableObject {
                 var sInstrumentLabel: String? = nil
                 var sMood: Int? = nil
                 var sEffort: Int? = nil
+                var sIsPublic: Bool = true
 
                 // Resolve the managed object directly via provided context and extract fields best-effort.
                 let viewContext = context
@@ -156,6 +148,14 @@ final class PublishService: ObservableObject {
                         if let val = obj.value(forKey: "effort") as? Int { sEffort = val }
                         else if let val16 = obj.value(forKey: "effort") as? Int16 { sEffort = Int(val16) }
                     }
+
+                if hasAttr("isPublic") {
+                    if let v = obj.value(forKey: "isPublic") as? Bool {
+                        sIsPublic = v
+                    } else if let v = obj.value(forKey: "isPublic") as? NSNumber {
+                        sIsPublic = v.boolValue
+                    }
+                }
                 } catch {
                     // Ignore extraction errors; fallback to minimal payload below.
                 }
@@ -174,7 +174,8 @@ final class PublishService: ObservableObject {
                     activityDetail: sActivityDetail,
                     instrumentLabel: sInstrumentLabel,
                     mood: mappedMood,
-                    effort: mappedEffort
+                    effort: mappedEffort,
+                    isPublic: sIsPublic
                 )
                 payload = p
 
@@ -264,6 +265,7 @@ final class PublishService: ObservableObject {
                     instrumentLabel: payload.instrumentLabel,
                     mood: payload.mood,
                     effort: payload.effort,
+                    isPublic: payload.isPublic,
                     notes: resolvedNotes,
                     areNotesPrivate: resolvedAreNotesPrivate
                 )

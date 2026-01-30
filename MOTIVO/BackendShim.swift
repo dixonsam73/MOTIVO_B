@@ -1,58 +1,31 @@
-// CHANGE-ID: 20260128_192500_14_3A_MainActorPublishingFix
-// SCOPE: Phase 14.3A — Fix runtime warning "Publishing changes from background threads" by ensuring all BackendFeedStore (@MainActor) mutations are performed via MainActor hops in HTTP feed fetch. No UI or logic changes.
 // SEARCH-TOKEN: 20260128_192500_14_3A_MainActorPublishingFix
 
-// CHANGE-ID: 20260121_181200_Phase14_Step3_FixUserIDType
-// SCOPE: Phase 14 Step 3 — fix AccountDirectoryService resolveAccounts callsite to pass [String] user_id values (uuid strings), not [UUID].
 
-// CHANGE-ID: 20260121_180200_Phase14_Step3_DirectoryBatchCache
-// SCOPE: Phase 14 Step 3 — Batch directory identity lookup after feed fetch; in-memory cache in BackendFeedStore (no UI changes).
 // SEARCH-TOKEN: 20260121_180200_Phase14_Step3_DirectoryBatchCache
-// CHANGE-ID: 20260121_124000_P13F_BackendFollowersFetch
-// SCOPE: Phase 13F — Add fetchFollowersApproved to BackendFollowService and HTTP/Simulated implementations.
 // SEARCH-TOKEN: 20260121_124000_P13F_BackendFollowersFetch
 
-// CHANGE-ID: 20260121_114321_P13D1_BackendConnectedMode
-// SCOPE: Phase 13D.1 — Add BackendMode.backendConnected (shipping) distinct from backendPreview; enable HTTP services in connected/preview; add isConnected/isHTTPEnabled
 // SEARCH-TOKEN: P13D1-CONNECTED-MODE-20260121_114321
 
-// CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
-// SCOPE: Decode activity_type/activity_detail on BackendPost for backend preview parity
 // SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
 
 //
-// CHANGE-ID: 20260112_201800_9C_RLSFeed
-// SCOPE: Step 9C — RLS-enforced feed visibility (All relies on server; no client allowlist filter)
 // SEARCH-TOKEN: 20260112_141800_Step9B_BackendFollowGraph_Fix1
 //
-// CHANGE-ID: 20260112_140516_Step9B_BackendFollowGraph
-// SCOPE: Step 9B — Backend follow table + client wiring (service + FollowStore refresh; no posts RLS changes).
 // SEARCH-TOKEN: 20260112_140516_Step9B_BackendFollowGraph
 //
-// CHANGE-ID: 20260109_121500_Step8G_Phase3_Fix_8G3A
-// SCOPE: Step 8G Phase 3 — Fix BackendShim compile errors (scope/brace hygiene + 409 idempotence NetworkError casting). No behavior changes beyond making Phase 3 compile.
 // SEARCH-TOKEN: 20260109_121500_Step8G_Phase3_Fix_8G3A
 //
 // Prior CHANGE-ID retained below for provenance:
-// CHANGE-ID: 20260101_141600_Step8B_AllFeed_DebugOnly
-//
-
-// CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
-// SCOPE: Step 9A — Use AuthManager.canonicalBackendUserID() for all backend owner identity reads (publish + feed)
 // UNIQUE-TOKEN: 20260112_131015_backendshim_id_canon
 
-// CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
-// SCOPE: Add posts.notes decode + include notes in publish POST body (gated by areNotesPrivate)
 // SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
 
-// CHANGE-ID: 20260122_113000_Phase142_IgnoreBackendOverrideInConnected_FollowService
-// SCOPE: Phase 14.2 — Ignore Debug.backendUserIDOverride when BackendEnvironment.isConnected == true (HTTPBackendFollowService)
 // SEARCH-TOKEN: 20260122_113000_Phase142_BackendShimIgnoreOverride
 
-// CHANGE-ID: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
-// SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
 // SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
 
+// CHANGE-ID: 20260130_155652_ShareTogglePersist
+// SCOPE: BackendShim: ensure idempotent publish updates is_public via PATCH metadata on every uploadPost attempt (including 409 existing-post path).
 import Foundation
 import CoreData
 import SwiftUI
@@ -589,7 +562,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             "id": payload.id.uuidString,
             "created_at": createdAt,
             "owner_user_id": owner,
-            "is_public": true
+            "is_public": payload.isPublic
         ]
 
         if let sid = payload.sessionID {
@@ -664,7 +637,17 @@ public final class HTTPBackendPublishService: BackendPublishService {
             return .failure(e)
         }
 
-        // Step 8G Phase 3: upload included attachments (owner-only by default) and PATCH posts.attachments.
+        
+        // Keep metadata in sync on every publish attempt (including the idempotent 409 path).
+        let metaPatch = await patchPostMetadata(postID: payload.id, payload: payload)
+        switch metaPatch {
+        case .success:
+            break
+        case .failure(let e):
+            return .failure(e)
+        }
+
+// Step 8G Phase 3: upload included attachments (owner-only by default) and PATCH posts.attachments.
         guard let sessionID = payload.sessionID else {
             // No local session reference → nothing to upload.
             return .success(())
@@ -821,7 +804,79 @@ public final class HTTPBackendPublishService: BackendPublishService {
         }
     }
 
-    private func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Result<Void, Error> {
+    private
+    /// PATCH post metadata that may change across re-publishes (e.g., visibility).
+    /// This is required because uploadPost uses idempotent POST (409 on existing),
+    /// and without a PATCH the existing row would keep stale values (notably is_public).
+    func patchPostMetadata(postID: UUID, payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+
+        var meta: [String: Any] = [
+            "is_public": payload.isPublic
+        ]
+
+        // Keep these fields in sync when they are present.
+        if let sid = payload.sessionID {
+            meta["session_id"] = sid.uuidString
+        }
+        if let ts = payload.sessionTimestamp {
+            meta["session_timestamp"] = ISO8601DateFormatter().string(from: ts)
+        }
+        if let title = payload.title {
+            meta["title"] = title
+        }
+        if let dur = payload.durationSeconds {
+            meta["duration_seconds"] = dur
+        }
+        if let at = payload.activityType {
+            meta["activity_type"] = at
+        }
+        if let ad = payload.activityDetail {
+            meta["activity_detail"] = ad
+        }
+        if let instr = payload.instrumentLabel {
+            meta["instrument_label"] = instr
+        }
+
+        // Notes: only include when not private (or omitted). If notes become private later,
+        // this patch intentionally does not force-clear server notes (out of scope).
+        if !payload.areNotesPrivate, let notes = payload.notes {
+            let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                meta["notes"] = trimmed
+            }
+        }
+
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: meta, options: [])
+        } catch {
+            return .failure(error)
+        }
+
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let result = await NetworkManager.shared.request(
+            path: patchPath,
+            method: "PATCH",
+            query: nil,
+            jsonBody: body,
+            headers: [
+                "apikey": apiKey,
+                "Prefer": "return=minimal"
+            ]
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Result<Void, Error> {
         let payload: [String: Any] = [
             "attachments": refs
         ]

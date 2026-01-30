@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260106_214417-aesv-visualparity-inset-v4
-// SCOPE: Visual parity micro-pass — match PRDV scroll top offset to prevent validation under nav blur (presentation-only).
+// CHANGE-ID: 20260130_155652_ShareTogglePersist
+// SCOPE: AESV: pass isPublic into PostPublishPayload and always publish on save; Share toggle only sets visibility.
 // SEARCH-TOKEN: AESV_VISUAL_PARITY_20260106_214417
 
 // CHANGE-ID: 20260105_183654-aesv-thumb-inclusion-invariants-3109c299
@@ -1309,13 +1309,17 @@ private var instrumentPicker: some View {
                 activityDetail: trimmedDetail,
                 instrumentLabel: instLabel,
                 mood: nil,
-                effort: focusValue
+                effort: focusValue,
+                isPublic: isPublic
             )
 
+            // Publish and visibility are separate concepts:
+            // - shouldPublish controls existence (publish vs unpublish/delete)
+            // - payload.isPublic controls follower visibility.
             PublishService.shared.publish(
                 payload: payload,
                 objectID: s.objectID,
-                shouldPublish: isPublic
+                shouldPublish: true
             )
 
             viewContext.processPendingChanges()

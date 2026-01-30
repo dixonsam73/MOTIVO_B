@@ -14,10 +14,10 @@
 //  SEARCH-TOKEN: NOTES-PUBLISH-PARITY-20260119
 //
 
-// CHANGE-ID: 20260122_113000_Phase142_ConnectedFlushEnabled
-// SCOPE: Phase 14.2 — Allow publish queue flush in backendConnected (not preview-only)
 // SEARCH-TOKEN: 20260122_113000_Phase142_QueueFlushConnected
 
+// CHANGE-ID: 20260130_143500_PubPrivacyFinal
+// SCOPE: Decouple publish vs share: always publish session-backed post; is_public reflects Share toggle; eliminate stub posts from Share OFF.
 import Foundation
 
 @MainActor
@@ -36,6 +36,9 @@ public final class SessionSyncQueue: ObservableObject {
       public let mood: Int?
       public let effort: Int?
 
+      // Visibility: true = share with approved followers; false = owner-only
+      public let isPublic: Bool
+
       // Step 12 (beta parity): notes
       public let notes: String?
       public let areNotesPrivate: Bool
@@ -51,6 +54,7 @@ public final class SessionSyncQueue: ObservableObject {
           instrumentLabel: String?,
           mood: Int?,
           effort: Int?,
+          isPublic: Bool = true,
           notes: String? = nil,
           areNotesPrivate: Bool = false
       ) {
@@ -64,6 +68,7 @@ public final class SessionSyncQueue: ObservableObject {
           self.instrumentLabel = instrumentLabel
           self.mood = mood
           self.effort = effort
+          self.isPublic = isPublic
           self.notes = notes
           self.areNotesPrivate = areNotesPrivate
       }
@@ -83,6 +88,28 @@ public final class SessionSyncQueue: ObservableObject {
         if let index = items.firstIndex(where: { $0.id == payload.id }) {
             // Merge with existing item: prefer new non-nil values, otherwise keep old
             let existing = items[index]
+
+            // isPublic is non-optional, so stub payloads (created via enqueue(postID:)) default to true.
+            // We must not let a stub overwrite an explicit saved false.
+            let payloadHasMetadata =
+                payload.sessionID != nil ||
+                payload.sessionTimestamp != nil ||
+                payload.title != nil ||
+                payload.durationSeconds != nil ||
+                payload.activityType != nil ||
+                payload.activityDetail != nil ||
+                payload.instrumentLabel != nil ||
+                payload.mood != nil ||
+                payload.effort != nil ||
+                payload.notes != nil ||
+                payload.areNotesPrivate != false
+
+            let mergedIsPublic: Bool = {
+                if payload.isPublic == false { return false }          // explicit private always wins
+                if payloadHasMetadata { return true }                 // explicit metadata payload can set public
+                return existing.isPublic                              // stub should not change visibility
+            }()
+
             let merged = PostPublishPayload(
                 id: existing.id,
                 sessionID: payload.sessionID ?? existing.sessionID,
@@ -94,6 +121,7 @@ public final class SessionSyncQueue: ObservableObject {
                 instrumentLabel: payload.instrumentLabel ?? existing.instrumentLabel,
                 mood: payload.mood ?? existing.mood,
                 effort: payload.effort ?? existing.effort,
+                isPublic: mergedIsPublic,
                 notes: payload.notes ?? existing.notes,
                 areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate)
             )
@@ -216,4 +244,3 @@ public final class SessionSyncQueue: ObservableObject {
         return dir.appendingPathComponent("SessionSyncQueue_v1.json")
     }
 }
-
