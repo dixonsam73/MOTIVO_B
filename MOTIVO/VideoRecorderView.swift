@@ -237,31 +237,7 @@ final class VideoRecorderController: NSObject,
         let thread = Thread.isMainThread ? "main" : "bg"
         print("[VidRec \(dbgID)] [\(t)] [\(thread)] \(msg)")
     }
-#if DEBUG
-private func logAudioRouteSnapshot(label: String) {
-    let session = AVAudioSession.sharedInstance()
-    let route = session.currentRoute
 
-    let inputLines = route.inputs.map { port -> String in
-        "  in: type=\(port.portType.rawValue) name=\(port.portName) uid=\(port.uid)"
-    }
-
-    let outputLines = route.outputs.map { port -> String in
-        "  out: type=\(port.portType.rawValue) name=\(port.portName) uid=\(port.uid)"
-    }
-
-    print("[VidRec][AudioRouteSnapshot] \(label)")
-    if inputLines.isEmpty { print("  in: (none)") } else { inputLines.forEach { print($0) } }
-    if outputLines.isEmpty { print("  out: (none)") } else { outputLines.forEach { print($0) } }
-
-    if let preferred = session.preferredInput {
-        print("  preferredInput: type=\(preferred.portType.rawValue) name=\(preferred.portName) uid=\(preferred.uid)")
-    } else {
-        print("  preferredInput: (nil)")
-    }
-    print("  sampleRate=\(session.sampleRate) ioBuffer=\(session.ioBufferDuration)")
-}
-#endif
     // Video first-2s logging state
     private var logVideoFirst2sStartPTS: CMTime? = nil
     private var logVideoFirst2sFrameIndex: Int = 0
@@ -635,11 +611,6 @@ private func logAudioRouteSnapshot(label: String) {
            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
            session.canAddInput(audioInput) {
             session.addInput(audioInput)
-
-
-        #if DEBUG
-        logAudioRouteSnapshot(label: "afterAddAudioInput")
-        #endif
         }
 
         // Video data output
@@ -991,9 +962,6 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         debugDidPrintFirstFrameTiming = false
         configureAudioSession()
 
-        #if DEBUG
-        logAudioRouteSnapshot(label: "startRecording")
-        #endif
         // Latch current interface orientation immediately on main to avoid race with async session connection updates.
         // This ensures writer canvas/orientation is correct for first frames in landscape.
         self.currentVideoOrientation = PreviewContainerView.currentOrientation()
@@ -1400,9 +1368,6 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         guard let userInfo = notif.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
-        #if DEBUG
-        logAudioRouteSnapshot(label: "routeChange reason=\(reason.rawValue)")
-        #endif
         if reason == .oldDeviceUnavailable {
             if state == .recording {
                 stopRecording()
@@ -1839,3 +1804,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
