@@ -1262,8 +1262,22 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             try session.setCategory(.playAndRecord,
                                     options: [.defaultToSpeaker, .allowBluetoothA2DP])
             try session.setActive(true)
+            applyPreferredRecordingInput()
         } catch {
             // Ignore silently
+        }
+    }
+
+    private func applyPreferredRecordingInput() {
+        let session = AVAudioSession.sharedInstance()
+        let inputs = session.availableInputs ?? []
+
+        if let usb = inputs.first(where: { $0.portType == .usbAudio }) {
+            try? session.setPreferredInput(usb)
+            return
+        }
+        if let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
+            try? session.setPreferredInput(builtIn)
         }
     }
 
@@ -1368,6 +1382,17 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         guard let userInfo = notif.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+
+        // Re-assert preferred recording input on meaningful route changes.
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .routeConfigurationChange:
+            DispatchQueue.main.async { [weak self] in
+                self?.applyPreferredRecordingInput()
+            }
+        default:
+            break
+        }
+
         if reason == .oldDeviceUnavailable {
             if state == .recording {
                 stopRecording()
@@ -1804,4 +1829,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-

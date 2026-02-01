@@ -4,6 +4,10 @@
 
 import SwiftUI
 import AVFoundation
+// CHANGE-ID: 20260201_210221_PlaybackRoutingHardening_4584fd
+// SCOPE: Ensure attachment playback uses stable .playback session (keeps AirPods/headphones output; avoids speaker forcing). No UI changes.
+// SEARCH-TOKEN: 20260201_210221_AudioRoutingHardening_PT
+
 
 extension PracticeTimerView {
 
@@ -27,6 +31,9 @@ extension PracticeTimerView {
         if currentlyPlayingID == id {
             // Toggle play/pause for the same item and keep the selection so the icon flips reliably
             if let p = audioPlayer {
+                Task { @MainActor in
+            AudioServices.shared.configureSession(for: .playback)
+        }
                 if p.isPlaying {
                     p.pause()
                     isAudioPlaying = false
@@ -65,6 +72,9 @@ extension PracticeTimerView {
                 .appendingPathExtension("m4a")
             try? item.data.write(to: tmp, options: .atomic)
 
+            Task { @MainActor in
+            AudioServices.shared.configureSession(for: .playback)
+        }
             audioPlayer = try AVAudioPlayer(contentsOf: tmp)
             let delegate = AudioPlayerDelegateBridge(onFinish: {
                 DispatchQueue.main.async {
@@ -257,4 +267,3 @@ final class AudioPlayerDelegateBridge: NSObject, AVAudioPlayerDelegate {
     init(onFinish: @escaping () -> Void) { self.onFinish = onFinish }
     func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) { onFinish() }
 }
-
