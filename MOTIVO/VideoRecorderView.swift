@@ -1,6 +1,14 @@
 // CHANGE-ID: 20251215-VIDREC-ORIENT-008
 // SCOPE: Fix landscape orientation regressions (front preview snap + squashed output) and rear-camera crash on Stop by syncing orientation at writer setup and serializing stop/finish on writerQueue. Preserve cadence-gated start + retimed commit.
 
+// CHANGE-ID: 20260201_180400_AudioRouteDebugLogs
+// SCOPE: DEBUG-only: log AVAudioSession route snapshots at key points (startRecording, routeChange, afterAddAudioInput). No UI/logic changes.
+// SEARCH-TOKEN: 20260201_180400_AudioRouteDebugLogs
+
+// CHANGE-ID: 20260201_183200_VidRec_RemoveAllowBluetooth
+// SCOPE: Force A2DP-only output; prevent HFP mic takeover in VideoRecorder (DEBUG logs unchanged)
+// SEARCH-TOKEN: 20260201_183200_VidRec_RemoveAllowBluetooth
+
 import SwiftUI
 import AVFoundation
 import AVKit
@@ -229,7 +237,31 @@ final class VideoRecorderController: NSObject,
         let thread = Thread.isMainThread ? "main" : "bg"
         print("[VidRec \(dbgID)] [\(t)] [\(thread)] \(msg)")
     }
+#if DEBUG
+private func logAudioRouteSnapshot(label: String) {
+    let session = AVAudioSession.sharedInstance()
+    let route = session.currentRoute
 
+    let inputLines = route.inputs.map { port -> String in
+        "  in: type=\(port.portType.rawValue) name=\(port.portName) uid=\(port.uid)"
+    }
+
+    let outputLines = route.outputs.map { port -> String in
+        "  out: type=\(port.portType.rawValue) name=\(port.portName) uid=\(port.uid)"
+    }
+
+    print("[VidRec][AudioRouteSnapshot] \(label)")
+    if inputLines.isEmpty { print("  in: (none)") } else { inputLines.forEach { print($0) } }
+    if outputLines.isEmpty { print("  out: (none)") } else { outputLines.forEach { print($0) } }
+
+    if let preferred = session.preferredInput {
+        print("  preferredInput: type=\(preferred.portType.rawValue) name=\(preferred.portName) uid=\(preferred.uid)")
+    } else {
+        print("  preferredInput: (nil)")
+    }
+    print("  sampleRate=\(session.sampleRate) ioBuffer=\(session.ioBufferDuration)")
+}
+#endif
     // Video first-2s logging state
     private var logVideoFirst2sStartPTS: CMTime? = nil
     private var logVideoFirst2sFrameIndex: Int = 0
@@ -603,6 +635,11 @@ final class VideoRecorderController: NSObject,
            let audioInput = try? AVCaptureDeviceInput(device: audioDevice),
            session.canAddInput(audioInput) {
             session.addInput(audioInput)
+
+
+        #if DEBUG
+        logAudioRouteSnapshot(label: "afterAddAudioInput")
+        #endif
         }
 
         // Video data output
@@ -953,6 +990,10 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         isStoppingRecording = false
         debugDidPrintFirstFrameTiming = false
         configureAudioSession()
+
+        #if DEBUG
+        logAudioRouteSnapshot(label: "startRecording")
+        #endif
         // Latch current interface orientation immediately on main to avoid race with async session connection updates.
         // This ensures writer canvas/orientation is correct for first frames in landscape.
         self.currentVideoOrientation = PreviewContainerView.currentOrientation()
@@ -1191,7 +1232,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord,
-                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                                    options: [.defaultToSpeaker, .allowBluetoothA2DP])
             try session.setActive(true, options: [.notifyOthersOnDeactivation])
         } catch {
             // ignore
@@ -1251,7 +1292,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(.playAndRecord,
-                                    options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+                                    options: [.defaultToSpeaker, .allowBluetoothA2DP])
             try session.setActive(true)
         } catch {
             // Ignore silently
@@ -1359,6 +1400,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         guard let userInfo = notif.userInfo,
               let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
               let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else { return }
+        #if DEBUG
+        logAudioRouteSnapshot(label: "routeChange reason=\(reason.rawValue)")
+        #endif
         if reason == .oldDeviceUnavailable {
             if state == .recording {
                 stopRecording()
@@ -1795,4 +1839,3 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
-

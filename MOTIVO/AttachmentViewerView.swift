@@ -14,6 +14,10 @@ import SwiftUI
 import AVKit
 import AVFoundation
 
+// CHANGE-ID: 20260201_170000_AttachmentPlaybackRouteFix
+// SCOPE: Fix AttachmentViewer audio playback to respect current output route (e.g., AirPods) by using .playback without speaker override.
+// NOTE: No other UI/logic changes.
+
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
     let audioTitles: [String]?
@@ -828,8 +832,11 @@ private func currentURL() -> URL? {
             .allowsHitTesting(true)
         }
         .onAppear {
+            // CHANGE-ID: 20260201_170000_AttachmentPlaybackRouteFix
+            // SCOPE: Attachment audio playback should respect current output route (e.g., AirPods) and never force speaker.
+            // Use a playback session without speaker override; keep behaviour otherwise unchanged.
             do {
-                try AVAudioSession.sharedInstance().setCategory(.playAndRecord, options: [.defaultToSpeaker])
+                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.allowBluetoothA2DP, .allowAirPlay])
                 try AVAudioSession.sharedInstance().setActive(true)
             } catch {
                 // Non-fatal: fall back silently

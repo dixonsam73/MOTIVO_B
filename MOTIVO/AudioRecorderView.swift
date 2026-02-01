@@ -1,6 +1,9 @@
 // AudioRecorderView.swift
 // CHANGE-ID: 20251201_AudioRecorderWaveformParity
 // SCOPE: Waveform visual parity with AttachmentViewerView (green playback, softer mapping)
+// CHANGE-ID: 20260201_162855_AudioRoute_PreferBuiltInMic
+// SCOPE: Prefer built-in mic on route change (AirPods monitoring) — no session lifecycle changes
+// SEARCH-TOKEN: 20260201_162855_AudioRoute_PreferBuiltInMic
 
 import SwiftUI
 import AVFoundation
@@ -589,6 +592,36 @@ struct AudioRecorderView: View {
         renderBars = bars
     }
 
+
+    // MARK: - Preferred input policy (minimal)
+
+    /// If a headset mic becomes available (e.g. AirPods), prefer the iPhone built-in mic for recording input
+    /// when both are selectable. This does not touch output routing or session activation.
+    func preferBuiltInMicIfAvailable() {
+        let session = AVAudioSession.sharedInstance()
+        guard let inputs = session.availableInputs else { return }
+
+        let builtIn = inputs.first(where: { $0.portType == .builtInMic })
+        let bluetooth = inputs.first(where: {
+            $0.portType == .bluetoothHFP ||
+            $0.portType == .bluetoothA2DP ||
+            $0.portType == .bluetoothLE
+        })
+
+        guard let builtInMic = builtIn, bluetooth != nil else { return }
+
+        do {
+            try session.setPreferredInput(builtInMic)
+            #if DEBUG
+            print("[AudioRecorder] preferredInput=BuiltInMic")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[AudioRecorder] preferredInput FAILED: \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Interruption & ScenePhase Handling
 
     /// Respond to app moving between active/inactive/background.
@@ -677,7 +710,8 @@ struct AudioRecorderView: View {
         }
 
         switch reason {
-        case .oldDeviceUnavailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange:
+        case .oldDeviceUnavailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange, .newDeviceAvailable:
+            preferBuiltInMicIfAvailable()
             if state == .playing {
                 togglePlayback()
             }
