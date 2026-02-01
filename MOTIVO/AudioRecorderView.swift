@@ -403,9 +403,11 @@ struct AudioRecorderView: View {
             startPlaybackTimer()
             state = .playing
         case .idle, .pausedRecording, .recording:
+            clearWaveform()
+            AudioServices.shared.droneEngine.stop()
+            AudioServices.shared.metronomeEngine.stop()
+            stopAll()
             do {
-                clearWaveform()
-                stopAll()
                 player = try AVAudioPlayer(contentsOf: url)
                 player?.isMeteringEnabled = true
                 player?.prepareToPlay()
