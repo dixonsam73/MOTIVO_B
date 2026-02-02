@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260202_101900_BackChevronFirstTap
+// SCOPE: Fix double-tap back chevron by clearing remote post push state when BackendSessionDetailView is popped.
+// SEARCH-TOKEN: 20260202_101900_BackChevronFirstTap
+
 // CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
 // SCOPE: Feed Thumbnail Hydration Stability — Remove icon-based placeholders for remote thumbs; render neutral placeholders while signed URLs/posters load.
 // SEARCH-TOKEN: 20260202_090000_FeedStatsReactivity
@@ -729,6 +733,11 @@ Spacer()
     .accessibilityHidden(true)
 }
 #endif
+
+
+            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("BackendSessionDetailView.didPop"))) { _ in
+                pushRemotePostID = nil
+            }
 
             // Sheets
             .sheet(isPresented: $showTimer) {

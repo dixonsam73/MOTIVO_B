@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
-// SCOPE: Feed Thumbnail Hydration Stability — Replace loud SF Symbol placeholders for remote thumbs/posters with neutral placeholders in BackendSessionDetailView.
+// CHANGE-ID: 20260202_102600_BackChevronPlusRemoteThumbStability
+// SCOPE: Keep nav pop fix while preserving neutral remote thumb placeholders in BSDV
 // SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
 
 
@@ -11,6 +11,60 @@
 import SwiftUI
 import Foundation
 import UIKit
+
+
+// MARK: - Backend detail signed URL cache (session-memory)
+// Cache key must be stable (bucket|path), not the signed URL string (token changes).
+// This prevents repeated /object/sign calls when revisiting the same post in a single session.
+private actor BackendDetailSignedURLCache {
+    static let shared = BackendDetailSignedURLCache()
+
+    private struct Entry {
+        let url: URL
+        let expiresAt: Date
+    }
+
+    private var cache: [String: Entry] = [:]
+    private var inflight: [String: Task<URL?, Never>] = [:]
+
+    private func key(bucket: String, path: String) -> String {
+        "\(bucket)|\(path)"
+    }
+
+    func get(bucket: String, path: String, expiresInSeconds: Int, fetcher: @Sendable @escaping () async -> URL?) async -> URL? {
+        let k = key(bucket: bucket, path: path)
+        let now = Date()
+
+        if let entry = cache[k] {
+            // Small safety margin to avoid returning an about-to-expire signed URL.
+            if entry.expiresAt.timeIntervalSince(now) > 5 {
+                return entry.url
+            } else {
+                cache[k] = nil
+            }
+        }
+
+        if let task = inflight[k] {
+            return await task.value
+        }
+
+        let task = Task<URL?, Never> {
+            let url = await fetcher()
+            return url
+        }
+        inflight[k] = task
+
+        let url = await task.value
+        inflight[k] = nil
+
+        if let url {
+            cache[k] = Entry(url: url, expiresAt: now.addingTimeInterval(TimeInterval(expiresInSeconds)))
+        }
+
+        return url
+    }
+}
+
 
 /// Connected-mode detail view for backend posts (read-only).
 /// Parity target: SessionDetailView (UI), with the only allowed differences:
@@ -179,7 +233,10 @@ struct BackendSessionDetailView: View {
             )
         }
         .appBackground()
-        .onDisappear { resetViewerState() }
+        .onDisappear {
+            NotificationCenter.default.post(name: Notification.Name("BackendSessionDetailView.didPop"), object: nil)
+            resetViewerState()
+        }
     }
 
     private func resetViewerState() {
@@ -450,19 +507,21 @@ struct BackendSessionDetailView: View {
     }
 
     private func signedURL(bucket: String, path: String, expiresInSeconds: Int) async -> URL? {
-        let result = await NetworkManager.shared.createSignedStorageObjectURL(
-            bucket: bucket,
-            path: path,
-            expiresInSeconds: expiresInSeconds
-        )
-
-        switch result {
-        case .success(let url):
-            return url
-        case .failure:
-            return nil
+        await BackendDetailSignedURLCache.shared.get(bucket: bucket, path: path, expiresInSeconds: expiresInSeconds) {
+            let result = await NetworkManager.shared.createSignedStorageObjectURL(
+                bucket: bucket,
+                path: path,
+                expiresInSeconds: expiresInSeconds
+            )
+            switch result {
+            case .success(let url):
+                return url
+            case .failure:
+                return nil
+            }
         }
     }
+
 
     // MARK: - Interactions row (must match SessionDetailView)
 
