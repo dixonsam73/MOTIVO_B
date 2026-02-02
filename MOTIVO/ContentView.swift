@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260202_090000_FeedStatsReactivity
+// SCOPE: Feed Stats Reactivity — Make 'Your Sessions' stat bar recompute on Core Data Session mutations and on pull-to-refresh; owner-scope stats to effective Apple user ID; no UI/layout changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260202_090000_FeedStatsReactivity
+
 // CHANGE-ID: 20260129_171107_14_3I_FilterParity
 // SCOPE: Phase 14.3I — Connected feed filter parity: apply instrument/activity/search/saved filters to remote posts and align local instrument filter with userInstrumentLabel for parity; no UI/layout changes; no backend/schema changes.
 // SEARCH-TOKEN: 20260129_171107_14_3I_FilterParity
@@ -361,6 +365,13 @@ fileprivate struct SessionsRootView: View {
                 }
                 .onAppear { refreshStats() }
                 .onChange(of: statsRange) { _ in refreshStats() }
+                .onReceive(
+                    NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)
+                        .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+                ) { note in
+                    guard notificationTouchesSessions(note) else { return }
+                    refreshStats()
+                }
                 .cardSurface()
                 .padding(.bottom, Theme.Spacing.s)
 
@@ -540,6 +551,9 @@ fileprivate struct SessionsRootView: View {
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
                     }
                     await followStore.refreshFromBackendIfPossible()
+                    await MainActor.run {
+                        refreshStats()
+                    }
                 }
                 .id(backendModeChangeTick)
                 .listStyle(.plain)
@@ -767,6 +781,23 @@ Spacer()
         }
     }
 
+
+    private func notificationTouchesSessions(_ note: Notification) -> Bool {
+        guard let info = note.userInfo else { return false }
+
+        func containsSession(in any: Any?) -> Bool {
+            guard let set = any as? Set<NSManagedObject>, !set.isEmpty else { return false }
+            return set.contains { $0.entity.name == "Session" }
+        }
+
+        return containsSession(in: info[NSInsertedObjectsKey])
+            || containsSession(in: info[NSUpdatedObjectsKey])
+            || containsSession(in: info[NSDeletedObjectsKey])
+            || containsSession(in: info[NSRefreshedObjectsKey])
+            || containsSession(in: info[NSInvalidatedObjectsKey])
+            || containsSession(in: info[NSInvalidatedAllObjectsKey])
+    }
+
     private func refreshStats() {
         // De-populate when signed out to mirror other data fields
         guard userID != nil else {
@@ -774,7 +805,11 @@ Spacer()
             return
         }
         do {
-            stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange)
+            guard let uid = effectiveUserID else {
+            stats = .init(count: 0, seconds: 0)
+            return
+        }
+        stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange, ownerUserID: uid)
         } catch {
             stats = .init(count: 0, seconds: 0)
         }

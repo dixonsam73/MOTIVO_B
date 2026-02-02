@@ -6,6 +6,10 @@
 //
 // CHANGE-ID: 20251013_184800-v79C
 // SCOPE: Add segmented stats header (Week/Month/Year/Total) to Your Sessions card
+
+// CHANGE-ID: 20260202_181000_StatsOwnerScopeOptional
+// SCOPE: Feed Stats Reactivity — Make ownerUserID predicate optional (default nil) to avoid breaking other call sites (e.g. MeView). When provided, stats are owner-scoped; no formula or date-range changes.
+// SEARCH-TOKEN: 20260202_181000_StatsOwnerScopeOptional
 // =============================================
 
 import Foundation
@@ -60,12 +64,15 @@ enum StatsHelper {
         }
     }
     
-    static func fetchStats(in ctx: NSManagedObjectContext, range: StatsRange) throws -> SessionStats {
+    static func fetchStats(in ctx: NSManagedObjectContext, range: StatsRange, ownerUserID: String? = nil) throws -> SessionStats {
         let (start, end) = dateBounds(for: range)
         let req = NSFetchRequest<NSManagedObject>(entityName: "Session")
         var preds: [NSPredicate] = []
         if let s = start { preds.append(NSPredicate(format: "timestamp >= %@", s as NSDate)) }
         if let e = end { preds.append(NSPredicate(format: "timestamp < %@", e as NSDate)) }
+        if let ownerUserID, ownerUserID.isEmpty == false {
+            preds.append(NSPredicate(format: "ownerUserID == %@", ownerUserID))
+        }
         if !preds.isEmpty { req.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: preds) }
         let objs = try ctx.fetch(req)
         let count = objs.count
