@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260202_090000_FeedStatsReactivity
-// SCOPE: Feed Stats Reactivity — Make 'Your Sessions' stat bar recompute on Core Data Session mutations and on pull-to-refresh; owner-scope stats to effective Apple user ID; no UI/layout changes; no backend/schema changes.
+// CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
+// SCOPE: Feed Thumbnail Hydration Stability — Remove icon-based placeholders for remote thumbs; render neutral placeholders while signed URLs/posters load.
 // SEARCH-TOKEN: 20260202_090000_FeedStatsReactivity
 
 // CHANGE-ID: 20260129_171107_14_3I_FilterParity
@@ -2605,10 +2605,10 @@ struct RemoteAttachmentPreview: View {
                         .scaledToFill()
                         .clipped()
                 } else {
-                    placeholderIcon(kind: kind)
+                    neutralPlaceholder(kind: kind)
                 }
                 #else
-                placeholderIcon(kind: kind)
+                neutralPlaceholder(kind: kind)
                 #endif
             }
 
@@ -2621,14 +2621,10 @@ struct RemoteAttachmentPreview: View {
                         .scaledToFill()
                         .clipped()
                 } else {
-                    Image(systemName: "video")
-                        .imageScale(.large)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                    neutralPlaceholder(kind: kind)
                 }
                 #else
-                Image(systemName: "video")
-                    .imageScale(.large)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                neutralPlaceholder(kind: kind)
                 #endif
 
                 Image(systemName: "play.circle.fill")
@@ -2668,7 +2664,15 @@ struct RemoteAttachmentPreview: View {
     }
 
     @ViewBuilder
+    private func neutralPlaceholder(kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> some View {
+        // Neutral, quiet placeholder: background is already rendered by the base RoundedRectangle.
+        // We intentionally avoid system glyphs here to prevent a “broken icon → real thumbnail” swap on first hydration.
+        EmptyView()
+    }
+
+    @ViewBuilder
     private func placeholderIcon(kind: BackendSessionViewModel.BackendAttachmentRef.Kind) -> some View {
+        // For non-thumbnail-able types (audio/pdf/other), an icon is stable and not a hydration artifact.
         Image(systemName: iconName(for: kind))
             .imageScale(.large)
             .foregroundStyle(Theme.Colors.secondaryText)

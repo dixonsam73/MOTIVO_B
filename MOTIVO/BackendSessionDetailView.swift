@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
-// SCOPE: Phase 14.2.2 — Make BackendSessionDetailView mirror SessionDetailView 1:1 (read-only; display-name-only header; no Edit button for non-owner posts). + fix4 (render backend video thumbnails via AttachmentStore.generateVideoPoster; no logic changes).
+// CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
+// SCOPE: Feed Thumbnail Hydration Stability — Replace loud SF Symbol placeholders for remote thumbs/posters with neutral placeholders in BackendSessionDetailView.
 // SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
 
 
@@ -698,24 +698,18 @@ private struct BackendThumbCell: View {
                                 case .success(let image):
                                     image.resizable().scaledToFill()
                                 default:
-                                    placeholderIcon(systemName: "photo")
+                                    neutralPlaceholder()
                                 }
                             }
                         } else {
-                            placeholderIcon(systemName: "photo")
+                            neutralPlaceholder()
                         }
 
                     case .video:
                         if let poster {
                             Image(uiImage: poster).resizable().scaledToFill()
                         } else {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .fill(Color.secondary.opacity(0.08))
-                                Image(systemName: "video")
-                                    .imageScale(.large)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
+                            neutralPlaceholder()
                         }
 
                     case .audio:
@@ -756,7 +750,14 @@ private struct BackendThumbCell: View {
         }
     }
 
-    private func placeholderIcon(systemName: String) -> some View {
+    private func neutralPlaceholder() -> some View {
+        // Quiet placeholder (no glyph) to avoid “generic icon → real thumbnail” swap while remote media hydrates.
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.secondary.opacity(0.08))
+    }
+
+    func placeholderIcon(systemName: String) -> some View {
+        // For stable non-thumbnail types (audio), an icon is fine and not a hydration artifact.
         ZStack {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(Color.secondary.opacity(0.08))
@@ -778,4 +779,3 @@ private struct BackendThumbCell: View {
         }
     }
 }
-
