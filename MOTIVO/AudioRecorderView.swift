@@ -1,4 +1,8 @@
 // AudioRecorderView.swift
+// CHANGE-ID: 20260201_233900_ARV_PlaybackFirstTap
+// SCOPE: Fix AudioRecorder preview first-tap playback by deferring AVAudioPlayer.play and retrying once; remove self.DispatchQueue misuse.
+// VERIFY: search for CHANGE-ID above
+
 // CHANGE-ID: 20251201_AudioRecorderWaveformParity
 // SCOPE: Waveform visual parity with AttachmentViewerView (green playback, softer mapping)
 // CHANGE-ID: 20260201_162855_AudioRoute_PreferBuiltInMic
@@ -406,16 +410,36 @@ struct AudioRecorderView: View {
             AudioServices.shared.droneEngine.stop()
             AudioServices.shared.metronomeEngine.stop()
             stopAll()
+
+            // Ensure the file exists before attempting playback.
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                setError("Playback error: missing file")
+                return
+            }
+
+            AudioServices.shared.configureSession(for: .playback)
+
             do {
-                AudioServices.shared.configureSession(for: .playback)
-                player = try AVAudioPlayer(contentsOf: url)
-                player?.isMeteringEnabled = true
-                player?.prepareToPlay()
-                player?.play()
+                let p = try AVAudioPlayer(contentsOf: url)
+                p.isMeteringEnabled = true
+                p.prepareToPlay()
+                player = p
+
                 displayTime = 0 // playback starts at zero
                 startPlaybackTimer()
                 startWaveform()
                 state = .playing
+
+                // Start playback on the next run-loop tick to avoid racing audio-session activation.
+                DispatchQueue.main.async { [weak p] in
+                    guard let p else { return }
+                    if !p.play() {
+                        // One retry shortly after, in case activation settles a beat later.
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak p] in
+                            _ = p?.play()
+                        }
+                    }
+                }
             } catch {
                 setError("Playback error: \(error.localizedDescription)")
             }
