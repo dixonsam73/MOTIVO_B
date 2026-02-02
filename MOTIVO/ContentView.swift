@@ -1,6 +1,14 @@
-// CHANGE-ID: 20260202_101900_BackChevronFirstTap
-// SCOPE: Fix double-tap back chevron by clearing remote post push state when BackendSessionDetailView is popped.
-// SEARCH-TOKEN: 20260202_101900_BackChevronFirstTap
+// CHANGE-ID: 20260202_224200_FeedNavFreezeV3
+// SCOPE: Freeze merged feed row identity across detail navigation (interactive pop safe) — ContentView only
+// SEARCH-TOKEN: 20260202_224200_FeedNavFreezeV3
+
+// CHANGE-ID: 20260202_211500_RemoteRowSpaceStability
+// SCOPE: Prevent feed card reflow on return by reserving remote attachment lane height and caching attachment presence per postID.
+// SEARCH-TOKEN: 20260202_211500_RemoteRowSpaceStability
+
+// CHANGE-ID: 20260202_112500_BackPopFeedFlashFix
+// SCOPE: Prevent feed row flash on returning from BackendSessionDetailView by suppressing immediate auto-fetch.
+// SEARCH-TOKEN: 20260202_112500_BackPopFeedFlashFix
 
 // CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
 // SCOPE: Feed Thumbnail Hydration Stability — Remove icon-based placeholders for remote thumbs; render neutral placeholders while signed URLs/posters load.
@@ -111,6 +119,15 @@ import SwiftUI
 import CoreData
 import Combine
 import CryptoKit
+
+// CHANGE-ID: 20260202_215800_BackPopFlashNoState
+// SCOPE: Prevent feed flash on return from BackendSessionDetailView without mutating ContentView state during the pop transition (use a static gate timestamp).
+// SEARCH-TOKEN: 20260202_215800_BackPopFlashNoState
+
+fileprivate enum BackendDetailPopGate {
+    static var lastPopAt: Date = .distantPast
+}
+
 
 private let FEED_IMAGE_VIDEO_THUMB: CGFloat = 88
 private let FEED_AUDIO_THUMB: CGFloat = 56
@@ -259,6 +276,9 @@ fileprivate struct SessionsRootView: View {
     @State private var debouncedQuery: String = ""
     @State private var pushSessionID: UUID? = nil
     @State private var pushRemotePostID: UUID? = nil
+    @State private var isFeedNavFrozen: Bool = false
+    @State private var frozenFeedItems: [FeedRowItem] = []
+    @State private var feedNavFreezeTask: Task<Void, Never>? = nil
 
     @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
@@ -448,16 +468,18 @@ fileprivate struct SessionsRootView: View {
                             let remotePosts: [BackendPost] = filteredRemotePosts(dedupedRemotePosts)
 
                             // Build unified row source (Local sessions + Remote posts)
-                            let feedItems: [FeedRowItem] = FeedRowItem.build(
+                            let liveFeedItems: [FeedRowItem] = FeedRowItem.build(
                                 local: localRows,
                                 remote: remotePosts
                             )
 
-                            if feedItems.isEmpty {
+                            let renderFeedItems: [FeedRowItem] = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
+
+                            if renderFeedItems.isEmpty {
                                 Text("No sessions match your filters yet.")
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             } else {
-                                ForEach(feedItems) { item in
+                                ForEach(renderFeedItems) { item in
                                     switch item.kind {
                                     case .local(let session):
                                         ZStack {
@@ -472,7 +494,12 @@ fileprivate struct SessionsRootView: View {
 
                                             SessionRow(session: session, scope: selectedScope)
                                                 .contentShape(Rectangle())
-                                                .onTapGesture { pushSessionID = (session.value(forKey: "id") as? UUID) }
+                                                .onTapGesture {
+                                                feedNavFreezeTask?.cancel()
+                                                isFeedNavFrozen = true
+                                                frozenFeedItems = renderFeedItems
+                                                pushSessionID = (session.value(forKey: "id") as? UUID)
+                                            }
                                                 .cardSurface()
                                                 .padding(.bottom, Theme.Spacing.section)
                                         }
@@ -502,7 +529,12 @@ fileprivate struct SessionsRootView: View {
                                                 viewerUserID: effectiveBackendUserID
                                             )
                                             .contentShape(Rectangle())
-                                            .onTapGesture { pushRemotePostID = post.id }
+                                            .onTapGesture {
+                                            feedNavFreezeTask?.cancel()
+                                            isFeedNavFrozen = true
+                                            frozenFeedItems = renderFeedItems
+                                            pushRemotePostID = post.id
+                                        }
                                             .cardSurface()
                                             .padding(.bottom, Theme.Spacing.section)
                                         }
@@ -515,8 +547,8 @@ fileprivate struct SessionsRootView: View {
                                     // Local sessions only — remote rows are deleteDisabled(true)
                                     var localOffsets = IndexSet()
                                     for idx in offsets {
-                                        guard idx < feedItems.count else { continue }
-                                        if case .local(let s) = feedItems[idx].kind,
+                                        guard idx < renderFeedItems.count else { continue }
+                                        if case .local(let s) = renderFeedItems[idx].kind,
                                            let localIndex = localRows.firstIndex(where: { $0.objectID == s.objectID }) {
                                             localOffsets.insert(localIndex)
                                         }
@@ -531,6 +563,11 @@ fileprivate struct SessionsRootView: View {
                     }
                     .task(id: selectedScope) {
                         guard useBackendFeed else { return }
+
+                        // When returning from BSDV, suppress the immediate auto-fetch to avoid a one-frame list rebind/flash.
+                        if Date().timeIntervalSince(BackendDetailPopGate.lastPopAt) < 0.75 {
+                            return
+                        }
 
                         let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
                         let key = "auto:\(scopeKey)"
@@ -736,8 +773,39 @@ Spacer()
 
 
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("BackendSessionDetailView.didPop"))) { _ in
-                pushRemotePostID = nil
+                BackendDetailPopGate.lastPopAt = Date()
             }
+
+            // Feed identity freeze across navigation transitions (covers interactive pop where ContentView is visible before didPop fires).
+            .onChange(of: pushRemotePostID) { _, _ in
+                feedNavFreezeTask?.cancel()
+                if pushRemotePostID != nil || pushSessionID != nil {
+                    isFeedNavFrozen = true
+                } else {
+                    feedNavFreezeTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000) // ~0.30s tail after pop
+                        if pushRemotePostID == nil && pushSessionID == nil {
+                            isFeedNavFrozen = false
+                            frozenFeedItems.removeAll(keepingCapacity: true)
+                        }
+                    }
+                }
+            }
+            .onChange(of: pushSessionID) { _, _ in
+                feedNavFreezeTask?.cancel()
+                if pushRemotePostID != nil || pushSessionID != nil {
+                    isFeedNavFrozen = true
+                } else {
+                    feedNavFreezeTask = Task { @MainActor in
+                        try? await Task.sleep(nanoseconds: 300_000_000) // ~0.30s tail after pop
+                        if pushRemotePostID == nil && pushSessionID == nil {
+                            isFeedNavFrozen = false
+                            frozenFeedItems.removeAll(keepingCapacity: true)
+                        }
+                    }
+                }
+            }
+
 
             // Sheets
             .sheet(isPresented: $showTimer) {
@@ -2145,7 +2213,35 @@ fileprivate struct BackendPostRow: View {
     }
 }
 
-// Phase 14.2.1 — Remote post row that is a visual twin of SessionRow (read-only)
+// Phase 14.2.1 — Remote post row that is a visual twin
+
+// Remote row layout stability: cache whether a post has attachments (and its chosen "fav" ref).
+// This prevents a transient empty attachmentRefs render from collapsing the thumbnail lane and then re-expanding it.
+fileprivate final class RemotePostAttachmentMetaCache {
+    struct Meta {
+        let fav: BackendSessionViewModel.BackendAttachmentRef?
+        let extraCount: Int
+        let hasAny: Bool
+    }
+
+    static let shared = RemotePostAttachmentMetaCache()
+
+    private let lock = NSLock()
+    private var map: [UUID: Meta] = [:]
+
+    func get(_ postID: UUID) -> Meta? {
+        lock.lock(); defer { lock.unlock() }
+        return map[postID]
+    }
+
+    func set(_ postID: UUID, _ meta: Meta) {
+        lock.lock(); defer { lock.unlock() }
+        map[postID] = meta
+    }
+}
+
+
+// Mirror of SessionRow (read-only)
 fileprivate struct RemotePostRowTwin: View {
     let post: BackendPost
     let scope: FeedScope
@@ -2157,6 +2253,61 @@ fileprivate struct RemotePostRowTwin: View {
 
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
+
+    private func favAndExtraCount(from refs: [BackendSessionViewModel.BackendAttachmentRef]) -> (BackendSessionViewModel.BackendAttachmentRef?, Int) {
+        guard !refs.isEmpty else { return (nil, 0) }
+        // Prefer image > video > audio (to match the calmest visual footprint in the feed).
+        let fav = refs.first(where: { $0.kind == .image })
+            ?? refs.first(where: { $0.kind == .video })
+            ?? refs.first
+        return (fav, max(0, refs.count - 1))
+    }
+
+    private var cachedAttachmentMeta: RemotePostAttachmentMetaCache.Meta? {
+        RemotePostAttachmentMetaCache.shared.get(post.id)
+    }
+
+    private var effectiveHasAttachments: Bool {
+        // Cache-first: if we've ever seen attachments for this post in this session, keep the lane reserved.
+        if let cached = cachedAttachmentMeta, cached.hasAny { return true }
+        return !model.attachmentRefs.isEmpty
+    }
+
+    private var effectiveFavAttachmentRef: BackendSessionViewModel.BackendAttachmentRef? {
+        if !model.attachmentRefs.isEmpty {
+            return favAndExtraCount(from: model.attachmentRefs).0
+        }
+        return cachedAttachmentMeta?.fav
+    }
+
+    private var effectiveExtraAttachmentCount: Int {
+        if !model.attachmentRefs.isEmpty {
+            return favAndExtraCount(from: model.attachmentRefs).1
+        }
+        return cachedAttachmentMeta?.extraCount ?? 0
+    }
+
+    private func updateAttachmentMetaCacheIfNeeded() {
+        let refs = model.attachmentRefs
+        guard !refs.isEmpty else { return }
+        let (fav, extra) = favAndExtraCount(from: refs)
+        RemotePostAttachmentMetaCache.shared.set(post.id, .init(fav: fav, extraCount: extra, hasAny: true))
+    }
+
+    @ViewBuilder
+    private func attachmentLanePlaceholder() -> some View {
+        // Reserve the exact same footprint as RemoteAttachmentPreview for non-audio thumbs.
+        let size: CGFloat = FEED_IMAGE_VIDEO_THUMB
+        RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
+            .fill(Color.secondary.opacity(0.08))
+            .frame(width: size, height: size)
+            .overlay(
+                RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous)
+                    .strokeBorder(Color.secondary.opacity(0.06), lineWidth: 1)
+            )
+            .accessibilityHidden(true)
+    }
+
 
     private var viewerIsOwner: Bool {
         guard let viewer = viewerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
@@ -2434,26 +2585,34 @@ private var extraAttachmentCount: Int {
                 }
 
                 // Attachment preview (twin placement to SessionRow)
-                if let fav = favAttachmentRef {
+                if effectiveHasAttachments {
                     HStack(alignment: .center, spacing: 8) {
-                        RemoteAttachmentPreview(ref: fav, postID: post.id)
+                        if let fav = effectiveFavAttachmentRef {
+                            RemoteAttachmentPreview(ref: fav, postID: post.id)
+                        } else {
+                            attachmentLanePlaceholder()
+                        }
                         Spacer()
                     }
                     .padding(.top, 2)
 
-                    interactionRow(postID: post.id, attachmentCount: extraAttachmentCount)
+                    interactionRow(postID: post.id, attachmentCount: effectiveExtraAttachmentCount)
                         .padding(.top, 6)
                 } else {
-                    interactionRow(postID: post.id, attachmentCount: extraAttachmentCount)
+                    interactionRow(postID: post.id, attachmentCount: effectiveExtraAttachmentCount)
                         .padding(.top, 6)
                 }
             }
         }
-        .padding(.vertical, !model.attachmentRefs.isEmpty ? 10 : 6)
-        .onAppear {
+        .padding(.vertical, effectiveHasAttachments ? 10 : 6)
+.onAppear {
+            updateAttachmentMetaCacheIfNeeded()
             // Keep initial saved state in sync for this viewer + post.
             let vid = (viewerUserID ?? "unknown")
             isSavedLocal = FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
+        }
+        .onChange(of: model.attachmentRefs.count) { _ in
+            updateAttachmentMetaCacheIfNeeded()
         }
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("row.openDetail")
