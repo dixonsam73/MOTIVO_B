@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260203_081447_IdentityHydrationSmoothing
+// SCOPE: Non-owner identity hydration smoothing: preserve directory cache during fetch; merge identities before publishing posts
+
 // SEARCH-TOKEN: 20260128_192500_14_3A_MainActorPublishingFix
 
 
@@ -127,7 +130,8 @@ public final class BackendFeedStore: ObservableObject {
     public func resetForSignOut() {
         minePosts = []
         allPosts = []
-        directoryAccountsByUserID = [:]
+        // NOTE: Do not clear directoryAccountsByUserID here.
+        // Identity cache should survive in-flight refreshes to avoid non-owner name flips.
 
         lastRawCount = 0
         lastMineCount = 0
@@ -165,7 +169,8 @@ public final class BackendFeedStore: ObservableObject {
 
         minePosts = []
         allPosts = []
-        directoryAccountsByUserID = [:]
+        // NOTE: Do not clear directoryAccountsByUserID here.
+        // Identity cache should survive in-flight refreshes to avoid non-owner name flips.
     }
 
     public func endFetchSuccess(rawPosts: [BackendPost], minePosts: [BackendPost], allPosts: [BackendPost]) {
@@ -1072,10 +1077,6 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                 let sortedMine = sortByCreatedDesc(mine)
                 let sortedAll = sortByCreatedDesc(all)
 
-                await MainActor.run {
-                    BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
-                }
-
                 // Phase 14 Step 3: Batch-resolve directory identities for authors visible in the feed.
                 // AccountDirectoryService expects [String] user IDs (uuid strings) matching the RPC signature (uuid[]).
                 let uniqueAuthorUserIDs: [String] = Array(Set(rawPosts.compactMap { post in
@@ -1090,6 +1091,10 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                             BackendFeedStore.shared.mergeDirectoryAccounts(map)
                         }
                     }
+                }
+
+                await MainActor.run {
+                    BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
                 }
 
                 return .success(())
