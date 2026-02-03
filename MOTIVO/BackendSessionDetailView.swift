@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260203_093000_14x_BSDV_PreviewCache
+// SCOPE: Phase 14.x — BSDV thumbnails/posters persist across repeated presentations via stable (bucket|path) decoded preview caches; keep signed URL cache unchanged; no UI/layout/feed/backend changes.
+// SEARCH-TOKEN: 20260203_093000_BSDV_PREVIEW_CACHE_V1
+
 // CHANGE-ID: 20260202_102600_BackChevronPlusRemoteThumbStability
 // SCOPE: Keep nav pop fix while preserving neutral remote thumb placeholders in BSDV
 // SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
@@ -378,14 +382,14 @@ struct BackendSessionDetailView: View {
                 if !images.isEmpty || !videos.isEmpty {
                     LazyVGrid(columns: grid, spacing: 12) {
                         ForEach(Array(images.enumerated()), id: \.offset) { (_, ref) in
-                            BackendThumbCell(kind: .image, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
+                            BackendThumbCell(kind: .image, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     Task { await presentViewer() }
                                 }
                         }
                         ForEach(Array(videos.enumerated()), id: \.offset) { (_, ref) in
-                            BackendThumbCell(kind: .video, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
+                            BackendThumbCell(kind: .video, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     Task { await presentViewer() }
@@ -622,6 +626,26 @@ struct BackendSessionDetailView: View {
     }
 }
 
+// MARK: - BSDV decoded preview caches (app-lifetime)
+//
+// These caches intentionally key by stable attachment identity (bucket|path), NOT by signed URL (token changes).
+// Purpose: prevent visible thumbnail/poster “reload” phases when BSDV is presented repeatedly during one app run.
+fileprivate enum BackendDetailPreviewCache {
+    static let imageThumbCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200
+        return c
+    }()
+
+    static let videoPosterCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 200
+        return c
+    }()
+}
+
+
+
 // MARK: - Focus token extraction (copied from SessionDetailView for parity)
 
 /// Extracts FocusDotIndex (0…11) if present; falls back to legacy StateIndex (0…3 → mapped to center dots).
@@ -740,10 +764,17 @@ private struct FocusDotStripView: View {
 
 private struct BackendThumbCell: View {
     let kind: BackendSessionViewModel.BackendAttachmentRef.Kind
+    let bucket: String
+    let path: String
     let url: URL?
     let showViewIcon: Bool
 
+    @State private var imageThumb: UIImage? = nil
     @State private var poster: UIImage? = nil
+
+    private var stableKey: NSString {
+        "\(bucket)|\(path)" as NSString
+    }
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -751,21 +782,18 @@ private struct BackendThumbCell: View {
                 Group {
                     switch kind {
                     case .image:
-                        if let url {
-                            AsyncImage(url: url) { phase in
-                                switch phase {
-                                case .success(let image):
-                                    image.resizable().scaledToFill()
-                                default:
-                                    neutralPlaceholder()
-                                }
-                            }
+                        if let cached = BackendDetailPreviewCache.imageThumbCache.object(forKey: stableKey) {
+                            Image(uiImage: cached).resizable().scaledToFill()
+                        } else if let imageThumb {
+                            Image(uiImage: imageThumb).resizable().scaledToFill()
                         } else {
                             neutralPlaceholder()
                         }
 
                     case .video:
-                        if let poster {
+                        if let cached = BackendDetailPreviewCache.videoPosterCache.object(forKey: stableKey) {
+                            Image(uiImage: cached).resizable().scaledToFill()
+                        } else if let poster {
                             Image(uiImage: poster).resizable().scaledToFill()
                         } else {
                             neutralPlaceholder()
@@ -803,10 +831,40 @@ private struct BackendThumbCell: View {
         }
         .frame(width: 128, height: 128)
         .task(id: url) {
-            guard kind == .video else { return }
-            guard poster == nil, let u = url else { return }
-            await generatePoster(u)
+            switch kind {
+            case .image:
+                await hydrateImageThumbIfNeeded()
+            case .video:
+                await hydrateVideoPosterIfNeeded()
+            case .audio:
+                break
+            }
         }
+    }
+
+    private func hydrateImageThumbIfNeeded() async {
+        if BackendDetailPreviewCache.imageThumbCache.object(forKey: stableKey) != nil { return }
+        if imageThumb != nil { return }
+        guard let u = url else { return }
+
+        do {
+            let (data, _) = try await URLSession.shared.data(from: u)
+            guard let img = UIImage(data: data) else { return }
+            BackendDetailPreviewCache.imageThumbCache.setObject(img, forKey: stableKey)
+            await MainActor.run { self.imageThumb = img }
+        } catch {
+            // Silent failure: keep neutral placeholder.
+        }
+    }
+
+    private func hydrateVideoPosterIfNeeded() async {
+        if BackendDetailPreviewCache.videoPosterCache.object(forKey: stableKey) != nil { return }
+        if poster != nil { return }
+        guard let u = url else { return }
+        let img = await generatePoster(u)
+        guard let img else { return }
+        BackendDetailPreviewCache.videoPosterCache.setObject(img, forKey: stableKey)
+        await MainActor.run { self.poster = img }
     }
 
     private func neutralPlaceholder() -> some View {
@@ -826,15 +884,13 @@ private struct BackendThumbCell: View {
         }
     }
 
-    private func generatePoster(_ url: URL) async {
+    private func generatePoster(_ url: URL) async -> UIImage? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
-                DispatchQueue.main.async {
-                    self.poster = img
-                    continuation.resume()
-                }
+                continuation.resume(returning: img)
             }
         }
     }
 }
+
