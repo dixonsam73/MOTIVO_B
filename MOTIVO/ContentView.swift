@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260203_093500_FeedThumbPrewarmFix
+// SCOPE: Feed thumbnail & signed-URL prewarm (warm RemoteAttachmentPreview caches ahead of scroll) — ContentView only
+// SEARCH-TOKEN: 20260203_093500_FeedThumbPrewarmFix
 // CHANGE-ID: 20260202_224200_FeedNavFreezeV3
 // SCOPE: Freeze merged feed row identity across detail navigation (interactive pop safe) — ContentView only
 // SEARCH-TOKEN: 20260202_224200_FeedNavFreezeV3
@@ -279,6 +282,7 @@ fileprivate struct SessionsRootView: View {
     @State private var isFeedNavFrozen: Bool = false
     @State private var frozenFeedItems: [FeedRowItem] = []
     @State private var feedNavFreezeTask: Task<Void, Never>? = nil
+    @State private var remotePrewarmNonce: Int = 0
 
     @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
@@ -466,6 +470,18 @@ fileprivate struct SessionsRootView: View {
 
                             // Apply the same filter semantics to remote posts as local sessions.
                             let remotePosts: [BackendPost] = filteredRemotePosts(dedupedRemotePosts)
+
+                            // Phase 14.x: prewarm feed thumbnails/posters for the first screenful of remote posts (writes into RemoteAttachmentPreview caches).
+                            let remoteWarmToken: String = {
+                                let head = remotePosts.prefix(12).map { $0.id.uuidString }.joined(separator: ",")
+                                return "\(remotePosts.count)|\(remotePrewarmNonce)|\(head)"
+                            }()
+
+                            Color.clear
+                                .frame(height: 0)
+                                .task(id: remoteWarmToken) {
+                                    await warmRemoteFeedPreviews(posts: remotePosts, viewerUserID: effectiveBackendUserID, limit: 10)
+                                }
 
                             // Build unified row source (Local sessions + Remote posts)
                             let liveFeedItems: [FeedRowItem] = FeedRowItem.build(
@@ -773,7 +789,9 @@ Spacer()
 
 
             .onReceive(NotificationCenter.default.publisher(for: Notification.Name("BackendSessionDetailView.didPop"))) { _ in
+                pushRemotePostID = nil
                 BackendDetailPopGate.lastPopAt = Date()
+                remotePrewarmNonce &+= 1
             }
 
             // Feed identity freeze across navigation transitions (covers interactive pop where ContentView is visible before didPop fires).
@@ -1065,6 +1083,74 @@ Spacer()
         }
     }
 
+
+    // MARK: - Remote feed preview prewarm
+
+    private func warmRemoteFeedPreviews(posts: [BackendPost], viewerUserID: String?, limit: Int = 10) async {
+        guard !posts.isEmpty else { return }
+
+        let currentUserID = viewerUserID ?? ""
+
+        for post in posts.prefix(limit) {
+            let model = BackendSessionViewModel(post: post, currentUserID: currentUserID)
+            let refs = model.attachmentRefs
+
+            // Match RemotePostRowTwin.favAndExtraCount: prefer image > video > other (but we only prewarm image/video).
+            guard let fav = (refs.first(where: { $0.kind == .image })
+                ?? refs.first(where: { $0.kind == .video })) else {
+                continue
+            }
+
+            let key = "feedThumb|\(post.id.uuidString)|\(fav.bucket)|\(fav.path)"
+
+            let signedURL: URL
+            if let cached = RemoteSignedURLCache.shared.get(key) {
+                signedURL = cached
+            } else {
+                let result = await NetworkManager.shared.createSignedStorageObjectURL(
+                    bucket: fav.bucket,
+                    path: fav.path,
+                    expiresInSeconds: 300
+                )
+                switch result {
+                case .success(let url):
+                    RemoteSignedURLCache.shared.set(key, url: url, ttlSeconds: 300)
+                    signedURL = url
+                case .failure:
+                    continue
+                }
+            }
+
+            switch fav.kind {
+            case .image:
+                #if canImport(UIKit)
+                if RemotePreviewCache.imageThumbCache.object(forKey: key as NSString) != nil { continue }
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: signedURL)
+                    if let ui = UIImage(data: data) {
+                        RemotePreviewCache.imageThumbCache.setObject(ui, forKey: key as NSString)
+                    }
+                } catch {
+                    // ignore
+                }
+                #endif
+
+            case .video:
+                #if canImport(UIKit)
+                if RemotePreviewCache.videoPosterCache.object(forKey: key as NSString) != nil { continue }
+                let poster = await Task.detached(priority: .utility) {
+                    AttachmentStore.generateVideoPoster(url: signedURL)
+                }.value
+                if let poster {
+                    RemotePreviewCache.videoPosterCache.setObject(poster, forKey: key as NSString)
+                }
+                #endif
+
+            default:
+                continue
+            }
+        }
+    }
 
     // MARK: - Delete
 
@@ -2734,12 +2820,19 @@ fileprivate final class RemoteSignedURLCache {
         map[key] = Entry(url: url, expiresAt: Date().addingTimeInterval(TimeInterval(ttlSeconds)))
     }
 }
+
+fileprivate enum RemotePreviewCache {
+    #if canImport(UIKit)
+    static let imageThumbCache = NSCache<NSString, UIImage>()
+    static let videoPosterCache = NSCache<NSString, UIImage>()
+    #endif
+}
 struct RemoteAttachmentPreview: View {
     // FIX-D: persistent in-memory thumbnail cache (keyed by postID + bucket + path)
     // Goal: prevent placeholder flashes and eliminate any chance of cross-row/cross-owner thumbnail reuse.
     #if canImport(UIKit)
-    private static let imageThumbCache = NSCache<NSString, UIImage>()
-    private static let videoPosterCache = NSCache<NSString, UIImage>()
+    // Shared caches (also written by feed prewarmer)
+    // See RemotePreviewCache.
     #endif
 
     let ref: BackendSessionViewModel.BackendAttachmentRef
@@ -2767,7 +2860,7 @@ struct RemoteAttachmentPreview: View {
             // IMAGE
             if kind == .image {
                 #if canImport(UIKit)
-                if let ui = resolvedImage ?? Self.imageThumbCache.object(forKey: cacheKey as NSString) {
+                if let ui = resolvedImage ?? RemotePreviewCache.imageThumbCache.object(forKey: cacheKey as NSString) {
                     Image(uiImage: ui)
                         .resizable()
                         .scaledToFill()
@@ -2783,7 +2876,7 @@ struct RemoteAttachmentPreview: View {
             // VIDEO
             else if kind == .video {
                 #if canImport(UIKit)
-                if let poster = videoPoster ?? Self.videoPosterCache.object(forKey: cacheKey as NSString) {
+                if let poster = videoPoster ?? RemotePreviewCache.videoPosterCache.object(forKey: cacheKey as NSString) {
                     Image(uiImage: poster)
                         .resizable()
                         .scaledToFill()
@@ -2874,7 +2967,7 @@ struct RemoteAttachmentPreview: View {
         guard ref.kind == .image else { return }
 
         // 1) Prefer immediate in-memory cache.
-        if let cached = Self.imageThumbCache.object(forKey: cacheKey as NSString) {
+        if let cached = RemotePreviewCache.imageThumbCache.object(forKey: cacheKey as NSString) {
             if resolvedImage !== cached { resolvedImage = cached }
             return
         }
@@ -2887,7 +2980,7 @@ struct RemoteAttachmentPreview: View {
             guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { return }
             guard let ui = UIImage(data: data) else { return }
 
-            Self.imageThumbCache.setObject(ui, forKey: cacheKey as NSString)
+            RemotePreviewCache.imageThumbCache.setObject(ui, forKey: cacheKey as NSString)
             if resolvedImage !== ui { resolvedImage = ui }
         } catch {
             // Ignore transient failures — placeholder remains; next navigation/refresh will retry.
@@ -2898,7 +2991,7 @@ struct RemoteAttachmentPreview: View {
         guard ref.kind == .video else { return }
 
         // 1) Prefer immediate in-memory cache.
-        if let cached = Self.videoPosterCache.object(forKey: cacheKey as NSString) {
+        if let cached = RemotePreviewCache.videoPosterCache.object(forKey: cacheKey as NSString) {
             if videoPoster !== cached { videoPoster = cached }
             return
         }
@@ -2911,7 +3004,7 @@ struct RemoteAttachmentPreview: View {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 DispatchQueue.main.async {
                     if let img {
-                        Self.videoPosterCache.setObject(img, forKey: cacheKey as NSString)
+                        RemotePreviewCache.videoPosterCache.setObject(img, forKey: cacheKey as NSString)
                         self.videoPoster = img
                     }
                     continuation.resume()
