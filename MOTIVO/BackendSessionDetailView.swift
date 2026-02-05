@@ -12,6 +12,10 @@
 // SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
 
 
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — show optional location in BSDV identity header (owner: local ProfileStore; non-owner: account_directory location).
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
 import SwiftUI
 import Foundation
 import UIKit
@@ -328,15 +332,41 @@ struct BackendSessionDetailView: View {
     @ViewBuilder
     private func identityHeader() -> some View {
         HStack(alignment: .center, spacing: 8) {
-            Text(displayName)
-                .font(.subheadline.weight(.semibold))
-                .accessibilityIdentifier("detail.displayName")
+            HStack(spacing: 6) {
+                Text(displayName)
+                    .font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("detail.displayName")
+
+                let loc = locationText
+                if !loc.isEmpty {
+                    Text("•").foregroundStyle(Theme.Colors.secondaryText)
+                    Text(loc)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .accessibilityIdentifier("detail.location")
+                }
+            }
 
             Spacer(minLength: 0)
         }
         .padding(.bottom, 2)
     }
 
+    private var locationText: String {
+        // Owner uses local ProfileStore; follower contexts use backend directory value.
+        if viewerIsOwner {
+            let viewer = effectiveViewerUserID ?? ""
+            return ProfileStore.location(for: viewer)
+        }
+
+        if let account = directoryAccount,
+           let s = account.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
+           !s.isEmpty {
+            return s
+        }
+
+        return ""
+    }
     private var displayName: String {
         if viewerIsOwner {
             return "You"
@@ -893,4 +923,3 @@ private struct BackendThumbCell: View {
         }
     }
 }
-

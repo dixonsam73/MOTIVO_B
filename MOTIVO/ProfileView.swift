@@ -18,6 +18,10 @@
  //  v7.8 DesignLite — visual polish only (headers/background/spacing).
  //  v7.8 DesignLite — tweak: Manage buttons placed above primary pickers and aligned to section edge.
  //
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — include optional location in directory sync fingerprint + upsertSelfRow call (owner updates push to account_directory).
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
  import SwiftUI
  import CoreData
 import Foundation
@@ -989,9 +993,11 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          let enabled = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
          let acctOrNil: String? = (acct.count >= 3) ? acct : nil
-         let fingerprint = "\(backendID)|\(display)|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
+         let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
+         let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
+         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
          if fingerprint == lastDirectorySyncFingerprint { return }
-         let result = await AccountDirectoryService.shared.upsertSelfRow(userID: backendID, displayName: display, accountID: acctOrNil, lookupEnabled: enabled)
+         let result = await AccountDirectoryService.shared.upsertSelfRow(userID: backendID, displayName: display, location: locOrNil, accountID: acctOrNil, lookupEnabled: enabled)
          switch result {
 case .success:
     lastDirectorySyncFingerprint = fingerprint

@@ -16,6 +16,10 @@
 // SCOPE: Phase 14.1 — Reuse directory batch resolver for Requests rows; avoid UI fallback to opaque user IDs.
 // SEARCH-TOKEN: 20260121_203420_Phase141_PeopleView_RequestIdentityWiring
 
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — pass optional directory location into ProfilePeekView from People search results.
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
 import SwiftUI
 
 /// Phase 10B — People Hub
@@ -100,7 +104,8 @@ struct PeopleView: View {
                     ProfilePeekView(
                         ownerID: userID,
                         directoryDisplayName: acct?.displayName,
-                        directoryAccountID: acct?.accountID
+                        directoryAccountID: acct?.accountID,
+                        directoryLocation: acct?.location
                     )
                 } trailing: {
                     HStack(spacing: Theme.Spacing.s) {
@@ -209,7 +214,8 @@ struct PeopleView: View {
                         ProfilePeekView(
                             ownerID: acct.userID,
                             directoryDisplayName: acct.displayName,
-                            directoryAccountID: acct.accountID
+                            directoryAccountID: acct.accountID,
+                            directoryLocation: acct.location
                         )
                     }
                 }

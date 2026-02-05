@@ -118,6 +118,10 @@
 // SCOPE: Phase 14.2 — Ignore debug identity overrides in connected mode (owner checks + viewer-local state)
 // SEARCH-TOKEN: 20260122_113000_Phase142_ContentViewGuardrails
 
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — use backend account_directory.location for non-owner identity rows and peeks; owner continues to use local ProfileStore.
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
 import SwiftUI
 import CoreData
 import Combine
@@ -1585,7 +1589,21 @@ fileprivate struct SessionRow: View {
                             }
                         }()
 
-                        let loc = ProfileStore.location(for: ownerIDNonEmpty)
+                        let loc: String = {
+                            if viewerIsOwner {
+                                return ProfileStore.location(for: ownerIDNonEmpty)
+                            }
+                            if let acct = BackendFeedStore.shared.directoryAccountsByUserID[ownerIDNonEmpty],
+                               let s = acct.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty {
+                                return s
+                            }
+                            let lower = ownerIDNonEmpty.lowercased()
+                            if let acct = BackendFeedStore.shared.directoryAccountsByUserID[lower],
+                               let s = acct.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty {
+                                return s
+                            }
+                            return ""
+                        }()
 
                         HStack(spacing: 6) {
                             Text(realName).font(.subheadline.weight(.semibold))
@@ -1693,7 +1711,15 @@ fileprivate struct SessionRow: View {
             // Invariant: self-peek must never render follow gating in any mode.
             let ownerForPeek = (owner.isEmpty || owner == viewer) ? (viewer.isEmpty ? owner : viewer) : owner
 
-            ProfilePeekView(ownerID: ownerForPeek)
+            let acct = BackendFeedStore.shared.directoryAccountsByUserID[ownerForPeek]
+                    ?? BackendFeedStore.shared.directoryAccountsByUserID[ownerForPeek.lowercased()]
+
+            ProfilePeekView(
+                ownerID: ownerForPeek,
+                directoryDisplayName: acct?.displayName,
+                directoryAccountID: acct?.accountID,
+                directoryLocation: acct?.location
+            )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
         }
@@ -2627,7 +2653,21 @@ private var extraAttachmentCount: Int {
 
                             return "User"
                         }()
-                        let loc = ProfileStore.location(for: owner)
+                        let loc: String = {
+                            if viewerIsOwner {
+                                return ProfileStore.location(for: owner)
+                            }
+                            if let acct = backendFeedStore.directoryAccountsByUserID[owner],
+                               let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                                return s
+                            }
+                            let lower = owner.lowercased()
+                            if let acct = backendFeedStore.directoryAccountsByUserID[lower],
+                               let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                                return s
+                            }
+                            return ""
+                        }()
 
 
                         HStack(spacing: 6) {

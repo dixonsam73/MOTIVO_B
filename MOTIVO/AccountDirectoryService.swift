@@ -17,6 +17,10 @@
 //  SEARCH-TOKEN: 20260120_113000_Phase12C_AccountDirectorySearch
 //
 
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — add optional location to DirectoryAccount read/write (account_directory + RPC decode). No discovery/UI changes.
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
 import Foundation
 
 public struct DirectoryAccount: Codable, Identifiable, Hashable {
@@ -25,11 +29,13 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
     public let userID: String
     public let accountID: String?
     public let displayName: String
+    public let location: String?
 
     public enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case accountID = "account_id"
         case displayName = "display_name"
+        case location = "location"
     }
 }
 
@@ -163,10 +169,11 @@ public final class AccountDirectoryService {
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
-    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool) async -> Result<Void, Error> {
+    public func upsertSelfRow(userID: String, displayName: String, location: String?, accountID: String?, lookupEnabled: Bool) async -> Result<Void, Error> {
         let payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
+            "location": (location?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? location!.trimmingCharacters(in: .whitespacesAndNewlines) : NSNull(),
             "account_id": sanitizedAccountID(accountID) ?? NSNull(),
             "lookup_enabled": lookupEnabled
         ]

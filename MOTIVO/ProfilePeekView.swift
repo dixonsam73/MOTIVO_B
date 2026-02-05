@@ -13,6 +13,10 @@
 // SCOPE: Phase 14.1 — Observe FollowStore for immediate follow UI invalidation; explicit owner path to prevent self-peek gating in any mode.
 // SEARCH-TOKEN: 20260121_203420_Phase141_ProfilePeek_OwnerExplicit_FollowReactive
 
+// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
+// SCOPE: Identity data parity — thread backend directory location into ProfilePeekView for non-owner peeks; owner continues to use local ProfileStore.
+// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+
 import SwiftUI
 import CoreData
 import Combine
@@ -29,6 +33,7 @@ struct ProfilePeekView: View {
     let ownerID: String
     let directoryDisplayName: String?
     let directoryAccountID: String?
+    let directoryLocation: String?
 
     // Derived
     /// Effective viewer ID for backend follow/directory logic (Supabase auth.users UUID).
@@ -74,10 +79,11 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil) {
         self.ownerID = ownerID
         self.directoryDisplayName = directoryDisplayName
         self.directoryAccountID = directoryAccountID
+        self.directoryLocation = directoryLocation
         // fetch sessions for this owner (lightweight)
         let sReq = NSFetchRequest<Session>(entityName: "Session")
         sReq.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
@@ -126,7 +132,13 @@ struct ProfilePeekView: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
-                        let loc = ProfileStore.location(for: ownerID)
+                        let loc: String = {
+                            if isOwner {
+                                return ProfileStore.location(for: ownerID)
+                            }
+                            let s = (directoryLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            return s
+                        }()
                         if !loc.isEmpty {
                             Text(loc)
                                 .font(.caption)
@@ -366,4 +378,3 @@ private struct ProfileAvatar: View {
         return combo.isEmpty ? "?" : combo
     }
 }
-
