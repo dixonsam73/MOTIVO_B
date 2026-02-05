@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260205_073900_LiveDirectorySync_LocationOnChange
+// SCOPE: Live directory identity sync — trigger account_directory upsert when Location changes (debounced); no UI/layout changes.
 // CHANGE-ID: 20260120_142900_Phase12C_CommitOnlyAccountID_BlurGuard
 // CHANGE-ID: 20260121_132406_P13A_AccountIDCollisionUX
 // SCOPE: Phase 13A — surface account_id collision (HTTP 409 / 23505) inline under Account ID field; no backend/schema changes.
@@ -997,7 +999,13 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
          let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
          if fingerprint == lastDirectorySyncFingerprint { return }
-         let result = await AccountDirectoryService.shared.upsertSelfRow(userID: backendID, displayName: display, location: locOrNil, accountID: acctOrNil, lookupEnabled: enabled)
+         let result = await AccountDirectoryService.shared.upsertSelfRow(
+             userID: backendID,
+             displayName: display,
+             accountID: acctOrNil,
+             lookupEnabled: enabled,
+             location: locOrNil
+         )
          switch result {
 case .success:
     lastDirectorySyncFingerprint = fingerprint
@@ -1095,6 +1103,9 @@ case .failure(let error):
                  primaryActivityChoice = normalizedPrimaryActivityRef()
              }
              .onChange(of: name) { _, _ in
+                 Task { @MainActor in scheduleDirectorySyncDebounced() }
+             }
+             .onChange(of: locationText) { _, _ in
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
              }
              .onChange(of: discoveryModeRawPerUser) { _, newValue in

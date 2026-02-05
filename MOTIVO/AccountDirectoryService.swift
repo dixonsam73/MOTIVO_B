@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260205_072955_LiveIdentityCache_f1a8c7
+// SCOPE: Live directory identity cache updates (merge on upsert + force-refresh on directory fetch)
+// SEARCH-TOKEN: 20260205_072955_LiveIdentityCache_f1a8c7
+
 // CHANGE-ID: 20260121_172500_Phase14_Step2_DirectoryBatchCache
 // SCOPE: Phase 14 Step 2 — add batch account_directory RPC lookup + in-memory cache for DirectoryAccount (user_id, display_name, account_id)
 // SEARCH-TOKEN: 20260121_172500_Phase14_Step2_DirectoryBatchCache
@@ -16,10 +20,6 @@
 //  SCOPE: Phase 12C (read path) — RPC-backed People search against account_directory via search_account_directory(); no profile sync; no discovery.
 //  SEARCH-TOKEN: 20260120_113000_Phase12C_AccountDirectorySearch
 //
-
-// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
-// SCOPE: Identity data parity — add optional location to DirectoryAccount read/write (account_directory + RPC decode). No discovery/UI changes.
-// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
 import Foundation
 
@@ -42,6 +42,11 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
 public final class AccountDirectoryService {
     // Phase 12C hygiene: never POST invalid account_id values.
     // Rule: accept only [a-z0-9_] and length 3–24; otherwise send null.
+    private func sanitizedLocation(_ raw: String?) -> String? {
+        guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
+    }
+
     private func sanitizedAccountID(_ raw: String?) -> String? {
         guard var s = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !s.isEmpty else { return nil }
@@ -79,7 +84,7 @@ public final class AccountDirectoryService {
     /// Resolve directory identity for a set of backend user IDs via SECURITY DEFINER RPC.
     /// - Returns: Map keyed by user_id (string UUID) for fast lookup in feed/profile-peek.
     /// - Important: This read path does NOT apply lookup_enabled filtering (People search only).
-    public func resolveAccounts(userIDs: [String]) async -> Result<[String: DirectoryAccount], Error> {
+    public func resolveAccounts(userIDs: [String], forceRefresh: Bool = false) async -> Result<[String: DirectoryAccount], Error> {
         let trimmed = userIDs
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -99,7 +104,7 @@ public final class AccountDirectoryService {
         }
 
         let cached = await cache.getMany(orderedUnique)
-        let missing = orderedUnique.filter { cached[$0] == nil }
+        let missing = forceRefresh ? orderedUnique : orderedUnique.filter { cached[$0] == nil }
 
         var merged = cached
 
@@ -169,13 +174,13 @@ public final class AccountDirectoryService {
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
-    public func upsertSelfRow(userID: String, displayName: String, location: String?, accountID: String?, lookupEnabled: Bool) async -> Result<Void, Error> {
+    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, location: String? = nil) async -> Result<Void, Error> {
         let payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
-            "location": (location?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? location!.trimmingCharacters(in: .whitespacesAndNewlines) : NSNull(),
             "account_id": sanitizedAccountID(accountID) ?? NSNull(),
-            "lookup_enabled": lookupEnabled
+            "lookup_enabled": lookupEnabled,
+            "location": sanitizedLocation(location) ?? NSNull()
         ]
 
         let body: Data
@@ -194,6 +199,13 @@ public final class AccountDirectoryService {
         let result = await NetworkManager.shared.request(path: path, method: "POST", query: nil, jsonBody: body, headers: headers)
         switch result {
         case .success:
+            // Live identity cache update: immediately merge the new identity values.
+            let merged = DirectoryAccount(userID: userID,
+                                        accountID: sanitizedAccountID(accountID),
+                                        displayName: displayName,
+                                        location: sanitizedLocation(location))
+            await cache.setMany([merged])
+            await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
             return .success(())
         case .failure(let error):
             return .failure(error)

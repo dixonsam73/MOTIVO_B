@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260205_072955_LiveIdentityCache_f1a8c7
+// SCOPE: Live directory identity cache updates (merge on upsert + force-refresh on directory fetch)
+// SEARCH-TOKEN: 20260205_072955_LiveIdentityCache_f1a8c7
+
 // CHANGE-ID: 20260203_081447_IdentityHydrationSmoothing
 // SCOPE: Non-owner identity hydration smoothing: preserve directory cache during fetch; merge identities before publishing posts
 
@@ -1085,7 +1089,7 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                 }))
 
                 if !uniqueAuthorUserIDs.isEmpty {
-                    let resolved = await AccountDirectoryService.shared.resolveAccounts(userIDs: uniqueAuthorUserIDs)
+                    let resolved = await AccountDirectoryService.shared.resolveAccounts(userIDs: uniqueAuthorUserIDs, forceRefresh: true)
                     if case .success(let map) = resolved {
                         await MainActor.run {
                             BackendFeedStore.shared.mergeDirectoryAccounts(map)
