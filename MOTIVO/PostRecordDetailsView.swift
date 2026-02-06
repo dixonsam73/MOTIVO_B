@@ -1605,6 +1605,7 @@ let namesKey = "stagedAudioNames_temp"
         let stagedVideoTitlesKey = "stagedVideoTitles_temp"
         let stagedVideoTitles: [String: String] = (UserDefaults.standard.dictionary(forKey: stagedVideoTitlesKey) as? [String: String]) ?? [:]
         let persistedVideoTitlesKey = "persistedVideoTitles_v1"
+        let persistedAudioTitlesKey = "persistedAudioTitles_v1"
 
         // Track rollback closures for files written during this commit attempt
         var rollbacks: [() -> Void] = []
@@ -1636,7 +1637,26 @@ let namesKey = "stagedAudioNames_temp"
                 stagedToFinalURL[att.id] = finalURL
 let stagedURL = surrogateURL(for: att)
                 migratePrivacy(fromStagedID: att.id, stagedURL: stagedURL, toNewID: (created.value(forKey: "id") as? UUID), newURL: finalURL)
-
+                // Persist any staged AUDIO title so publish pipeline can round-trip it (remote display_name)
+                if att.kind == .audio {
+                    let stagedKey = att.id.uuidString
+                    if let stagedTitleRaw = namesDict[stagedKey] {
+                        let trimmed = stagedTitleRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !trimmed.isEmpty {
+                            if let finalID = created.value(forKey: "id") as? UUID {
+                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
+                                persisted[finalID.uuidString] = trimmed
+                                UserDefaults.standard.set(persisted, forKey: persistedAudioTitlesKey)
+                            } else {
+                                // Fallback (should be rare): key by saved filename stem
+                                let stem = URL(fileURLWithPath: result.path).deletingPathExtension().lastPathComponent
+                                var persisted = (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
+                                persisted[stem] = trimmed
+                                UserDefaults.standard.set(persisted, forKey: persistedAudioTitlesKey)
+                            }
+                        }
+                    }
+                }
                 // Persist any staged video title so SessionDetailView can surface it later
                 if att.kind == .video {
                     let stagedKey = att.id.uuidString

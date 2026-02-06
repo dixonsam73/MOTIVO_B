@@ -1,3 +1,15 @@
+// CHANGE-ID: 20260206_100245_AVVKeysImmutable_079028
+// SCOPE: Fix crash risk by making audioKeys/videoKeys and title maps immutable inputs (not state/optional). No UI/layout/behavior changes beyond stable-key title resolution.
+// SEARCH-TOKEN: 20260206_100245_AVVKeysImmutable_079028
+
+// CHANGE-ID: 20260206_095420_AVVInitKeys_1cd203
+// SCOPE: Fix AttachmentViewerView initializers to fully initialize new stable-key title properties (audio/video keys + title maps). No UI/layout changes.
+// SEARCH-TOKEN: 20260206_095420_AVVInitKeys_1cd203
+
+// CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
+// SCOPE: Remote attachment display-name parity: viewer resolves audio/video titles by stable attachment key (not signed URL).
+// SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
+
 // CHANGE-ID: 20260114_172800_9F_URLRefresh
 // SCOPE: Step 9F Option A — viewer detects signed URL failures and offers calm tap-to-retry which requests a fresh signed URL via injected closure (no backend/schema/social changes).
 
@@ -20,6 +32,10 @@ import AVFoundation
 
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
+    let audioKeys: [String]
+    let audioTitlesByKey: [String: String]
+    let videoKeys: [String]
+    let videoTitlesByKey: [String: String]
     let audioTitles: [String]?
     let isReadOnly: Bool
     let canShare: Bool
@@ -167,6 +183,10 @@ struct AttachmentViewerView: View {
         videoURLs: [URL],
         audioURLs: [URL],
         startIndex: Int,
+        audioKeys: [String] = [],
+        audioTitlesByKey: [String: String] = [:],
+        videoKeys: [String] = [],
+        videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
         isReadOnly: Bool,
         canShare: Bool,
@@ -185,6 +205,10 @@ struct AttachmentViewerView: View {
         onRequestFreshURL: ((AttachmentKind, URL) async -> Result<URL, Error>)? = nil
     ) {
         self.imageURLs = imageURLs
+        self.audioKeys = audioKeys
+        self.audioTitlesByKey = audioTitlesByKey
+        self.videoKeys = videoKeys
+        self.videoTitlesByKey = videoTitlesByKey
         self.audioTitles = audioTitles
         self.isReadOnly = isReadOnly
         self.canShare = canShare
@@ -301,6 +325,10 @@ private func currentURL() -> URL? {
         themeBackground: Color = Color.clear,
         videoURLs: [URL] = [],
         audioURLs: [URL] = [],
+        audioKeys: [String] = [],
+        audioTitlesByKey: [String: String] = [:],
+        videoKeys: [String] = [],
+        videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
         onDelete: ((URL) -> Void)? = nil,
         titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
@@ -324,6 +352,10 @@ private func currentURL() -> URL? {
         self.imageURLs = imageURLs
         self._videoURLs = State(initialValue: videoURLs)
         self._audioURLs = State(initialValue: audioURLs)
+        self.audioKeys = audioKeys
+        self.audioTitlesByKey = audioTitlesByKey
+        self.videoKeys = videoKeys
+        self.videoTitlesByKey = videoTitlesByKey
         self.audioTitles = audioTitles
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
@@ -351,6 +383,10 @@ private func currentURL() -> URL? {
         themeBackground: Color = Color.clear,
         videoURLs: [URL] = [],
         audioURLs: [URL] = [],
+        audioKeys: [String] = [],
+        audioTitlesByKey: [String: String] = [:],
+        videoKeys: [String] = [],
+        videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
         onDelete: ((URL) -> Void)? = nil,
         onRename: ((URL, String) -> Void)? = nil,
@@ -369,6 +405,10 @@ private func currentURL() -> URL? {
             themeBackground: themeBackground,
             videoURLs: videoURLs,
             audioURLs: audioURLs,
+            audioKeys: audioKeys,
+            audioTitlesByKey: audioTitlesByKey,
+            videoKeys: videoKeys,
+            videoTitlesByKey: videoTitlesByKey,
             audioTitles: audioTitles,
             onDelete: onDelete,
             titleForURL: nil,
@@ -412,7 +452,23 @@ private func currentURL() -> URL? {
     }
 
 
-    // MARK: - Title resolution
+    
+
+    private static func resolvedTitleByStableKey(
+        url: URL,
+        kind: AttachmentKind,
+        urls: [URL],
+        keys: [String]?,
+        titlesByKey: [String: String]?
+    ) -> String? {
+        guard let keys, let titlesByKey else { return nil }
+        guard keys.count == urls.count, let idx = urls.firstIndex(of: url) else { return nil }
+        let key = keys[idx]
+        let t = (titlesByKey[key] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+// MARK: - Title resolution
 
     private func normalizedTitle(_ raw: String?) -> String? {
         guard let raw else { return nil }
@@ -430,6 +486,9 @@ private func currentURL() -> URL? {
         if let ov = normalizedTitle(localTitleOverrides[url]) { return ov }
 
         if let t = normalizedTitle(titleForURL?(url, kind)) { return t }
+
+        if kind == .audio, let t = normalizedTitle(Self.resolvedTitleByStableKey(url: url, kind: kind, urls: audioURLs, keys: audioKeys, titlesByKey: audioTitlesByKey)) { return t }
+        if kind == .video, let t = normalizedTitle(Self.resolvedTitleByStableKey(url: url, kind: kind, urls: videoURLs, keys: videoKeys, titlesByKey: videoTitlesByKey)) { return t }
 
         if kind == .audio, let t = normalizedTitle(
             Self.resolvedAudioTitleProxy(url: url, audioURLs: audioURLs, audioTitles: audioTitles)

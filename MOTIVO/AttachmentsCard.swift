@@ -9,6 +9,12 @@ import SwiftUI
 import AVFoundation
 import AVKit
 
+private enum PracticeTimerDebug {
+    // Central switch to enable/disable verbose title logging.
+    // Default: disabled to avoid console spam.
+    static let titlesLoggingEnabled: Bool = false
+}
+
 struct AttachmentsCard: View {
     @Binding var stagedImages: [StagedAttachment]
     @Binding var stagedAudio: [StagedAttachment]
@@ -208,14 +214,18 @@ struct AttachmentsCard: View {
                         get: {
                             if focusedAudioTitleID.wrappedValue == att.id {
                                 #if DEBUG
-                                print("[PracticeTimer] Title.get focused id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                                if PracticeTimerDebug.titlesLoggingEnabled {
+                                    print("[PracticeTimer] Title.get focused id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                                }
                                 #endif
                                 return audioTitleEditingBuffer[att.id] ?? ""
                             } else {
                                 let t = (audioTitles[att.id] ?? "")
                                     .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
                                 #if DEBUG
-                                print("[PracticeTimer] Title.get unfocused id=\(att.id) title=\(t) auto=\(audioAutoTitles[att.id] ?? "")")
+                                if PracticeTimerDebug.titlesLoggingEnabled {
+                                    print("[PracticeTimer] Title.get unfocused id=\(att.id) title=\(t) auto=\(audioAutoTitles[att.id] ?? "")")
+                                }
                                 #endif
                                 if t.isEmpty {
                                     return audioAutoTitles[att.id] ?? ""
@@ -225,8 +235,10 @@ struct AttachmentsCard: View {
                         },
                         set: { newValue in
                             #if DEBUG
-                            let isFocused = (focusedAudioTitleID.wrappedValue == att.id)
-                            print("[PracticeTimer] Title.set id=\(att.id) isFocused=\(isFocused) new=\(newValue)")
+                            if PracticeTimerDebug.titlesLoggingEnabled {
+                                let isFocused = (focusedAudioTitleID.wrappedValue == att.id)
+                                print("[PracticeTimer] Title.set id=\(att.id) isFocused=\(isFocused) new=\(newValue)")
+                            }
                             #endif
                             // Only mutate the editing buffer while focused; do not write to audioTitles yet
                             if focusedAudioTitleID.wrappedValue == att.id {
@@ -255,13 +267,17 @@ struct AttachmentsCard: View {
                         .onChange(of: focusedAudioTitleID.wrappedValue) { _, newFocus in
                             if newFocus == att.id {
                                 #if DEBUG
-                                print("[PracticeTimer] focus gained id=\(att.id)")
+                                if PracticeTimerDebug.titlesLoggingEnabled {
+                                    print("[PracticeTimer] focus gained id=\(att.id)")
+                                }
                                 #endif
                                 // Gained focus: clear the editing buffer so user starts from empty
                                 audioTitleEditingBuffer[att.id] = ""
                             } else if newFocus == nil || newFocus != att.id {
                                 #if DEBUG
-                                print("[PracticeTimer] focus lost id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                                if PracticeTimerDebug.titlesLoggingEnabled {
+                                    print("[PracticeTimer] focus lost id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                                }
                                 #endif
                                 
                                 // Lost focus from this field: commit buffer to stored titles
@@ -290,7 +306,9 @@ struct AttachmentsCard: View {
                         }
                         .onSubmit {
                             #if DEBUG
-                            print("[PracticeTimer] Title.submit id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                            if PracticeTimerDebug.titlesLoggingEnabled {
+                                print("[PracticeTimer] Title.submit id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
+                            }
                             #endif
                             // Commit on submit as well (Enter/Return key)
                             let buffer = audioTitleEditingBuffer[att.id] ?? ""

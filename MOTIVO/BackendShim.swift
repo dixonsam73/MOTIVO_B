@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260206_104437_BackendShim_DisplayNameFromCoreData_972b4909
+// SCOPE: Include attachment display_name in backend posts.attachments, preferring Core Data Attachment.title; fall back to persisted per-ID store.
+// SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
+
 // CHANGE-ID: 20260205_072955_LiveIdentityCache_f1a8c7
 // SCOPE: Live directory identity cache updates (merge on upsert + force-refresh on directory fetch)
 // SEARCH-TOKEN: 20260205_072955_LiveIdentityCache_f1a8c7
@@ -320,18 +324,18 @@ public final class HTTPBackendFollowService: BackendFollowService {
     private func currentBackendUserID() -> String? {
         #if DEBUG
         if BackendEnvironment.shared.isConnected == false,
-           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
            !override.isEmpty {
             return override.lowercased()
         }
         #endif
 
         // Prefer Supabase user ID if present; fall back to legacy backendUserID.
-        if let supa = UserDefaults.standard.string(forKey: "supabaseUserID_v1")?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let supa = UserDefaults.standard.string(forKey: "supabaseUserID_v1")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
            !supa.isEmpty {
             return supa.lowercased()
         }
-        if let legacy = UserDefaults.standard.string(forKey: "backendUserID_v1")?.trimmingCharacters(in: .whitespacesAndNewlines),
+        if let legacy = UserDefaults.standard.string(forKey: "backendUserID_v1")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
            !legacy.isEmpty {
             return legacy.lowercased()
         }
@@ -605,7 +609,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
         // Step 12 parity: only publish notes when they are not marked private.
         // If notes are private (or empty), omit the key so the backend column remains NULL.
         if !payload.areNotesPrivate, let notes = payload.notes {
-            let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = notes.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 body["notes"] = trimmed
             }
@@ -682,11 +686,17 @@ public final class HTTPBackendPublishService: BackendPublishService {
             let upload = await uploadStorageObject(from: item.fileURL, bucket: "attachments", objectPath: objectPath, contentType: item.contentType)
             switch upload {
             case .success:
-                refs.append([
+                var ref: [String: String] = [
                     "kind": item.kind,
                     "bucket": "attachments",
                     "path": objectPath
-                ])
+                ]
+
+                if let displayName = item.displayName ?? persistedDisplayNameForAttachment(kind: item.kind, attachmentID: item.id) {
+                    ref["display_name"] = displayName
+                }
+
+                refs.append(ref)
             case .failure(let e):
                 return .failure(e)
             }
@@ -701,8 +711,32 @@ public final class HTTPBackendPublishService: BackendPublishService {
         }
     }
 
-    // MARK: - Step 8G Phase 3 helpers (publish-time Storage upload)
+    // MARK: - Step 8G Phase 3 helpers (p
+    // MARK: - Display-name parity (remote attachments)
 
+    /// Returns a user-facing display name for an attachment (audio/video only), or nil.
+    /// Hard rule: never return file paths, sandbox URLs, or storage object keys as names.
+    private func persistedDisplayNameForAttachment(kind: String, attachmentID: UUID) -> String? {
+        let k = kind.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
+        guard k == "audio" || k == "video" else { return nil }
+
+        let defaultsKey: String
+        if k == "audio" {
+            defaultsKey = "persistedAudioTitles_v1"
+        } else {
+            defaultsKey = "persistedVideoTitles_v1"
+        }
+
+        guard let dict = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: String] else {
+            return nil
+        }
+
+        let raw = dict[attachmentID.uuidString]
+        let trimmed = (raw ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    // MARK: - Publish-time Storage upload
     private struct LocalAttachmentUpload {
         let id: UUID
         let kind: String
@@ -710,11 +744,12 @@ public final class HTTPBackendPublishService: BackendPublishService {
         let ext: String
         let contentType: String
         let createdAt: Date?
+    let displayName: String? = nil
     }
 
 
     private func resolveLocalFileURL(from stored: String) -> URL? {
-        let s = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+        let s = stored.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         guard !s.isEmpty else { return nil }
 
         // If we stored a file:// URL string, prefer parsing it directly.
@@ -749,7 +784,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
 
         for a in attachments {
             guard let id = a.value(forKey: "id") as? UUID else { continue }
-            let kind = ((a.value(forKey: "kind") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let kind = ((a.value(forKey: "kind") as? String) ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             guard let filePath = a.value(forKey: "fileURL") as? String, !filePath.isEmpty else { continue }
 
             guard let url = resolveLocalFileURL(from: filePath) else { continue }
@@ -762,8 +797,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
             let ext = url.pathExtension.isEmpty ? defaultExtension(for: kind) : url.pathExtension.lowercased()
             let contentType = contentType(for: kind, ext: ext)
             let createdAt = a.value(forKey: "createdAt") as? Date
-
-            items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, contentType: contentType, createdAt: createdAt))
+items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, contentType: contentType, createdAt: createdAt))
         }
 
         items.sort {
@@ -777,7 +811,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
     }
 
     private func storageObjectPath(owner: String, postID: UUID, attachmentID: UUID, ext: String) -> String {
-        let safeOwner = owner.trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeOwner = owner.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         let safeExt = ext.isEmpty ? "" : ".\(ext)"
         return "users/\(safeOwner)/\(postID.uuidString)/\(attachmentID.uuidString)\(safeExt)"
     }
@@ -852,7 +886,7 @@ public final class HTTPBackendPublishService: BackendPublishService {
         // Notes: only include when not private (or omitted). If notes become private later,
         // this patch intentionally does not force-clear server notes (out of scope).
         if !payload.areNotesPrivate, let notes = payload.notes {
-            let trimmed = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = notes.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
             if !trimmed.isEmpty {
                 meta["notes"] = trimmed
             }
@@ -981,7 +1015,7 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
 
     @MainActor
     public func fetchFeed(scope: String) async -> Result<Void, Error> {
-        let normalized = scope.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalized = scope.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
         guard normalized == "mine" || normalized == "all" else {
             return .failure(NSError(domain: "Backend", code: 10, userInfo: [NSLocalizedDescriptionKey: "Unsupported feed scope: \(scope)"]))
         }
@@ -1006,7 +1040,7 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
             }
 
             let following = FollowStore.shared.followingIDs()
-            let normalizedFollowing = following.map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            let normalizedFollowing = following.map { $0.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased() }
             var seen = Set<String>()
             var merged: [String] = []
             for id in ([ownerLower] + normalizedFollowing) {

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
+// SCOPE: Remote attachment display-name parity: BSDV uses stable attachment keys for viewer title lookup (no signed-URL keys).
+// SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
+
 // CHANGE-ID: 20260203_093000_14x_BSDV_PreviewCache
 // SCOPE: Phase 14.x — BSDV thumbnails/posters persist across repeated presentations via stable (bucket|path) decoded preview caches; keep signed URL cache unchanged; no UI/layout/feed/backend changes.
 // SEARCH-TOKEN: 20260203_093000_BSDV_PREVIEW_CACHE_V1
@@ -98,7 +102,10 @@ struct BackendSessionDetailView: View {
     @State private var viewerImageURLs: [URL] = []
     @State private var viewerVideoURLs: [URL] = []
     @State private var viewerAudioURLs: [URL] = []
-    @State private var viewerAudioTitles: [String]? = nil
+    @State private var viewerAudioKeys: [String] = []
+    @State private var viewerAudioTitles: [String: String] = [:]
+    @State private var viewerVideoKeys: [String] = []
+    @State private var viewerVideoTitles: [String: String] = [:]
 
     // Signed URL caches
     @State private var isLoadingAttachments: Bool = false
@@ -235,7 +242,10 @@ struct BackendSessionDetailView: View {
                 videoURLs: viewerVideoURLs,
                 audioURLs: viewerAudioURLs,
                 startIndex: 0,
-                audioTitles: viewerAudioTitles,
+                audioKeys: viewerAudioKeys,
+                audioTitlesByKey: viewerAudioTitles,
+                videoKeys: viewerVideoKeys,
+                videoTitlesByKey: viewerVideoTitles,
                 isReadOnly: true,
                 canShare: false
             )
@@ -252,7 +262,7 @@ struct BackendSessionDetailView: View {
         viewerImageURLs.removeAll()
         viewerVideoURLs.removeAll()
         viewerAudioURLs.removeAll()
-        viewerAudioTitles = nil
+        viewerAudioTitles.removeAll()
     }
 
     // Type-erased wrapper to help Xcode's type-checker on large view trees.
@@ -432,6 +442,9 @@ struct BackendSessionDetailView: View {
                 if !audios.isEmpty {
                     ForEach(audios, id: \.self) { ref in
                         let title = {
+                            if let dn = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
+                                return dn
+                            }
                             let stem = URL(fileURLWithPath: filename(from: ref.path)).deletingPathExtension().lastPathComponent
                             let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
                             return trimmed.isEmpty ? "Audio clip" : trimmed
@@ -515,17 +528,30 @@ struct BackendSessionDetailView: View {
         var images: [URL] = []
         var videos: [URL] = []
         var audios: [URL] = []
-        var audioTitles: [String] = []
+        var audioKeys: [String] = []
+        var audioTitlesByKey: [String: String] = [:]
+        var videoKeys: [String] = []
+        var videoTitlesByKey: [String: String] = [:]
 
         for ref in refs {
             let k = kindEnum(ref)
             if let url = await signedURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: 120) {
                 switch k {
                 case .image: images.append(url)
-                case .video: videos.append(url)
+                case .video:
+                    videos.append(url)
+                    let key = cacheKey(ref)
+                    videoKeys.append(key)
+                    if let dn = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
+                        videoTitlesByKey[key] = dn
+                    }
                 case .audio:
                     audios.append(url)
-                    audioTitles.append(filename(from: ref.path))
+                    let key = cacheKey(ref)
+                    audioKeys.append(key)
+                    if let dn = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
+                        audioTitlesByKey[key] = dn
+                    }
                 }
             }
         }
@@ -533,7 +559,10 @@ struct BackendSessionDetailView: View {
         viewerImageURLs = images
         viewerVideoURLs = videos
         viewerAudioURLs = audios
-        viewerAudioTitles = audioTitles.isEmpty ? nil : audioTitles
+        viewerAudioKeys = audioKeys
+        viewerAudioTitles = audioTitlesByKey
+        viewerVideoKeys = videoKeys
+        viewerVideoTitles = videoTitlesByKey
 
         if images.isEmpty && videos.isEmpty && audios.isEmpty {
             attachmentLoadError = "Unable to load attachment URLs."

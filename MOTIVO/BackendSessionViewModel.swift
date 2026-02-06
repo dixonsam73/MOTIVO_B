@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
+// SCOPE: Remote attachment display-name parity: plumb posts.attachments display_name into BackendAttachmentRef.
+// SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
+
 // CHANGE-ID: 20260119_135600_Step12_ActivityReadFix
 // SCOPE: Read activity_type from backend posts when activity_label is absent (backend preview parity)
 // SEARCH-TOKEN: ACTIVITY-READ-PARITY-20260119
@@ -20,11 +24,13 @@ public struct BackendSessionViewModel: Identifiable {
         public let kind: Kind
         public let path: String
         public let bucket: String
+        public let displayName: String?
 
-        public init(kind: Kind, path: String, bucket: String = "attachments") {
+        public init(kind: Kind, path: String, bucket: String = "attachments", displayName: String? = nil) {
             self.kind = kind
             self.path = path
             self.bucket = bucket
+            self.displayName = displayName
         }
     }
 
@@ -163,7 +169,10 @@ public struct BackendSessionViewModel: Identifiable {
             let bucket = (item["bucket"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             let effectiveBucket = (bucket?.isEmpty == false) ? bucket! : "attachments"
 
-            out.append(BackendAttachmentRef(kind: kind, path: path, bucket: effectiveBucket))
+            let displayNameRaw = (item["display_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayName = (displayNameRaw?.isEmpty == false) ? displayNameRaw : nil
+
+            out.append(BackendAttachmentRef(kind: kind, path: path, bucket: effectiveBucket, displayName: displayName))
         }
 
         return out

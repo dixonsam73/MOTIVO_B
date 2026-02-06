@@ -2088,17 +2088,33 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                                         switch kind {
                                         case .audio:
-                                            guard !trimmed.isEmpty else { return }
-                                            var namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-                                            guard let id = UUID(uuidString: stem) else { return }
-                                            namesDict[id.uuidString] = trimmed
-                                            UserDefaults.standard.set(namesDict, forKey: "stagedAudioNames_temp")
-                                            
-                                            // Also persist audio titles for existing attachments (no file rename / no Core Data change)
-                                            var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
-                                            persisted[id.uuidString] = trimmed
-                                            UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
-                                            
+                                            // Resolve attachment identity by viewer index → ID, then write to staged/persisted stores.
+                                            // This avoids relying on URL stem being a UUID (it often isn't once filenames are user-named).
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            let ids = req.viewerAttachmentIDs
+                                            guard let idx = indexInCombined, idx >= 0, idx < ids.count else { return }
+                                            let attID = ids[idx]
+
+                                            // Trim user input
+                                            let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
+                                            // Always keep staged map in sync (used for unsaved items and local viewer titles)
+                                            var staged = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+                                            if trimmed.isEmpty { staged.removeValue(forKey: attID.uuidString) }
+                                            else { staged[attID.uuidString] = trimmed }
+                                            UserDefaults.standard.set(staged, forKey: "stagedAudioNames_temp")
+
+                                            // For existing attachments, also persist under final attachment UUID so publish can round-trip display_name
+                                            if existingAttachmentIDs.contains(attID) {
+                                                var persisted = (UserDefaults.standard.dictionary(forKey: "persistedAudioTitles_v1") as? [String: String]) ?? [:]
+                                                if trimmed.isEmpty { persisted.removeValue(forKey: attID.uuidString) }
+                                                else { persisted[attID.uuidString] = trimmed }
+                                                UserDefaults.standard.set(persisted, forKey: "persistedAudioTitles_v1")
+                                            }
+
                                             attachmentTitlesRefreshTick &+= 1
                                         case .video:
                                             // Resolve attachment identity by viewer index → ID, then route to persisted or staged store only.
