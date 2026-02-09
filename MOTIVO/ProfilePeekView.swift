@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260209_211200_PPVOwnerHideFollow_9b7c2c
+// SCOPE: ProfilePeekView — owner hygiene: hide Follow button when viewer is owner (use isOwner, not viewerID!=ownerID).
+// SEARCH-TOKEN: 20260209_211200_PPVOwnerHideFollow_9b7c2c
+
 // CHANGE-ID: 20260116_221900_phase10C_profilepeek_followactions_polish
 // SCOPE: Phase 10C — remove duplicate follow status label; rename "Requested" to "Request sent"; remove invalid accessibility traits.
 
@@ -150,7 +154,7 @@ struct ProfilePeekView: View {
                 .accessibilityElement(children: .combine)
 
                 // Follow action (Phase 10C) — single calm control, no counts
-                if viewerID != ownerID {
+                if !isOwner {
                     followActionRow
                         .padding(.top, 2)
                 }
