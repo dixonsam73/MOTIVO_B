@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260209_113255_AESV_StarToggle_VisualGrid
-// SCOPE: AESV: make ⭐ toggle bidirectional in visual attachment grid + context menu; keep existing ⭐⇒👁 and privacy→private clears ⭐; no UI/layout changes.
+// CHANGE-ID: 20260209_123100_AESV_StarPersistParity_7c2d3f
+// SCOPE: AESV: allow clearing ⭐ to persist (no forced single-image thumbnail); AVV favourite toggle now mirrors AESV toggle + ⭐⇒👁; no UI/layout changes.
 // SEARCH-TOKEN: 20260209_113255_AESV_StarToggle_VisualGrid
 
 // CHANGE-ID: 20260130_155652_ShareTogglePersist
@@ -1728,7 +1728,9 @@ private var instrumentPicker: some View {
         // Determine chosen thumbnail (if any)
         let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
         var chosenThumbID = selectedThumbnailID
-        if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
+        // NOTE: Do not force a thumbnail when user has cleared ⭐ (PRDV parity).
+        // Feed/detail can still *display* a fallback thumb without persisting isThumbnail.
+        // if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
 
         // Track rollback closures for files written during this commit attempt
         var rollbacks: [() -> Void] = []
@@ -2176,7 +2178,20 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         }()
                                         guard let id = attID else { return }
                                         if let att = stagedAttachments.first(where: { $0.id == id }) {
-                                            selectedThumbnailID = att.id
+                                            // PRDV parity: toggle ⭐ on/off from viewer.
+                                            if selectedThumbnailID == att.id {
+                                                // Toggle OFF
+                                                selectedThumbnailID = nil
+                                            } else {
+                                                // ⭐ implies 👁 — starring auto-includes.
+                                                let fileURL: URL? = surrogateURL(for: att)
+                                                let privNow = isPrivate(id: att.id, url: fileURL)
+                                                if privNow {
+                                                    setPrivate(id: att.id, url: fileURL, false)
+                                                }
+                                                // Toggle ON
+                                                selectedThumbnailID = att.id
+                                            }
                                         }
                                     },
                                     isFavourite: { url in

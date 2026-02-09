@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260114_092641_P9D2_CommentsGate_a1717bfd
-// SCOPE: Step 9D.2 — Gate Comments entry points based on backend follow approval (fail closed).
-// SEARCH-TOKEN: 20260114_092641_Step9D2_CommentsGate
+// CHANGE-ID: 20260209_121500_SDV_StarVsEye_14b7743a
+// SCOPE: SessionDetailView — Star vs eye overlay precedence (owner-only); suppress eye on thumbnail.
+// SEARCH-TOKEN: 20260209_121500_SDV_StarVsEye_14b7743a
 
 ////////
 //  SessionDetailView.swift
@@ -1083,7 +1083,8 @@ fileprivate struct AttachmentRow: View {
             }
             Spacer()
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
-            if isOwner && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
+            let isThumb = ((attachment.value(forKey: "isThumbnail") as? Bool) == true)
+            if isOwner && !isThumb && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
                 Image(systemName: "eye")
                     .imageScale(.small)
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -1154,7 +1155,7 @@ fileprivate struct ThumbCell: View {
 
             // Read-only privacy badge (supports ID-first and URL fallback)
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
-            if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
+            if isOwner && !isStarred && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -1319,4 +1320,3 @@ fileprivate struct SessionIdentityHeader: View {
         .padding(.bottom, 2)
     }
 }
-
