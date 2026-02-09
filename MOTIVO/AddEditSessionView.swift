@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260209_113255_AESV_StarToggle_VisualGrid
+// SCOPE: AESV: make ⭐ toggle bidirectional in visual attachment grid + context menu; keep existing ⭐⇒👁 and privacy→private clears ⭐; no UI/layout changes.
+// SEARCH-TOKEN: 20260209_113255_AESV_StarToggle_VisualGrid
+
 // CHANGE-ID: 20260130_155652_ShareTogglePersist
 // SCOPE: AESV: pass isPublic into PostPublishPayload and always publish on save; Share toggle only sets visibility.
 // SEARCH-TOKEN: AESV_VISUAL_PARITY_20260106_214417
@@ -470,11 +474,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                                 .onTapGesture {
                                                                                     let fileURL: URL? = surrogateURL(for: att)
                                                                                     let privNow: Bool = isPrivate(id: att.id, url: fileURL)
-                                                                                    if privNow {
-                                                                                        // ⭐ implies 👁 — starring auto-includes.
-                                                                                        setPrivate(id: att.id, url: fileURL, false)
+                                                                                    if selectedThumbnailID == att.id {
+                                                                                        // Toggle OFF
+                                                                                        selectedThumbnailID = nil
+                                                                                    } else {
+                                                                                        if privNow {
+                                                                                            // ⭐ implies 👁 — starring auto-includes.
+                                                                                            setPrivate(id: att.id, url: fileURL, false)
+                                                                                        }
+                                                                                        // Toggle ON
+                                                                                        selectedThumbnailID = att.id
                                                                                     }
-                                                                                    selectedThumbnailID = att.id
                                                                                 }
                                                                                 .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
                                                                         }
@@ -533,11 +543,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                         Button("Set as Thumbnail") {
                                                                             let fileURL: URL? = surrogateURL(for: att)
                                                                             let privNow: Bool = isPrivate(id: att.id, url: fileURL)
-                                                                            if privNow {
-                                                                                // ⭐ implies 👁 — starring auto-includes.
-                                                                                setPrivate(id: att.id, url: fileURL, false)
+                                                                            if selectedThumbnailID == att.id {
+                                                                                // Toggle OFF
+                                                                                selectedThumbnailID = nil
+                                                                            } else {
+                                                                                if privNow {
+                                                                                    // ⭐ implies 👁 — starring auto-includes.
+                                                                                    setPrivate(id: att.id, url: fileURL, false)
+                                                                                }
+                                                                                // Toggle ON
+                                                                                selectedThumbnailID = att.id
                                                                             }
-                                                                            selectedThumbnailID = att.id
                                                                         }
                                                                     }
                                                                     Button(role: .destructive) {
