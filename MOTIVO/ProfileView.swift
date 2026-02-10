@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_190200_Phase15_Step3B_ProfileAvatarWire
+// SCOPE: Phase 15 Step 3B — ProfileView: wire avatar editor Save/Clear to backend avatar upload + account_directory.avatar_key patch; bust remote avatar caches; owner local cache preserved.
+// SEARCH-TOKEN: 20260210_190200_Phase15_Step3B_ProfileAvatarWire
+
 // CHANGE-ID: 20260205_073900_LiveDirectorySync_LocationOnChange
 // SCOPE: Live directory identity sync — trigger account_directory upsert when Location changes (debounced); no UI/layout changes.
 // CHANGE-ID: 20260120_142900_Phase12C_CommitOnlyAccountID_BlurGuard
@@ -122,6 +126,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  
      // Identity MVP additions
      @State private var avatarImage: UIImage? = nil
+    @State private var avatarSyncErrorMessage: String? = nil
+    @State private var showAvatarSyncErrorAlert: Bool = false
+    @State private var avatarSyncInFlight: Bool = false
+
      @State private var showPhotoPicker: Bool = false
      @State private var locationText: String = ""
  
@@ -764,15 +772,21 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          AvatarEditorView(
              image: ProfileStore.avatarOriginalImage(for: auth.currentUserID) ?? ProfileStore.avatarImage(for: auth.currentUserID),
              placeholderInitials: initials(from: name),
-             onSave: { cropped in
+             onSave: { jpegData, cropped in
+                 // Local cache for immediate UI (owner view).
                  ProfileStore.saveAvatarDerived(cropped, for: auth.currentUserID)
                  avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
                  showAvatarEditor = false
+
+                 Task { await persistAvatarToBackendIfPossible(jpegData: jpegData) }
              },
              onDelete: {
+                 // Local clear immediately.
                  ProfileStore.deleteAvatar(for: auth.currentUserID)
                  avatarImage = nil
                  showAvatarEditor = false
+
+                 Task { await clearAvatarFromBackendIfPossible() }
              },
              onCancel: { showAvatarEditor = false },
              onReplaceOriginal: { image in
@@ -1024,7 +1038,82 @@ case .failure(let error):
 
 
 
-     // Phase 13A — Detect account_id collision (unique constraint) from NetworkManager error.
+     
+
+     // MARK: - Avatar (backend identity)
+
+     @MainActor
+     private func persistAvatarToBackendIfPossible(jpegData: Data) async {
+         guard BackendEnvironment.shared.isConnected else { return }
+         let auth = _auth.wrappedValue
+         guard auth.hasSupabaseAccessToken else { return }
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+
+         avatarSyncInFlight = true
+         defer { avatarSyncInFlight = false }
+
+         // 1) Upload (overwrite) avatars/users/<uid>/avatar.jpg
+         let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
+         switch upload {
+         case .failure:
+             avatarSyncErrorMessage = "Couldn’t upload your avatar. Please try again."
+             showAvatarSyncErrorAlert = true
+             return
+         case .success(let avatarKey):
+             // Bust remote caches for this key (image + signed URL), because content may have changed.
+             await invalidateRemoteAvatarCaches(avatarKey: avatarKey)
+
+             // 2) Patch account_directory.avatar_key
+             let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
+             switch patch {
+             case .success:
+                 return
+             case .failure:
+                 avatarSyncErrorMessage = "Uploaded your avatar, but couldn’t update your profile. Please try again."
+                 showAvatarSyncErrorAlert = true
+                 return
+             }
+         }
+     }
+
+     @MainActor
+     private func clearAvatarFromBackendIfPossible() async {
+         guard BackendEnvironment.shared.isConnected else { return }
+         let auth = _auth.wrappedValue
+         guard auth.hasSupabaseAccessToken else { return }
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+
+         avatarSyncInFlight = true
+         defer { avatarSyncInFlight = false }
+
+         // Best-effort delete (do not block UI on failure).
+         _ = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
+
+         // Clear avatar_key in account_directory.
+         let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
+         switch patch {
+         case .success:
+             // Bust caches for the canonical key as well, in case any surfaces still reference it.
+             await invalidateRemoteAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
+             return
+         case .failure:
+             avatarSyncErrorMessage = "Couldn’t clear your avatar right now. Please try again."
+             showAvatarSyncErrorAlert = true
+             return
+         }
+     }
+
+     private func invalidateRemoteAvatarCaches(avatarKey: String) async {
+         let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+         guard !trimmed.isEmpty else { return }
+         let cacheKey = "avatars|\(trimmed)"
+         await RemoteAvatarSignedURLCache.shared.invalidate(cacheKey)
+         #if canImport(UIKit)
+         RemoteAvatarImageCache.invalidate(cacheKey)
+         #endif
+     }
+
+// Phase 13A — Detect account_id collision (unique constraint) from NetworkManager error.
      private func isAccountIDCollision(_ error: Error) -> Bool {
         // NetworkError is nested in NetworkManager.
         if let net = error as? NetworkManager.NetworkError {
@@ -1116,6 +1205,11 @@ case .failure(let error):
                  Button("OK", role: .cancel) {}
              } message: {
                  Text("Your Primary Activity was removed, so it’s been reset to Practice.")
+             }
+             .alert("Avatar update failed", isPresented: $showAvatarSyncErrorAlert) {
+                 Button("OK", role: .cancel) {}
+             } message: {
+                 Text(avatarSyncErrorMessage ?? "Couldn’t update your avatar. Please try again.")
              }
              .sheet(isPresented: $showInstrumentManager) {
                  InstrumentListView()

@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260121_124000_P13F_FollowersListWire
-// SCOPE: Phase 13F — Wire FollowersListView to FollowStore.followers (relationship-only).
-// SEARCH-TOKEN: 20260121_124000_P13F_FollowersListWire
+// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
+// SCOPE: FollowersListView: pass avatar_key into PeopleUserRow so follower rows can render remote avatars.
+// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
 
 // CHANGE-ID: 20260117_090800_10B_FollowersList_PlaceholderAlign
 // SCOPE: FollowersListView — remove duplicate in-body title; match Following list style; placeholder only.
@@ -34,7 +34,8 @@ struct FollowersListView: View {
                     PeopleUserRow(
                         userID: userID,
                         overrideDisplayName: acct?.displayName,
-                        overrideSubtitle: acct?.accountID.map { "@\($0)" }
+                        overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                        overrideAvatarKey: acct?.avatarKey
                     ) {
                         ProfilePeekView(
                             ownerID: userID,

@@ -1,6 +1,15 @@
 //
 //  NetworkManager.swift
 //  MOTIVO
+//  CHANGE-ID: 20260210_182200_Phase15_Step3A_AvatarUploadDelete
+//  SCOPE: Phase 15 Step 3A — add NetworkManager backend primitives to upsert/delete avatar JPEG in Supabase Storage (avatars bucket). No UI wiring.
+//  SEARCH-TOKEN: 20260210_182200_Phase15_Step3A_AvatarUploadDelete
+//
+//  CHANGE-ID: 20260210_194800_Phase15_AvatarUIDLowercase_RLSFix
+//  SCOPE: Phase 15 Step 3B — normalize backendUserID to lowercase when constructing avatar storage path to satisfy RLS policy users/<auth.uid()>/avatar.jpg; no other behavior changes.
+//  SEARCH-TOKEN: 20260210_194800_Phase15_AvatarUIDLowercase_RLSFix
+//
+
 //  CHANGE-ID: 20260114_131900_9E_SignedURL_Debug
 //  SCOPE: DEBUG-only logging for storage signed URLs (sign response -> final URL) to diagnose backend attachment playback; no logic changes.
 //
@@ -448,6 +457,122 @@ public final class NetworkManager {
             return String(part).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String(part)
         }
         return encoded.joined(separator: "/")
+    }
+
+
+
+    // MARK: - Phase 15 Step 3A (Avatars) — backend primitives (upload/delete)
+
+    /// Uploads (upserts) the caller's avatar JPEG to the `avatars` bucket.
+    /// Storage key convention (locked): `users/<uid>/avatar.jpg`
+    /// - Returns: The `avatar_key` string to store in `account_directory.avatar_key`.
+    public func uploadAvatarJPEG(data: Data, backendUserID: String) async -> Result<String, Error> {
+        guard let baseURL else {
+            return .failure(NetworkError.notConfigured)
+        }
+
+        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !uid.isEmpty else {
+            return .failure(NetworkError.invalidURL("empty backendUserID"))
+        }
+
+        let key = "users/\(uid)/avatar.jpg"
+        let encodedKey = percentEncodePathSegments(key)
+        let path = "storage/v1/object/avatars/\(encodedKey)"
+
+        guard let url = URL(string: path, relativeTo: baseURL) else {
+            return .failure(NetworkError.invalidURL("base=\(baseURL.absoluteString) path=\(path)"))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.httpBody = data
+
+        // Headers (match request() behavior, but allow non-JSON bodies).
+        if let apiKey = authToken, !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        }
+        if let bearer = bearerToken, !bearer.isEmpty {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
+
+        request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        request.setValue("true", forHTTPHeaderField: "x-upsert")
+
+        print("[NetworkManager] ▶︎ POST \(url.absoluteString)")
+
+        do {
+            let (respData, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("[NetworkManager] ◀︎ status=\(status) for avatar upload")
+
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                let bodyString = String(data: respData, encoding: .utf8)
+                #if DEBUG
+                if let bodyString, !bodyString.isEmpty {
+                    print("[NetworkManager] ◀︎ body=\(bodyString)")
+                }
+                #endif
+                return .failure(NetworkError.httpError(status: http.statusCode, body: bodyString))
+            }
+
+            return .success(key)
+        } catch {
+            return .failure(NetworkError.transportError(String(describing: error)))
+        }
+    }
+
+    /// Deletes the caller's avatar object from the `avatars` bucket.
+    /// Storage key convention (locked): `users/<uid>/avatar.jpg`
+    public func deleteAvatarObject(backendUserID: String) async -> Result<Void, Error> {
+        guard let baseURL else {
+            return .failure(NetworkError.notConfigured)
+        }
+
+        let uid = backendUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !uid.isEmpty else {
+            return .failure(NetworkError.invalidURL("empty backendUserID"))
+        }
+
+        let key = "users/\(uid)/avatar.jpg"
+        let encodedKey = percentEncodePathSegments(key)
+        let path = "storage/v1/object/avatars/\(encodedKey)"
+
+        guard let url = URL(string: path, relativeTo: baseURL) else {
+            return .failure(NetworkError.invalidURL("base=\(baseURL.absoluteString) path=\(path)"))
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+
+        if let apiKey = authToken, !apiKey.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "apikey")
+        }
+        if let bearer = bearerToken, !bearer.isEmpty {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
+
+        print("[NetworkManager] ▶︎ DELETE \(url.absoluteString)")
+
+        do {
+            let (respData, response) = try await URLSession.shared.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            print("[NetworkManager] ◀︎ status=\(status) for avatar delete")
+
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                let bodyString = String(data: respData, encoding: .utf8)
+                #if DEBUG
+                if let bodyString, !bodyString.isEmpty {
+                    print("[NetworkManager] ◀︎ body=\(bodyString)")
+                }
+                #endif
+                return .failure(NetworkError.httpError(status: http.statusCode, body: bodyString))
+            }
+
+            return .success(())
+        } catch {
+            return .failure(NetworkError.transportError(String(describing: error)))
+        }
     }
 
 }

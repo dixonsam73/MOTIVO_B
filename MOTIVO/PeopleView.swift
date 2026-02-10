@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
+// SCOPE: PeopleView: plumb avatar_key into PeopleUserRow for directory search results + follow requests. No UI/layout changes.
+// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
+
 //
 //  PeopleView.swift
 //  MOTIVO
@@ -99,7 +103,8 @@ struct PeopleView: View {
                 PeopleUserRow(
                     userID: userID,
                     overrideDisplayName: acct?.displayName,
-                    overrideSubtitle: acct?.accountID.map { "@\($0)" }
+                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                    overrideAvatarKey: acct?.avatarKey
                 ) {
                     ProfilePeekView(
                         ownerID: userID,
@@ -209,7 +214,8 @@ struct PeopleView: View {
                     PeopleUserRow(
                         userID: acct.userID,
                         overrideDisplayName: acct.displayName,
-                        overrideSubtitle: acct.accountID.map { "@\($0)" }
+                        overrideSubtitle: acct.accountID.map { "@\($0)" },
+                        overrideAvatarKey: acct.avatarKey
                     ) {
                         ProfilePeekView(
                             ownerID: acct.userID,

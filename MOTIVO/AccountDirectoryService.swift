@@ -25,6 +25,10 @@
 //  SEARCH-TOKEN: 20260120_113000_Phase12C_AccountDirectorySearch
 //
 
+// CHANGE-ID: 20260210_182200_Phase15_Step3A_AvatarKeyWrite
+// SCOPE: Phase 15 Step 3A — add owner-only PATCH helper to update/clear account_directory.avatar_key and merge into live identity caches.
+// SEARCH-TOKEN: 20260210_182200_Phase15_Step3A_AvatarKeyWrite
+
 import Foundation
 
 public struct DirectoryAccount: Codable, Identifiable, Hashable {
@@ -214,6 +218,54 @@ public final class AccountDirectoryService {
                                         avatarKey: existing?.avatarKey)
             await cache.setMany([merged])
             await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
+            return .success(())
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+
+
+    // MARK: - Phase 15 Step 3A (Avatars) — update self avatar_key
+
+    /// Update the caller's `account_directory.avatar_key` (owner-only via RLS).
+    /// - Parameter avatarKey: `users/<uid>/avatar.jpg` or nil to clear.
+    /// - Important: This is an owner-only metadata update; no profile sync.
+    public func updateSelfAvatarKey(userID: String, avatarKey: String?) async -> Result<Void, Error> {
+        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else {
+            return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))
+        }
+
+        let payload: [String: Any] = [
+            "avatar_key": avatarKey ?? NSNull()
+        ]
+
+        let body: Data
+        do {
+            body = try JSONSerialization.data(withJSONObject: payload, options: [])
+        } catch {
+            return .failure(error)
+        }
+
+        let path = "rest/v1/account_directory?user_id=eq.\(uid)"
+        let headers = [
+            "Prefer": "return=minimal"
+        ]
+
+        let result = await NetworkManager.shared.request(path: path, method: "PATCH", query: nil, jsonBody: body, headers: headers)
+        switch result {
+        case .success:
+            // Live identity cache update: patch avatar_key in-memory so UI refreshes immediately.
+            if let existing = await cache.getMany([uid])[uid] {
+                let updated = DirectoryAccount(userID: existing.userID,
+                                               accountID: existing.accountID,
+                                               displayName: existing.displayName,
+                                               location: existing.location,
+                                               avatarKey: avatarKey)
+                await cache.setMany([updated])
+                await BackendFeedStore.shared.mergeDirectoryAccounts([uid: updated])
+            }
             return .success(())
         case .failure(let error):
             return .failure(error)

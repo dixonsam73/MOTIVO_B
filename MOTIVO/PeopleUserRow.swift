@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
+// SCOPE: PeopleUserRow: add remote avatar support via avatar_key using NetworkManager.fetchAvatarImageIfNeeded; plumb overrideAvatarKey; preserve existing layout/styles.
+// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
+
 //
 //  PeopleUserRow.swift
 //  MOTIVO
@@ -20,6 +24,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
     let userID: String
     let overrideDisplayName: String?
     let overrideSubtitle: String?
+    let overrideAvatarKey: String?
     let destination: () -> Destination
     let trailing: () -> Trailing
 
@@ -27,12 +32,14 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         userID: String,
         overrideDisplayName: String? = nil,
         overrideSubtitle: String? = nil,
+        overrideAvatarKey: String? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
     ) {
         self.userID = userID
         self.overrideDisplayName = overrideDisplayName
         self.overrideSubtitle = overrideSubtitle
+        self.overrideAvatarKey = overrideAvatarKey
         self.destination = destination
         self.trailing = trailing
     }

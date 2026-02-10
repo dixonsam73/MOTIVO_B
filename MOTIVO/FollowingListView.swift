@@ -1,5 +1,6 @@
-// CHANGE-ID: 20260117_101000_10B_Following_BGFix
-// SCOPE: FollowingListView — remove white List canvas and match app background; preserve existing behavior.
+// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
+// SCOPE: FollowingListView: pass avatar_key into PeopleUserRow so following rows can render remote avatars.
+// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
 
 // CHANGE-ID: 20260121_203420_Phase141_FollowingListView_DirectoryIdentityWiring
 // SCOPE: Phase 14.1 — Resolve directory identity for list rows and pass into PeopleUserRow/ProfilePeek; avoid opaque ID fallback.
@@ -30,7 +31,8 @@ struct FollowingListView: View {
                     PeopleUserRow(
                         userID: userID,
                         overrideDisplayName: acct?.displayName,
-                        overrideSubtitle: acct?.accountID.map { "@\($0)" }
+                        overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                        overrideAvatarKey: acct?.avatarKey
                     ) {
                         ProfilePeekView(
                             ownerID: userID,

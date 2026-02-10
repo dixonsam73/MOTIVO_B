@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_190200_Phase15_Step3B_AvatarEditor
+// SCOPE: Phase 15 Step 3B — AvatarEditorView: export JPEG (sRGB) with size hygiene + Clear control; output jpegData+preview; no layout redesign.
+// SEARCH-TOKEN: 20260210_190200_Phase15_Step3B_AvatarEditor
+
 import SwiftUI
 #if canImport(PhotosUI)
 import PhotosUI
@@ -33,7 +37,7 @@ public struct AvatarEditorView: View {
     public init(
         image: UIImage?,
         placeholderInitials: String? = nil,
-        onSave: @escaping (UIImage) -> Void,
+        onSave: @escaping (Data, UIImage) -> Void,
         onDelete: @escaping () -> Void,
         onCancel: @escaping () -> Void,
         onReplaceOriginal: ((UIImage) -> Void)? = nil
@@ -47,6 +51,7 @@ public struct AvatarEditorView: View {
     }
     
     @State private var workingImage: UIImage?
+    @State private var exportErrorMessage: String? = nil
     
     // Zoom & pan state
     @State private var baseScale: CGFloat = 1.0
@@ -69,7 +74,7 @@ public struct AvatarEditorView: View {
 
     @State private var showCamera = false
     
-    private let onSave: (UIImage) -> Void
+    private let onSave: (Data, UIImage) -> Void
     private let onDelete: () -> Void
     private let onCancel: () -> Void
     private let onReplaceOriginal: ((UIImage) -> Void)?
@@ -142,6 +147,14 @@ public struct AvatarEditorView: View {
                     }
                 }
                 .frame(height: 320)
+                if let msg = exportErrorMessage {
+                    Text(msg)
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, Theme.Spacing.l)
+                        .padding(.top, Theme.Spacing.s)
+                }
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -200,7 +213,29 @@ public struct AvatarEditorView: View {
                         .accessibilityLabel("Choose photo from library")
                         #endif
 
+                        
+
                         Button {
+                            // Clear the current avatar (revert to initials)
+                            onDelete()
+                        } label: {
+                            ZStack {
+                                Circle()
+                                    .fill(.thinMaterial)
+                                    .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                    .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                                Image(systemName: "trash")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                            .contentShape(Circle())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(workingImage == nil)
+                        .opacity(workingImage == nil ? 0.35 : 1.0)
+                        .accessibilityLabel("Clear avatar")
+Button {
                             guard let image = workingImage else { return }
                             let effectiveScale = min(max(baseScale, minScale), maxScale)
                             let cropped = renderCroppedCircle(
@@ -210,7 +245,24 @@ public struct AvatarEditorView: View {
                                 scale: effectiveScale,
                                 offset: offset
                             )
-                            onSave(cropped)
+
+                            // Data hygiene: JPEG sRGB, target ≤100 KB, hard cap 200 KB.
+                            guard let jpegData = AvatarJPEGExporter.makeJPEGData(
+                                from: cropped,
+                                targetBytes: 100_000,
+                                hardCapBytes: 200_000
+                            ) else {
+                                exportErrorMessage = "Couldn’t export this photo as a small JPEG. Please try a different image."
+                                return
+                            }
+
+                            if jpegData.count > 200_000 {
+                                exportErrorMessage = "That photo is still too large after compression. Please choose a different image."
+                                return
+                            }
+
+                            exportErrorMessage = nil
+                            onSave(jpegData, cropped)
                         } label: {
                             ZStack {
                                 Circle()
@@ -307,5 +359,58 @@ public struct AvatarEditorView: View {
 private extension Comparable {
     func clamped(to limits: ClosedRange<Self>) -> Self {
         min(max(self, limits.lowerBound), limits.upperBound)
+    }
+}
+
+
+// MARK: - Avatar export hygiene
+
+enum AvatarJPEGExporter {
+    /// Export JPEG data in sRGB, attempting to hit targetBytes and never exceeding hardCapBytes if possible.
+    static func makeJPEGData(from image: UIImage, targetBytes: Int, hardCapBytes: Int) -> Data? {
+        let srgb = forceSRGB(image)
+        // Try a descending quality ladder.
+        let qualities: [CGFloat] = [0.85, 0.75, 0.65, 0.55, 0.45, 0.38, 0.32, 0.28]
+        var best: Data?
+
+        for q in qualities {
+            guard let data = srgb.jpegData(compressionQuality: q) else { continue }
+            best = data
+            if data.count <= targetBytes { return data }
+            if data.count <= hardCapBytes {
+                // Keep searching for closer-to-target but this is acceptable.
+                // Continue to see if we can hit target without exceeding cap.
+                continue
+            }
+        }
+
+        // If we never got under hard cap, return the smallest we managed.
+        return best
+    }
+
+    private static func forceSRGB(_ image: UIImage) -> UIImage {
+        guard let cg = image.cgImage else { return image }
+        let width = cg.width
+        let height = cg.height
+
+        let colorSpace = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+        guard let ctx = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo
+        ) else {
+            return image
+        }
+
+        ctx.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        guard let out = ctx.makeImage() else { return image }
+        return UIImage(cgImage: out, scale: image.scale, orientation: image.imageOrientation)
     }
 }
