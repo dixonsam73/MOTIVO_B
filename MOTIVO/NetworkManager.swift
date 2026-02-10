@@ -451,3 +451,125 @@ public final class NetworkManager {
     }
 
 }
+
+
+// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
+// SCOPE: Phase 15 Step 2 — shared signed-URL + decoded image cache for directory avatars (read-only rendering). No upload/delete in this step.
+// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_AVATAR_CACHE
+
+#if canImport(UIKit)
+import UIKit
+#endif
+
+/// Shared cache/pipeline for remote directory avatars (bucket: 'avatars').
+/// Path convention: `users/<uid>/avatar.jpg` stored in `account_directory.avatar_key`.
+actor RemoteAvatarSignedURLCache {
+    static let shared = RemoteAvatarSignedURLCache()
+
+    private struct Entry {
+        let url: URL
+        let expiresAt: Date
+    }
+
+    private var map: [String: Entry] = [:]
+
+    func get(_ key: String) -> URL? {
+        if let entry = map[key], entry.expiresAt > Date() {
+            return entry.url
+        }
+        map.removeValue(forKey: key)
+        return nil
+    }
+
+    func set(_ key: String, url: URL, ttlSeconds: Int) {
+        map[key] = Entry(url: url, expiresAt: Date().addingTimeInterval(TimeInterval(ttlSeconds)))
+    }
+
+    func invalidate(_ key: String) {
+        map.removeValue(forKey: key)
+    }
+}
+
+#if canImport(UIKit)
+enum RemoteAvatarImageCache {
+    static let imageCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 256
+        return c
+    }()
+
+    static func get(_ key: String) -> UIImage? {
+        imageCache.object(forKey: key as NSString)
+    }
+
+    static func set(_ key: String, image: UIImage) {
+        imageCache.setObject(image, forKey: key as NSString)
+    }
+
+    static func invalidate(_ key: String) {
+        imageCache.removeObject(forKey: key as NSString)
+    }
+}
+#endif
+
+enum RemoteAvatarPipeline {
+    /// Returns a decoded UIImage for a directory avatar, using shared signed URL + image caches.
+    /// - Parameters:
+    ///   - avatarKey: path within 'avatars' bucket (e.g. users/<uid>/avatar.jpg)
+    ///   - expiresInSeconds: signed URL TTL (default mirrors remote attachment TTL used elsewhere)
+    static func fetchAvatarImageIfNeeded(avatarKey: String, expiresInSeconds: Int = 300) async -> UIImage? {
+        let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let cacheKey = "avatars|\(trimmed)"
+
+        #if canImport(UIKit)
+        if let cached = RemoteAvatarImageCache.get(cacheKey) {
+            return cached
+        }
+        #endif
+
+        let signedURL: URL
+        if let cachedURL = await RemoteAvatarSignedURLCache.shared.get(cacheKey) {
+            signedURL = cachedURL
+        } else {
+            let result = await NetworkManager.shared.createSignedStorageObjectURL(
+                bucket: "avatars",
+                path: trimmed,
+                expiresInSeconds: expiresInSeconds
+            )
+            switch result {
+            case .success(let url):
+                await RemoteAvatarSignedURLCache.shared.set(cacheKey, url: url, ttlSeconds: expiresInSeconds)
+                signedURL = url
+            case .failure:
+                return nil
+            }
+        }
+
+        #if canImport(UIKit)
+        do {
+            let (data, _) = try await URLSession.shared.data(from: signedURL)
+            if let ui = UIImage(data: data) {
+                RemoteAvatarImageCache.set(cacheKey, image: ui)
+                return ui
+            }
+        } catch {
+            return nil
+        }
+        return nil
+        #else
+        return nil
+        #endif
+    }
+
+    static func invalidateAvatarCaches(avatarKey: String) async {
+        let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let cacheKey = "avatars|\(trimmed)"
+        await RemoteAvatarSignedURLCache.shared.invalidate(cacheKey)
+        #if canImport(UIKit)
+        RemoteAvatarImageCache.invalidate(cacheKey)
+        #endif
+    }
+}

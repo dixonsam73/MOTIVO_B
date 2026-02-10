@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
+// SCOPE: Phase 15 Step 2 — render non-owner directory avatars in BackendSessionDetailView header using shared signed-URL + image caches (read-only).
+// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_BSDV_AVATAR
+
 // CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
 // SCOPE: Remote attachment display-name parity: BSDV uses stable attachment keys for viewer title lookup (no signed-URL keys).
 // SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
@@ -93,6 +97,11 @@ struct BackendSessionDetailView: View {
     // Phase 14 directory (display-name only; no avatar until Phase 15)
     @State private var directoryAccount: DirectoryAccount? = nil
     @State private var isLoadingDirectory: Bool = false
+
+
+    #if canImport(UIKit)
+    @State private var remoteAvatar: UIImage? = nil
+    #endif
 
     // Comments sheet
     @State private var isCommentsPresented: Bool = false
@@ -341,7 +350,53 @@ struct BackendSessionDetailView: View {
 
     @ViewBuilder
     private func identityHeader() -> some View {
-        HStack(alignment: .center, spacing: 8) {
+                HStack(alignment: .center, spacing: 8) {
+            // Avatar (owner uses local; non-owner uses directory avatar_key when available)
+            #if canImport(UIKit)
+            let avatarKey = directoryAccount?.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let cacheKey = "avatars|\(avatarKey)"
+
+            Group {
+                if viewerIsOwner, let img = ProfileStore.avatarImage(for: effectiveViewerUserID ?? "") {
+                    Image(uiImage: img).resizable().scaledToFill()
+                } else if !avatarKey.isEmpty, let cached = RemoteAvatarImageCache.get(cacheKey) {
+                    Image(uiImage: cached).resizable().scaledToFill()
+                } else if !avatarKey.isEmpty, let remoteAvatar {
+                    Image(uiImage: remoteAvatar).resizable().scaledToFill()
+                } else {
+                    ZStack {
+                        Circle().fill(Color.gray.opacity(0.2))
+                        Text(initials(from: displayName))
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(Circle())
+            .task(id: avatarKey) {
+                guard !viewerIsOwner else {
+                    remoteAvatar = nil
+                    return
+                }
+                guard !avatarKey.isEmpty else {
+                    remoteAvatar = nil
+                    return
+                }
+                if RemoteAvatarImageCache.get(cacheKey) != nil { return }
+                if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: avatarKey) {
+                    remoteAvatar = ui
+                }
+            }
+            #else
+            ZStack {
+                Circle().fill(Color.gray.opacity(0.2))
+                Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
+            }
+            .frame(width: 32, height: 32)
+            .clipShape(Circle())
+            #endif
+
             HStack(spacing: 6) {
                 Text(displayName)
                     .font(.subheadline.weight(.semibold))
@@ -361,6 +416,21 @@ struct BackendSessionDetailView: View {
         }
         .padding(.bottom, 2)
     }
+
+    private func initials(from name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        let words = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        if words.isEmpty { return "?" }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let combo = (first + last)
+        return combo.isEmpty ? "U" : combo
+    }
+
 
     private var locationText: String {
         // Owner uses local ProfileStore; follower contexts use backend directory value.

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
+// SCOPE: Phase 15 Step 2 — render non-owner directory avatars in ProfilePeekView using shared signed-URL + image caches (read-only).
+// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_PPV_AVATAR
+
 // CHANGE-ID: 20260209_211200_PPVOwnerHideFollow_9b7c2c
 // SCOPE: ProfilePeekView — owner hygiene: hide Follow button when viewer is owner (use isOwner, not viewerID!=ownerID).
 // SEARCH-TOKEN: 20260209_211200_PPVOwnerHideFollow_9b7c2c
@@ -38,6 +42,8 @@ struct ProfilePeekView: View {
     let directoryDisplayName: String?
     let directoryAccountID: String?
     let directoryLocation: String?
+    let directoryAvatarKey: String?
+
 
     // Derived
     /// Effective viewer ID for backend follow/directory logic (Supabase auth.users UUID).
@@ -83,11 +89,12 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil) {
         self.ownerID = ownerID
         self.directoryDisplayName = directoryDisplayName
         self.directoryAccountID = directoryAccountID
         self.directoryLocation = directoryLocation
+        self.directoryAvatarKey = directoryAvatarKey
         // fetch sessions for this owner (lightweight)
         let sReq = NSFetchRequest<Session>(entityName: "Session")
         sReq.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
@@ -120,7 +127,7 @@ struct ProfilePeekView: View {
                             revealSelfName.toggle()
                         }
                     }) {
-                        ProfileAvatar(ownerID: ownerID, displayName: displayName(ownerID))
+                        ProfileAvatar(ownerID: ownerID, displayName: displayName(ownerID), directoryAvatarKey: (isOwner ? nil : directoryAvatarKey))
                             .frame(width: 44, height: 44)
                             .clipShape(Circle())
                     }
@@ -350,11 +357,26 @@ private struct FlexibleChipsView: View {
 private struct ProfileAvatar: View {
     let ownerID: String
     let displayName: String
+    let directoryAvatarKey: String?
+
+    #if canImport(UIKit)
+    @State private var remoteAvatar: UIImage? = nil
+    #endif
 
     var body: some View {
-        Group {
+        let key = directoryAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cacheKey = "avatars|\(key)"
+
+        return Group {
+            #if canImport(UIKit)
             if let img = ProfileStore.avatarImage(for: ownerID) {
                 Image(uiImage: img).resizable().scaledToFill()
+            } else if !key.isEmpty,
+                      let cached = RemoteAvatarImageCache.get(cacheKey) {
+                Image(uiImage: cached).resizable().scaledToFill()
+            } else if !key.isEmpty,
+                      let remoteAvatar {
+                Image(uiImage: remoteAvatar).resizable().scaledToFill()
             } else {
                 ZStack {
                     Circle().fill(.secondary.opacity(0.15))
@@ -365,7 +387,29 @@ private struct ProfileAvatar: View {
                         .lineLimit(1)
                 }
             }
+            #else
+            ZStack {
+                Circle().fill(.secondary.opacity(0.15))
+                Text(initials(from: displayName))
+                    .font(.system(size: 24, weight: .bold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .minimumScaleFactor(0.5)
+                    .lineLimit(1)
+            }
+            #endif
         }
+        #if canImport(UIKit)
+        .task(id: key) {
+            guard !key.isEmpty else {
+                remoteAvatar = nil
+                return
+            }
+            if RemoteAvatarImageCache.get(cacheKey) != nil { return }
+            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key) {
+                remoteAvatar = ui
+            }
+        }
+        #endif
     }
 
     private func initials(from name: String) -> String {

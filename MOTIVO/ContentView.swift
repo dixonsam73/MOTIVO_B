@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
+// SCOPE: Phase 15 Step 2 — render non-owner directory avatars in feed identity header + pass avatar_key into ProfilePeekView; shared cache lives in NetworkManager.swift (read-only).
+// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_CV_AVATAR
+
 // CHANGE-ID: 20260203_093500_FeedThumbPrewarmFix
 // SCOPE: Feed thumbnail & signed-URL prewarm (warm RemoteAttachmentPreview caches ahead of scroll) — ContentView only
 // SEARCH-TOKEN: 20260203_093500_FeedThumbPrewarmFix
@@ -1381,6 +1385,11 @@ fileprivate struct SessionRow: View {
     @State private var isCommentsPresented: Bool = false
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
+
+
+    #if canImport(UIKit)
+    @State private var remoteAvatar: UIImage? = nil
+    #endif
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
     @ObservedObject private var commentsStore = CommentsStore.shared
@@ -1718,7 +1727,8 @@ fileprivate struct SessionRow: View {
                 ownerID: ownerForPeek,
                 directoryDisplayName: acct?.displayName,
                 directoryAccountID: acct?.accountID,
-                directoryLocation: acct?.location
+                directoryLocation: acct?.location,
+                directoryAvatarKey: acct?.avatarKey
             )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
@@ -2582,41 +2592,11 @@ private var extraAttachmentCount: Int {
                     HStack(alignment: .center, spacing: 8) {
                         // Avatar 32pt circle
                         Button(action: { showPeek = true }) {
-                            Group {
-                                #if canImport(UIKit)
-                                if let img = ProfileStore.avatarImage(for: owner) {
-                                    Image(uiImage: img)
-                                        .resizable()
-                                        .scaledToFill()
-                                } else {
-                                    let initials: String = {
-                                        if let acct = resolvedDirectoryAccount {
-                                            let words = acct.displayName
-                                                .trimmingCharacters(in: .whitespacesAndNewlines)
-                                                .components(separatedBy: .whitespacesAndNewlines)
-                                                .filter { !$0.isEmpty }
-                                            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-                                            let first = words.first?.first.map { String($0).uppercased() } ?? ""
-                                            let last = words.last?.first.map { String($0).uppercased() } ?? ""
-                                            let combo = (first + last)
-                                            return combo.isEmpty ? "U" : combo
-                                        }
-                                        return viewerIsOwner ? "Y" : "U"
-                                    }()
-                                    ZStack {
-                                        Circle().fill(Color.gray.opacity(0.2))
-                                        Text(initials)
-                                            .font(.system(size: 16, weight: .bold))
-                                            .foregroundStyle(Theme.Colors.secondaryText)
-                                    }
-                                }
-                                #else
-                                ZStack {
-                                    Circle().fill(Color.gray.opacity(0.2))
-                                    Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                                }
-                                #endif
-                            }
+                            DirectoryAvatarCircle(
+                                ownerID: owner,
+                                displayName: (resolvedDirectoryAccount?.displayName ?? (viewerIsOwner ? "You" : "User")),
+                                directoryAvatarKey: (viewerIsOwner ? nil : resolvedDirectoryAccount?.avatarKey)
+                            )
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
                             .overlay(Circle().stroke(.black.opacity(0.06), lineWidth: 1))
@@ -2754,7 +2734,68 @@ private var extraAttachmentCount: Int {
         }
     }
 
-    private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
+    
+
+// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
+// SCOPE: Phase 15 Step 2 — helper view for rendering directory avatars with shared caches (feed + other non-owner identity surfaces).
+// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_DIR_AVATAR_VIEW
+#if canImport(UIKit)
+private struct DirectoryAvatarCircle: View {
+    let ownerID: String
+    let displayName: String
+    let directoryAvatarKey: String?
+
+    @State private var remoteAvatar: UIImage? = nil
+
+    var body: some View {
+        let key = directoryAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let cacheKey = "avatars|\(key)"
+
+        return Group {
+            if let img = ProfileStore.avatarImage(for: ownerID) {
+                Image(uiImage: img).resizable().scaledToFill()
+            } else if !key.isEmpty, let cached = RemoteAvatarImageCache.get(cacheKey) {
+                Image(uiImage: cached).resizable().scaledToFill()
+            } else if !key.isEmpty, let remoteAvatar {
+                Image(uiImage: remoteAvatar).resizable().scaledToFill()
+            } else {
+                ZStack {
+                    Circle().fill(Color.gray.opacity(0.2))
+                    Text(initials(from: displayName))
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+        }
+        .task(id: key) {
+            guard !key.isEmpty else {
+                remoteAvatar = nil
+                return
+            }
+            if RemoteAvatarImageCache.get(cacheKey) != nil { return }
+            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key) {
+                remoteAvatar = ui
+            }
+        }
+    }
+
+    private func initials(from name: String) -> String {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        let words = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        if words.isEmpty { return "?" }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let combo = (first + last)
+        return combo.isEmpty ? "U" : combo
+    }
+}
+#endif
+
+private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 16) {
             // Save (viewer-local)
             Button(action: {

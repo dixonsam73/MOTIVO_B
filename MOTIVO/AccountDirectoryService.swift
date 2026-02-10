@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260209_213700_Phase15_Step1_AvatarKeyPlumb_25a97d6f
+// SCOPE: Phase 15 Step 1 — plumb account_directory.avatar_key through DirectoryAccount decode + caches (no UI)
+// SEARCH-TOKEN: 20260209_213700_Phase15_Step1_AvatarKeyPlumb_25a97d6f
+
 // CHANGE-ID: 20260205_072955_LiveIdentityCache_f1a8c7
 // SCOPE: Live directory identity cache updates (merge on upsert + force-refresh on directory fetch)
 // SEARCH-TOKEN: 20260205_072955_LiveIdentityCache_f1a8c7
@@ -30,12 +34,14 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
     public let accountID: String?
     public let displayName: String
     public let location: String?
+    public let avatarKey: String?
 
     public enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case accountID = "account_id"
         case displayName = "display_name"
         case location = "location"
+        case avatarKey = "avatar_key"
     }
 }
 
@@ -200,10 +206,12 @@ public final class AccountDirectoryService {
         switch result {
         case .success:
             // Live identity cache update: immediately merge the new identity values.
+            let existing = await cache.getMany([userID])[userID]
             let merged = DirectoryAccount(userID: userID,
                                         accountID: sanitizedAccountID(accountID),
                                         displayName: displayName,
-                                        location: sanitizedLocation(location))
+                                        location: sanitizedLocation(location),
+                                        avatarKey: existing?.avatarKey)
             await cache.setMany([merged])
             await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
             return .success(())
