@@ -1,6 +1,9 @@
 // CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
 // SCOPE: Phase 15 Step 2 — render non-owner directory avatars in BackendSessionDetailView header using shared signed-URL + image caches (read-only).
 // SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_BSDV_AVATAR
+// CHANGE-ID: 20260211_142900_BSDV_ProfilePeekTap
+// SCOPE: BackendSessionDetailView — tap non-owner identity header to present ProfilePeekView using directory identity injection (no new services).
+// SEARCH-TOKEN: 20260211_142900_BSDV_ProfilePeekTap
 
 // CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
 // SCOPE: Remote attachment display-name parity: BSDV uses stable attachment keys for viewer title lookup (no signed-URL keys).
@@ -97,6 +100,10 @@ struct BackendSessionDetailView: View {
     // Phase 14 directory (display-name only; no avatar until Phase 15)
     @State private var directoryAccount: DirectoryAccount? = nil
     @State private var isLoadingDirectory: Bool = false
+
+    // Profile peek sheet (non-owner identity header tap)
+    @State private var isProfilePeekPresented: Bool = false
+
 
 
     #if canImport(UIKit)
@@ -237,6 +244,16 @@ struct BackendSessionDetailView: View {
         .sheet(isPresented: $isCommentsPresented) {
             CommentsView(sessionID: model.id, placeholderAuthor: "You")
         }
+.sheet(isPresented: $isProfilePeekPresented) {
+    ProfilePeekView(
+        ownerID: ownerUserID,
+        directoryDisplayName: directoryAccount?.displayName,
+        directoryAccountID: directoryAccount?.accountID,
+        directoryLocation: directoryAccount?.location,
+        directoryAvatarKey: directoryAccount?.avatarKey,
+        directoryInstruments: directoryAccount?.instruments
+    )
+}
         .fullScreenCover(
         isPresented: Binding(
             get: {
@@ -361,7 +378,7 @@ struct BackendSessionDetailView: View {
                     Image(uiImage: img).resizable().scaledToFill()
                 } else if !avatarKey.isEmpty, let cached = RemoteAvatarImageCache.get(cacheKey) {
                     Image(uiImage: cached).resizable().scaledToFill()
-                } else if !avatarKey.isEmpty, let remoteAvatar {
+                } else if !avatarKey.isEmpty, let remoteAvatar = remoteAvatar {
                     Image(uiImage: remoteAvatar).resizable().scaledToFill()
                 } else {
                     ZStack {
@@ -371,6 +388,11 @@ struct BackendSessionDetailView: View {
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
                 }
+            }
+            .contentShape(Rectangle())
+            .onTapGesture {
+                guard !viewerIsOwner else { return }
+                isProfilePeekPresented = true
             }
             .frame(width: 32, height: 32)
             .clipShape(Circle())
