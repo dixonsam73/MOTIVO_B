@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
-// SCOPE: PeopleUserRow: add remote avatar support via avatar_key using NetworkManager.fetchAvatarImageIfNeeded; plumb overrideAvatarKey; preserve existing layout/styles.
-// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
+// CHANGE-ID: 20260211_211900_Phase15B_RemoteAvatars_PeopleFollowsRows
+// SCOPE: Phase 15B — Wire remote avatars into People + Followers/Following rows (UI-only). PeopleUserRow now uses overrideAvatarKey with RemoteAvatarPipeline (signed URL + cache) while preserving initials fallback and existing layout.
+// SEARCH-TOKEN: 20260211_211900_Phase15B_RemoteAvatars_PeopleFollowsRows
 
 //
 //  PeopleUserRow.swift
@@ -27,6 +27,8 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
     let overrideAvatarKey: String?
     let destination: () -> Destination
     let trailing: () -> Trailing
+
+    @State private var remoteAvatarImage: UIImage?
 
     init(
         userID: String,
@@ -86,23 +88,40 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         let loc = ProfileStore.location(for: userID)
         return loc.isEmpty ? "" : loc
     }
+
     private func initials(from name: String) -> String {
-            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty { return "?" }
-            let words = trimmed
-                .components(separatedBy: .whitespacesAndNewlines)
-                .filter { !$0.isEmpty }
-            if words.isEmpty { return "?" }
-            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-            let first = words.first?.first.map { String($0).uppercased() } ?? ""
-            let last = words.last?.first.map { String($0).uppercased() } ?? ""
-            let combo = first + last
-            return combo.isEmpty ? "?" : combo
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "?" }
+        let words = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+        if words.isEmpty { return "?" }
+        if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+        let first = words.first?.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let combo = first + last
+        return combo.isEmpty ? "?" : combo
+    }
+
+    private var trimmedAvatarKey: String? {
+        guard let k = overrideAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines), !k.isEmpty else {
+            return nil
         }
+        return k
+    }
+
     @ViewBuilder
     private var avatar: some View {
+        // Preserve existing local override behaviour (e.g., current user).
         if let img = ProfileStore.avatarImage(for: userID) {
             Image(uiImage: img)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 36, height: 36)
+                .clipShape(Circle())
+                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+        } else if let remote = remoteAvatarImage {
+            Image(uiImage: remote)
                 .resizable()
                 .scaledToFill()
                 .frame(width: 36, height: 36)
@@ -118,6 +137,16 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
                         .foregroundStyle(Theme.Colors.secondaryText)
                 )
                 .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                .task(id: trimmedAvatarKey ?? "") {
+                    // UI-only: reuse existing signed-URL + cache pipeline (no refactors / new services).
+                    guard let key = trimmedAvatarKey else {
+                        if remoteAvatarImage != nil { remoteAvatarImage = nil }
+                        return
+                    }
+                    let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key)
+                    if Task.isCancelled { return }
+                    remoteAvatarImage = img
+                }
         }
     }
 }
