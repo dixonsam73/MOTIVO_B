@@ -2729,13 +2729,24 @@ private var extraAttachmentCount: Int {
             // Invariant: self-peek must never render follow gating in any mode.
             let ownerForPeek = (owner.isEmpty || owner == viewer) ? (viewer.isEmpty ? owner : viewer) : owner
 
-            ProfilePeekView(ownerID: ownerForPeek)
+            // CHANGE-ID: 20260211_142500_ContentView_PPV_RemotePeek_InjectDirectoryIdentity
+            // SCOPE: Feed remote row ProfilePeekView must receive directory identity (name/location/avatar/instruments) to avoid "User •" fallback; no UI/layout changes.
+            let acct = BackendFeedStore.shared.directoryAccountsByUserID[ownerForPeek]
+                    ?? BackendFeedStore.shared.directoryAccountsByUserID[ownerForPeek.lowercased()]
+
+            ProfilePeekView(
+                ownerID: ownerForPeek,
+                directoryDisplayName: acct?.displayName,
+                directoryAccountID: acct?.accountID,
+                directoryLocation: acct?.location,
+                directoryAvatarKey: acct?.avatarKey,
+                directoryInstruments: acct?.instruments
+            )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
         }
     }
 
-    
 
 // CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
 // SCOPE: Phase 15 Step 2 — helper view for rendering directory avatars with shared caches (feed + other non-owner identity surfaces).
