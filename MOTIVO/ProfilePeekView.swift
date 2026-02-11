@@ -43,6 +43,7 @@ struct ProfilePeekView: View {
     let directoryAccountID: String?
     let directoryLocation: String?
     let directoryAvatarKey: String?
+    let directoryInstruments: [String]?
 
 
     // Derived
@@ -89,12 +90,13 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil, directoryInstruments: [String]? = nil) {
         self.ownerID = ownerID
         self.directoryDisplayName = directoryDisplayName
         self.directoryAccountID = directoryAccountID
         self.directoryLocation = directoryLocation
         self.directoryAvatarKey = directoryAvatarKey
+        self.directoryInstruments = directoryInstruments
         // fetch sessions for this owner (lightweight)
         let sReq = NSFetchRequest<Session>(entityName: "Session")
         sReq.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
@@ -127,7 +129,10 @@ struct ProfilePeekView: View {
                             revealSelfName.toggle()
                         }
                     }) {
-                        ProfileAvatar(ownerID: ownerID, displayName: displayName(ownerID), directoryAvatarKey: (isOwner ? nil : directoryAvatarKey))
+                        ProfileAvatar(ownerID: ownerID,
+                                      displayName: displayName(ownerID),
+                                      directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                      directoryInstruments: nil)
                             .frame(width: 44, height: 44)
                             .clipShape(Circle())
                     }
@@ -166,34 +171,53 @@ struct ProfilePeekView: View {
                         .padding(.top, 2)
                 }
 
-                if canSee {
-                    // Visible summary
+                if isOwner {
+                    // Owner-only summary (metrics are strictly owner-only)
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Overview").sectionHeader()
-                                                let sessionsCount = ownerSessions.count
-                                                let totalSeconds = ownerSessions.reduce(0) { acc, s in
-                                                    let attrs = s.entity.attributesByName
-                                                    if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber { return acc + n.intValue }
-                                                    if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber { return acc + (n.intValue * 60) }
-                                                    if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber { return acc + (n.intValue * 60) }
-                                                    if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber { return acc + (n.intValue * 60) }
-                                                    return acc
-                                                }
-                                                let sessionsLabel = sessionsCount == 1 ? "1 session" : "\(sessionsCount) sessions"
-                                                Text("\(sessionsLabel) · \(StatsHelper.formatDuration(totalSeconds)) total")
-                                                    .font(Theme.Text.body)
-                                                    .foregroundStyle(Color.primary.opacity(0.85))
+                        let sessionsCount = ownerSessions.count
+                        let totalSeconds = ownerSessions.reduce(0) { acc, s in
+                            let attrs = s.entity.attributesByName
+                            if attrs["durationSeconds"] != nil, let n = s.value(forKey: "durationSeconds") as? NSNumber { return acc + n.intValue }
+                            if attrs["durationMinutes"] != nil, let n = s.value(forKey: "durationMinutes") as? NSNumber { return acc + (n.intValue * 60) }
+                            if attrs["duration"] != nil, let n = s.value(forKey: "duration") as? NSNumber { return acc + (n.intValue * 60) }
+                            if attrs["lengthMinutes"] != nil, let n = s.value(forKey: "lengthMinutes") as? NSNumber { return acc + (n.intValue * 60) }
+                            return acc
+                        }
+                        let sessionsLabel = sessionsCount == 1 ? "1 session" : "\(sessionsCount) sessions"
+                        Text("\(sessionsLabel) · \(StatsHelper.formatDuration(totalSeconds)) total")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Color.primary.opacity(0.85))
                     }
                     .transition(.opacity)
 
                     Divider().overlay(Theme.Colors.stroke(colorScheme).opacity(0.5)).padding(.vertical, Theme.Spacing.s)
 
-                    if canSee, !ownerInstruments.isEmpty {
+                    if !ownerInstruments.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             Text("Instruments").sectionHeader()
                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                 ForEach(ownerInstruments, id: \.objectID) { inst in
                                     Text((inst.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines))
+                                        .font(Theme.Text.body)
+                                        .lineLimit(1)
+                                        .foregroundStyle(Color.primary.opacity(0.85))
+                                }
+                            }
+                        }
+                        .padding(.top, 2)
+                    }
+                } else if canSee {
+                    // Follower-visible identity metadata (no metrics)
+                    if let list = directoryInstruments?.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) }).filter({ !$0.isEmpty }),
+                       !list.isEmpty {
+                        Divider().overlay(Theme.Colors.stroke(colorScheme).opacity(0.5)).padding(.vertical, Theme.Spacing.s)
+
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("Instruments").sectionHeader()
+                            VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                                ForEach(list, id: \.self) { name in
+                                    Text(name)
                                         .font(Theme.Text.body)
                                         .lineLimit(1)
                                         .foregroundStyle(Color.primary.opacity(0.85))
@@ -358,6 +382,7 @@ private struct ProfileAvatar: View {
     let ownerID: String
     let displayName: String
     let directoryAvatarKey: String?
+    let directoryInstruments: [String]?
 
     #if canImport(UIKit)
     @State private var remoteAvatar: UIImage? = nil

@@ -1728,7 +1728,8 @@ fileprivate struct SessionRow: View {
                 directoryDisplayName: acct?.displayName,
                 directoryAccountID: acct?.accountID,
                 directoryLocation: acct?.location,
-                directoryAvatarKey: acct?.avatarKey
+                directoryAvatarKey: acct?.avatarKey,
+                directoryInstruments: acct?.instruments
             )
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)

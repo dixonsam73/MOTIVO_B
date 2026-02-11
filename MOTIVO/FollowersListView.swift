@@ -40,7 +40,10 @@ struct FollowersListView: View {
                         ProfilePeekView(
                             ownerID: userID,
                             directoryDisplayName: acct?.displayName,
-                            directoryAccountID: acct?.accountID
+                            directoryAccountID: acct?.accountID,
+                            directoryLocation: acct?.location,
+                            directoryAvatarKey: acct?.avatarKey,
+                            directoryInstruments: acct?.instruments,
                         )
                     }
                     .listRowBackground(Color.clear)

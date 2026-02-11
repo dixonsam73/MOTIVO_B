@@ -39,6 +39,7 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
     public let displayName: String
     public let location: String?
     public let avatarKey: String?
+    public let instruments: [String]?
 
     public enum CodingKeys: String, CodingKey {
         case userID = "user_id"
@@ -46,6 +47,7 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
         case displayName = "display_name"
         case location = "location"
         case avatarKey = "avatar_key"
+        case instruments = "instruments"
     }
 }
 
@@ -212,10 +214,11 @@ public final class AccountDirectoryService {
             // Live identity cache update: immediately merge the new identity values.
             let existing = await cache.getMany([userID])[userID]
             let merged = DirectoryAccount(userID: userID,
-                                        accountID: sanitizedAccountID(accountID),
-                                        displayName: displayName,
-                                        location: sanitizedLocation(location),
-                                        avatarKey: existing?.avatarKey)
+                                          accountID: sanitizedAccountID(accountID),
+                                          displayName: displayName,
+                                          location: sanitizedLocation(location),
+                                          avatarKey: existing?.avatarKey,
+                                          instruments: existing?.instruments)
             await cache.setMany([merged])
             await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
             return .success(())
@@ -262,7 +265,8 @@ public final class AccountDirectoryService {
                                                accountID: existing.accountID,
                                                displayName: existing.displayName,
                                                location: existing.location,
-                                               avatarKey: avatarKey)
+                                               avatarKey: avatarKey,
+                                               instruments: existing.instruments)
                 await cache.setMany([updated])
                 await BackendFeedStore.shared.mergeDirectoryAccounts([uid: updated])
             }

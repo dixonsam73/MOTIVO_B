@@ -110,7 +110,9 @@ struct PeopleView: View {
                         ownerID: userID,
                         directoryDisplayName: acct?.displayName,
                         directoryAccountID: acct?.accountID,
-                        directoryLocation: acct?.location
+                        directoryLocation: acct?.location,
+                        directoryAvatarKey: acct?.avatarKey,
+                        directoryInstruments: acct?.instruments,
                     )
                 } trailing: {
                     HStack(spacing: Theme.Spacing.s) {
@@ -221,7 +223,9 @@ struct PeopleView: View {
                             ownerID: acct.userID,
                             directoryDisplayName: acct.displayName,
                             directoryAccountID: acct.accountID,
-                            directoryLocation: acct.location
+                            directoryLocation: acct.location,
+                            directoryAvatarKey: acct.avatarKey,
+                            directoryInstruments: acct.instruments,
                         )
                     }
                 }
