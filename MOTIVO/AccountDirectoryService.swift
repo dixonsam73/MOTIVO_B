@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260211_141746_PPV_Instruments_Writeback_ADS_a3d9c1
+// SCOPE: Owner instruments write-back to account_directory.instruments via upsertSelfRow payload + cache merge
+// SEARCH-TOKEN: 20260211_141746_PPV_Instruments_Writeback_ADS_a3d9c1
+
 // CHANGE-ID: 20260209_213700_Phase15_Step1_AvatarKeyPlumb_25a97d6f
 // SCOPE: Phase 15 Step 1 — plumb account_directory.avatar_key through DirectoryAccount decode + caches (no UI)
 // SEARCH-TOKEN: 20260209_213700_Phase15_Step1_AvatarKeyPlumb_25a97d6f
@@ -186,14 +190,18 @@ public final class AccountDirectoryService {
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
-    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, location: String? = nil) async -> Result<Void, Error> {
-        let payload: [String: Any] = [
+    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
+        var payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
             "account_id": sanitizedAccountID(accountID) ?? NSNull(),
             "lookup_enabled": lookupEnabled,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
+
+        if let instruments = instruments {
+            payload["instruments"] = instruments
+        }
 
         let body: Data
         do {
@@ -218,7 +226,7 @@ public final class AccountDirectoryService {
                                           displayName: displayName,
                                           location: sanitizedLocation(location),
                                           avatarKey: existing?.avatarKey,
-                                          instruments: existing?.instruments)
+                                          instruments: instruments ?? existing?.instruments)
             await cache.setMany([merged])
             await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
             return .success(())

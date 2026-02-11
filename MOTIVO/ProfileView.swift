@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260211_141746_PPV_Instruments_Writeback_PV_a3d9c1
+// SCOPE: Sync local instruments to account_directory on instrument manager dismiss + include instruments in directory upsert fingerprint
+// SEARCH-TOKEN: 20260211_141746_PPV_Instruments_Writeback_PV_a3d9c1
+
 // CHANGE-ID: 20260210_190200_Phase15_Step3B_ProfileAvatarWire
 // SCOPE: Phase 15 Step 3B — ProfileView: wire avatar editor Save/Clear to backend avatar upload + account_directory.avatar_key patch; bust remote avatar caches; owner local cache preserved.
 // SEARCH-TOKEN: 20260210_190200_Phase15_Step3B_ProfileAvatarWire
@@ -1011,14 +1015,23 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          let acctOrNil: String? = (acct.count >= 3) ? acct : nil
          let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
          let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
-         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")"
+         let instrumentsClean = instrumentsArray
+             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+             .filter { !$0.isEmpty }
+         let instrumentsSorted = instrumentsClean.sorted { a, b in
+             a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+         }
+
+         let instrumentsFP = instrumentsSorted.joined(separator: ",")
+         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")|i:\(instrumentsFP)"
          if fingerprint == lastDirectorySyncFingerprint { return }
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
              displayName: display,
              accountID: acctOrNil,
              lookupEnabled: enabled,
-             location: locOrNil
+             location: locOrNil,
+             instruments: instrumentsSorted
          )
          switch result {
 case .success:
@@ -1214,6 +1227,12 @@ case .failure(let error):
              .sheet(isPresented: $showInstrumentManager) {
                  InstrumentListView()
                      .environment(\.managedObjectContext, ctx)
+             }
+             .onChange(of: showInstrumentManager) { _, newValue in
+                 // When instrument manager closes, sync instruments to account_directory (debounced).
+                 if newValue == false {
+                     scheduleDirectorySyncDebounced(nanoseconds: 200_000_000)
+                 }
              }
              .sheet(isPresented: $showActivityManager) {
                  ActivityListView()
