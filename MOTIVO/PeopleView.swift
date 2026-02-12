@@ -41,6 +41,9 @@ struct PeopleView: View {
     @StateObject private var sharedWithYouStore = SharedWithYouStore()
     @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
 
+    @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
+    @EnvironmentObject private var auth: AuthManager
+
 
     @State private var searchText: String = ""
     @State private var searchResults: [DirectoryAccount] = []
@@ -120,18 +123,34 @@ struct PeopleView: View {
             .filter { !$0.isEmpty }
             .sorted()
     }
+    private var effectiveBackendUserID: String {
+        #if DEBUG
+        if BackendEnvironment.shared.isConnected == false,
+           let o = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+           !o.isEmpty {
+            return o.lowercased()
+        }
+        #endif
 
+        return (auth.backendUserID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+    }
     private var sharedWithYouSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Shared with you").sectionHeader()
 
-            ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \ .id) { share in
+            ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
                 let acct = shareOwnerDirectory[share.ownerUserID]
-                Button {
-                    // Stage 3 note: opening BSDV is wired in the next step (ContentView listener).
-                    // For now we mark as viewed on tap and keep the UI calm and correct.
-                    Task {
-                        await sharedWithYouStore.markViewed(shareID: share.id)
+
+                NavigationLink {
+                    SharedPostDetailHost(
+                        share: share,
+                        viewerUserID: effectiveBackendUserID,
+                        backendFeedStore: backendFeedStore
+                    ) {
+                        Task { await sharedWithYouStore.markViewed(shareID: share.id) }
                     }
                 } label: {
                     HStack {
@@ -152,11 +171,11 @@ struct PeopleView: View {
                     .contentShape(Rectangle())
                     .padding(.vertical, Theme.Spacing.s)
                 }
-                .buttonStyle(.plain)
             }
         }
         .cardSurface()
     }
+
 
 
     /// Phase 10D.1: Incoming requests only (defensive filter).
@@ -375,4 +394,52 @@ struct PeopleView: View {
     /// Defensive: requests must be incoming-only.
     /// If local simulation or future wiring ever accidentally mixes sets, we still never show outgoing here.
 
+}
+
+
+// MARK: - Shared Post Detail Host (PeopleView navigation)
+
+private struct SharedPostDetailHost: View {
+    let share: BackendPostSharePointer
+    let viewerUserID: String
+    let backendFeedStore: BackendFeedStore
+    let onMarkViewed: () -> Void
+
+    @State private var didMarkViewed: Bool = false
+
+    private var resolvedPost: BackendPost? {
+        backendFeedStore.allPosts.first(where: { $0.id == share.postID })
+        ?? backendFeedStore.minePosts.first(where: { $0.id == share.postID })
+    }
+
+    var body: some View {
+        Group {
+            if let post = resolvedPost {
+                BackendSessionDetailView(
+                    model: BackendSessionViewModel(
+                        post: post,
+                        currentUserID: viewerUserID
+                    )
+                )
+            } else {
+                VStack(spacing: Theme.Spacing.m) {
+                    Text("Not available")
+                        .font(Theme.Text.sectionHeader)
+                        .foregroundStyle(Color.primary)
+
+                    Text("This shared post isn’t available right now.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(Theme.Spacing.l)
+                .appBackground()
+            }
+        }
+        .task {
+            guard didMarkViewed == false else { return }
+            didMarkViewed = true
+            onMarkViewed()
+        }
+    }
 }
