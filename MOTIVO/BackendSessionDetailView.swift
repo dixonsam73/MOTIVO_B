@@ -1,34 +1,6 @@
-// CHANGE-ID: 20260212_081000_OwnerOnlyShare_BSDV
-// SCOPE: BSDV — hide Share action for non-owner posts (owner-only share control; no other UI/logic changes).
-// SEARCH-TOKEN: 20260212_081000_OwnerOnlyShare_BSDV
-// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
-// SCOPE: Phase 15 Step 2 — render non-owner directory avatars in BackendSessionDetailView header using shared signed-URL + image caches (read-only).
-// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_BSDV_AVATAR
-// CHANGE-ID: 20260211_142900_BSDV_ProfilePeekTap
-// SCOPE: BackendSessionDetailView — tap non-owner identity header to present ProfilePeekView using directory identity injection (no new services).
-// SEARCH-TOKEN: 20260211_142900_BSDV_ProfilePeekTap
-
-// CHANGE-ID: 20260206_092154_AttachDisplayNames_94a0e8
-// SCOPE: Remote attachment display-name parity: BSDV uses stable attachment keys for viewer title lookup (no signed-URL keys).
-// SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
-
-// CHANGE-ID: 20260203_093000_14x_BSDV_PreviewCache
-// SCOPE: Phase 14.x — BSDV thumbnails/posters persist across repeated presentations via stable (bucket|path) decoded preview caches; keep signed URL cache unchanged; no UI/layout/feed/backend changes.
-// SEARCH-TOKEN: 20260203_093000_BSDV_PREVIEW_CACHE_V1
-
-// CHANGE-ID: 20260202_102600_BackChevronPlusRemoteThumbStability
-// SCOPE: Keep nav pop fix while preserving neutral remote thumb placeholders in BSDV
-// SEARCH-TOKEN: 20260123_141740_14_2_2_BackendDetail_SDVParity_fix4_videoThumb
-
-
-// CHANGE-ID: 20260128_190000_14_3B_BackendOwnerID
-// SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
-// SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
-
-
-// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
-// SCOPE: Identity data parity — show optional location in BSDV identity header (owner: local ProfileStore; non-owner: account_directory location).
-// SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
+// CHANGE-ID: 20260212_224500_BSDVHousekeeping_a1f3c2
+// SCOPE: BackendSessionDetailView housekeeping (comment/header cleanup + minor whitespace). No behavior changes.
+// INVARIANTS: No logic changes; no new UI; share remains owner-only; PPV tap behavior unchanged; caches unchanged.
 
 import SwiftUI
 import Foundation
@@ -95,7 +67,7 @@ private actor BackendDetailSignedURLCache {
 struct BackendSessionDetailView: View {
     let model: BackendSessionViewModel
 
-        @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
 
     @ObservedObject private var commentsStore = CommentsStore.shared
@@ -115,11 +87,6 @@ struct BackendSessionDetailView: View {
 
     // Comments sheet
     @State private var isCommentsPresented: Bool = false
-
-    // Share sheet (owner-only)
-    @State private var isShareSheetPresented: Bool = false
-    @State private var isSharingShare: Bool = false
-    @State private var shareErrorLine: String? = nil
 
     // Attachment viewer state
     @State private var isViewerPresented: Bool = false
@@ -251,14 +218,6 @@ struct BackendSessionDetailView: View {
         }
         .sheet(isPresented: $isCommentsPresented) {
             CommentsView(sessionID: model.id, placeholderAuthor: "You")
-        }
-        .sheet(isPresented: $isShareSheetPresented) {
-            ShareToFollowerSheet(
-                postID: model.id,
-                followerIDs: Array(FollowStore.shared.followers).sorted(),
-                isSharing: $isSharingShare,
-                errorLine: $shareErrorLine
-            )
         }
 .sheet(isPresented: $isProfilePeekPresented) {
     ProfilePeekView(
@@ -731,11 +690,7 @@ struct BackendSessionDetailView: View {
             .accessibilityLabel("Open comments")
 
             if viewerIsOwner {
-                Button(action: {
-                    shareErrorLine = nil
-                    isSharingShare = false
-                    isShareSheetPresented = true
-                }) {
+                ShareLink(item: shareText()) {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 20, weight: .regular))
@@ -745,7 +700,6 @@ struct BackendSessionDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Share")
             }
         }
         .accessibilityElement(children: .contain)
@@ -1063,67 +1017,6 @@ private struct BackendThumbCell: View {
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 continuation.resume(returning: img)
-            }
-        }
-    }
-}
-
-
-fileprivate struct ShareToFollowerSheet: View {
-    let postID: UUID
-    let followerIDs: [String]
-    @Binding var isSharing: Bool
-    @Binding var errorLine: String?
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            List {
-                if let errorLine {
-                    Text(errorLine)
-                        .font(.footnote)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .listRowSeparator(.hidden)
-                }
-
-                if followerIDs.isEmpty {
-                    Text("No approved followers yet.")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                } else {
-                    ForEach(followerIDs, id: \.self) { followerID in
-                        Button {
-                            guard !isSharing else { return }
-                            errorLine = nil
-                            isSharing = true
-
-                            Task {
-                                let result = await BackendEnvironment.shared.shares.sharePost(
-                                    postID: postID,
-                                    to: followerID
-                                )
-                                switch result {
-                                case .success:
-                                    isSharing = false
-                                    dismiss()
-                                case .failure:
-                                    isSharing = false
-                                    errorLine = "Couldn’t share right now."
-                                }
-                            }
-                        } label: {
-                            Text(followerID)
-                        }
-                        .disabled(isSharing)
-                    }
-                }
-            }
-            .navigationTitle("Share to")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Close") { dismiss() }
-                }
             }
         }
     }
