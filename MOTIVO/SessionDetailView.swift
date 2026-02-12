@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260209_121500_SDV_StarVsEye_14b7743a
-// SCOPE: SessionDetailView — Star vs eye overlay precedence (owner-only); suppress eye on thumbnail.
-// SEARCH-TOKEN: 20260209_121500_SDV_StarVsEye_14b7743a
+// CHANGE-ID: 20260212_222413_SDV_CloseStage3_ShareToFollower
+// SCOPE: SessionDetailView — Replace legacy iOS ShareLink with Share-to-follower sheet (owner-only).
+// SEARCH-TOKEN: 20260212_222413_SDV_CloseStage3_ShareToFollower
 
 ////////
 //  SessionDetailView.swift
@@ -88,6 +88,10 @@ struct SessionDetailView: View {
     @State private var viewerTappedURL: URL? = nil
 
     @State private var isCommentsPresented: Bool = false
+    @State private var isShareSheetPresented: Bool = false
+    @State private var isSharing: Bool = false
+    @State private var errorLine: String? = nil
+
     // 9D.2: Effective viewer ID for gating (DEBUG override → AuthManager).
     private var effectiveViewerUserID: String? {
         #if DEBUG
@@ -461,6 +465,52 @@ struct SessionDetailView: View {
             } else {
                 Text("Comments unavailable for this item.")
                     .padding()
+            }
+        }
+        .sheet(isPresented: $isShareSheetPresented) {
+            NavigationView {
+                let followers = Array(FollowStore.shared.followers).sorted()
+                List {
+                    ForEach(followers, id: \.self) { followerID in
+                        Button {
+                            guard !isSharing else { return }
+                            errorLine = nil
+                            isSharing = true
+                            Task {
+                                guard let postID = sessionUUID else {
+                                    isSharing = false
+                                    errorLine = "Couldn’t share right now."
+                                    return
+                                }
+                                let result = await BackendEnvironment.shared.shares
+                                    .sharePost(postID: postID, to: followerID)
+                                switch result {
+                                case .success:
+                                    isSharing = false
+                                    isShareSheetPresented = false
+                                case .failure:
+                                    isSharing = false
+                                    errorLine = "Couldn’t share right now."
+                                }
+                            }
+                        } label: {
+                            Text(followerID)
+                        }
+                    }
+                }
+                .navigationTitle("Share to")
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Close") { isShareSheetPresented = false }
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if let errorLine {
+                        Text(errorLine)
+                            .font(.footnote)
+                            .padding()
+                    }
+                }
             }
         }
         #if DEBUG
@@ -1024,26 +1074,13 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open comments")
-
-            // Share
+            .accessibilityLabel("Open comments")            // Share
             Group {
                 let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
-                if isPrivatePost && !isOwner {
-                    ShareLink(item: shareText()) {
-                        HStack(spacing: 8) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 20, weight: .regular))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(true)
-                    .opacity(0.4)
-                } else {
-                    ShareLink(item: shareText()) {
+                if isOwner {
+                    Button {
+                        isShareSheetPresented = true
+                    } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "square.and.arrow.up")
                                 .font(.system(size: 20, weight: .regular))

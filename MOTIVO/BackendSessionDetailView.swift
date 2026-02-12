@@ -116,6 +116,11 @@ struct BackendSessionDetailView: View {
     // Comments sheet
     @State private var isCommentsPresented: Bool = false
 
+    // Share sheet (owner-only)
+    @State private var isShareSheetPresented: Bool = false
+    @State private var isSharingShare: Bool = false
+    @State private var shareErrorLine: String? = nil
+
     // Attachment viewer state
     @State private var isViewerPresented: Bool = false
     @State private var viewerImageURLs: [URL] = []
@@ -246,6 +251,14 @@ struct BackendSessionDetailView: View {
         }
         .sheet(isPresented: $isCommentsPresented) {
             CommentsView(sessionID: model.id, placeholderAuthor: "You")
+        }
+        .sheet(isPresented: $isShareSheetPresented) {
+            ShareToFollowerSheet(
+                postID: model.id,
+                followerIDs: Array(FollowStore.shared.followers).sorted(),
+                isSharing: $isSharingShare,
+                errorLine: $shareErrorLine
+            )
         }
 .sheet(isPresented: $isProfilePeekPresented) {
     ProfilePeekView(
@@ -718,7 +731,11 @@ struct BackendSessionDetailView: View {
             .accessibilityLabel("Open comments")
 
             if viewerIsOwner {
-                ShareLink(item: shareText()) {
+                Button(action: {
+                    shareErrorLine = nil
+                    isSharingShare = false
+                    isShareSheetPresented = true
+                }) {
                     HStack(spacing: 8) {
                         Image(systemName: "square.and.arrow.up")
                             .font(.system(size: 20, weight: .regular))
@@ -728,6 +745,7 @@ struct BackendSessionDetailView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel("Share")
             }
         }
         .accessibilityElement(children: .contain)
@@ -1045,6 +1063,67 @@ private struct BackendThumbCell: View {
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 continuation.resume(returning: img)
+            }
+        }
+    }
+}
+
+
+fileprivate struct ShareToFollowerSheet: View {
+    let postID: UUID
+    let followerIDs: [String]
+    @Binding var isSharing: Bool
+    @Binding var errorLine: String?
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let errorLine {
+                    Text(errorLine)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .listRowSeparator(.hidden)
+                }
+
+                if followerIDs.isEmpty {
+                    Text("No approved followers yet.")
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                } else {
+                    ForEach(followerIDs, id: \.self) { followerID in
+                        Button {
+                            guard !isSharing else { return }
+                            errorLine = nil
+                            isSharing = true
+
+                            Task {
+                                let result = await BackendEnvironment.shared.shares.sharePost(
+                                    postID: postID,
+                                    to: followerID
+                                )
+                                switch result {
+                                case .success:
+                                    isSharing = false
+                                    dismiss()
+                                case .failure:
+                                    isSharing = false
+                                    errorLine = "Couldn’t share right now."
+                                }
+                            }
+                        } label: {
+                            Text(followerID)
+                        }
+                        .disabled(isSharing)
+                    }
+                }
+            }
+            .navigationTitle("Share to")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Close") { dismiss() }
+                }
             }
         }
     }

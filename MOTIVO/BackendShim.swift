@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260212_224356_PostShares_AlreadyShared
+// SCOPE: Map duplicate post_shares insert (409/23505) to BackendPostShareAlreadySharedError for UI "Already shared." handling.
+// SEARCH-TOKEN: 20260212_224356_PostShares_AlreadyShared
+
 // CHANGE-ID: 20260212_083300_PostSharesService_GREEN
 // SCOPE: Add post_shares service surface (fetch/insert/mark-viewed/delete) and fix BackendEnvironment.follow/shares property placement.
 // SEARCH-TOKEN: 20260212_083300_PostSharesService_GREEN
@@ -1185,6 +1189,12 @@ public protocol BackendPostShareService {
     func deleteShare(shareID: UUID) async -> Result<Void, Error>
 }
 
+public struct BackendPostShareAlreadySharedError: LocalizedError {
+    public init() {}
+    public var errorDescription: String? { "Already shared." }
+}
+
+
 public struct SimulatedPostShareService: BackendPostShareService {
     public init() {}
     public func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error> { .success([]) }
@@ -1281,6 +1291,32 @@ public final class HTTPBackendPostShareService: BackendPostShareService {
             case .success:
                 return .success(())
             case .failure(let e):
+                // Duplicate share attempts should surface as "Already shared.".
+                // We can't rely on the Error to carry HTTP status/body, so we verify by querying for an existing row.
+                let existingPath = "/rest/v1/post_shares?select=id&post_id=eq.\(postID.uuidString)&owner_user_id=eq.\(uid)&recipient_user_id=eq.\(recipientUserID.lowercased())&limit=1"
+                let existing = await NetworkManager.shared.request(
+                    path: existingPath,
+                    method: "GET",
+                    query: nil,
+                    jsonBody: nil,
+                    headers: [:]
+                )
+
+                switch existing {
+                case .success(let data):
+                    do {
+                        let obj = try JSONSerialization.jsonObject(with: data, options: [])
+                        let rows = obj as? [[String: Any]] ?? []
+                        if rows.isEmpty == false {
+                            return .failure(BackendPostShareAlreadySharedError())
+                        }
+                    } catch {
+                        // fall through to original error
+                    }
+                case .failure:
+                    break
+                }
+
                 return .failure(e)
             }
         } catch {

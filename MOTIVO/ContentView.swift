@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260212_213900_CloseStage3_ContentView_InteractionShare
+// SCOPE: Close Stage 3 — Replace legacy iOS ShareLink in SessionRow.interactionRow with Share-to-follower sheet (Result-based BackendEnvironment.shared.shares.sharePost). ContentView only; no other UI/logic changes.
+// SEARCH-TOKEN: 20260212_213900_CloseStage3_ContentView_InteractionShare
+
 // CHANGE-ID: 20260212_091600_OwnerShare_BadgeCompose_FIX
 // SCOPE: Owner-Only Share — compose People '+' signal from follow requests + unread shares (no layout change)
 // SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_CV_AVATAR
@@ -1394,7 +1398,9 @@ fileprivate struct SessionRow: View {
     @State private var isCommentsPresented: Bool = false
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
-
+    @State private var isShareSheetPresented: Bool = false
+    @State private var isSharing: Bool = false
+    @State private var errorLine: String? = nil
 
     #if canImport(UIKit)
     @State private var remoteAvatar: UIImage? = nil
@@ -1793,7 +1799,9 @@ fileprivate struct SessionRow: View {
 
             // Share (owner-only)
             if viewerIsOwner {
-                ShareLink(item: shareText()) {
+                Button(action: {
+                    isShareSheetPresented = true
+                }) {
                     HStack(spacing: 6) {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -1802,7 +1810,7 @@ fileprivate struct SessionRow: View {
                     .font(.system(size: 18, weight: .semibold))
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Export")
+                .accessibilityLabel("Share")
             }
 
             Spacer(minLength: 0)
@@ -1826,6 +1834,9 @@ fileprivate struct SessionRow: View {
         .padding(.top, -2)
         .font(.subheadline)
         .accessibilityElement(children: .contain)
+        .sheet(isPresented: $isShareSheetPresented) {
+            ShareToFollowerSheet(postID: sessionID, isPresented: $isShareSheetPresented)
+        }
     }
 
     private func shareText() -> String {
@@ -2374,6 +2385,80 @@ fileprivate final class RemotePostAttachmentMetaCache {
 
 
 // Mirror of SessionRow (read-only)
+
+
+fileprivate struct ShareToFollowerSheet: View {
+    let postID: UUID
+    @Binding var isPresented: Bool
+
+    @State private var isSharing: Bool = false
+    @State private var errorLine: String? = nil
+
+    private var followersSorted: [String] {
+        Array(FollowStore.shared.followers).sorted()
+    }
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 12) {
+                if let errorLine {
+                    Text(errorLine)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .padding(.top, 8)
+                        .padding(.horizontal, 16)
+                }
+
+                if followersSorted.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No approved followers yet.")
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .padding(.top, 24)
+                    Spacer()
+                } else {
+                    List {
+                        ForEach(followersSorted, id: \.self) { followerID in
+                            Button {
+                                guard !isSharing else { return }
+                                errorLine = nil
+                                isSharing = true
+
+                                Task {
+                                    let result = await BackendEnvironment.shared.shares.sharePost(
+                                        postID: postID,
+                                        to: followerID
+                                    )
+
+                                    switch result {
+                                    case .success:
+                                        isPresented = false
+                                    case .failure:
+                                        errorLine = "Couldn’t share right now."
+                                        isSharing = false
+                                    }
+                                }
+                            } label: {
+                                Text(followerID)
+                            }
+                            .disabled(isSharing)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+            .navigationTitle("Share to")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        isPresented = false
+                    }
+                }
+            }
+        }
+    }
+}
+
 fileprivate struct RemotePostRowTwin: View {
     let post: BackendPost
     let scope: FeedScope
@@ -2849,19 +2934,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
             .buttonStyle(.plain)
             .accessibilityLabel("Comments")
 
-            // Share (owner-only)
-            if viewerIsOwner {
-                ShareLink(item: shareText()) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.up")
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
-                    .contentShape(Rectangle())
-                    .font(.system(size: 18, weight: .semibold))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Export")
-            }
+       
 
             Spacer(minLength: 0)
 
