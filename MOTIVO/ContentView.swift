@@ -1,6 +1,11 @@
-// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
-// SCOPE: Phase 15 Step 2 — render non-owner directory avatars in feed identity header + pass avatar_key into ProfilePeekView; shared cache lives in NetworkManager.swift (read-only).
+// CHANGE-ID: 20260212_091600_OwnerShare_BadgeCompose_FIX
+// SCOPE: Owner-Only Share — compose People '+' signal from follow requests + unread shares (no layout change)
 // SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_CV_AVATAR
+
+// CHANGE-ID: 20260212_091600_OwnerShare_BadgeCompose
+// SCOPE: Owner-Only Share — compose People '+' indicator from follow requests OR unread post_shares; add refresh triggers (initial task, pull-to-refresh, foreground). ContentView only.
+// SEARCH-TOKEN: 20260212_091600_OwnerShare_BadgeCompose
+
 
 // CHANGE-ID: 20260203_093500_FeedThumbPrewarmFix
 // SCOPE: Feed thumbnail & signed-URL prewarm (warm RemoteAttachmentPreview caches ahead of scroll) — ContentView only
@@ -257,7 +262,6 @@ struct ContentView: View {
 
   
 @ObservedObject private var followStore = FollowStore.shared
-
     var body: some View {
         SessionsRootView(userID: auth.currentUserID, backendUserID: auth.backendUserID)
             .id(auth.currentUserID ?? "nil-user")
@@ -274,6 +278,8 @@ fileprivate struct SessionsRootView: View {
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
 
+
+    @StateObject private var sharedWithYouStore = SharedWithYouStore()
     let userID: String?
     let backendUserID: String?
 
@@ -400,7 +406,7 @@ fileprivate struct SessionsRootView: View {
                     }
                 }
                 .onAppear { refreshStats() }
-                .onChange(of: statsRange) { _ in refreshStats() }
+                .onChange(of: statsRange) { _, _ in refreshStats() }
                 .onReceive(
                     NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)
                         .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
@@ -616,6 +622,7 @@ fileprivate struct SessionsRootView: View {
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
                     }
                     await followStore.refreshFromBackendIfPossible()
+                    await sharedWithYouStore.refreshUnreadShares()
                     await MainActor.run {
                         refreshStats()
                     }
@@ -712,7 +719,7 @@ fileprivate struct SessionsRootView: View {
                         .contentShape(Circle())
 
                         // Subtle "+" indicator for incoming follow requests (outside the pill)
-                        if !followStore.requests.isEmpty {
+                        if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares {
                             Text("+")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -862,6 +869,7 @@ Spacer()
             // Debounce lifecycle
             .task {
                 setUpDebounce()
+                await sharedWithYouStore.refreshUnreadShares()
             }
             .onChange(of: userID) { _, _ in
                 refreshStats()
@@ -873,11 +881,12 @@ Spacer()
                     .sink { debouncedQuery = $0 }
             }
 
-            .onChange(of: scenePhase) { phase in
+            .onChange(of: scenePhase) { _, phase in
                 // Phase 14.1: refresh incoming follow requests when returning to foreground (no polling)
                 guard phase == .active else { return }
                 Task { @MainActor in
                     await followStore.refreshFromBackendIfPossible()
+                    await sharedWithYouStore.refreshUnreadShares()
                 }
             }
             .appBackground()
@@ -1468,7 +1477,7 @@ fileprivate struct SessionRow: View {
         }
 
         // Fallback (mirrors legacy behavior when AuthManager hasn't populated currentUserID yet)
-        return try? PersistenceController.shared.currentUserID
+        return PersistenceController.shared.currentUserID
     }
 
     private func stableUUID(from string: String) -> UUID {
@@ -2718,7 +2727,7 @@ private var extraAttachmentCount: Int {
             let vid = (viewerUserID ?? "unknown")
             isSavedLocal = FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
         }
-        .onChange(of: model.attachmentRefs.count) { _ in
+        .onChange(of: model.attachmentRefs.count) { _, _ in
             updateAttachmentMetaCacheIfNeeded()
         }
         .accessibilityElement(children: .combine)
@@ -3000,7 +3009,7 @@ struct RemoteAttachmentPreview: View {
         )
         .accessibilityLabel("Attachment preview")
         .accessibilityIdentifier("row.attachmentPreview")
-        .onChange(of: cacheKey) { _ in
+        .onChange(of: cacheKey) { _, _ in
             // Defensive reset: if SwiftUI reuses the view instance across rows, never show stale media.
             signedURL = nil
             #if canImport(UIKit)

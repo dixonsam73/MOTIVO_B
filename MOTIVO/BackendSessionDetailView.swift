@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260212_081000_OwnerOnlyShare_BSDV
+// SCOPE: BSDV — hide Share action for non-owner posts (owner-only share control; no other UI/logic changes).
+// SEARCH-TOKEN: 20260212_081000_OwnerOnlyShare_BSDV
 // CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
 // SCOPE: Phase 15 Step 2 — render non-owner directory avatars in BackendSessionDetailView header using shared signed-URL + image caches (read-only).
 // SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_BSDV_AVATAR
@@ -714,16 +717,18 @@ struct BackendSessionDetailView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Open comments")
 
-            ShareLink(item: shareText()) {
-                HStack(spacing: 8) {
-                    Image(systemName: "square.and.arrow.up")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(Theme.Colors.secondaryText)
+            if viewerIsOwner {
+                ShareLink(item: shareText()) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
         .accessibilityElement(children: .contain)
     }

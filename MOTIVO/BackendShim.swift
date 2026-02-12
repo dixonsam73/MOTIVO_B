@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260212_083300_PostSharesService_GREEN
+// SCOPE: Add post_shares service surface (fetch/insert/mark-viewed/delete) and fix BackendEnvironment.follow/shares property placement.
+// SEARCH-TOKEN: 20260212_083300_PostSharesService_GREEN
+
 // CHANGE-ID: 20260206_104437_BackendShim_DisplayNameFromCoreData_972b4909
 // SCOPE: Include attachment display_name in backend posts.attachments, preferring Core Data Attachment.title; fall back to persisted per-ID store.
 // SEARCH-TOKEN: 20260206_092154_AttachDisplayNames_94a0e8
@@ -1152,6 +1156,184 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
     }
 }
 
+
+
+// MARK: - Post Shares (pointer-only "Shared with you")
+
+public struct BackendPostSharePointer: Codable, Hashable, Identifiable {
+    public let id: UUID
+    public let postID: UUID
+    public let ownerUserID: String
+    public let recipientUserID: String
+    public let createdAt: Date
+    public let viewedAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case postID = "post_id"
+        case ownerUserID = "owner_user_id"
+        case recipientUserID = "recipient_user_id"
+        case createdAt = "created_at"
+        case viewedAt = "viewed_at"
+    }
+}
+
+public protocol BackendPostShareService {
+    func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error>
+    func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error>
+    func markShareViewed(shareID: UUID) async -> Result<Void, Error>
+    func deleteShare(shareID: UUID) async -> Result<Void, Error>
+}
+
+public struct SimulatedPostShareService: BackendPostShareService {
+    public init() {}
+    public func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error> { .success([]) }
+    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error> { .success(()) }
+    public func markShareViewed(shareID: UUID) async -> Result<Void, Error> { .success(()) }
+    public func deleteShare(shareID: UUID) async -> Result<Void, Error> { .success(()) }
+}
+
+public final class HTTPBackendPostShareService: BackendPostShareService {
+    public init() {}
+
+    private func currentBackendUserID() -> String? {
+        #if DEBUG
+        if BackendEnvironment.shared.isConnected == false,
+           let override = UserDefaults.standard.string(forKey: "Debug.backendUserIDOverride")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
+           !override.isEmpty {
+            return override.lowercased()
+        }
+        #endif
+
+        // Prefer Supabase user ID if present; fall back to legacy backendUserID.
+        if let supa = UserDefaults.standard.string(forKey: "supabaseUserID_v1")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
+           !supa.isEmpty {
+            return supa.lowercased()
+        }
+        if let legacy = UserDefaults.standard.string(forKey: "backendUserID_v1")?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines),
+           !legacy.isEmpty {
+            return legacy.lowercased()
+        }
+        return nil
+    }
+
+    private func decoder() -> JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }
+
+    public func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error> {
+        guard let uid = currentBackendUserID(), !uid.isEmpty else {
+            return .success([])
+        }
+
+        let path = "/rest/v1/post_shares"
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "select", value: "*"),
+            URLQueryItem(name: "recipient_user_id", value: "eq.\(uid)"),
+            URLQueryItem(name: "viewed_at", value: "is.null"),
+            URLQueryItem(name: "order", value: "created_at.desc")
+        ]
+
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "GET",
+            query: query,
+            jsonBody: nil
+        )
+
+        switch result {
+        case .success(let data):
+            do {
+                let shares = try decoder().decode([BackendPostSharePointer].self, from: data)
+                return .success(shares)
+            } catch {
+                return .failure(error)
+            }
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error> {
+        guard let uid = currentBackendUserID(), !uid.isEmpty else {
+            return .failure(NSError(domain: "BackendPostShareService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing user ID"]))
+        }
+
+        let payload: [String: Any] = [
+            "post_id": postID.uuidString,
+            "owner_user_id": uid,
+            "recipient_user_id": recipientUserID.lowercased()
+        ]
+
+        do {
+            let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let result = await NetworkManager.shared.request(
+                path: "/rest/v1/post_shares",
+                method: "POST",
+                query: nil,
+                jsonBody: body,
+                headers: ["Prefer": "return=minimal"]
+            )
+
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func markShareViewed(shareID: UUID) async -> Result<Void, Error> {
+        let payload: [String: Any] = [
+            "viewed_at": ISO8601DateFormatter().string(from: Date())
+        ]
+
+        do {
+            let body = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let result = await NetworkManager.shared.request(
+                path: "/rest/v1/post_shares",
+                method: "PATCH",
+                query: [URLQueryItem(name: "id", value: "eq.\(shareID.uuidString)")],
+                jsonBody: body,
+                headers: ["Prefer": "return=minimal"]
+            )
+
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func deleteShare(shareID: UUID) async -> Result<Void, Error> {
+        let result = await NetworkManager.shared.request(
+            path: "/rest/v1/post_shares",
+            method: "DELETE",
+            query: [URLQueryItem(name: "id", value: "eq.\(shareID.uuidString)")],
+            jsonBody: nil,
+            headers: ["Prefer": "return=minimal"]
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+}
+
+
+
 public final class BackendEnvironment {
     public static let shared = BackendEnvironment()
 
@@ -1174,6 +1356,15 @@ public final class BackendEnvironment {
             return HTTPBackendFollowService()
         }
         return SimulatedFollowService()
+    }
+
+    public var shares: BackendPostShareService {
+        let mode = currentBackendMode()
+        let hasHTTPConfig = BackendConfig.isConfigured && (NetworkManager.shared.baseURL != nil)
+        if (mode == .backendPreview || mode == .backendConnected) && hasHTTPConfig {
+            return HTTPBackendPostShareService()
+        }
+        return SimulatedPostShareService()
     }
 
     private init() {}
