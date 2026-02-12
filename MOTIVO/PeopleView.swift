@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260212_115900_OwnerShare_PeopleView_SharedWithYou
+// SCOPE: PeopleView — add quiet 'Shared with you' section (recipient-side pointers) using Theme tokens. No other UI/layout changes.
+// SEARCH-TOKEN: 20260212_115900_OwnerShare_PeopleView_SharedWithYou
+
 // CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
 // SCOPE: PeopleView: plumb avatar_key into PeopleUserRow for directory search results + follow requests. No UI/layout changes.
 // SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
@@ -33,10 +37,15 @@ struct PeopleView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
 
+    // Owner-Only Share — unread share pointers (recipient-side)
+    @StateObject private var sharedWithYouStore = SharedWithYouStore()
+    @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
+
+
     @State private var searchText: String = ""
     @State private var searchResults: [DirectoryAccount] = []
     @State private var searchError: String? = nil
-@State private var requestDirectory: [String: DirectoryAccount] = [:]
+    @State private var requestDirectory: [String: DirectoryAccount] = [:]
 
     @State private var isSearching: Bool = false
     @Environment(\.colorScheme) private var colorScheme
@@ -49,6 +58,11 @@ struct PeopleView: View {
                     .font(Theme.Text.sectionHeader)
                     .foregroundStyle(Theme.Colors.secondaryText)
                 
+                // Shared with you (quiet, conditional)
+                if !sharedWithYouStore.unreadShares.isEmpty {
+                    sharedWithYouSection
+                }
+
                 // Incoming requests (defensive: never surface outgoing requests here)
                 if !incomingRequestIDs.isEmpty {
                     requestsSection
@@ -70,6 +84,20 @@ struct PeopleView: View {
             // In Backend Preview, this keeps requests/following fresh when opening People.
             await followStore.refreshFromBackendIfPossible()
         }
+        .task {
+            await sharedWithYouStore.refreshUnreadShares()
+        }
+        .task(id: shareOwnerIDs) {
+            let ids = shareOwnerIDs
+            guard !ids.isEmpty else {
+                shareOwnerDirectory = [:]
+                return
+            }
+            let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+            if case .success(let map) = result {
+                shareOwnerDirectory = map
+            }
+        }
         .task(id: incomingRequestIDs) {
             let ids = incomingRequestIDs
             guard !ids.isEmpty else {
@@ -84,6 +112,52 @@ struct PeopleView: View {
     }
 
     // MARK: - Sections
+
+    /// Unread share pointers — we resolve owner identities for a calm, minimal label.
+    private var shareOwnerIDs: [String] {
+        Array(Set(sharedWithYouStore.unreadShares.map { $0.ownerUserID }))
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
+    private var sharedWithYouSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Shared with you").sectionHeader()
+
+            ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \ .id) { share in
+                let acct = shareOwnerDirectory[share.ownerUserID]
+                Button {
+                    // Stage 3 note: opening BSDV is wired in the next step (ContentView listener).
+                    // For now we mark as viewed on tap and keep the UI calm and correct.
+                    Task {
+                        await sharedWithYouStore.markViewed(shareID: share.id)
+                    }
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                            Text(acct?.displayName ?? "Shared post")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Color.primary)
+
+                            Text(share.createdAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .contentShape(Rectangle())
+                    .padding(.vertical, Theme.Spacing.s)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .cardSurface()
+    }
+
 
     /// Phase 10D.1: Incoming requests only (defensive filter).
     /// Requests UI must never surface outgoing requests.
