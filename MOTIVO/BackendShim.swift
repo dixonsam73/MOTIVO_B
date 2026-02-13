@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260213_210205_ConnectedOfflineResilience_FeedSnapshot
+// SCOPE: Connected-mode Offline Resilience — preserve last-known feed snapshot on refresh failure; no UI changes; no backend/schema changes.
+// SEARCH-TOKEN: 20260213_210205_FeedSnapshotRetention
+
 // CHANGE-ID: 20260213_074012_ab077a83
 // SCOPE: Fix duplicate post_shares insert mapping: return typed .alreadyShared outcome (409/23505) and propagate to UI; no backend/schema changes.
 // SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
@@ -148,8 +152,6 @@ public final class BackendFeedStore: ObservableObject {
     // Phase 14.3H (A): Connected-mode sign-out must clear feed state.
     // This is a pure in-memory reset (no backend calls).
     public func resetForSignOut() {
-        minePosts = []
-        allPosts = []
         // NOTE: Do not clear directoryAccountsByUserID here.
         // Identity cache should survive in-flight refreshes to avoid non-owner name flips.
 
@@ -187,8 +189,6 @@ public final class BackendFeedStore: ObservableObject {
         lastTargetOwnerCount = targetOwners.count
         lastTargetOwnerSamples = Array(targetOwners.prefix(3))
 
-        minePosts = []
-        allPosts = []
         // NOTE: Do not clear directoryAccountsByUserID here.
         // Identity cache should survive in-flight refreshes to avoid non-owner name flips.
     }
@@ -218,11 +218,12 @@ public final class BackendFeedStore: ObservableObject {
         for (k, v) in accounts { merged[k] = v }
         directoryAccountsByUserID = merged
     }
-public func endFetchFailure(_ error: Error) {
+    public func endFetchFailure(_ error: Error) {
         isFetching = false
         lastError = error.localizedDescription
     }
-}
+    }
+
 
 public protocol BackendPublishService {
     func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error>

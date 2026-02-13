@@ -5,6 +5,10 @@
 //  Created by Samuel Dixon on 22/09/2025.
 //
 
+// CHANGE-ID: 20260213_210205_ConnectedOfflineResilience
+// SCOPE: Connected-mode Offline Resilience — do not sign out on offline/transient refresh failures; preserve zombie fix for true auth invalidation.
+// SEARCH-TOKEN: 20260213_210205_OfflineNotSignOut
+
 // CHANGE-ID: 20260129_133308_14_3H_B5_SignInRaceGuard
 // SCOPE: Phase 14.3H (B5) — Prevent foreground/launch session refresh from signing out during in-flight Supabase sign-in (missing refresh token race).
 // SEARCH-TOKEN: 20260129_133308_14_3H_B5_SignInRaceGuard
@@ -236,6 +240,49 @@ final class AuthManager: NSObject, ObservableObject {
         return ok
     }
 
+private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
+    // We must not treat offline / transient transport failures as auth invalidation.
+    // Supabase Swift may wrap URLError inside NSError userInfo; inspect recursively.
+    func extractNSErrorChain(_ error: Error) -> [NSError] {
+        var out: [NSError] = []
+        var current: NSError? = error as NSError
+        var seen = Set<ObjectIdentifier>()
+        while let ns = current {
+            let oid = ObjectIdentifier(ns)
+            if seen.contains(oid) { break }
+            seen.insert(oid)
+            out.append(ns)
+            if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+                current = underlying
+            } else {
+                break
+            }
+        }
+        return out
+    }
+
+    for ns in extractNSErrorChain(error) {
+        if ns.domain == NSURLErrorDomain {
+            switch ns.code {
+            case NSURLErrorNotConnectedToInternet,
+                 NSURLErrorTimedOut,
+                 NSURLErrorCannotFindHost,
+                 NSURLErrorCannotConnectToHost,
+                 NSURLErrorNetworkConnectionLost,
+                 NSURLErrorDNSLookupFailed,
+                 NSURLErrorInternationalRoamingOff,
+                 NSURLErrorCallIsActive,
+                 NSURLErrorDataNotAllowed,
+                 NSURLErrorSecureConnectionFailed:
+                return true
+            default:
+                break
+            }
+        }
+    }
+    return false
+}
+
     private func refreshSupabaseSession(reason: String) async -> Bool {
         #if canImport(Supabase)
         guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
@@ -276,6 +323,10 @@ final class AuthManager: NSObject, ObservableObject {
             return true
         } catch {
             NSLog("[Auth] refreshSupabaseSession FAILED: %@ reason=%@", String(describing: error), reason)
+            if isOfflineOrTransientNetworkError(error) {
+                NSLog("[Auth] refreshSupabaseSession: offline/transient failure; not signing out. reason=%@", reason)
+                return false
+            }
             await MainActor.run { self.signOut() }
             return false
         }
