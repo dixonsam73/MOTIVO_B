@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260213_070034_PostShares_DuplicateOutcome
+// SCOPE: Handle BackendPostShareOutcome.alreadyShared in SessionDetailView share sheet (show 'Already shared.'; no layout changes).
+// SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
+
 // CHANGE-ID: 20260212_222413_SDV_CloseStage3_ShareToFollower
 // SCOPE: SessionDetailView — Replace legacy iOS ShareLink with Share-to-follower sheet (owner-only).
 // SEARCH-TOKEN: 20260212_222413_SDV_CloseStage3_ShareToFollower
@@ -485,9 +489,15 @@ struct SessionDetailView: View {
                                 let result = await BackendEnvironment.shared.shares
                                     .sharePost(postID: postID, to: followerID)
                                 switch result {
-                                case .success:
-                                    isSharing = false
-                                    isShareSheetPresented = false
+                                case .success(let outcome):
+                                    switch outcome {
+                                    case .shared:
+                                        isSharing = false
+                                        isShareSheetPresented = false
+                                    case .alreadyShared:
+                                        isSharing = false
+                                        errorLine = "Already shared."
+                                    }
                                 case .failure:
                                     isSharing = false
                                     errorLine = "Couldn’t share right now."

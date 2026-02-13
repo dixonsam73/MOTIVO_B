@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260213_074012_ab077a83
+// SCOPE: Fix duplicate post_shares insert mapping: return typed .alreadyShared outcome (409/23505) and propagate to UI; no backend/schema changes.
+// SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
+
 // CHANGE-ID: 20260212_224356_PostShares_AlreadyShared
 // SCOPE: Map duplicate post_shares insert (409/23505) to BackendPostShareAlreadySharedError for UI "Already shared." handling.
 // SEARCH-TOKEN: 20260212_224356_PostShares_AlreadyShared
@@ -1184,9 +1188,14 @@ public struct BackendPostSharePointer: Codable, Hashable, Identifiable {
 
 public protocol BackendPostShareService {
     func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error>
-    func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error>
+    func sharePost(postID: UUID, to recipientUserID: String) async -> Result<BackendPostShareOutcome, Error>
     func markShareViewed(shareID: UUID) async -> Result<Void, Error>
     func deleteShare(shareID: UUID) async -> Result<Void, Error>
+}
+
+public enum BackendPostShareOutcome: Equatable {
+    case shared
+    case alreadyShared
 }
 
 public struct BackendPostShareAlreadySharedError: LocalizedError {
@@ -1198,7 +1207,7 @@ public struct BackendPostShareAlreadySharedError: LocalizedError {
 public struct SimulatedPostShareService: BackendPostShareService {
     public init() {}
     public func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error> { .success([]) }
-    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error> { .success(()) }
+    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<BackendPostShareOutcome, Error> { .success(.shared) }
     public func markShareViewed(shareID: UUID) async -> Result<Void, Error> { .success(()) }
     public func deleteShare(shareID: UUID) async -> Result<Void, Error> { .success(()) }
 }
@@ -1266,7 +1275,7 @@ public final class HTTPBackendPostShareService: BackendPostShareService {
         }
     }
 
-    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<Void, Error> {
+    public func sharePost(postID: UUID, to recipientUserID: String) async -> Result<BackendPostShareOutcome, Error> {
         guard let uid = currentBackendUserID(), !uid.isEmpty else {
             return .failure(NSError(domain: "BackendPostShareService", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing user ID"]))
         }
@@ -1289,32 +1298,21 @@ public final class HTTPBackendPostShareService: BackendPostShareService {
 
             switch result {
             case .success:
-                return .success(())
-            case .failure(let e):
-                // Duplicate share attempts should surface as "Already shared.".
-                // We can't rely on the Error to carry HTTP status/body, so we verify by querying for an existing row.
-                let existingPath = "/rest/v1/post_shares?select=id&post_id=eq.\(postID.uuidString)&owner_user_id=eq.\(uid)&recipient_user_id=eq.\(recipientUserID.lowercased())&limit=1"
-                let existing = await NetworkManager.shared.request(
-                    path: existingPath,
-                    method: "GET",
-                    query: nil,
-                    jsonBody: nil,
-                    headers: [:]
-                )
+                return .success(.shared)
 
-                switch existing {
-                case .success(let data):
-                    do {
-                        let obj = try JSONSerialization.jsonObject(with: data, options: [])
-                        let rows = obj as? [[String: Any]] ?? []
-                        if rows.isEmpty == false {
-                            return .failure(BackendPostShareAlreadySharedError())
+            case .failure(let e):
+                // Duplicate share attempts should surface as a non-fatal "Already shared." outcome.
+                if case NetworkManager.NetworkError.httpError(let status, let bodyString) = e, status == 409 {
+                    if let bodyString, let bodyData = bodyString.data(using: .utf8) {
+                        if let obj = try? JSONSerialization.jsonObject(with: bodyData, options: []),
+                           let dict = obj as? [String: Any] {
+                            let code = dict["code"] as? String
+                            let message = dict["message"] as? String
+                            if code == "23505" || (message?.contains("post_shares_unique") == true) {
+                                return .success(.alreadyShared)
+                            }
                         }
-                    } catch {
-                        // fall through to original error
                     }
-                case .failure:
-                    break
                 }
 
                 return .failure(e)

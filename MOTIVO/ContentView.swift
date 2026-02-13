@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260213_070034_PostShares_DuplicateOutcome
+// SCOPE: Handle BackendPostShareOutcome.alreadyShared in Share sheet (show 'Already shared.'; keep existing styling).
+// SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
+
 // CHANGE-ID: 20260212_213900_CloseStage3_ContentView_InteractionShare
 // SCOPE: Close Stage 3 — Replace legacy iOS ShareLink in SessionRow.interactionRow with Share-to-follower sheet (Result-based BackendEnvironment.shared.shares.sharePost). ContentView only; no other UI/logic changes.
 // SEARCH-TOKEN: 20260212_213900_CloseStage3_ContentView_InteractionShare
@@ -2431,8 +2435,14 @@ fileprivate struct ShareToFollowerSheet: View {
                                     )
 
                                     switch result {
-                                    case .success:
-                                        isPresented = false
+                                    case .success(let outcome):
+                                        switch outcome {
+                                        case .shared:
+                                            isPresented = false
+                                        case .alreadyShared:
+                                            errorLine = "Already shared."
+                                            isSharing = false
+                                        }
                                     case .failure:
                                         errorLine = "Couldn’t share right now."
                                         isSharing = false
