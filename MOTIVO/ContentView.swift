@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260213_121200_SharePicker_RecipientParity_ContentView
+// SCOPE: Share UI polish — recipient picker parity in ContentView ShareToFollowerSheet: render identity rows (avatar + display name + @handle), reuse PeopleUserRow + AccountDirectoryService; A–Z sort by display name with fallback; no backend/schema changes.
+// SEARCH-TOKEN: 20260213_121200_SharePicker_RecipientParity_ContentView
+
 // CHANGE-ID: 20260213_070034_PostShares_DuplicateOutcome
 // SCOPE: Handle BackendPostShareOutcome.alreadyShared in Share sheet (show 'Already shared.'; keep existing styling).
 // SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
@@ -2398,8 +2402,60 @@ fileprivate struct ShareToFollowerSheet: View {
     @State private var isSharing: Bool = false
     @State private var errorLine: String? = nil
 
-    private var followersSorted: [String] {
-        Array(FollowStore.shared.followers).sorted()
+    @State private var directory: [String: DirectoryAccount] = [:]
+    @State private var isDirectoryLoading: Bool = false
+
+    private var followerIDs: [String] {
+        Array(FollowStore.shared.followers)
+    }
+
+    private func normalized(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A–Z by display name (case/diacritic insensitive), with fallback:
+    /// 1) displayName
+    /// 2) handle (accountID)
+    /// 3) stable internal ID (never rendered)
+    private func sortKey(for userID: String) -> (String, String, String) {
+        if let acct = directory[userID] {
+            let name = normalized(acct.displayName)
+            let handle = normalized(acct.accountID ?? "")
+            let primary = !name.isEmpty ? name : (!handle.isEmpty ? handle : normalized(userID))
+            return (primary, handle, normalized(userID))
+        } else {
+            // Directory missing: keep stable ordering but never render raw IDs.
+            return ("", "", normalized(userID))
+        }
+    }
+
+    private var followerIDsSorted: [String] {
+        followerIDs.sorted { a, b in
+            let ka = sortKey(for: a)
+            let kb = sortKey(for: b)
+            if ka.0 != kb.0 { return ka.0 < kb.0 }
+            if ka.1 != kb.1 { return ka.1 < kb.1 }
+            return ka.2 < kb.2
+        }
+    }
+
+    private func loadDirectoryIfNeeded() async {
+        guard !isDirectoryLoading else { return }
+        let ids = followerIDs
+        guard !ids.isEmpty else { return }
+
+        isDirectoryLoading = true
+        defer { isDirectoryLoading = false }
+
+        let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+        switch result {
+        case .success(let map):
+            directory = map
+        case .failure:
+            // UI-only polish: keep the picker functional, but never show raw IDs.
+            directory = [:]
+        }
     }
 
     var body: some View {
@@ -2413,7 +2469,7 @@ fileprivate struct ShareToFollowerSheet: View {
                         .padding(.horizontal, 16)
                 }
 
-                if followersSorted.isEmpty {
+                if followerIDsSorted.isEmpty {
                     VStack(spacing: 8) {
                         Text("No approved followers yet.")
                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -2422,8 +2478,8 @@ fileprivate struct ShareToFollowerSheet: View {
                     Spacer()
                 } else {
                     List {
-                        ForEach(followersSorted, id: \.self) { followerID in
-                            Button {
+                        ForEach(followerIDsSorted, id: \.self) { followerID in
+                            Button(action: {
                                 guard !isSharing else { return }
                                 errorLine = nil
                                 isSharing = true
@@ -2448,9 +2504,18 @@ fileprivate struct ShareToFollowerSheet: View {
                                         isSharing = false
                                     }
                                 }
-                            } label: {
-                                Text(followerID)
+                            }) {
+                                let acct = directory[followerID]
+                                PeopleUserRow(
+                                    userID: followerID,
+                                    overrideDisplayName: acct?.displayName ?? "User",
+                                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                                    overrideAvatarKey: acct?.avatarKey
+                                ) {
+                                    EmptyView()
+                                }
                             }
+                            .buttonStyle(.plain)
                             .disabled(isSharing)
                         }
                     }
@@ -2464,6 +2529,9 @@ fileprivate struct ShareToFollowerSheet: View {
                         isPresented = false
                     }
                 }
+            }
+            .task {
+                await loadDirectoryIfNeeded()
             }
         }
     }

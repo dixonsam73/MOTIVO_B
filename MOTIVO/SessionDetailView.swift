@@ -1,9 +1,13 @@
-// CHANGE-ID: 20260213_070034_PostShares_DuplicateOutcome
-// SCOPE: Handle BackendPostShareOutcome.alreadyShared in SessionDetailView share sheet (show 'Already shared.'; no layout changes).
+// CHANGE-ID: 20260213_124500_SharePicker_RecipientParity_SessionDetailView_FixResult
+// SCOPE: Share picker recipient rows parity in SessionDetailView (fix resolveAccounts Result handling).
+// SEARCH-TOKEN: 20260213_123800_SharePicker_RecipientParity_SessionDetailView
+
+// CHANGE-ID: 20260213_124500_SharePicker_RecipientParity_SessionDetailView_FixResult
+// SCOPE: Share picker recipient rows parity in SessionDetailView (fix resolveAccounts Result handling).
 // SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
 
-// CHANGE-ID: 20260212_222413_SDV_CloseStage3_ShareToFollower
-// SCOPE: SessionDetailView — Replace legacy iOS ShareLink with Share-to-follower sheet (owner-only).
+// CHANGE-ID: 20260213_124500_SharePicker_RecipientParity_SessionDetailView_FixResult
+// SCOPE: Share picker recipient rows parity in SessionDetailView (fix resolveAccounts Result handling).
 // SEARCH-TOKEN: 20260212_222413_SDV_CloseStage3_ShareToFollower
 
 ////////
@@ -18,8 +22,8 @@
 //  v7.8 Stage 2 — Fix AddEditSessionView initializer call
 //  - Replace outdated initializer that passed isPresented / onSaved with current form.
 //
-// CHANGE-ID: 20251227_212500-e51e0181
-// SCOPE: Type-checker fix (extract subviews + AnyView erasure) + compile errors fix (DEBUG block + AttachmentViewerView arg order)
+// CHANGE-ID: 20260213_124500_SharePicker_RecipientParity_SessionDetailView_FixResult
+// SCOPE: Share picker recipient rows parity in SessionDetailView (fix resolveAccounts Result handling).
 import SwiftUI
 import CoreData
 import UIKit
@@ -472,56 +476,12 @@ struct SessionDetailView: View {
             }
         }
         .sheet(isPresented: $isShareSheetPresented) {
-            NavigationView {
-                let followers = Array(FollowStore.shared.followers).sorted()
-                List {
-                    ForEach(followers, id: \.self) { followerID in
-                        Button {
-                            guard !isSharing else { return }
-                            errorLine = nil
-                            isSharing = true
-                            Task {
-                                guard let postID = sessionUUID else {
-                                    isSharing = false
-                                    errorLine = "Couldn’t share right now."
-                                    return
-                                }
-                                let result = await BackendEnvironment.shared.shares
-                                    .sharePost(postID: postID, to: followerID)
-                                switch result {
-                                case .success(let outcome):
-                                    switch outcome {
-                                    case .shared:
-                                        isSharing = false
-                                        isShareSheetPresented = false
-                                    case .alreadyShared:
-                                        isSharing = false
-                                        errorLine = "Already shared."
-                                    }
-                                case .failure:
-                                    isSharing = false
-                                    errorLine = "Couldn’t share right now."
-                                }
-                            }
-                        } label: {
-                            Text(followerID)
-                        }
-                    }
-                }
-                .navigationTitle("Share to")
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Close") { isShareSheetPresented = false }
-                    }
-                }
-                .overlay(alignment: .bottom) {
-                    if let errorLine {
-                        Text(errorLine)
-                            .font(.footnote)
-                            .padding()
-                    }
-                }
-            }
+            ShareToFollowerSheet_SDV(
+                isPresented: $isShareSheetPresented,
+                postID: sessionUUID,
+                isSharing: $isSharing,
+                errorLine: $errorLine
+            )
         }
         #if DEBUG
         .sheet(isPresented: $isDebugPresented) {
@@ -1367,3 +1327,120 @@ fileprivate struct SessionIdentityHeader: View {
         .padding(.bottom, 2)
     }
 }
+
+// MARK: - Share recipient picker (SessionDetailView)
+
+fileprivate struct ShareToFollowerSheet_SDV: View {
+    @Binding var isPresented: Bool
+    let postID: UUID?
+
+    @Binding var isSharing: Bool
+    @Binding var errorLine: String?
+
+    @State private var directory: [String: DirectoryAccount] = [:]
+    @State private var didLoadDirectory: Bool = false
+
+    private var followerIDs: [String] {
+        Array(FollowStore.shared.followers)
+    }
+
+    private func foldedKey(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+    }
+
+    private func sortTuple(for userID: String) -> (String, String, String) {
+        let acct = directory[userID]
+        let displayName = acct?.displayName ?? ""
+        let handle = acct?.accountID ?? ""
+        // Locked fallback order:
+        // 1) display name
+        // 2) handle
+        // 3) stable internal ID (never rendered)
+        return (foldedKey(displayName), foldedKey(handle), foldedKey(userID))
+    }
+
+    private var sortedFollowerIDs: [String] {
+        followerIDs.sorted { a, b in
+            let ka = sortTuple(for: a)
+            let kb = sortTuple(for: b)
+            if ka.0 != kb.0 { return ka.0 < kb.0 }
+            if ka.1 != kb.1 { return ka.1 < kb.1 }
+            return ka.2 < kb.2
+        }
+    }
+
+    var body: some View {
+        NavigationView {
+            List {
+                ForEach(sortedFollowerIDs, id: \.self) { followerID in
+                    Button(action: {
+                        guard !isSharing else { return }
+                        errorLine = nil
+                        isSharing = true
+                        Task {
+                            guard let postID else {
+                                isSharing = false
+                                errorLine = "Couldn’t share right now."
+                                return
+                            }
+                            let result = await BackendEnvironment.shared.shares
+                                .sharePost(postID: postID, to: followerID)
+                            switch result {
+                            case .success(let outcome):
+                                switch outcome {
+                                case .shared:
+                                    isSharing = false
+                                    isPresented = false
+                                case .alreadyShared:
+                                    isSharing = false
+                                    errorLine = "Already shared."
+                                }
+                            case .failure:
+                                isSharing = false
+                                errorLine = "Couldn’t share right now."
+                            }
+                        }
+                    }) {
+                        let acct = directory[followerID]
+                        PeopleUserRow(
+                            userID: followerID,
+                            overrideDisplayName: acct?.displayName ?? "User",
+                            overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                            overrideAvatarKey: acct?.avatarKey
+                        ) {
+                            EmptyView()
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Share to")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") { isPresented = false }
+                }
+            }
+            .overlay(alignment: .bottom) {
+                if let errorLine {
+                    Text(errorLine)
+                        .font(.footnote)
+                        .padding()
+                }
+            }
+        }
+        .onAppear {
+            guard !didLoadDirectory else { return }
+            didLoadDirectory = true
+            Task {
+                let ids = followerIDs
+                guard !ids.isEmpty else { return }
+                let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+                if case .success(let map) = result {
+                    await MainActor.run {
+                        self.directory = map
+                    }
+                }
+            }
+        }
+    }
+}
+
