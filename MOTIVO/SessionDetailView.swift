@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
+// SCOPE: SessionDetailView: ShareToFollowerSheet_SDV mirrors FollowingList nav (inline title + chevron back) and list background parity. No logic changes.
+// SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
+
 // CHANGE-ID: 20260213_124500_SharePicker_RecipientParity_SessionDetailView_FixResult
 // SCOPE: Share picker recipient rows parity in SessionDetailView (fix resolveAccounts Result handling).
 // SEARCH-TOKEN: 20260213_123800_SharePicker_RecipientParity_SessionDetailView
@@ -1330,6 +1334,10 @@ fileprivate struct SessionIdentityHeader: View {
 
 // MARK: - Share recipient picker (SessionDetailView)
 
+// CHANGE-ID: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
+// SCOPE: ShareToFollowerSheet_SDV: mirror FollowingList nav chrome (inline title + chevron back) and list background parity.
+// SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
+
 fileprivate struct ShareToFollowerSheet_SDV: View {
     @Binding var isPresented: Bool
     let postID: UUID?
@@ -1370,7 +1378,7 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             List {
                 ForEach(sortedFollowerIDs, id: \.self) { followerID in
                     Button(action: {
@@ -1413,13 +1421,19 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
                     }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .appBackground()
             .navigationTitle("Share to")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") { isPresented = false }
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { isPresented = false }) {
+                        Image(systemName: "chevron.left")
+                    }
                 }
             }
-            .overlay(alignment: .bottom) {
+.overlay(alignment: .bottom) {
                 if let errorLine {
                     Text(errorLine)
                         .font(.footnote)

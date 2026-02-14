@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260214_103700_Etudes_ShareTo_InlineNav
+// SCOPE: ContentView: ShareToFollowerSheet mirrors FollowingList nav (inline title + chevron back) and list background parity. No logic changes.
+// SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_InlineNav
+
 // CHANGE-ID: 20260213_121200_SharePicker_RecipientParity_ContentView
 // SCOPE: Share UI polish — recipient picker parity in ContentView ShareToFollowerSheet: render identity rows (avatar + display name + @handle), reuse PeopleUserRow + AccountDirectoryService; A–Z sort by display name with fallback; no backend/schema changes.
 // SEARCH-TOKEN: 20260213_121200_SharePicker_RecipientParity_ContentView
@@ -2395,6 +2399,12 @@ fileprivate final class RemotePostAttachmentMetaCache {
 // Mirror of SessionRow (read-only)
 
 
+
+
+// CHANGE-ID: 20260214_103700_Etudes_ShareTo_InlineNav
+// SCOPE: ShareToFollowerSheet: mirror FollowingList nav chrome (inline title + chevron back) and list background parity.
+// SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_InlineNav
+
 fileprivate struct ShareToFollowerSheet: View {
     let postID: UUID
     @Binding var isPresented: Bool
@@ -2459,7 +2469,7 @@ fileprivate struct ShareToFollowerSheet: View {
     }
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             VStack(spacing: 12) {
                 if let errorLine {
                     Text(errorLine)
@@ -2520,17 +2530,21 @@ fileprivate struct ShareToFollowerSheet: View {
                         }
                     }
                     .listStyle(.plain)
+                    .scrollContentBackground(.hidden)
+                    .appBackground()
                 }
             }
+            .appBackground()
             .navigationTitle("Share to")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        isPresented = false
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button(action: { isPresented = false }) {
+                        Image(systemName: "chevron.left")
                     }
                 }
             }
-            .task {
+.task {
                 await loadDirectoryIfNeeded()
             }
         }
