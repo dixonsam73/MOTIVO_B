@@ -1824,7 +1824,7 @@ fileprivate struct SessionRow: View {
                 }
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: hasComments ? "text.bubble.fill" : "bubble.right")
+                    Image(systemName: hasComments ? "text.bubble" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
@@ -3064,7 +3064,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
                 isRemoteCommentsPresented = true
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: CommentPresenceStore.shared.hasComments(postID: post.id) ? "text.bubble.fill" : "bubble.right")
+                    Image(systemName: CommentPresenceStore.shared.hasComments(postID: post.id) ? "text.bubble" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))

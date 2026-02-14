@@ -1061,7 +1061,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: hasComments ? "text.bubble.fill" : "bubble.right")
+                    Image(systemName: hasComments ? "text.bubble" : "bubble.right")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(Theme.Colors.secondaryText)
 
