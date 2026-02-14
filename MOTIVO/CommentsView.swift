@@ -1,5 +1,6 @@
-// CHANGE-ID: 20260214_153800_8H_CommentsOwnerSendDefault
-// SCOPE: Enable owner composer send in connected comments by defaulting to Respond-to-commenters when commenters exist; no identity wiring.
+// CHANGE-ID: 20260214_201500_CommentsUIIdentityHeaderParity_ReplyDedupe_VerticalRhythm
+// SCOPE: Comments UI polish — reply button only on last author-run + improved vertical rhythm; UI-only
+// SEARCH-TOKEN: 20260214_120000_CommentsUIIdentityHeaderParity_Final
 
 import SwiftUI
 import CoreData
@@ -19,7 +20,9 @@ public struct CommentsView: View {
     @State private var replyTargetDisplayName: String? = nil
     
     @State private var isRespondToCommentersMode: Bool = false
-    
+
+    // UI-only: read-through identity cache for comment rows (displayName/location/avatarKey). Never shows raw IDs.
+    @State private var directoryAccounts: [String: DirectoryAccount] = [:]
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var scheme
@@ -256,46 +259,35 @@ public struct CommentsView: View {
     }
     
     // MARK: - Relative time formatting
-    private func relativeTimestamp(from date: Date, now: Date = Date()) -> String {
+    private static let timeOnlyFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.timeStyle = .short
+        f.dateStyle = .none
+        return f
+    }()
+
+    private static let dayMonthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.timeZone = .current
+        f.dateFormat = "d MMM"
+        return f
+    }()
+
+    private static func relativeTimestamp(from date: Date, now: Date = Date()) -> String {
         let calendar = Calendar.current
-        let tzAwareNow = now
-        let tzAwareDate = date
-        
-        // Today / Yesterday using calendar semantics (DST-safe)
-        if calendar.isDateInToday(tzAwareDate) {
-            let tf = DateFormatter()
-            tf.locale = Locale.autoupdatingCurrent
-            tf.timeZone = TimeZone.autoupdatingCurrent
-            tf.dateFormat = "HH:mm"
-            return "Today at \(tf.string(from: tzAwareDate))"
+
+        // Variant A:
+        // - Same day as now → time only (no "Today")
+        // - Different day → "d MMM" + time
+        if calendar.isDate(date, inSameDayAs: now) {
+            return timeOnlyFormatter.string(from: date)
+        } else {
+            let d = dayMonthFormatter.string(from: date)
+            let t = timeOnlyFormatter.string(from: date)
+            return "\(d) \(t)"
         }
-        if calendar.isDateInYesterday(tzAwareDate) {
-            return "Yesterday"
-        }
-        
-        // Compare day boundaries to avoid 24h-delta pitfalls (DST/clock changes)
-        let startOfNow = calendar.startOfDay(for: tzAwareNow)
-        let startOfDate = calendar.startOfDay(for: tzAwareDate)
-        guard let dayDiff = calendar.dateComponents([.day], from: startOfDate, to: startOfNow).day else {
-            let df = DateFormatter()
-            df.locale = Locale.autoupdatingCurrent
-            df.timeZone = TimeZone.autoupdatingCurrent
-            df.dateFormat = "d MMM yyyy"
-            return df.string(from: tzAwareDate)
-        }
-        
-        if dayDiff < 7 {
-            return "\(dayDiff) days ago"
-        }
-        if dayDiff < 30 {
-            let weeks = max(1, dayDiff / 7)
-            return weeks == 1 ? "A week ago" : "\(weeks) weeks ago"
-        }
-        let df = DateFormatter()
-        df.locale = Locale.autoupdatingCurrent
-        df.timeZone = TimeZone.autoupdatingCurrent
-        df.dateFormat = "d MMM yyyy"
-        return df.string(from: tzAwareDate)
     }
     
     public var body: some View {
@@ -384,10 +376,37 @@ public struct CommentsView: View {
                 }
             }()
             
-            return AnyView(
+                        let replyEligibleCommentIDs: Set<UUID> = {
+                guard isOwnerViewer, let ownerID, let viewerID else { return [] }
+                guard ownerID == viewerID else { return [] }
+                return eligibleReplyCommentIDsLocal(comments, ownerUserID: ownerID)
+            }()
+
+return AnyView(
                 List {
-                ForEach(comments) { comment in
-                    commentRowLocal(comment: comment, ownerID: ownerID, viewerID: viewerID, sessionID: sid)
+                ForEach(Array(comments.enumerated()), id: \.element.id) { idx, comment in
+                    let authorID = (store.authorUserID(for: comment.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let prevAuthorID: String = {
+                        guard idx > 0 else { return "" }
+                        let prev = comments[idx - 1]
+                        return (store.authorUserID(for: prev.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    }()
+                    let nextAuthorID: String = {
+                        guard idx + 1 < comments.count else { return "" }
+                        let next = comments[idx + 1]
+                        return (store.authorUserID(for: next.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    }()
+                    let isStartOfRun = authorID.isEmpty ? true : (prevAuthorID != authorID)
+                    let isEndOfRun = authorID.isEmpty ? true : (nextAuthorID != authorID)
+                    commentRowLocal(
+                        comment: comment,
+                        ownerID: ownerID,
+                        viewerID: viewerID,
+                        sessionID: sid,
+                        isStartOfAuthorRun: isStartOfRun,
+                        isEndOfAuthorRun: isEndOfRun,
+                        replyEligibleCommentIDs: replyEligibleCommentIDs
+                    )
                 }
             }
             .listStyle(.plain)
@@ -401,6 +420,9 @@ public struct CommentsView: View {
             )
             .padding(.horizontal)
             .padding(.top, Theme.Spacing.m)
+            .task(id: directoryKey(for: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])) {
+                await hydrateDirectoryIfNeeded(userIDs: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])
+            }
             .accessibilitySortPriority(1)
             )
             
@@ -415,10 +437,34 @@ public struct CommentsView: View {
                 }
             }()
             
-            return AnyView(
+                        let replyEligibleCommentIDs: Set<UUID> = {
+                guard isOwnerViewer else { return [] }
+                return eligibleReplyCommentIDsBackend(rows, ownerUserID: ownerUserID)
+            }()
+
+return AnyView(
                 List {
-                ForEach(rows) { row in
-                    commentRowBackend(row: row, postID: pid, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
+                ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                    let authorID = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let prevAuthorID: String = {
+                        guard idx > 0 else { return "" }
+                        return rows[idx - 1].authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    }()
+                    let nextAuthorID: String = {
+                        guard idx + 1 < rows.count else { return "" }
+                        return rows[idx + 1].authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    }()
+                    let isStartOfRun = authorID.isEmpty ? true : (prevAuthorID != authorID)
+                    let isEndOfRun = authorID.isEmpty ? true : (nextAuthorID != authorID)
+                    commentRowBackend(
+                        row: row,
+                        postID: pid,
+                        ownerUserID: ownerUserID,
+                        viewerUserID: viewerUserID,
+                        isStartOfAuthorRun: isStartOfRun,
+                        isEndOfAuthorRun: isEndOfRun,
+                        replyEligibleCommentIDs: replyEligibleCommentIDs
+                    )
                 }
             }
             .listStyle(.plain)
@@ -432,105 +478,361 @@ public struct CommentsView: View {
             )
             .padding(.horizontal)
             .padding(.top, Theme.Spacing.m)
+            .task(id: directoryKey(for: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])) {
+                await hydrateDirectoryIfNeeded(userIDs: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])
+            }
             .accessibilitySortPriority(1)
             )
         }
     }
     
     
-    private func commentRowLocal(comment: Comment, ownerID: String?, viewerID: String?, sessionID: UUID) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-            
-            HStack(alignment: .center, spacing: 8) {
-                // Avatar (32pt circle) — try to use current user's avatar when author is "You"; else show initials
-                Group {
-#if canImport(UIKit)
-                    if comment.authorName == "You", let ui = ProfileStore.avatarImage(for: (try? PersistenceController.shared.currentUserID) ?? nil) {
-                        Image(uiImage: ui).resizable().scaledToFill()
-                    } else {
-                        let initials: String = {
-                            let name = comment.authorName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            let parts = name.split(separator: " ")
-                            if parts.count == 1 { return String(parts[0].prefix(1)).uppercased() }
-                            let first = parts.first?.first.map { String($0).uppercased() } ?? "U"
-                            let last = parts.last?.first.map { String($0).uppercased() } ?? ""
-                            return (first + last).isEmpty ? "U" : (first + last)
-                        }()
-                        ZStack {
-                            Circle().fill(Color.gray.opacity(0.2))
-                            Text(initials)
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                    }
-#else
-                    ZStack {
-                        Circle().fill(Color.gray.opacity(0.2))
-                        Text("U").font(.system(size: 12, weight: .bold)).foregroundStyle(.secondary)
-                    }
-#endif
-                }
-                .frame(width: 32, height: 32)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
-                
-                // Name and inline timestamp on one line
-                HStack(spacing: 6) {
-                    let displayName: String = {
-                        if comment.authorName == "You" {
-#if canImport(CoreData)
-                            let ctx = PersistenceController.shared.container.viewContext
-                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                            req.fetchLimit = 1
-                            if let profile = try? ctx.fetch(req).first, let n = profile.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                return n
-                            }
-#endif
-                            return "You"
-                        } else {
-                            return comment.authorName
-                        }
-                    }()
-                    Text(displayName)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Color.primary.opacity(0.9))
-                    Text("•")
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    Text(relativeTimestamp(from: comment.timestamp))
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                    
-                    let authorID = store.authorUserID(for: comment.id)
-                    let ownerIDForUI = ownerID ?? ""
-                    let viewerIDForUI = viewerID ?? ""
-                    let isViewerOwner = (!ownerIDForUI.isEmpty && ownerIDForUI == viewerIDForUI)
-                    let isAuthorOwner = (authorID == ownerIDForUI)
-                    
-                    if isViewerOwner, let authorID, !authorID.isEmpty, !isAuthorOwner {
-                        Button {
-                            isRespondToCommentersMode = false
-                            replyTargetUserID = authorID
-                            let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
-                            replyTargetDisplayName = (name == "You") ? "Commenter" : name
-                        } label: {
-                            Text("· Reply")
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Reply to commenter")
-                    }
-                }
-                
-                Spacer(minLength: 0)
+    
+    // MARK: - Directory identity hydration (UI-only)
+
+    private func normalizedUserID(_ raw: String?) -> String? {
+        guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !s.isEmpty else { return nil }
+        return s
+    }
+
+    private func directoryKey(for userIDs: [String]) -> String {
+        let norm = userIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }
+        return Array(Set(norm)).sorted().joined(separator: ",")
+    }
+
+    private func hydrateDirectoryIfNeeded(userIDs: [String]) async {
+        let ids = Array(Set(userIDs
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty }))
+        guard !ids.isEmpty else { return }
+
+        let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids, forceRefresh: false)
+        switch result {
+        case .success(let map):
+            // Merge into local state (fail-closed: keep existing on error).
+            var merged = directoryAccounts
+            for (k, v) in map {
+                let nk = k.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !nk.isEmpty { merged[nk] = v }
             }
-            
-            Text(comment.text)
-                .font(.body)
-                .foregroundStyle(Color.primary.opacity(0.92))
-                .fixedSize(horizontal: false, vertical: true)
-            
+            directoryAccounts = merged
+        case .failure:
+            break
+        }
+    }
+
+    private func directoryAccount(for userID: String?) -> DirectoryAccount? {
+        guard let id = normalizedUserID(userID) else { return nil }
+        return directoryAccounts[id]
+    }
+
+    private func safeDisplayName(_ s: String?) -> String {
+        let trimmed = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "User" : trimmed
+    }
+
+    private func safeLocation(_ s: String?) -> String {
+        let trimmed = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed
+    }
+
+    // MARK: - Comment identity header (People row parity; no navigation; fail-closed)
+
+    private struct CommentIdentityHeader: View {
+        let authorUserID: String?
+        let viewerUserID: String?
+        let fallbackDisplayName: String
+        let directoryAccount: DirectoryAccount?
+        let timestamp: Date
+        let showsReplyAction: Bool
+        let onReply: (() -> Void)?
+
+        @Environment(\.colorScheme) private var scheme
+
+        @State private var remoteAvatarImage: UIImage?
+
+        private func initials(from name: String) -> String {
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty { return "U" }
+            let words = trimmed
+                .components(separatedBy: .whitespacesAndNewlines)
+                .filter { !$0.isEmpty }
+            if words.isEmpty { return "U" }
+            if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+            let first = words.first?.first.map { String($0).uppercased() } ?? ""
+            let last = words.last?.first.map { String($0).uppercased() } ?? ""
+            let combo = first + last
+            return combo.isEmpty ? "U" : combo
+        }
+
+        private var normalizedAuthorID: String? {
+            let s = (authorUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return s.isEmpty ? nil : s
+        }
+
+        private var normalizedViewerID: String? {
+            let s = (viewerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            return s.isEmpty ? nil : s
+        }
+
+        private var isViewerAuthor: Bool {
+            guard let a = normalizedAuthorID, let v = normalizedViewerID else { return false }
+            return a == v
+        }
+
+        private var resolvedDisplayName: String {
+            let nameFromDirectory = directoryAccount?.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let n = nameFromDirectory, !n.isEmpty { return n }
+            let fallback = fallbackDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fallback.isEmpty ? "User" : fallback
+        }
+
+        private var primaryLabel: String {
+            // Spec: if author == viewer, label as "You" but still show identity if available.
+            return isViewerAuthor ? "You" : resolvedDisplayName
+        }
+
+        private var secondaryLabel: String {
+            // Combine optional identity + location on one calm line.
+            let loc = (directoryAccount?.location ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            var parts: [String] = []
+            if isViewerAuthor {
+                let n = resolvedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !n.isEmpty, n.lowercased() != "you" { parts.append(n) }
+            }
+            if !loc.isEmpty { parts.append(loc) }
+            return parts.joined(separator: " • ")
+        }
+
+        private var avatarKey: String? {
+            let k = (directoryAccount?.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return k.isEmpty ? nil : k
+        }
+
+        private var avatarFallbackNameForInitials: String {
+            if isViewerAuthor {
+                let n = resolvedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                return n.isEmpty ? "User" : n
+            }
+            let n = primaryLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? "User" : n
+        }
+
+        @ViewBuilder
+        private var avatar: some View {
+#if canImport(UIKit)
+            if let id = normalizedAuthorID, let ui = ProfileStore.avatarImage(for: id) {
+                Image(uiImage: ui)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+            } else if let remote = remoteAvatarImage {
+                Image(uiImage: remote)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 36, height: 36)
+                    .clipShape(Circle())
+                    .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+            } else {
+                Circle()
+                    .fill(.thinMaterial)
+                    .frame(width: 36, height: 36)
+                    .overlay(
+                        Text(initials(from: avatarFallbackNameForInitials))
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    )
+                    .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                    .task(id: avatarKey ?? "") {
+                        guard let key = avatarKey else {
+                            if remoteAvatarImage != nil { remoteAvatarImage = nil }
+                            return
+                        }
+                        let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key)
+                        if Task.isCancelled { return }
+                        remoteAvatarImage = img
+                    }
+            }
+#else
+            Circle()
+                .fill(Color.gray.opacity(0.2))
+                .frame(width: 36, height: 36)
+                .overlay(
+                    Text("U")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                )
+                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+#endif
+        }
+
+        var body: some View {
+            HStack(spacing: Theme.Spacing.m) {
+                avatar
+
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Text(primaryLabel)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Color.primary)
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: 6) {
+                            Text(CommentsView.relativeTimestamp(from: timestamp))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+
+                            if showsReplyAction {
+                                Button(action: { onReply?() }) {
+                                    Text("Reply")
+                                        .font(Theme.Text.meta)
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Reply to commenter")
+                            }
+                        }
+                    }
+
+                    if !secondaryLabel.isEmpty {
+                        Text(secondaryLabel)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+
+
+    private struct CommentContinuationMetaRow: View {
+        let timestamp: Date
+        let showsReplyAction: Bool
+        let onReply: (() -> Void)?
+
+        @Environment(\.colorScheme) private var scheme
+
+        var body: some View {
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+
+                Text(CommentsView.relativeTimestamp(from: timestamp))
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+
+                if showsReplyAction, let onReply {
+                    Button(action: onReply) {
+                        Text("Reply")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+
+    private func commentRowLocal(comment: Comment, ownerID: String?, viewerID: String?, sessionID: UUID, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, replyEligibleCommentIDs: Set<UUID>) -> some View {
+        let authorID = store.authorUserID(for: comment.id)
+        let isViewerOwner: Bool = {
+            let o = (ownerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let v = (viewerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !o.isEmpty, !v.isEmpty else { return false }
+            return o == v
+        }()
+        let isAuthorOwner: Bool = {
+            let a = (authorID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let o = (ownerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !a.isEmpty, !o.isEmpty else { return false }
+            return a == o
+        }()
+
+        // Fallback name (never shows raw IDs).
+        let fallbackName: String = {
+            if comment.authorName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return "User"
+            }
+            // Local store may still label viewer as "You".
+            return comment.authorName
+        }()
+
+        let dir = directoryAccount(for: authorID)
+
+        let showsReplyAction: Bool = {
+            guard isViewerOwner else { return false }
+            guard let authorID else { return false }
+            let a = authorID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !a.isEmpty else { return false }
+            guard !isAuthorOwner else { return false }
+            // UI-only: only show reply for the most recent *unanswered* commenter message (per commenter).
+            return replyEligibleCommentIDs.contains(comment.id)
+        }()
+
+        let onReply: (() -> Void)? = showsReplyAction ? {
+            guard let authorID, !authorID.isEmpty else { return }
+            isRespondToCommentersMode = false
+            replyTargetUserID = authorID.lowercased()
+
+            // UI-only: target label should be calm and never leak IDs.
+            let name = (dir?.displayName ?? fallbackName).trimmingCharacters(in: .whitespacesAndNewlines)
+            replyTargetDisplayName = name.isEmpty || name.lowercased() == "you" ? "Commenter" : name
+        } : nil
+
+        return VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+            if isStartOfAuthorRun {
+                CommentIdentityHeader(
+                    authorUserID: authorID,
+                    viewerUserID: viewerID,
+                    fallbackDisplayName: fallbackName,
+                    directoryAccount: dir,
+                    timestamp: comment.timestamp,
+                    showsReplyAction: showsReplyAction,
+                    onReply: onReply
+                )
+
+                Text(comment.text)
+                    .padding(.top, 2)
+                    .font(.body)
+                    .foregroundStyle(Color.primary.opacity(0.92))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // No ID header: move timestamp to the same line as the comment text (Variant A format).
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                    Text(comment.text)
+                        .font(.body)
+                        .foregroundStyle(Color.primary.opacity(0.92))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 6) {
+                        Text(CommentsView.relativeTimestamp(from: comment.timestamp))
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                            .lineLimit(1)
+
+                        if showsReplyAction {
+                            Button(action: { onReply?() }) {
+                                Text("Reply")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .layoutPriority(0)
+                }
+                .padding(.top, 2)
+            }
+
             let _handles = mentions(in: comment.text)
             if !_handles.isEmpty {
                 HStack(spacing: Theme.Spacing.s) {
@@ -548,7 +850,6 @@ public struct CommentsView: View {
                     Spacer(minLength: 0)
                 }
                 .accessibilitySortPriority(1)
-                
             }
         }
         .padding(.vertical, Theme.Spacing.s)
@@ -569,68 +870,79 @@ public struct CommentsView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
-    
-    private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserID: String, viewerUserID: String) -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-            
-            HStack(alignment: .center, spacing: 8) {
-                // Avatar placeholder (32pt circle). Identity surfaces are minimal in v1.
-                let initials: String = {
-                    let name = backendDisplayName(for: row, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
-                    let parts = name.split(separator: " ")
-                    if parts.count == 1 { return String(parts[0].prefix(1)).uppercased() }
-                    let first = parts.first?.first.map { String($0).uppercased() } ?? "U"
-                    let last = parts.last?.first.map { String($0).uppercased() } ?? ""
-                    return (first + last).isEmpty ? "U" : (first + last)
-                }()
-                ZStack {
-                    Circle().fill(Color.gray.opacity(0.2))
-                    Text(initials)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-                .frame(width: 32, height: 32)
-                .clipShape(Circle())
-                .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
-                
-                HStack(spacing: 6) {
-                    let displayName = backendDisplayName(for: row, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
-                    Text(displayName)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Color.primary.opacity(0.9))
-                    Text("•")
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    Text(relativeTimestamp(from: row.createdAt))
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                    
-                    let isViewerOwner = (viewerUserID == ownerUserID)
-                    let isAuthorOwner = (row.authorUserID.lowercased() == ownerUserID.lowercased())
-                    
-                    if isViewerOwner, !row.authorUserID.isEmpty, !isAuthorOwner {
-                        Button {
-                            isRespondToCommentersMode = false
-                            replyTargetUserID = row.authorUserID.lowercased()
-                            replyTargetDisplayName = "Commenter"
-                        } label: {
-                            Text("· Reply")
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+
+
+private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserID: String, viewerUserID: String, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, replyEligibleCommentIDs: Set<UUID>) -> some View {
+        let authorID = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isViewerOwner = (viewerUserID.lowercased() == ownerUserID.lowercased())
+        let isAuthorOwner = (!authorID.isEmpty && authorID == ownerUserID.lowercased())
+
+        let dir = directoryAccount(for: authorID)
+        let fallbackName = backendDisplayName(for: row, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
+
+        let showsReplyAction: Bool = {
+            guard isViewerOwner else { return false }
+            guard !authorID.isEmpty else { return false }
+            guard !isAuthorOwner else { return false }
+            // UI-only: only show reply for the most recent *unanswered* commenter message (per commenter).
+            return replyEligibleCommentIDs.contains(row.id)
+        }()
+
+        let onReply: (() -> Void)? = showsReplyAction ? {
+            guard !authorID.isEmpty else { return }
+            isRespondToCommentersMode = false
+            replyTargetUserID = authorID
+            let name = (dir?.displayName ?? fallbackName).trimmingCharacters(in: .whitespacesAndNewlines)
+            replyTargetDisplayName = name.isEmpty || name.lowercased() == "you" ? "Commenter" : name
+        } : nil
+
+        return VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+            if isStartOfAuthorRun {
+                CommentIdentityHeader(
+                    authorUserID: authorID,
+                    viewerUserID: viewerUserID,
+                    fallbackDisplayName: fallbackName,
+                    directoryAccount: dir,
+                    timestamp: row.createdAt,
+                    showsReplyAction: showsReplyAction,
+                    onReply: onReply
+                )
+
+                Text(row.body)
+                    .padding(.top, 2)
+                    .font(.body)
+                    .foregroundStyle(Color.primary.opacity(0.92))
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.s) {
+                    Text(row.body)
+                        .font(.body)
+                        .foregroundStyle(Color.primary.opacity(0.92))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .layoutPriority(1)
+
+                    Spacer(minLength: 0)
+
+                    HStack(spacing: 6) {
+                        Text(CommentsView.relativeTimestamp(from: row.createdAt))
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                            .lineLimit(1)
+
+                        if showsReplyAction {
+                            Button(action: { onReply?() }) {
+                                Text("Reply")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Reply to commenter")
                     }
+                    .layoutPriority(0)
                 }
-                
-                Spacer(minLength: 0)
+                .padding(.top, 2)
             }
-            
-            Text(row.body)
-                .font(.body)
-                .foregroundStyle(Color.primary.opacity(0.92))
-                .fixedSize(horizontal: false, vertical: true)
-            
+
             let _handles = mentions(in: row.body)
             if !_handles.isEmpty {
                 HStack(spacing: Theme.Spacing.s) {
@@ -648,7 +960,6 @@ public struct CommentsView: View {
                     Spacer(minLength: 0)
                 }
                 .accessibilitySortPriority(1)
-                
             }
         }
         .padding(.vertical, Theme.Spacing.s)
@@ -656,7 +967,7 @@ public struct CommentsView: View {
         .accessibilityHint("Comment")
         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
             // Delete allowed if viewer is owner or author (enforced by RLS; fail-closed UI).
-            let canDelete = (!viewerUserID.isEmpty && (viewerUserID == ownerUserID || viewerUserID == row.authorUserID.lowercased()))
+            let canDelete = (!viewerUserID.isEmpty && (viewerUserID == ownerUserID || viewerUserID == authorID))
             if canDelete {
                 Button {
                     Task {
@@ -673,8 +984,10 @@ public struct CommentsView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
-    
-    private func backendDisplayName(for row: BackendPostComment, ownerUserID: String, viewerUserID: String) -> String {
+
+
+
+private func backendDisplayName(for row: BackendPostComment, ownerUserID: String, viewerUserID: String) -> String {
         let author = row.authorUserID.lowercased()
         if author == viewerUserID.lowercased() { return "You" }
         if author == ownerUserID.lowercased() {
@@ -704,6 +1017,96 @@ public struct CommentsView: View {
         }
         
         return result
+    }
+
+
+    // MARK: - Reply eligibility (UI-only)
+    // Show Reply only for the most recent *unanswered* commenter message (per commenter).
+    // "Unanswered" means: latest commenter → owner message timestamp is later than latest owner → commenter reply.
+    private func eligibleReplyCommentIDsLocal(_ comments: [Comment], ownerUserID: String) -> Set<UUID> {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !owner.isEmpty else { return [] }
+
+        // We do NOT have recipientUserID on local Comment, so we infer "answered" using
+        // list order: a commenter is considered answered iff the next message after their
+        // most recent comment is authored by the owner.
+        //
+        // This preserves your intended UX without adding any schema / store fields.
+
+        // 1) Find the last comment index per non-owner author.
+        var lastIndexByAuthor: [String: Int] = [:]
+        for (idx, c) in comments.enumerated() {
+            let author = (store.authorUserID(for: c.id) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+
+            guard !author.isEmpty else { continue }
+            guard author != owner else { continue } // only commenters
+            lastIndexByAuthor[author] = idx
+        }
+
+        // 2) For each commenter, eligible reply = most recent comment AND not answered.
+        var eligible: Set<UUID> = []
+
+        for (author, lastIdx) in lastIndexByAuthor {
+            let nextIdx = lastIdx + 1
+
+            // If there's a next message and it's from the owner, we consider this commenter answered.
+            var answered = false
+            if nextIdx < comments.count {
+                let nextAuthor = (store.authorUserID(for: comments[nextIdx].id) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                answered = (nextAuthor == owner)
+            }
+
+            if !answered {
+                eligible.insert(comments[lastIdx].id)
+            }
+        }
+
+        return eligible
+    }
+
+    private func eligibleReplyCommentIDsBackend(_ rows: [BackendPostComment], ownerUserID: String) -> Set<UUID> {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !owner.isEmpty else { return [] }
+
+        var latestIncoming: [String: (id: UUID, ts: Date)] = [:] // commenter -> latest comment to owner
+        var latestOwnerReply: [String: Date] = [:] // commenter -> latest owner reply to commenter
+
+        for r in rows {
+            let author = r.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let recipient = r.recipientUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !author.isEmpty else { continue }
+
+            if author == owner {
+                guard !recipient.isEmpty, recipient != owner else { continue }
+                let ts = r.createdAt
+                if let existing = latestOwnerReply[recipient] {
+                    if ts > existing { latestOwnerReply[recipient] = ts }
+                } else {
+                    latestOwnerReply[recipient] = ts
+                }
+            } else {
+                guard recipient == owner else { continue }
+                let ts = r.createdAt
+                if let existing = latestIncoming[author] {
+                    if ts > existing.ts { latestIncoming[author] = (r.id, ts) }
+                } else {
+                    latestIncoming[author] = (r.id, ts)
+                }
+            }
+        }
+
+        var eligible: Set<UUID> = []
+        for (commenter, incoming) in latestIncoming {
+            let lastReply = latestOwnerReply[commenter] ?? .distantPast
+            if incoming.ts > lastReply {
+                eligible.insert(incoming.id)
+            }
+        }
+        return eligible
     }
     private var composer: some View {
         VStack(spacing: 0) {
