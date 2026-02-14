@@ -2576,6 +2576,7 @@ fileprivate struct RemotePostRowTwin: View {
 
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
+    @State private var isRemoteCommentsPresented: Bool = false
 
     private func favAndExtraCount(from refs: [BackendSessionViewModel.BackendAttachmentRef]) -> (BackendSessionViewModel.BackendAttachmentRef?, Int) {
         guard !refs.isEmpty else { return (nil, 0) }
@@ -2945,6 +2946,24 @@ private var extraAttachmentCount: Int {
                 .environment(\.managedObjectContext, ctx)
                 .environmentObject(auth)
         }
+        .sheet(isPresented: $isRemoteCommentsPresented) {
+            let owner = (post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+            let viewer = (viewerUserID ?? auth.backendUserID ?? auth.currentUserID)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !owner.isEmpty, !viewer.isEmpty {
+                CommentsView(
+                    postID: post.id,
+                    ownerUserID: owner,
+                    viewerUserID: viewer,
+                    ownerDisplayName: resolvedDirectoryAccount?.displayName,
+                    placeholderAuthor: "You"
+                )
+                .environment(\.managedObjectContext, ctx)
+                .environmentObject(auth)
+            } else {
+                EmptyView()
+            }
+        }
+
     }
 
 
@@ -3027,9 +3046,12 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
             .buttonStyle(.plain)
             .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
 
-            // Comment (read-only row parity; backend comment UI is handled elsewhere)
+            // Comment
             Button(action: {
-                // Intentionally no-op in feed row; navigation to detail is the interaction surface.
+                let owner = (post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+                let viewer = (viewerUserID ?? auth.backendUserID ?? auth.currentUserID)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !owner.isEmpty, !viewer.isEmpty else { return }
+                isRemoteCommentsPresented = true
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: "bubble.right")
