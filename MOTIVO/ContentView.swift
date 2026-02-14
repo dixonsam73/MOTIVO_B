@@ -359,6 +359,7 @@ fileprivate struct SessionsRootView: View {
 
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
+    @ObservedObject private var commentPresence = CommentPresenceStore.shared
 
     private var useBackendFeed: Bool {
         _ = backendModeChangeTick
@@ -1420,6 +1421,7 @@ fileprivate struct SessionRow: View {
     @State private var likeCountLocal: Int = 0
     @State private var commentCountLocal: Int = 0
     @ObservedObject private var commentsStore = CommentsStore.shared
+    @ObservedObject private var commentPresence = CommentPresenceStore.shared
 
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
@@ -1476,6 +1478,14 @@ fileprivate struct SessionRow: View {
     private var commentsCount: Int {
         guard let id = sessionIDForComments else { return 0 }
         return commentsStore.comments(for: id).count
+    }
+
+    var hasComments: Bool {
+        guard let id = sessionIDForComments else { return false }
+        if auth.isConnected {
+            return CommentPresenceStore.shared.hasComments(postID: id)
+        }
+        return commentsCount > 0
     }
 
     /// Effective viewer ID, respecting DEBUG override, then Auth, then PersistenceController.
@@ -1814,7 +1824,7 @@ fileprivate struct SessionRow: View {
                 }
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
+                    Image(systemName: hasComments ? "text.bubble.fill" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
@@ -3054,7 +3064,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
                 isRemoteCommentsPresented = true
             }) {
                 HStack(spacing: 6) {
-                    Image(systemName: "bubble.right")
+                    Image(systemName: CommentPresenceStore.shared.hasComments(postID: post.id) ? "text.bubble.fill" : "bubble.right")
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))

@@ -71,6 +71,7 @@ struct BackendSessionDetailView: View {
     @EnvironmentObject private var auth: AuthManager
 
     @ObservedObject private var commentsStore = CommentsStore.shared
+    @ObservedObject private var commentPresence = CommentPresenceStore.shared
 
     // Phase 14 directory (display-name only; no avatar until Phase 15)
     @State private var directoryAccount: DirectoryAccount? = nil
@@ -197,6 +198,13 @@ struct BackendSessionDetailView: View {
 
     private var commentsCount: Int {
         commentsStore.comments(for: model.id).count
+    }
+
+    private var hasComments: Bool {
+        if auth.isConnected {
+            return commentPresence.hasComments(postID: model.id)
+        }
+        return commentsCount > 0
     }
 
     // MARK: - Body
@@ -683,7 +691,7 @@ struct BackendSessionDetailView: View {
                 isCommentsPresented = true
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
+                    Image(systemName: hasComments ? "text.bubble.fill" : "bubble.right")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }

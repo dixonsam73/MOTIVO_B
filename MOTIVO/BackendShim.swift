@@ -1148,6 +1148,14 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                     BackendFeedStore.shared.endFetchSuccess(rawPosts: rawPosts, minePosts: sortedMine, allPosts: sortedAll)
                 }
 
+
+                // Blocker B Option 2: Prime viewer-local comment presence for the top feed slice.
+                // This enables outline vs filled comments icon parity without opening CommentsView.
+                let primeIDs: [UUID] = Array((normalized == "all" ? sortedAll : sortedMine).prefix(20)).map { $0.id }
+                Task {
+                    await CommentPresenceStore.shared.primePresence(postIDs: primeIDs, maxToCheck: 20, concurrency: 4)
+                }
+
                 return .success(())
             } catch {
                 await MainActor.run {

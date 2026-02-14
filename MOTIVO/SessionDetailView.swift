@@ -86,6 +86,7 @@ struct SessionDetailView: View {
     @EnvironmentObject private var auth: AuthManager
 
     @ObservedObject private var commentsStore = CommentsStore.shared
+    @ObservedObject private var commentPresence = CommentPresenceStore.shared
 
     let session: Session
 
@@ -199,6 +200,14 @@ struct SessionDetailView: View {
     private var commentsCount: Int {
         guard let id = sessionIDForComments else { return 0 }
         return commentsStore.comments(for: id).count
+    }
+
+    var hasComments: Bool {
+        guard let id = sessionIDForComments else { return false }
+        if auth.isConnected {
+            return commentPresence.hasComments(postID: id)
+        }
+        return commentsCount > 0
     }
 
     private func stableUUID(from string: String) -> UUID {
@@ -1052,7 +1061,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 }
             } label: {
                 HStack(spacing: 8) {
-                    Image(systemName: commentsCount > 0 ? "text.bubble" : "bubble.right")
+                    Image(systemName: hasComments ? "text.bubble.fill" : "bubble.right")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(Theme.Colors.secondaryText)
 
