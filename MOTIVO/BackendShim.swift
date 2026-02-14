@@ -1187,6 +1187,192 @@ public struct BackendPostSharePointer: Codable, Hashable, Identifiable {
     }
 }
 
+
+// CHANGE-ID: 20260214_113225_8H_PersistComments
+// SCOPE: Phase 8H persistence — backend comment service surface (fetch + RPC writes + delete). No counts; RLS + SECURITY DEFINER enforced server-side.
+// SEARCH-TOKEN: 20260214_113225_8H_PersistComments_BackendPostCommentService
+
+public struct BackendPostComment: Codable, Identifiable, Hashable {
+    public let id: UUID
+    public let postID: UUID
+    public let ownerUserID: String
+    public let authorUserID: String
+    public let recipientUserID: String
+    public let body: String
+    public let createdAt: Date
+
+    public enum CodingKeys: String, CodingKey {
+        case id
+        case postID = "post_id"
+        case ownerUserID = "owner_user_id"
+        case authorUserID = "author_user_id"
+        case recipientUserID = "recipient_user_id"
+        case body
+        case createdAt = "created_at"
+    }
+}
+
+public protocol BackendPostCommentService {
+    func fetchComments(postID: UUID) async -> Result<[BackendPostComment], Error>
+
+    // SECURITY DEFINER RPC writes
+    func addPostComment(postID: UUID, body: String) async -> Result<Void, Error>
+    func replyToCommenter(postID: UUID, recipientUserID: String, body: String) async -> Result<Void, Error>
+    func respondToCommenters(postID: UUID, body: String) async -> Result<Void, Error>
+
+    // RLS delete (author or owner)
+    func deleteComment(commentID: UUID) async -> Result<Void, Error>
+}
+
+public struct SimulatedPostCommentService: BackendPostCommentService {
+    public init() {}
+    public func fetchComments(postID: UUID) async -> Result<[BackendPostComment], Error> { .success([]) }
+    public func addPostComment(postID: UUID, body: String) async -> Result<Void, Error> { .success(()) }
+    public func replyToCommenter(postID: UUID, recipientUserID: String, body: String) async -> Result<Void, Error> { .success(()) }
+    public func respondToCommenters(postID: UUID, body: String) async -> Result<Void, Error> { .success(()) }
+    public func deleteComment(commentID: UUID) async -> Result<Void, Error> { .success(()) }
+}
+
+public final class HTTPBackendPostCommentService: BackendPostCommentService {
+    public init() {}
+
+    private func decoder() -> JSONDecoder {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }
+
+    public func fetchComments(postID: UUID) async -> Result<[BackendPostComment], Error> {
+        let path = "/rest/v1/post_comments"
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "select", value: "*"),
+            URLQueryItem(name: "post_id", value: "eq.\(postID.uuidString)"),
+            URLQueryItem(name: "order", value: "created_at.asc")
+        ]
+
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "GET",
+            query: query,
+            jsonBody: nil
+        )
+
+        switch result {
+        case .success(let data):
+            do {
+                let rows = try decoder().decode([BackendPostComment].self, from: data)
+                return .success(rows)
+            } catch {
+                return .failure(error)
+            }
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    public func addPostComment(postID: UUID, body: String) async -> Result<Void, Error> {
+        let payload: [String: Any] = [
+            "p_post_id": postID.uuidString,
+            "p_body": body
+        ]
+
+        do {
+            let json = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let result = await NetworkManager.shared.request(
+                path: "/rest/v1/rpc/add_post_comment",
+                method: "POST",
+                query: nil,
+                jsonBody: json,
+                headers: ["Prefer": "return=minimal"]
+            )
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func replyToCommenter(postID: UUID, recipientUserID: String, body: String) async -> Result<Void, Error> {
+        let payload: [String: Any] = [
+            "p_post_id": postID.uuidString,
+            "p_recipient_user_id": recipientUserID,
+            "p_body": body
+        ]
+
+        do {
+            let json = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let result = await NetworkManager.shared.request(
+                path: "/rest/v1/rpc/reply_to_commenter",
+                method: "POST",
+                query: nil,
+                jsonBody: json,
+                headers: ["Prefer": "return=minimal"]
+            )
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func respondToCommenters(postID: UUID, body: String) async -> Result<Void, Error> {
+        let payload: [String: Any] = [
+            "p_post_id": postID.uuidString,
+            "p_body": body
+        ]
+
+        do {
+            let json = try JSONSerialization.data(withJSONObject: payload, options: [])
+            let result = await NetworkManager.shared.request(
+                path: "/rest/v1/rpc/respond_to_commenters",
+                method: "POST",
+                query: nil,
+                jsonBody: json,
+                headers: ["Prefer": "return=minimal"]
+            )
+            switch result {
+            case .success:
+                return .success(())
+            case .failure(let e):
+                return .failure(e)
+            }
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func deleteComment(commentID: UUID) async -> Result<Void, Error> {
+        let path = "/rest/v1/post_comments"
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "id", value: "eq.\(commentID.uuidString)")
+        ]
+
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "DELETE",
+            query: query,
+            jsonBody: nil,
+            headers: ["Prefer": "return=minimal"]
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+}
+
+
 public protocol BackendPostShareService {
     func fetchUnreadShares() async -> Result<[BackendPostSharePointer], Error>
     func sharePost(postID: UUID, to recipientUserID: String) async -> Result<BackendPostShareOutcome, Error>

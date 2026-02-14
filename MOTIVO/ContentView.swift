@@ -1735,7 +1735,21 @@ fileprivate struct SessionRow: View {
             }
         }
         .sheet(isPresented: $isCommentsPresented) {
-            if let id = sessionIDForComments {
+            if auth.isConnected, let postID = sessionUUID {
+                let raw = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let viewerBackendID = raw.isEmpty ? nil : raw.lowercased()
+                if let viewerBackendID {
+                    CommentsView(
+                        postID: postID,
+                        ownerUserID: viewerBackendID,
+                        viewerUserID: viewerBackendID,
+                        ownerDisplayName: auth.displayName,
+                        placeholderAuthor: "You"
+                    )
+                } else {
+                    Text("Comments unavailable for this item.").padding()
+                }
+            } else if let id = sessionIDForComments {
                 CommentsView(sessionID: id, placeholderAuthor: "You")
             } else {
                 Text("Comments unavailable for this item.").padding()

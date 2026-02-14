@@ -217,7 +217,11 @@ struct BackendSessionDetailView: View {
             }
         }
         .sheet(isPresented: $isCommentsPresented) {
-            CommentsView(sessionID: model.id, placeholderAuthor: "You")
+            if let viewer = effectiveViewerUserID, !viewer.isEmpty, !ownerUserID.isEmpty {
+                CommentsView(postID: model.id, ownerUserID: ownerUserID, viewerUserID: viewer, ownerDisplayName: directoryAccount?.displayName)
+            } else {
+                Text("Comments unavailable.").padding()
+            }
         }
 .sheet(isPresented: $isProfilePeekPresented) {
     ProfilePeekView(
