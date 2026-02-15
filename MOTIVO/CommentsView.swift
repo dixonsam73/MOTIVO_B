@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_110254_UnreadComments_PeoplePlus
+// SCOPE: CommentsView: when viewing connected post comments as owner, mark post comments as viewed (clears People '+'). No UI changes.
+// SEARCH-TOKEN: 20260215_110254_UnreadComments_PeoplePlus
+
 // CHANGE-ID: 20260215_102000_CommentsView_CalmUI_Polish_TuneDateAndTime
 // SCOPE: CommentsView Calm UI Polish — remove location line; calmer date/time labels; UI-only
 // SEARCH-TOKEN: 20260215_102000_CommentsView_CalmUI_Polish_TuneDateAndTime
@@ -360,6 +364,11 @@ public struct CommentsView: View {
                 .task {
                     if case .connectedPost(let pid, let ownerUserID, let viewerUserID, _) = mode {
                         await backendStore.refresh(postID: pid)
+                        // Calm unread presence: opening comments clears owner-only pending state for this post.
+                        if ownerUserID.lowercased() == viewerUserID.lowercased() {
+                            await UnreadCommentsStore.shared.markViewed(postID: pid)
+                        }
+
                         // Owner default: if there are any commenters, default the composer to "Respond to commenters".
                         await MainActor.run {
                             let ownerLower = ownerUserID.lowercased()

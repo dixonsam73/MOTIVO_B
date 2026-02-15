@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_114000_UnreadComments_PeoplePlusFix2
+// SCOPE: Compose People "+" with unread private comments. Do not block existing presence refreshes; fire unread refresh non-blocking to avoid regressions.
+// SEARCH-TOKEN: 20260215_114000_UnreadComments_PeoplePlusFix2
+
 // CHANGE-ID: 20260214_103700_Etudes_ShareTo_InlineNav
 // SCOPE: ContentView: ShareToFollowerSheet mirrors FollowingList nav (inline title + chevron back) and list background parity. No logic changes.
 // SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_InlineNav
@@ -294,6 +298,8 @@ fileprivate struct SessionsRootView: View {
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
 
+
+    @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
 
     @StateObject private var sharedWithYouStore = SharedWithYouStore()
     let userID: String?
@@ -640,6 +646,7 @@ fileprivate struct SessionsRootView: View {
                     }
                     await followStore.refreshFromBackendIfPossible()
                     await sharedWithYouStore.refreshUnreadShares()
+                    Task { await unreadCommentsStore.refresh(force: true) }
                     await MainActor.run {
                         refreshStats()
                     }
@@ -736,7 +743,7 @@ fileprivate struct SessionsRootView: View {
                         .contentShape(Circle())
 
                         // Subtle "+" indicator for incoming follow requests (outside the pill)
-                        if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares {
+                        if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread {
                             Text("+")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -887,6 +894,7 @@ Spacer()
             .task {
                 setUpDebounce()
                 await sharedWithYouStore.refreshUnreadShares()
+                Task { await unreadCommentsStore.refresh(force: true) }
             }
             .onChange(of: userID) { _, _ in
                 refreshStats()
@@ -904,6 +912,7 @@ Spacer()
                 Task { @MainActor in
                     await followStore.refreshFromBackendIfPossible()
                     await sharedWithYouStore.refreshUnreadShares()
+                    Task { await unreadCommentsStore.refresh(force: true) }
                 }
             }
             .appBackground()
