@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_145500_PeopleView_ResponsesSection_FixBraces
+// SCOPE: PeopleView — fix section helper scoping (close sharedWithYouSection, keep responsesSection at type scope). No UI/logic changes.
+// SEARCH-TOKEN: 20260215_145500_PeopleView_ResponsesSection_FixBraces
+
 // CHANGE-ID: 20260212_115900_OwnerShare_PeopleView_SharedWithYou
 // SCOPE: PeopleView — add quiet 'Shared with you' section (recipient-side pointers) using Theme tokens. No other UI/layout changes.
 // SEARCH-TOKEN: 20260212_115900_OwnerShare_PeopleView_SharedWithYou
@@ -36,6 +40,8 @@ import SwiftUI
 struct PeopleView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
+
 
     // Owner-Only Share — unread share pointers (recipient-side)
     @StateObject private var sharedWithYouStore = SharedWithYouStore()
@@ -66,6 +72,11 @@ struct PeopleView: View {
                     sharedWithYouSection
                 }
 
+                // Responses (unread private comments; quiet, conditional)
+                if !unreadCommentsStore.unreadGroups.isEmpty {
+                    responsesSection
+                }
+
                 // Incoming requests (defensive: never surface outgoing requests here)
                 if !incomingRequestIDs.isEmpty {
                     requestsSection
@@ -86,6 +97,9 @@ struct PeopleView: View {
         .task {
             // In Backend Preview, this keeps requests/following fresh when opening People.
             await followStore.refreshFromBackendIfPossible()
+        }
+        .task {
+            await unreadCommentsStore.refresh(force: true)
         }
         .task {
             await sharedWithYouStore.refreshUnreadShares()
@@ -174,7 +188,51 @@ struct PeopleView: View {
             }
         }
         .cardSurface()
+
     }
+
+    private var responsesSection: some View {
+    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        Text("Responses").sectionHeader()
+
+        ForEach(unreadCommentsStore.unreadGroups.sorted(by: { $0.latestUnreadAt > $1.latestUnreadAt })) { group in
+            NavigationLink {
+                ResponsesPostDetailHost(
+                    postID: group.postID,
+                    viewerUserID: effectiveBackendUserID,
+                    backendFeedStore: backendFeedStore
+                ) {
+                    Task { await unreadCommentsStore.markViewed(postID: group.postID) }
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                        Text("Session")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Color.primary)
+
+                        Text((group.latestBody?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? group.latestBody! : "New comment")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Text(group.latestUnreadAt.formatted(date: .abbreviated, time: .shortened))
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+                .contentShape(Rectangle())
+                .padding(.vertical, Theme.Spacing.s)
+            }
+        }
+    }
+    .cardSurface()
+    }
+
 
 
 
@@ -443,3 +501,50 @@ private struct SharedPostDetailHost: View {
         }
     }
 }
+
+
+private struct ResponsesPostDetailHost: View {
+    let postID: UUID
+    let viewerUserID: String
+    let backendFeedStore: BackendFeedStore
+    let onMarkViewed: () -> Void
+
+    @State private var didMarkViewed: Bool = false
+
+    private var resolvedPost: BackendPost? {
+        backendFeedStore.allPosts.first(where: { $0.id == postID })
+        ?? backendFeedStore.minePosts.first(where: { $0.id == postID })
+    }
+
+    var body: some View {
+        Group {
+            if let post = resolvedPost {
+                BackendSessionDetailView(
+                    model: BackendSessionViewModel(
+                        post: post,
+                        currentUserID: viewerUserID
+                    )
+                )
+            } else {
+                VStack(spacing: Theme.Spacing.m) {
+                    Text("Not available")
+                        .font(Theme.Text.sectionHeader)
+                        .foregroundStyle(Color.primary)
+
+                    Text("This session isn’t available right now.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(Theme.Spacing.l)
+                .appBackground()
+            }
+        }
+        .task {
+            guard didMarkViewed == false else { return }
+            didMarkViewed = true
+            onMarkViewed()
+        }
+    }
+}
+
