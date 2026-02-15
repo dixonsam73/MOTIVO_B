@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260215_202000_CommentsUI_PlaceholderFix_SyntaxRepair
+// SCOPE: Fix bad paste that left stray placeholder-return code at top level causing cascading compile errors; placeholder logic unchanged (fan-out wording only when recipientCount>1 && fan-out mode).
+// SEARCH-TOKEN: 20260215_202000_CommentsUI_PlaceholderFix_SyntaxRepair
+
+// CHANGE-ID: 20260215_200500_CommentsUI_CalmConditionalControls
+// SCOPE: Comments UI calm-down: hide 'Respond to all commenters' when only one commenter; remove helper explanation line; show fan-out 'Sending privately…' chip only in fan-out; auto-exit fan-out if recipient count drops to 1. UI-only; no backend/schema/RPC changes.
+// SEARCH-TOKEN: 20260215_200500_CommentsUI_CalmConditionalControls
+
 // CHANGE-ID: 20260215_101500_CommentsUI_OwnerFollowUp_TargetSelector
 // SCOPE: Comments UI-only: owner can always send targeted follow-up replies via calm target selector above composer; rename fan-out control to "Respond to all commenters" (+ helper text). No backend/schema/RPC changes.
 // SEARCH-TOKEN: 20260215_101500_CommentsUI_OwnerFollowUp_TargetSelector
@@ -198,12 +206,22 @@ public struct CommentsView: View {
         let isOwnerViewer = !trimmedOwner.isEmpty && trimmedOwner == trimmedViewer
 
         if isOwnerViewer {
-            if isRespondToCommentersMode {
+            let recipientCount: Int = {
+                guard let ownerID else { return 0 }
+                return respondToCommentersRecipientIDs(ownerUserID: ownerID).count
+            }()
+
+            // Only show fan-out wording when fan-out is actually meaningful/available.
+            if recipientCount > 1 && isRespondToCommentersMode {
                 return "Respond to all commenters…"
             }
+
             let id = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             let name = (replyTargetDisplayName ?? displayNameForUserID(id)).trimmingCharacters(in: .whitespacesAndNewlines)
             if !name.isEmpty { return "Reply to \(name)…" }
+
+            // If there are no commenters to target yet, keep the placeholder generic/calm.
+            if recipientCount == 0 { return "Add a comment…" }
             return "Reply…"
         }
 
@@ -212,7 +230,6 @@ public struct CommentsView: View {
 
 
 
-    
     // MARK: - Mentions tokenization & helpers
     private struct MentionSpan: Identifiable {
         let id = UUID()
@@ -1397,8 +1414,18 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                 let recipients = respondToCommentersRecipientIDs(ownerUserID: ownerID)
                 let recipientCount = recipients.count
                 
+
+                // Keep UI calm: if only one commenter remains, fan-out is not a meaningful state.
+                // Ensure we exit fan-out mode if the recipient set collapses.
+                Color.clear
+                    .frame(width: 0, height: 0)
+                    .onChange(of: recipientCount) { _, newValue in
+                        if newValue <= 1 {
+                            isRespondToCommentersMode = false
+                        }
+                    }
                 // Owner-only 8H-D control: respond to all commenters (fan-out private replies)
-                if recipientCount > 0 {
+                if recipientCount > 1 {
                     HStack(spacing: Theme.Spacing.s) {
                         Button {
                             // Enter/exit fan-out mode (fan-out remains multiple independent private replies).
@@ -1419,12 +1446,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     }
                     .padding(.bottom, Theme.Spacing.s)
 
-                    Text("Sends a private reply to each commenter")
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .padding(.bottom, Theme.Spacing.s)
-
-                    if isRespondToCommentersMode {
+                    if isRespondToCommentersMode && recipientCount > 1 {
                         HStack(spacing: Theme.Spacing.s) {
                             Text("Sending privately to \(recipientCount) commenter\(recipientCount == 1 ? "" : "s")")
                                 .font(Theme.Text.meta)
