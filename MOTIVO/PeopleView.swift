@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_101500_PeopleView_SharedWithYouRowParity_cc2c5330
+// SCOPE: PeopleView — Shared-with-you rows: render with PeopleUserRow + trailing timestamp to match Responses row layout. UI-only; no behavior changes.
+// SEARCH-TOKEN: 20260215_101500_PeopleView_SharedWithYouRowParity_cc2c5330
+
 // CHANGE-ID: 20260215_171007_PeopleView_ResponsesIdentity_bf5de905
 // SCOPE: PeopleView — Responses: normalize latestAuthorUserID UUID casing to lowercase for directory hydration (display name + avatar). No UI/layout changes.
 // SEARCH-TOKEN: 20260215_171007_PeopleView_ResponsesIdentity_bf5de905
@@ -192,7 +196,12 @@ struct PeopleView: View {
             ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
                 let acct = shareOwnerDirectory[share.ownerUserID]
 
-                NavigationLink {
+                PeopleUserRow(
+                    userID: share.ownerUserID,
+                    overrideDisplayName: acct?.displayName ?? "Shared post",
+                    overrideSubtitle: "Shared a post",
+                    overrideAvatarKey: acct?.avatarKey
+                ) {
                     SharedPostDetailHost(
                         share: share,
                         viewerUserID: effectiveBackendUserID,
@@ -200,29 +209,20 @@ struct PeopleView: View {
                     ) {
                         Task { await sharedWithYouStore.markViewed(shareID: share.id) }
                     }
-                } label: {
-                    HStack {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                            Text(acct?.displayName ?? "Shared post")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Color.primary)
-
-                            Text(share.createdAt.formatted(date: .abbreviated, time: .shortened))
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 14, weight: .semibold))
+                } trailing: {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(responsesTimeLabel(from: share.createdAt))
+                            .font(Theme.Text.meta)
                             .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                     }
-                    .contentShape(Rectangle())
-                    .padding(.vertical, Theme.Spacing.s)
                 }
             }
         }
         .cardSurface()
-
     }
 
     private var responsesSection: some View {
