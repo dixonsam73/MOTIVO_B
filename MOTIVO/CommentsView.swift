@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_101500_CommentsUI_OwnerFollowUp_TargetSelector
+// SCOPE: Comments UI-only: owner can always send targeted follow-up replies via calm target selector above composer; rename fan-out control to "Respond to all commenters" (+ helper text). No backend/schema/RPC changes.
+// SEARCH-TOKEN: 20260215_101500_CommentsUI_OwnerFollowUp_TargetSelector
+
 // CHANGE-ID: 20260215_174800_CommentsView_KeyboardDismissOnSend_Fix
 // SCOPE: CommentsView keyboard retract-on-send + ensure latest message visible (ScrollViewReader bottom anchor). UI-only; no store/backend/schema changes.
 // SEARCH-TOKEN: 20260215_174800_CommentsView_KeyboardDismissOnSend_Fix
@@ -28,7 +32,7 @@ public struct CommentsView: View {
     
     @State private var replyTargetUserID: String? = nil
     @State private var replyTargetDisplayName: String? = nil
-    
+    @State private var isTargetPickerPresented: Bool = false
     @State private var isRespondToCommentersMode: Bool = false
 
     // UI-only: read-through identity cache for comment rows (displayName/location/avatarKey). Never shows raw IDs.
@@ -109,6 +113,105 @@ public struct CommentsView: View {
         }
         return Array(Set(ids)).sorted()
     }
+
+    // MARK: - Owner reply targeting (UI-only)
+    private struct CommenterTarget: Identifiable, Equatable {
+        let userID: String
+        let lastActivity: Date
+        var id: String { userID }
+    }
+
+    private func commenterTargetsForPicker(ownerUserID: String) -> [CommenterTarget] {
+        let owner = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let _ = postID {
+            // Connected: derive from backend snapshot.
+            var latestByAuthor: [String: Date] = [:]
+            for row in backendStore.comments {
+                let a = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !a.isEmpty, a != owner else { continue }
+                let t = row.createdAt
+                if let existing = latestByAuthor[a] {
+                    if t > existing { latestByAuthor[a] = t }
+                } else {
+                    latestByAuthor[a] = t
+                }
+            }
+            return latestByAuthor
+                .map { CommenterTarget(userID: $0.key, lastActivity: $0.value) }
+                .sorted(by: { $0.lastActivity > $1.lastActivity })
+        }
+
+        // Local: derive from local comments.
+        guard let sid = sessionID else { return [] }
+        let all = store.comments(for: sid)
+        var latestByAuthor: [String: Date] = [:]
+        for c in all {
+            let a = (store.authorUserID(for: c.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !a.isEmpty, a != owner else { continue }
+            let t = c.timestamp
+            if let existing = latestByAuthor[a] {
+                if t > existing { latestByAuthor[a] = t }
+            } else {
+                latestByAuthor[a] = t
+            }
+        }
+        return latestByAuthor
+            .map { CommenterTarget(userID: $0.key, lastActivity: $0.value) }
+            .sorted(by: { $0.lastActivity > $1.lastActivity })
+    }
+
+    private func ensureDefaultReplyTargetIfNeeded(ownerUserID: String) {
+        // Owner-only: ensure we always have a valid target when there are commenters.
+        let targets = commenterTargetsForPicker(ownerUserID: ownerUserID)
+        guard !targets.isEmpty else {
+            replyTargetUserID = nil
+            replyTargetDisplayName = nil
+            return
+        }
+
+        let existing = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !existing.isEmpty, targets.contains(where: { $0.userID == existing }) {
+            // Keep existing selection; refresh display name if we can.
+            replyTargetDisplayName = nil
+            return
+        }
+
+        // Default: most recent commenter.
+        let chosen = targets[0].userID
+        replyTargetUserID = chosen
+        replyTargetDisplayName = nil
+    }
+
+    private func displayNameForUserID(_ userIDLowercased: String) -> String {
+        let key = userIDLowercased.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if let acct = directoryAccounts[key] {
+            let n = acct.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !n.isEmpty { return n }
+        }
+        return "User"
+    }
+
+
+    private func composerPlaceholderText(ownerID: String?, viewerID: String?) -> String {
+        let trimmedOwner = (ownerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let trimmedViewer = (viewerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let isOwnerViewer = !trimmedOwner.isEmpty && trimmedOwner == trimmedViewer
+
+        if isOwnerViewer {
+            if isRespondToCommentersMode {
+                return "Respond to all commenters…"
+            }
+            let id = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            let name = (replyTargetDisplayName ?? displayNameForUserID(id)).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !name.isEmpty { return "Reply to \(name)…" }
+            return "Reply…"
+        }
+
+        return "Add a comment…"
+    }
+
+
+
     
     // MARK: - Mentions tokenization & helpers
     private struct MentionSpan: Identifiable {
@@ -368,6 +471,13 @@ public struct CommentsView: View {
                     Text("Mention tapped. Future: open profile or start reply with \(tappedMention ?? "")")
                 }
                 .appBackground()
+                .onAppear {
+                    let ownerID = ownerUserIDForSession()
+                    let viewerID = viewerUserID()
+                    if let ownerID, let viewerID, ownerID == viewerID {
+                        ensureDefaultReplyTargetIfNeeded(ownerUserID: ownerID)
+                    }
+                }
                 .task {
                     if case .connectedPost(let pid, let ownerUserID, let viewerUserID, _) = mode {
                         await backendStore.refresh(postID: pid)
@@ -376,7 +486,7 @@ public struct CommentsView: View {
                             await UnreadCommentsStore.shared.markViewed(postID: pid)
                         }
 
-                        // Owner default: if there are any commenters, default the composer to "Respond to commenters".
+                        // Owner default: if there are any commenters, default the composer to "Respond to all commenters".
                         await MainActor.run {
                             let ownerLower = ownerUserID.lowercased()
                             let viewerLower = viewerUserID.lowercased()
@@ -384,6 +494,7 @@ public struct CommentsView: View {
                                 let commenterIDs = Set(backendStore.comments.map { $0.authorUserID.lowercased() })
                                     .subtracting([ownerLower])
                                 isRespondToCommentersMode = !commenterIDs.isEmpty
+                                ensureDefaultReplyTargetIfNeeded(ownerUserID: ownerUserID)
                             }
                         }
                     }
@@ -792,7 +903,85 @@ return AnyView(
     }
 
 
-    private struct CommentContinuationMetaRow: View {
+
+    private struct CommenterPickerRow: View {
+        @Environment(\.colorScheme) private var scheme
+        let userID: String
+        let displayName: String
+        let directoryAccount: DirectoryAccount?
+
+        private var avatarKey: String? {
+            let k = (directoryAccount?.avatarKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return k.isEmpty ? nil : k
+        }
+
+        private var fallbackName: String {
+            let n = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            return n.isEmpty ? "User" : n
+        }
+
+        var body: some View {
+            HStack(spacing: Theme.Spacing.m) {
+#if canImport(UIKit)
+                let id = userID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if let ui = ProfileStore.avatarImage(for: id) {
+                    Image(uiImage: ui)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 36, height: 36)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
+                } else {
+                    initialsAvatar(fallbackName)
+                }
+#else
+                initialsAvatar(fallbackName)
+#endif
+
+                VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
+                    Text(displayName.isEmpty ? "User" : displayName)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Color.primary)
+
+                    if let loc = directoryAccount?.location, !loc.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(loc)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, Theme.Spacing.xs)
+        }
+
+        @ViewBuilder
+        private func initialsAvatar(_ name: String) -> some View {
+            let initials = initialsForName(name)
+            ZStack {
+                Circle()
+                    .fill(Theme.Colors.stroke(scheme).opacity(0.25))
+                    .frame(width: 36, height: 36)
+                Text(initials)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+            }
+            .overlay(Circle().stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1))
+        }
+
+        private func initialsForName(_ n: String) -> String {
+            let parts = n
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .split(separator: " ")
+                .map(String.init)
+            let first = parts.first?.first.map(String.init) ?? "U"
+            let last = parts.dropFirst().first?.first.map(String.init) ?? ""
+            let combo = (first + last).uppercased()
+            return combo.isEmpty ? "U" : combo
+        }
+    }
+
+struct CommentContinuationMetaRow: View {
         let timestamp: Date
         let showsReplyAction: Bool
         let onReply: (() -> Void)?
@@ -1212,27 +1401,29 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                 if recipientCount > 0 {
                     HStack(spacing: Theme.Spacing.s) {
                         Button {
-                            // Enter/exit fan-out mode. Entering clears single-target reply.
+                            // Enter/exit fan-out mode (fan-out remains multiple independent private replies).
                             if isRespondToCommentersMode {
                                 isRespondToCommentersMode = false
                             } else {
-                                clearReplyTarget()
-                    handleSuccessfulSend()
-                    handleSuccessfulSend()
                                 isRespondToCommentersMode = true
                             }
                         } label: {
-                            Text("Respond to commenters")
+                            Text("Respond to all commenters")
                                 .font(Theme.Text.meta)
                                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Respond to commenters")
+                        .accessibilityLabel("Respond to all commenters")
                         
                         Spacer(minLength: 0)
                     }
                     .padding(.bottom, Theme.Spacing.s)
-                    
+
+                    Text("Sends a private reply to each commenter")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .padding(.bottom, Theme.Spacing.s)
+
                     if isRespondToCommentersMode {
                         HStack(spacing: Theme.Spacing.s) {
                             Text("Sending privately to \(recipientCount) commenter\(recipientCount == 1 ? "" : "s")")
@@ -1266,29 +1457,42 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                 
                 
             }
-            // 8H-C single-target reply banner (suppressed while in fan-out mode)
-            if !isRespondToCommentersMode, isOwner, let targetID = replyTargetUserID, !targetID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                HStack(spacing: Theme.Spacing.s) {
-                    Text("Replying to \(replyTargetDisplayName ?? "commenter")")
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    
-                    Spacer(minLength: 0)
-                    
+
+            // Owner-only: targeted reply selector (replaces unanswered-only gating; no row-level reply buttons).
+            if isOwner, let ownerID, !isRespondToCommentersMode {
+                let targets = commenterTargetsForPicker(ownerUserID: ownerID)
+                if !targets.isEmpty {
+                    let selectedID = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    let selectedName = (replyTargetDisplayName ?? displayNameForUserID(selectedID)).trimmingCharacters(in: .whitespacesAndNewlines)
+
                     Button {
-                        clearReplyTarget()
+                        if targets.count > 1 {
+                            isTargetPickerPresented = true
+                        }
                     } label: {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                        HStack(spacing: Theme.Spacing.s) {
+                            Text("Reply to: \(selectedName.isEmpty ? "User" : selectedName)")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+
+                            if targets.count > 1 {
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, Theme.Spacing.xs)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel("Clear reply target")
+                    .padding(.bottom, Theme.Spacing.s)
                 }
-                .padding(.bottom, Theme.Spacing.s)
             }
-            
+
+
             HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
-                TextField("Add a comment…", text: $draft, axis: .vertical)
+                TextField(composerPlaceholderText(ownerID: ownerID, viewerID: viewerID), text: $draft, axis: .vertical)
                     .focused($composerFocused)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Add a comment")
@@ -1334,6 +1538,62 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                 .accessibilityLabel("Send comment")
             }
         }
+        .sheet(isPresented: $isTargetPickerPresented) {
+            let ownerID = ownerUserIDForSession() ?? ""
+            let targets = commenterTargetsForPicker(ownerUserID: ownerID)
+
+            VStack(spacing: 0) {
+                HStack {
+                    Button {
+                        isTargetPickerPresented = false
+                    } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                            .frame(width: 44, height: 44, alignment: .center)
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 0)
+
+                    Text("Reply to")
+                        .font(Theme.Text.sectionHeader)
+                        .kerning(0.2)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+
+                    Spacer(minLength: 0)
+
+                    Color.clear
+                        .frame(width: 44, height: 44)
+                }
+                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.top, Theme.Spacing.s)
+                .padding(.bottom, Theme.Spacing.s)
+
+                List {
+                    ForEach(targets) { t in
+                        Button {
+                            replyTargetUserID = t.userID
+                            replyTargetDisplayName = nil
+                            isTargetPickerPresented = false
+                        } label: {
+                            CommenterPickerRow(
+                                userID: t.userID,
+                                displayName: displayNameForUserID(t.userID),
+                                directoryAccount: directoryAccounts[t.userID]
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: Theme.Spacing.s, leading: Theme.Spacing.m, bottom: Theme.Spacing.s, trailing: Theme.Spacing.m))
+                    }
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+            }
+            .appBackground()
+        }
+
         .cardSurface(padding: Theme.Spacing.m)
         .padding(.horizontal)
         .padding(.vertical, 10)
@@ -1399,7 +1659,6 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     
                     draft = ""
                     isRespondToCommentersMode = false
-                    clearReplyTarget()
                     handleSuccessfulSend()
                 } else {
                     let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1414,7 +1673,6 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     )
                     
                     draft = ""
-                    clearReplyTarget()
                     handleSuccessfulSend()
                 }
             } else {
@@ -1433,7 +1691,6 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                             await MainActor.run {
                                 draft = ""
                                 isRespondToCommentersMode = false
-                                clearReplyTarget()
                                 handleSuccessfulSend()
                             }
                         case .failure:
@@ -1449,7 +1706,6 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                         case .success:
                             await MainActor.run {
                                 draft = ""
-                                clearReplyTarget()
                                 handleSuccessfulSend()
                             }
                         case .failure:
