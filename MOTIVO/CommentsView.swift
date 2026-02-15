@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260214_201500_CommentsUIIdentityHeaderParity_ReplyDedupe_VerticalRhythm
-// SCOPE: Comments UI polish — reply button only on last author-run + improved vertical rhythm; UI-only
-// SEARCH-TOKEN: 20260214_120000_CommentsUIIdentityHeaderParity_Final
+// CHANGE-ID: 20260215_102000_CommentsView_CalmUI_Polish_TuneDateAndTime
+// SCOPE: CommentsView Calm UI Polish — remove location line; calmer date/time labels; UI-only
+// SEARCH-TOKEN: 20260215_102000_CommentsView_CalmUI_Polish_TuneDateAndTime
 
 import SwiftUI
 import CoreData
@@ -275,6 +275,38 @@ public struct CommentsView: View {
         return f
     }()
 
+
+    private static let dayMonthYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current; f.timeZone = .current
+        f.dateFormat = "d MMM yyyy"
+        return f
+    }()
+
+    // MARK: - Calm date/time formatting (UI-only)
+    static func calmDateLabel(from date: Date, now: Date = Date()) -> String {
+        let cal = Calendar.current
+        let days = cal.dateComponents([.day], from: cal.startOfDay(for: date), to: cal.startOfDay(for: now)).day ?? 0
+        if days <= 0 { return "Today" }
+        if days == 1 { return "Yesterday" }
+        if (2...6).contains(days) { return "\(days) days ago" }
+        if (7...29).contains(days) { return "\(max(1, days / 7)) weeks ago" }
+        let sameYear = cal.component(.year, from: date) == cal.component(.year, from: now)
+        return sameYear ? dayMonthFormatter.string(from: date) : dayMonthYearFormatter.string(from: date)
+    }
+
+    private static let time24Formatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current; f.timeZone = .current
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+    static func calmTimeLabel(from date: Date) -> String { time24Formatter.string(from: date) }
+
+    private static func authorDayKey(authorID: String, date: Date) -> String {
+        "\(authorID)|\(Int(Calendar.current.startOfDay(for: date).timeIntervalSince1970))"
+    }
+
     private static func relativeTimestamp(from date: Date, now: Date = Date()) -> String {
         let calendar = Calendar.current
 
@@ -382,6 +414,11 @@ public struct CommentsView: View {
                 return eligibleReplyCommentIDsLocal(comments, ownerUserID: ownerID)
             }()
 
+            let authorDayCounts: [String: Int] = comments.reduce(into: [:]) { acc, c in
+                let a = (store.authorUserID(for: c.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !a.isEmpty { acc[CommentsView.authorDayKey(authorID: a, date: c.timestamp), default: 0] += 1 }
+            }
+
 return AnyView(
                 List {
                 ForEach(Array(comments.enumerated()), id: \.element.id) { idx, comment in
@@ -398,6 +435,7 @@ return AnyView(
                     }()
                     let isStartOfRun = authorID.isEmpty ? true : (prevAuthorID != authorID)
                     let isEndOfRun = authorID.isEmpty ? true : (nextAuthorID != authorID)
+                    let prevTimestamp = idx > 0 ? comments[idx - 1].timestamp : nil
                     commentRowLocal(
                         comment: comment,
                         ownerID: ownerID,
@@ -405,6 +443,8 @@ return AnyView(
                         sessionID: sid,
                         isStartOfAuthorRun: isStartOfRun,
                         isEndOfAuthorRun: isEndOfRun,
+                        prevTimestamp: prevTimestamp,
+                        authorDayCounts: authorDayCounts,
                         replyEligibleCommentIDs: replyEligibleCommentIDs
                     )
                 }
@@ -442,6 +482,11 @@ return AnyView(
                 return eligibleReplyCommentIDsBackend(rows, ownerUserID: ownerUserID)
             }()
 
+            let authorDayCounts: [String: Int] = rows.reduce(into: [:]) { acc, r in
+                let a = r.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                if !a.isEmpty { acc[CommentsView.authorDayKey(authorID: a, date: r.createdAt), default: 0] += 1 }
+            }
+
 return AnyView(
                 List {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
@@ -456,6 +501,7 @@ return AnyView(
                     }()
                     let isStartOfRun = authorID.isEmpty ? true : (prevAuthorID != authorID)
                     let isEndOfRun = authorID.isEmpty ? true : (nextAuthorID != authorID)
+                    let prevTimestamp = idx > 0 ? rows[idx - 1].createdAt : nil
                     commentRowBackend(
                         row: row,
                         postID: pid,
@@ -463,6 +509,8 @@ return AnyView(
                         viewerUserID: viewerUserID,
                         isStartOfAuthorRun: isStartOfRun,
                         isEndOfAuthorRun: isEndOfRun,
+                        prevTimestamp: prevTimestamp,
+                        authorDayCounts: authorDayCounts,
                         replyEligibleCommentIDs: replyEligibleCommentIDs
                     )
                 }
@@ -677,15 +725,15 @@ return AnyView(
                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                     HStack(spacing: Theme.Spacing.s) {
                         Text(primaryLabel)
-                            .font(Theme.Text.body)
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(Color.primary)
 
                         Spacer(minLength: 0)
 
                         HStack(spacing: 6) {
-                            Text(CommentsView.relativeTimestamp(from: timestamp))
+                            Text(CommentsView.calmDateLabel(from: timestamp))
                                 .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.58))
 
                             if showsReplyAction {
                                 Button(action: { onReply?() }) {
@@ -697,13 +745,6 @@ return AnyView(
                                 .accessibilityLabel("Reply to commenter")
                             }
                         }
-                    }
-
-                    if !secondaryLabel.isEmpty {
-                        Text(secondaryLabel)
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .lineLimit(2)
                     }
                 }
             }
@@ -739,7 +780,7 @@ return AnyView(
     }
 
 
-    private func commentRowLocal(comment: Comment, ownerID: String?, viewerID: String?, sessionID: UUID, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, replyEligibleCommentIDs: Set<UUID>) -> some View {
+    private func commentRowLocal(comment: Comment, ownerID: String?, viewerID: String?, sessionID: UUID, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, prevTimestamp: Date?, authorDayCounts: [String: Int], replyEligibleCommentIDs: Set<UUID>) -> some View {
         let authorID = store.authorUserID(for: comment.id)
         let isViewerOwner: Bool = {
             let o = (ownerID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -872,7 +913,7 @@ return AnyView(
     }
 
 
-private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserID: String, viewerUserID: String, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, replyEligibleCommentIDs: Set<UUID>) -> some View {
+private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserID: String, viewerUserID: String, isStartOfAuthorRun: Bool, isEndOfAuthorRun: Bool, prevTimestamp: Date?, authorDayCounts: [String: Int], replyEligibleCommentIDs: Set<UUID>) -> some View {
         let authorID = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let isViewerOwner = (viewerUserID.lowercased() == ownerUserID.lowercased())
         let isAuthorOwner = (!authorID.isEmpty && authorID == ownerUserID.lowercased())
@@ -923,12 +964,21 @@ private func commentRowBackend(row: BackendPostComment, postID: UUID, ownerUserI
 
                     Spacer(minLength: 0)
 
+                    let showInlineTime = {
+                        guard !authorID.isEmpty, let prevTimestamp else { return false }
+                        let cal = Calendar.current
+                        guard cal.isDate(prevTimestamp, inSameDayAs: row.createdAt) else { return false }
+                        if abs(row.createdAt.timeIntervalSince(prevTimestamp)) < 60 { return false }
+                        let key = CommentsView.authorDayKey(authorID: authorID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), date: row.createdAt)
+                        return (authorDayCounts[key] ?? 0) >= 2
+                    }()
                     HStack(spacing: 6) {
-                        Text(CommentsView.relativeTimestamp(from: row.createdAt))
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                            .lineLimit(1)
-
+                        if showInlineTime {
+                            Text(CommentsView.calmTimeLabel(from: row.createdAt))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                                .lineLimit(1)
+                        }
                         if showsReplyAction {
                             Button(action: { onReply?() }) {
                                 Text("Reply")
