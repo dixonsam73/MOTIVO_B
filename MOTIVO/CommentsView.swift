@@ -1,3 +1,12 @@
+// CHANGE-ID: 20260215_221500_CommentsView_InitialAutoScroll_ConnectedPaddingFix
+// SCOPE: CommentsView — restore List-era horizontal insets for CONNECTED comments path after ScrollView/LazyVStack migration. UI-only; no logic/backend changes.
+// SEARCH-TOKEN: 20260215_221500_CommentsView_InitialAutoScroll_ConnectedPaddingFix
+
+// CHANGE-ID: 20260215_220800_CommentsView_InitialAutoScrollToBottom_SpacingFix3
+// SCOPE: Restore List-equivalent outer + inner horizontal padding for comment card when using ScrollView+LazyVStack (UI-only).
+// SEARCH-TOKEN: 20260215_215900_CommentsView_InitialAutoScrollToBottom_SpacingFix2
+// SEARCH-TOKEN: 20260215_213000_CommentsView_InitialAutoScrollToBottom
+
 // CHANGE-ID: 20260215_202000_CommentsUI_PlaceholderFix_SyntaxRepair
 // SCOPE: Fix bad paste that left stray placeholder-return code at top level causing cascading compile errors; placeholder logic unchanged (fan-out wording only when recipientCount>1 && fan-out mode).
 // SEARCH-TOKEN: 20260215_202000_CommentsUI_PlaceholderFix_SyntaxRepair
@@ -36,6 +45,11 @@ public struct CommentsView: View {
     @State private var draft: String = ""
     @FocusState private var composerFocused: Bool
     @State private var scrollToBottomNonce: Int = 0
+    
+    // Deterministic first-open scroll: keyed by current mode (postID/sessionID) so reopening a different thread re-scrolls.
+    @State private var initialAutoScrollKey: String? = nil
+    @State private var didInitialAutoScroll: Bool = false
+    @State private var userHasManuallyScrolled: Bool = false
     @State private var tappedMention: String? = nil
     
     @State private var replyTargetUserID: String? = nil
@@ -79,6 +93,46 @@ public struct CommentsView: View {
     }
     
     
+
+    // MARK: - Deterministic auto-scroll
+
+    private func autoScrollKey() -> String {
+        switch mode {
+        case .localSession(let sid):
+            return "local_\(sid.uuidString)"
+        case .connectedPost(let pid, _, _, _):
+            return "connected_\(pid.uuidString)"
+        }
+    }
+
+    private func resetAutoScrollStateIfNeeded() {
+        let key = autoScrollKey()
+        if initialAutoScrollKey != key {
+            initialAutoScrollKey = key
+            didInitialAutoScroll = false
+            userHasManuallyScrolled = false
+        }
+    }
+
+    private func scheduleScrollToBottom(_ proxy: ScrollViewProxy) {
+        let perform: () -> Void = {
+            proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+        }
+
+        DispatchQueue.main.async(execute: perform)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05, execute: perform)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.20, execute: perform)
+    }
+
+    private func maybePerformInitialAutoScroll(proxy: ScrollViewProxy, contentCount: Int) {
+        resetAutoScrollStateIfNeeded()
+        guard !userHasManuallyScrolled else { return }
+        guard contentCount > 0 else { return }
+        guard !didInitialAutoScroll else { return }
+        didInitialAutoScroll = true
+        scheduleScrollToBottom(proxy)
+    }
+
     public init(sessionID: UUID, placeholderAuthor: String = "You") {
         self.mode = .localSession(sessionID: sessionID)
         self.placeholderAuthor = placeholderAuthor
@@ -470,7 +524,7 @@ public struct CommentsView: View {
                         }
                         Spacer()
                     }
-                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.horizontal, Theme.Spacing.l)
                     .padding(.bottom, Theme.Spacing.m)
                 }
                 .toolbar {
@@ -565,7 +619,8 @@ public struct CommentsView: View {
 
 return AnyView(
                 ScrollViewReader { proxy in
-                    List {
+                    ScrollView {
+                        LazyVStack(spacing: Theme.Spacing.xs) {
                 ForEach(Array(comments.enumerated()), id: \.element.id) { idx, comment in
                     let authorID = (store.authorUserID(for: comment.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let prevAuthorID: String = {
@@ -596,10 +651,10 @@ return AnyView(
                 Color.clear
                     .frame(height: 1)
                     .id(Self.bottomAnchorID)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-            }
-            .listStyle(.plain)
+                        }
+                        .padding(.horizontal, Theme.Spacing.l)
+                    }
+                    .simultaneousGesture(DragGesture(minimumDistance: 1).onChanged { _ in userHasManuallyScrolled = true })
             .scrollIndicators(.hidden)
             .scrollContentBackground(.hidden)
             .background(Theme.Colors.surface(scheme))
@@ -608,15 +663,19 @@ return AnyView(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                     .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
             )
-            .padding(.horizontal)
+            .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
+            .onAppear {
+                maybePerformInitialAutoScroll(proxy: proxy, contentCount: comments.count)
+            }
+            .onChange(of: comments.count) { newCount in
+                maybePerformInitialAutoScroll(proxy: proxy, contentCount: newCount)
+            }
             .task(id: directoryKey(for: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])) {
                 await hydrateDirectoryIfNeeded(userIDs: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])
             }
             .onChange(of: scrollToBottomNonce) { _ in
-                DispatchQueue.main.async {
-                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-                }
+                scheduleScrollToBottom(proxy)
             }
             .accessibilitySortPriority(1)
                 }
@@ -645,7 +704,8 @@ return AnyView(
 
 return AnyView(
                 ScrollViewReader { proxy in
-                    List {
+                    ScrollView {
+                        LazyVStack(spacing: Theme.Spacing.xs) {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                     let authorID = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let prevAuthorID: String = {
@@ -674,10 +734,10 @@ return AnyView(
                 Color.clear
                     .frame(height: 1)
                     .id(Self.bottomAnchorID)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-            }
-            .listStyle(.plain)
+                        }
+                        .padding(.horizontal, Theme.Spacing.l)
+                    }
+                    .simultaneousGesture(DragGesture(minimumDistance: 1).onChanged { _ in userHasManuallyScrolled = true })
             .scrollIndicators(.hidden)
             .scrollContentBackground(.hidden)
             .background(Theme.Colors.surface(scheme))
@@ -686,15 +746,19 @@ return AnyView(
                 RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                     .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
             )
-            .padding(.horizontal)
+            .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
+            .onAppear {
+                maybePerformInitialAutoScroll(proxy: proxy, contentCount: rows.count)
+            }
+            .onChange(of: rows.count) { newCount in
+                maybePerformInitialAutoScroll(proxy: proxy, contentCount: newCount)
+            }
             .task(id: directoryKey(for: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])) {
                 await hydrateDirectoryIfNeeded(userIDs: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])
             }
             .onChange(of: scrollToBottomNonce) { _ in
-                DispatchQueue.main.async {
-                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
-                }
+                scheduleScrollToBottom(proxy)
             }
             .accessibilitySortPriority(1)
                 }
@@ -1588,7 +1652,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     Color.clear
                         .frame(width: 44, height: 44)
                 }
-                .padding(.horizontal, Theme.Spacing.m)
+                .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.s)
                 .padding(.bottom, Theme.Spacing.s)
 
