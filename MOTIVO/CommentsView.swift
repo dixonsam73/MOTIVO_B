@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260215_174800_CommentsView_KeyboardDismissOnSend_Fix
+// SCOPE: CommentsView keyboard retract-on-send + ensure latest message visible (ScrollViewReader bottom anchor). UI-only; no store/backend/schema changes.
+// SEARCH-TOKEN: 20260215_174800_CommentsView_KeyboardDismissOnSend_Fix
+
 // CHANGE-ID: 20260215_110254_UnreadComments_PeoplePlus
 // SCOPE: CommentsView: when viewing connected post comments as owner, mark post comments as viewed (clears People '+'). No UI changes.
 // SEARCH-TOKEN: 20260215_110254_UnreadComments_PeoplePlus
@@ -18,6 +22,8 @@ public struct CommentsView: View {
     @ObservedObject private var store = CommentsStore.shared
     @StateObject private var backendStore: BackendCommentsStore
     @State private var draft: String = ""
+    @FocusState private var composerFocused: Bool
+    @State private var scrollToBottomNonce: Int = 0
     @State private var tappedMention: String? = nil
     
     @State private var replyTargetUserID: String? = nil
@@ -33,6 +39,7 @@ public struct CommentsView: View {
     
     private let mode: CommentsViewMode
     private let placeholderAuthor: String
+    private static let bottomAnchorID = "comments_bottom_anchor"
     
     private var sessionID: UUID? {
         if case .localSession(let sid) = mode { return sid }
@@ -429,7 +436,8 @@ public struct CommentsView: View {
             }
 
 return AnyView(
-                List {
+                ScrollViewReader { proxy in
+                    List {
                 ForEach(Array(comments.enumerated()), id: \.element.id) { idx, comment in
                     let authorID = (store.authorUserID(for: comment.id) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let prevAuthorID: String = {
@@ -457,6 +465,11 @@ return AnyView(
                         replyEligibleCommentIDs: replyEligibleCommentIDs
                     )
                 }
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollIndicators(.hidden)
@@ -472,7 +485,13 @@ return AnyView(
             .task(id: directoryKey(for: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])) {
                 await hydrateDirectoryIfNeeded(userIDs: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])
             }
+            .onChange(of: scrollToBottomNonce) { _ in
+                DispatchQueue.main.async {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+            }
             .accessibilitySortPriority(1)
+                }
             )
             
         case .connectedPost(let pid, let ownerUserID, let viewerUserID, _):
@@ -497,7 +516,8 @@ return AnyView(
             }
 
 return AnyView(
-                List {
+                ScrollViewReader { proxy in
+                    List {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
                     let authorID = row.authorUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     let prevAuthorID: String = {
@@ -523,6 +543,11 @@ return AnyView(
                         replyEligibleCommentIDs: replyEligibleCommentIDs
                     )
                 }
+                Color.clear
+                    .frame(height: 1)
+                    .id(Self.bottomAnchorID)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
             }
             .listStyle(.plain)
             .scrollIndicators(.hidden)
@@ -538,7 +563,13 @@ return AnyView(
             .task(id: directoryKey(for: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])) {
                 await hydrateDirectoryIfNeeded(userIDs: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])
             }
+            .onChange(of: scrollToBottomNonce) { _ in
+                DispatchQueue.main.async {
+                    proxy.scrollTo(Self.bottomAnchorID, anchor: .bottom)
+                }
+            }
             .accessibilitySortPriority(1)
+                }
             )
         }
     }
@@ -1186,6 +1217,8 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                                 isRespondToCommentersMode = false
                             } else {
                                 clearReplyTarget()
+                    handleSuccessfulSend()
+                    handleSuccessfulSend()
                                 isRespondToCommentersMode = true
                             }
                         } label: {
@@ -1256,6 +1289,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
             
             HStack(alignment: .bottom, spacing: Theme.Spacing.s) {
                 TextField("Add a comment…", text: $draft, axis: .vertical)
+                    .focused($composerFocused)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Add a comment")
                     .onSubmit(send)
@@ -1333,6 +1367,11 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
         return result
     }
     
+    private func handleSuccessfulSend() {
+        composerFocused = false
+        scrollToBottomNonce &+= 1
+    }
+
     private func send() {
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -1361,6 +1400,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     draft = ""
                     isRespondToCommentersMode = false
                     clearReplyTarget()
+                    handleSuccessfulSend()
                 } else {
                     let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !target.isEmpty else { return }
@@ -1375,34 +1415,60 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     
                     draft = ""
                     clearReplyTarget()
+                    handleSuccessfulSend()
                 }
             } else {
                 store.add(sessionID: sid, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: ownerID)
                 draft = ""
+                handleSuccessfulSend()
             }
             
         case .connectedPost(let pid, _, _, _):
             if viewerID == ownerID {
                 if isRespondToCommentersMode {
                     Task {
-                        _ = await backendStore.respondToCommenters(postID: pid, body: trimmed)
-                        draft = ""
-                        isRespondToCommentersMode = false
-                        clearReplyTarget()
+                        let result = await backendStore.respondToCommenters(postID: pid, body: trimmed)
+                        switch result {
+                        case .success:
+                            await MainActor.run {
+                                draft = ""
+                                isRespondToCommentersMode = false
+                                clearReplyTarget()
+                                handleSuccessfulSend()
+                            }
+                        case .failure:
+                            break
+                        }
                     }
                 } else {
                     let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !target.isEmpty else { return }
                     Task {
-                        _ = await backendStore.replyToCommenter(postID: pid, recipientUserID: target, body: trimmed)
-                        draft = ""
-                        clearReplyTarget()
+                        let result = await backendStore.replyToCommenter(postID: pid, recipientUserID: target, body: trimmed)
+                        switch result {
+                        case .success:
+                            await MainActor.run {
+                                draft = ""
+                                clearReplyTarget()
+                                handleSuccessfulSend()
+                            }
+                        case .failure:
+                            break
+                        }
                     }
                 }
             } else {
                 Task {
-                    _ = await backendStore.addComment(postID: pid, body: trimmed)
-                    draft = ""
+                    let result = await backendStore.addComment(postID: pid, body: trimmed)
+                    switch result {
+                    case .success:
+                        await MainActor.run {
+                            draft = ""
+                            handleSuccessfulSend()
+                        }
+                    case .failure:
+                        break
+                    }
                 }
             }
         }
