@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260215_171007_PeopleView_ResponsesIdentity_bf5de905
+// SCOPE: PeopleView — Responses: normalize latestAuthorUserID UUID casing to lowercase for directory hydration (display name + avatar). No UI/layout changes.
+// SEARCH-TOKEN: 20260215_171007_PeopleView_ResponsesIdentity_bf5de905
+
+// CHANGE-ID: 20260215_152200_PeopleView_Responses_ToComments
+// SCOPE: PeopleView — Responses: tap navigates to CommentsView (not detail), row uses PeopleUserRow (commenter identity) and subtitle uses post activity description; time label matches CommentsView (HH:mm).
+// SEARCH-TOKEN: 20260215_152200_PeopleView_Responses_ToComments
+
 // CHANGE-ID: 20260215_145500_PeopleView_ResponsesSection_FixBraces
 // SCOPE: PeopleView — fix section helper scoping (close sharedWithYouSection, keep responsesSection at type scope). No UI/logic changes.
 // SEARCH-TOKEN: 20260215_145500_PeopleView_ResponsesSection_FixBraces
@@ -46,6 +54,7 @@ struct PeopleView: View {
     // Owner-Only Share — unread share pointers (recipient-side)
     @StateObject private var sharedWithYouStore = SharedWithYouStore()
     @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
+    @State private var responseAuthorDirectory: [String: DirectoryAccount] = [:]
 
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
     @EnvironmentObject private var auth: AuthManager
@@ -115,7 +124,18 @@ struct PeopleView: View {
                 shareOwnerDirectory = map
             }
         }
-        .task(id: incomingRequestIDs) {
+        .task(id: responseAuthorIDsTaskToken) {
+            let ids = responseAuthorIDs
+            guard !ids.isEmpty else {
+                responseAuthorDirectory = [:]
+                return
+            }
+            let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+            if case .success(let map) = result {
+                responseAuthorDirectory = map
+            }
+        }
+.task(id: incomingRequestIDs) {
             let ids = incomingRequestIDs
             guard !ids.isEmpty else {
                 requestDirectory = [:]
@@ -136,6 +156,20 @@ struct PeopleView: View {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .sorted()
+    }
+
+    private var responseAuthorIDs: [String] {
+        // IMPORTANT: normalize to lowercase so String keys match account_directory.user_id casing.
+        // UUID().uuidString is uppercase by default; backend IDs are typically lowercase.
+        let ids = unreadCommentsStore.unreadGroups
+            .compactMap { $0.latestAuthorUserID?.uuidString.lowercased() }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return Array(Set(ids)).sorted()
+    }
+
+    private var responseAuthorIDsTaskToken: String {
+        responseAuthorIDs.joined(separator: ",")
     }
     private var effectiveBackendUserID: String {
         #if DEBUG
@@ -192,51 +226,89 @@ struct PeopleView: View {
     }
 
     private var responsesSection: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-        Text("Responses").sectionHeader()
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Responses").sectionHeader()
 
-        ForEach(unreadCommentsStore.unreadGroups.sorted(by: { $0.latestUnreadAt > $1.latestUnreadAt })) { group in
-            NavigationLink {
-                ResponsesPostDetailHost(
-                    postID: group.postID,
-                    viewerUserID: effectiveBackendUserID,
-                    backendFeedStore: backendFeedStore
+            ForEach(unreadCommentsStore.unreadGroups.sorted(by: { $0.latestUnreadAt > $1.latestUnreadAt }), id: \.id) { group in
+                let authorID = group.latestAuthorUserID?.uuidString.lowercased() ?? ""
+                let acct = responseAuthorDirectory[authorID]
+                let subtitle = responsePostSubtitle(postID: group.postID)
+
+                PeopleUserRow(
+                    userID: authorID,
+                    overrideDisplayName: acct?.displayName,
+                    overrideSubtitle: subtitle,
+                    overrideAvatarKey: acct?.avatarKey
                 ) {
-                    Task { await unreadCommentsStore.markViewed(postID: group.postID) }
-                }
-            } label: {
-                HStack {
-                    VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                        Text("Session")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Color.primary)
+                    ResponsesCommentsHost(
+                            postID: group.postID,
+                            ownerUserID: effectiveBackendUserID,
+                            viewerUserID: effectiveBackendUserID
+                        ) {
+                            Task { await unreadCommentsStore.markViewed(postID: group.postID) }
+                        }
+                } trailing: {
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text(responsesTimeLabel(from: group.latestUnreadAt))
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text((group.latestBody?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? group.latestBody! : "New comment")
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                        }
                     }
-                    Spacer()
-                    Text(group.latestUnreadAt.formatted(date: .abbreviated, time: .shortened))
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-                .contentShape(Rectangle())
-                .padding(.vertical, Theme.Spacing.s)
+                
             }
         }
+        .cardSurface()
     }
-    .cardSurface()
+
+    private func responsePostSubtitle(postID: UUID) -> String {
+        // Prefer activity detail (defaults to session title), then activity label.
+        if let match = backendFeedStore.minePosts.first(where: { $0.id == postID }) ??
+            backendFeedStore.allPosts.first(where: { $0.id == postID }) {
+            return match.activityDetail ?? match.activityLabel ?? "Session"
+        }
+        return "Session"
+    }
+
+    private static let responsesTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_GB_POSIX")
+        f.calendar = Calendar(identifier: .iso8601)
+        f.timeZone = TimeZone.current
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
+    private func responsesTimeLabel(from date: Date) -> String {
+        Self.responsesTimeFormatter.string(from: date)
+    }
+
+    private struct ResponsesCommentsHost: View {
+        let postID: UUID
+        let ownerUserID: String
+        let viewerUserID: String
+        let onAppearMarkViewed: () -> Void
+
+        init(postID: UUID, ownerUserID: String, viewerUserID: String, onAppearMarkViewed: @escaping () -> Void) {
+            self.postID = postID
+            self.ownerUserID = ownerUserID
+            self.viewerUserID = viewerUserID
+            self.onAppearMarkViewed = onAppearMarkViewed
+        }
+
+        var body: some View {
+            CommentsView(postID: postID, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
+                .task { onAppearMarkViewed() }
+        }
     }
 
 
 
 
-    /// Phase 10D.1: Incoming requests only (defensive filter).
+/// Phase 10D.1: Incoming requests only (defensive filter).
     /// Requests UI must never surface outgoing requests.
     private var incomingRequestIDs: [String] {
         Array(followStore.requests.subtracting(followStore.outgoingRequests))
@@ -547,4 +619,3 @@ private struct ResponsesPostDetailHost: View {
         }
     }
 }
-
