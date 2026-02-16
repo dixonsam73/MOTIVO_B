@@ -7,7 +7,7 @@
 import Foundation
 
 public enum SessionActivityType: Int16, CaseIterable, Identifiable {
-    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4
+    case practice = 0, rehearsal = 1, recording = 2, lesson = 3, performance = 4, writing = 5
 
     public var id: Int16 { rawValue }
 
@@ -18,6 +18,7 @@ public enum SessionActivityType: Int16, CaseIterable, Identifiable {
         case .recording:   return "Recording"
         case .lesson:      return "Lesson"
         case .performance: return "Performance"
+        case .writing:     return "Writing"
         }
     }
 

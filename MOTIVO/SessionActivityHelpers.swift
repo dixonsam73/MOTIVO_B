@@ -90,6 +90,7 @@ enum SessionActivity {
         case 2: return "Recording"
         case 3: return "Lesson"
         case 4: return "Performance"
+        case 5: return "Writing"
         default: return "Practice"
         }
     }

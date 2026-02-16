@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "1CA2DFBA2E704AF800F23C97"
-               BuildableName = "MOTIVO.app"
+               BuildableName = "Etudes.app"
                BlueprintName = "MOTIVO"
                ReferencedContainer = "container:MOTIVO.xcodeproj">
             </BuildableReference>
@@ -69,7 +69,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CA2DFBA2E704AF800F23C97"
-            BuildableName = "MOTIVO.app"
+            BuildableName = "Etudes.app"
             BlueprintName = "MOTIVO"
             ReferencedContainer = "container:MOTIVO.xcodeproj">
          </BuildableReference>
@@ -86,7 +86,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "1CA2DFBA2E704AF800F23C97"
-            BuildableName = "MOTIVO.app"
+            BuildableName = "Etudes.app"
             BlueprintName = "MOTIVO"
             ReferencedContainer = "container:MOTIVO.xcodeproj">
          </BuildableReference>
