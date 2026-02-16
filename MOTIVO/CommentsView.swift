@@ -552,10 +552,8 @@ public struct CommentsView: View {
                 .task {
                     if case .connectedPost(let pid, let ownerUserID, let viewerUserID, _) = mode {
                         await backendStore.refresh(postID: pid)
-                        // Calm unread presence: opening comments clears owner-only pending state for this post.
-                        if ownerUserID.lowercased() == viewerUserID.lowercased() {
-                            await UnreadCommentsStore.shared.markViewed(postID: pid)
-                        }
+                        // Calm unread presence: opening comments clears unread state for THIS viewer (owner or commenter).
+                        await UnreadCommentsStore.shared.markViewed(postID: pid)
 
                         // Owner default: if there are any commenters, default the composer to "Respond to all commenters".
                         await MainActor.run {
@@ -1744,8 +1742,9 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     }
                     
                     draft = ""
-                    isRespondToCommentersMode = false
-                    handleSuccessfulSend()
+                                isRespondToCommentersMode = false
+                    CommentPresenceStore.shared.set(postID: sid, hasComments: true)
+                                handleSuccessfulSend()
                 } else {
                     let target = (replyTargetUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !target.isEmpty else { return }
@@ -1759,12 +1758,14 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     )
                     
                     draft = ""
-                    handleSuccessfulSend()
+                    CommentPresenceStore.shared.set(postID: sid, hasComments: true)
+                                handleSuccessfulSend()
                 }
             } else {
                 store.add(sessionID: sid, authorUserID: viewerID, authorName: placeholderAuthor, text: trimmed, recipientUserID: ownerID)
                 draft = ""
-                handleSuccessfulSend()
+                CommentPresenceStore.shared.set(postID: sid, hasComments: true)
+                                handleSuccessfulSend()
             }
             
         case .connectedPost(let pid, _, _, _):
@@ -1777,6 +1778,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                             await MainActor.run {
                                 draft = ""
                                 isRespondToCommentersMode = false
+                                CommentPresenceStore.shared.set(postID: pid, hasComments: true)
                                 handleSuccessfulSend()
                             }
                         case .failure:
@@ -1792,6 +1794,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                         case .success:
                             await MainActor.run {
                                 draft = ""
+                                CommentPresenceStore.shared.set(postID: pid, hasComments: true)
                                 handleSuccessfulSend()
                             }
                         case .failure:
@@ -1806,6 +1809,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     case .success:
                         await MainActor.run {
                             draft = ""
+                            CommentPresenceStore.shared.set(postID: pid, hasComments: true)
                             handleSuccessfulSend()
                         }
                     case .failure:

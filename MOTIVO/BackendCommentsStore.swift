@@ -26,6 +26,8 @@ public final class BackendCommentsStore: ObservableObject {
         case .success(let rows):
             comments = rows.sorted(by: { $0.createdAt < $1.createdAt })
             lastFetchAt = Date()
+            // Viewer-local presence: keep comment icon state in sync with the latest fetched snapshot.
+            CommentPresenceStore.shared.set(postID: postID, hasComments: !rows.isEmpty)
         case .failure(let e):
             // Fail-closed: keep existing comments snapshot and surface a gentle error string.
             lastError = (e as? LocalizedError)?.errorDescription ?? e.localizedDescription

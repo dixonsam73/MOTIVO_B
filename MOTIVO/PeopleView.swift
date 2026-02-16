@@ -240,9 +240,13 @@ struct PeopleView: View {
                     overrideSubtitle: subtitle,
                     overrideAvatarKey: acct?.avatarKey
                 ) {
+                    let post = backendFeedStore.allPosts.first(where: { $0.id == group.postID })
+                        ?? backendFeedStore.minePosts.first(where: { $0.id == group.postID })
+                    let resolvedOwnerUserID = (post?.ownerUserID ?? effectiveBackendUserID).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
                     ResponsesCommentsHost(
                             postID: group.postID,
-                            ownerUserID: effectiveBackendUserID,
+                            ownerUserID: resolvedOwnerUserID,
                             viewerUserID: effectiveBackendUserID
                         ) {
                             Task { await unreadCommentsStore.markViewed(postID: group.postID) }
