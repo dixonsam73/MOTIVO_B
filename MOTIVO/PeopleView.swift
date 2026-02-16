@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260216_214800_PeopleView_Responses_NoDuplicateClose
+// SCOPE: PeopleView — Responses: when pushing CommentsView via NavigationLink, suppress CommentsView's modal close X so only the system back chevron appears. UI-only.
+// SEARCH-TOKEN: 20260216_214800_PeopleView_Responses_NoDuplicateClose
+
 // CHANGE-ID: 20260215_101500_PeopleView_SharedWithYouRowParity_cc2c5330
 // SCOPE: PeopleView — Shared-with-you rows: render with PeopleUserRow + trailing timestamp to match Responses row layout. UI-only; no behavior changes.
 // SEARCH-TOKEN: 20260215_101500_PeopleView_SharedWithYouRowParity_cc2c5330
@@ -240,13 +244,9 @@ struct PeopleView: View {
                     overrideSubtitle: subtitle,
                     overrideAvatarKey: acct?.avatarKey
                 ) {
-                    let post = backendFeedStore.allPosts.first(where: { $0.id == group.postID })
-                        ?? backendFeedStore.minePosts.first(where: { $0.id == group.postID })
-                    let resolvedOwnerUserID = (post?.ownerUserID ?? effectiveBackendUserID).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-
                     ResponsesCommentsHost(
                             postID: group.postID,
-                            ownerUserID: resolvedOwnerUserID,
+                            ownerUserID: effectiveBackendUserID,
                             viewerUserID: effectiveBackendUserID
                         ) {
                             Task { await unreadCommentsStore.markViewed(postID: group.postID) }
@@ -304,7 +304,7 @@ struct PeopleView: View {
         }
 
         var body: some View {
-            CommentsView(postID: postID, ownerUserID: ownerUserID, viewerUserID: viewerUserID)
+            CommentsView(postID: postID, ownerUserID: ownerUserID, viewerUserID: viewerUserID, showsCloseButton: false)
                 .task { onAppearMarkViewed() }
         }
     }
