@@ -719,7 +719,7 @@ struct BackendSessionDetailView: View {
 
     private func shareText() -> String {
         let title = headerTitle
-        return "Check out my session: \(title) — via Motivo"
+        return "Check out my session: \(title) — via Etudes"
     }
 
     // MARK: - Directory lookup (Phase 14)

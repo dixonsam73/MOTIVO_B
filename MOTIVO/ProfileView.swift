@@ -233,7 +233,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
-                 .accessibilityLabel(Text("Welcome to Motivo"))
+                 .accessibilityLabel(Text("Welcome to Etudes"))
                  .accessibilityHint(Text(isWelcomeExpanded ? "Hide welcome information" : "Show welcome information"))
                  .frame(minHeight: 24)
 
@@ -242,7 +242,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                          .padding(.vertical, 8)
 
                      VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                         Text("Welcome to Motivo")
+                         Text("Welcome to Etudes")
                              .font(Theme.Text.body)
                              .fontWeight(.semibold)
 
@@ -438,7 +438,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  }
                  .tint(.primary)
 
-                 Text("Motivo never auto-approves follows.")
+                 Text("Etudes never auto-approves follows.")
                      .font(.caption)
                      .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
              }

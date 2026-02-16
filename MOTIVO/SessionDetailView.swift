@@ -225,7 +225,7 @@ struct SessionDetailView: View {
     // Added helper to build share text
     private func shareText() -> String {
         let title = SessionActivity.headerTitle(for: session)
-        return "Check out my session: \(title) — via Motivo"
+        return "Check out my session: \(title) — via Etudes"
     }
 
 
