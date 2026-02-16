@@ -437,6 +437,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
 				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";
@@ -471,6 +472,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
 				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";
