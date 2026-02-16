@@ -29,7 +29,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		1CA2DFBB2E704AF800F23C97 /* MOTIVO.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MOTIVO.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		1CA2DFBB2E704AF800F23C97 /* Etudes.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Etudes.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1CA2DFCD2E704AFA00F23C97 /* MOTIVOTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MOTIVOTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1CA2DFD72E704AFA00F23C97 /* MOTIVOUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MOTIVOUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -106,7 +106,7 @@
 		1CA2DFBC2E704AF800F23C97 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				1CA2DFBB2E704AF800F23C97 /* MOTIVO.app */,
+				1CA2DFBB2E704AF800F23C97 /* Etudes.app */,
 				1CA2DFCD2E704AFA00F23C97 /* MOTIVOTests.xctest */,
 				1CA2DFD72E704AFA00F23C97 /* MOTIVOUITests.xctest */,
 			);
@@ -144,7 +144,7 @@
 				1CE3B03D2F04730900BFF0B8 /* Supabase */,
 			);
 			productName = MOTIVO;
-			productReference = 1CA2DFBB2E704AF800F23C97 /* MOTIVO.app */;
+			productReference = 1CA2DFBB2E704AF800F23C97 /* Etudes.app */;
 			productType = "com.apple.product-type.application";
 		};
 		1CA2DFCC2E704AFA00F23C97 /* MOTIVOTests */ = {
@@ -438,10 +438,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
-				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "lets Motivo use the app to take relevant photos ";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Etudes needs access to the camera to capture photos for your sessions.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Etudes needs access to the microphone to record audio for your sessions.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Etudes needs permission to save photos to your library from your sessions.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Etudes needs access to your photo library to select photos for your sessions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -453,7 +453,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.samueldixon.motivo.dev;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Etudes;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -473,10 +473,10 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
-				INFOPLIST_KEY_NSCameraUsageDescription = "lets motivo use the camera to take pictures ";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "lets motivo record relevant audio for the practice sessio";
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "lets motivo add photos to the practice session";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "lets Motivo use the app to take relevant photos ";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Etudes needs access to the camera to capture photos for your sessions.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Etudes needs access to the microphone to record audio for your sessions.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Etudes needs permission to save photos to your library from your sessions.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Etudes needs access to your photo library to select photos for your sessions.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -488,7 +488,7 @@
 				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.samueldixon.motivo.dev;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Etudes;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
