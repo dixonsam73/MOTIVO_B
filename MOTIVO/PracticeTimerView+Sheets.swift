@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260106_000900_ptv_sheets_viewer_state_sync
-// SCOPE: PTV viewer callbacks now use stable privacy keys + enforce ⭐⇔selection with privacy/thumbnail invariants; remove any thumbnail fallback on delete.
+// CHANGE-ID: 20260217_104417_ad416700
+// SCOPE: PTV Audio Recorder card width contract — remove ARV self-card chrome; wrap in PTV cardSurface
 
 // CHANGE-ID: 20251227_153950-ptv-sheets-renamewire-audioPersistSync-01
 // SCOPE: PTV viewer audio rename: also write to StagingStore.updateAudioMetadata so card does not snap back. No other changes.
@@ -124,6 +124,7 @@ extension PracticeTimerView {
             Task { await stageAudioURL(url) }
             showAudioRecorder = false
         }
+        .cardSurface()
     }
 
 

@@ -161,13 +161,6 @@ struct AudioRecorderView: View {
 
             Spacer(minLength: 0)
         }
-        .padding(24)
-        .background(
-            Theme.Colors.surface(colorScheme)
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .shadow(color: Color.black.opacity(0.2), radius: 18, x: 0, y: 10)
-     
         .onAppear {
             setupWaveformBuffer()
             installObserversIfNeeded()
