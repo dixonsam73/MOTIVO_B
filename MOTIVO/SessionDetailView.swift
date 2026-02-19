@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260219_212900_SDV_AAV_TappedSelection_Fix
+// SCOPE: Bugfix — SDV attachment tap opens AttachmentViewer on tapped item (first-tap fix) + PRDV-style two-gallery launch
+// SEARCH-TOKEN: 20260219_205130_SDV_AAV_TappedSelection
+
 // CHANGE-ID: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
 // SCOPE: SessionDetailView: ShareToFollowerSheet_SDV mirrors FollowingList nav (inline title + chevron back) and list background parity. No logic changes.
 // SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_SDV_InlineNav
@@ -96,14 +100,24 @@ struct SessionDetailView: View {
     @State private var previewURL: URL?
     @State private var isShowingPreview = false
     
-    @State private var isShowingAttachmentViewer = false
-    @State private var viewerStartIndex = 0
-    @State private var viewerTappedURL: URL? = nil
-
+    @State private var viewerRequest: SDVAttachmentViewerRequest? = nil
     @State private var isCommentsPresented: Bool = false
     @State private var isShareSheetPresented: Bool = false
     @State private var isSharing: Bool = false
     @State private var errorLine: String? = nil
+
+    private enum ViewerGalleryMode {
+        case visual
+        case audio
+    }
+
+
+    private struct SDVAttachmentViewerRequest: Identifiable {
+        let id: UUID = UUID()
+        let mode: ViewerGalleryMode
+        let tappedObjectID: NSManagedObjectID
+    }
+
 
     // 9D.2: Effective viewer ID for gating (DEBUG override → AuthManager).
     private var effectiveViewerUserID: String? {
@@ -253,50 +267,73 @@ struct SessionDetailView: View {
     }
     #endif
 
-    private func attachmentViewerSheetErased() -> AnyView {
-        AnyView(attachmentViewerSheet())
+    private func attachmentViewerSheetErased(_ req: SDVAttachmentViewerRequest) -> AnyView {
+        AnyView(attachmentViewerSheet(req))
     }
 
     // Extracted sheet content (kept identical) so it can be type-erased for compiler performance.
-    private func attachmentViewerSheet() -> some View {
+    private func attachmentViewerSheet(_ req: SDVAttachmentViewerRequest) -> some View {
 
-            // Build URLs from the same source-of-truth order as thumbnails
+            // Build URLs from the same source-of-truth order as thumbnails (mirrors PRDV two-gallery behaviour)
             let split = splitAttachments()
             let images = split.images
             let videos = split.videos
             let others = split.others
 
-            let imageURLs: [URL] = images.compactMap { a in
-                resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            let audioAttachments: [Attachment] = others.filter { ($0.kind ?? "") == "audio" }
+
+            let imagePairs: [(Attachment, URL)] = images.compactMap { a in
+                guard let u = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String) else { return nil }
+                return (a, u)
             }
-            let videoURLs: [URL] = videos.compactMap { a in
-                resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            let videoPairs: [(Attachment, URL)] = videos.compactMap { a in
+                guard let u = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String) else { return nil }
+                return (a, u)
             }
-            // Treat non-image, non-video attachments as audio when possible
-            let audioURLs: [URL] = others.compactMap { a in
-                let kind = (a.kind ?? "")
-                guard kind == "audio" else { return nil }
-                return resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
+            let audioPairs: [(Attachment, URL)] = audioAttachments.compactMap { a in
+                guard let u = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String) else { return nil }
+                return (a, u)
             }
 
-            // Compute start index based on the tapped URL within the combined media order [images, videos, audios]
-            let combined: [URL] = imageURLs + videoURLs + audioURLs
-            let startIndex: Int = {
-                guard let tapped = viewerTappedURL, let idx = combined.firstIndex(of: tapped) else {
-                    // Fallback: if we only had an image index previously, try to map it
-                    if let first = imageURLs.first, combined.firstIndex(of: first) != nil {
-                        return min(max(viewerStartIndex, 0), (combined.count > 0 ? combined.count - 1 : 0))
-                    }
-                    return 0
-                }
-                return idx
+            let imageURLs: [URL] = imagePairs.map { $0.1 }
+            let videoURLs: [URL] = videoPairs.map { $0.1 }
+            let audioURLs: [URL] = audioPairs.map { $0.1 }
+
+            let tappedID = req.tappedObjectID
+
+            // PRDV-style: visual gallery = images then videos; audio gallery = audio only.
+            let mode: ViewerGalleryMode = req.mode
+
+        let startIndex: Int = {
+            switch mode {
+            case .audio:
+                return audioPairs.firstIndex(where: { $0.0.objectID == tappedID }) ?? 0
+            case .visual:
+                if let i = imagePairs.firstIndex(where: { $0.0.objectID == tappedID }) { return i }
+                if let v = videoPairs.firstIndex(where: { $0.0.objectID == tappedID }) { return imagePairs.count + v }
+                return 0
+            }
             }()
 
-            return AttachmentViewerView(
-                imageURLs: imageURLs,
+            let finalImageURLs: [URL]
+            let finalVideoURLs: [URL]
+            let finalAudioURLs: [URL]
+            switch mode {
+            case .audio:
+                finalImageURLs = []
+                finalVideoURLs = []
+                finalAudioURLs = audioURLs
+            case .visual:
+                finalImageURLs = imageURLs
+                finalVideoURLs = videoURLs
+                finalAudioURLs = []
+            }
+
+return AttachmentViewerView(
+                imageURLs: finalImageURLs,
                 startIndex: startIndex,
-                videoURLs: videoURLs,
-                audioURLs: audioURLs,
+                videoURLs: finalVideoURLs,
+                audioURLs: finalAudioURLs,
                 onDelete: { url in
                     // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
                     let set = (session.attachments as? Set<Attachment>) ?? []
@@ -514,8 +551,8 @@ struct SessionDetailView: View {
             debugSheetErased()
         }
         #endif
-        .fullScreenCover(isPresented: $isShowingAttachmentViewer) {
-            attachmentViewerSheetErased()
+        .fullScreenCover(item: $viewerRequest) { req in
+            attachmentViewerSheetErased(req)
         }
         .alert("Delete Session?", isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) { deleteSession() }
@@ -651,8 +688,9 @@ struct SessionDetailView: View {
                                 .accessibilityLabel(simpleThumbLabel(index: idx, total: images.count, fileURLString: a.value(forKey: "fileURL") as? String))
                                 .accessibilityIdentifier("thumb.attachment.\(idx)")
                                 .onTapGesture {
-                                    viewerTappedURL = url
-                                    isShowingAttachmentViewer = true
+                                    if let _ = url {
+                                        viewerRequest = SDVAttachmentViewerRequest(mode: .visual, tappedObjectID: a.objectID)
+                                    }
                                 }
                             }
                             // Then videos
@@ -661,9 +699,8 @@ struct SessionDetailView: View {
                                 VideoThumbCell(fileURL: url, attachment: a)
                                     .contentShape(Rectangle())
                                     .onTapGesture {
-                                        if let u = url {
-                                            viewerTappedURL = u
-                                            isShowingAttachmentViewer = true
+                                        if let _ = url {
+                                            viewerRequest = SDVAttachmentViewerRequest(mode: .visual, tappedObjectID: a.objectID)
                                         }
                                     }
                             }
@@ -696,8 +733,9 @@ struct SessionDetailView: View {
                             }()
                             HStack(alignment: .center, spacing: 12) {
                                 Button {
-                                    viewerTappedURL = url
-                                    isShowingAttachmentViewer = true
+                                    if let _ = url {
+                                        viewerRequest = SDVAttachmentViewerRequest(mode: .audio, tappedObjectID: a.objectID)
+                                    }
                                 } label: {
                                     HStack(spacing: 10) {
                                         Image(systemName: "waveform")
