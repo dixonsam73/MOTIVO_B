@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260212_224500_BSDVHousekeeping_a1f3c2
-// SCOPE: BackendSessionDetailView housekeeping (comment/header cleanup + minor whitespace). No behavior changes.
-// INVARIANTS: No logic changes; no new UI; share remains owner-only; PPV tap behavior unchanged; caches unchanged.
+// CHANGE-ID: 20260219_222900_BSDV_AAVParity_FirstTapFix_4a12
+// SCOPE: BSDV — item-based AttachmentViewer launch + PRDV/SDV-style gallery grouping/startIndex (no UI redesign; BSDV-only).
+// INVARIANTS: No backend/schema/RLS/RPC changes. No attachment persistence changes. No UI redesign. Changes localized to BSDV viewer launch.
 
 import SwiftUI
 import Foundation
@@ -89,17 +89,34 @@ struct BackendSessionDetailView: View {
     // Comments sheet
     @State private var isCommentsPresented: Bool = false
 
-    // Attachment viewer state
-    @State private var isViewerPresented: Bool = false
-    @State private var viewerImageURLs: [URL] = []
-    @State private var viewerVideoURLs: [URL] = []
-    @State private var viewerAudioURLs: [URL] = []
-    @State private var viewerAudioKeys: [String] = []
-    @State private var viewerAudioTitles: [String: String] = [:]
-    @State private var viewerVideoKeys: [String] = []
-    @State private var viewerVideoTitles: [String: String] = [:]
+    // Attachment viewer state (request owns payload to avoid first-tap empty-cover race)
+    private enum ViewerMode {
+        case visual
+        case audio
+    }
 
-    // Signed URL caches
+    private struct ViewerPayload {
+        let mode: ViewerMode
+        let startIndex: Int
+
+        let imageURLs: [URL]
+        let videoURLs: [URL]
+        let audioURLs: [URL]
+
+        let audioKeys: [String]
+        let audioTitlesByKey: [String: String]
+
+        let videoKeys: [String]
+        let videoTitlesByKey: [String: String]
+    }
+
+    private struct ViewerRequest: Identifiable {
+        let id = UUID()
+        let payload: ViewerPayload
+    }
+
+    @State private var viewerRequest: ViewerRequest? = nil
+
     @State private var isLoadingAttachments: Bool = false
     @State private var attachmentLoadError: String? = nil
     @State private var thumbSignedURLs: [String: URL] = [:]
@@ -241,24 +258,17 @@ struct BackendSessionDetailView: View {
         directoryInstruments: directoryAccount?.instruments
     )
 }
-        .fullScreenCover(
-        isPresented: Binding(
-            get: {
-                isViewerPresented &&
-                (!viewerImageURLs.isEmpty || !viewerVideoURLs.isEmpty || !viewerAudioURLs.isEmpty)
-            },
-            set: { isViewerPresented = $0 }
-        )
-    ) {
+        .fullScreenCover(item: $viewerRequest) { req in
+            let p = req.payload
             AttachmentViewerView(
-                imageURLs: viewerImageURLs,
-                videoURLs: viewerVideoURLs,
-                audioURLs: viewerAudioURLs,
-                startIndex: 0,
-                audioKeys: viewerAudioKeys,
-                audioTitlesByKey: viewerAudioTitles,
-                videoKeys: viewerVideoKeys,
-                videoTitlesByKey: viewerVideoTitles,
+                imageURLs: p.imageURLs,
+                videoURLs: p.videoURLs,
+                audioURLs: p.audioURLs,
+                startIndex: p.startIndex,
+                audioKeys: p.audioKeys,
+                audioTitlesByKey: p.audioTitlesByKey,
+                videoKeys: p.videoKeys,
+                videoTitlesByKey: p.videoTitlesByKey,
                 isReadOnly: true,
                 canShare: false
             )
@@ -271,12 +281,9 @@ struct BackendSessionDetailView: View {
     }
 
     private func resetViewerState() {
-        isViewerPresented = false
-        viewerImageURLs.removeAll()
-        viewerVideoURLs.removeAll()
-        viewerAudioURLs.removeAll()
-        viewerAudioTitles.removeAll()
+        viewerRequest = nil
     }
+
 
     // Type-erased wrapper to help Xcode's type-checker on large view trees.
     private func mainContentErased() -> AnyView {
@@ -504,14 +511,14 @@ struct BackendSessionDetailView: View {
                             BackendThumbCell(kind: .image, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    Task { await presentViewer() }
+                                    Task { await presentViewer(tapped: ref) }
                                 }
                         }
                         ForEach(Array(videos.enumerated()), id: \.offset) { (_, ref) in
                             BackendThumbCell(kind: .video, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    Task { await presentViewer() }
+                                    Task { await presentViewer(tapped: ref) }
                                 }
                         }
                     }
@@ -531,7 +538,7 @@ struct BackendSessionDetailView: View {
 
                         HStack(alignment: .center, spacing: 12) {
                             Button {
-                                Task { await presentViewer() }
+                                Task { await presentViewer(tapped: ref) }
                             } label: {
                                 HStack(spacing: 10) {
                                     Image(systemName: "waveform")
@@ -572,13 +579,129 @@ struct BackendSessionDetailView: View {
         }
     }
 
-    private func presentViewer() async {
-        await loadViewerSignedURLsIfNeeded()
-        if viewerImageURLs.isEmpty && viewerVideoURLs.isEmpty && viewerAudioURLs.isEmpty {
-            attachmentLoadError = attachmentLoadError ?? "Unable to load attachment URLs."
+    private func presentViewer(tapped ref: BackendSessionViewModel.BackendAttachmentRef) async {
+        guard !isLoadingAttachments else { return }
+        isLoadingAttachments = true
+        attachmentLoadError = nil
+        defer { isLoadingAttachments = false }
+
+        let refs = model.attachmentRefs
+        guard !refs.isEmpty else {
+            attachmentLoadError = "Unable to load attachment URLs."
             return
         }
-        isViewerPresented = true
+
+        let tappedKind = kindEnum(ref)
+        let tappedKey = cacheKey(ref)
+
+        let imagesAll = refs.filter { kindEnum($0) == .image }
+        let videosAll = refs.filter { kindEnum($0) == .video }
+        let audiosAll = refs.filter { kindEnum($0) == .audio }
+
+        // Build the entire viewer payload locally first, then present with fullScreenCover(item:)
+        // so the cover never sees an empty/default payload on first tap.
+        if tappedKind == .audio {
+            var audioURLs: [URL] = []
+            var audioKeys: [String] = []
+            var audioTitlesByKey: [String: String] = [:]
+
+            for r in audiosAll {
+                let key = cacheKey(r)
+                guard let url = await signedURL(bucket: r.bucket, path: r.path, expiresInSeconds: 120) else { continue }
+                audioURLs.append(url)
+                audioKeys.append(key)
+                if let dn = r.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
+                    audioTitlesByKey[key] = dn
+                }
+            }
+
+            guard !audioURLs.isEmpty, let startIndex = audioKeys.firstIndex(of: tappedKey) else {
+                attachmentLoadError = "Unable to load attachment URLs."
+                return
+            }
+
+            let payload = ViewerPayload(
+                mode: .audio,
+                startIndex: startIndex,
+                imageURLs: [],
+                videoURLs: [],
+                audioURLs: audioURLs,
+                audioKeys: audioKeys,
+                audioTitlesByKey: audioTitlesByKey,
+                videoKeys: [],
+                videoTitlesByKey: [:]
+            )
+
+            await MainActor.run {
+                viewerRequest = nil
+                viewerRequest = ViewerRequest(payload: payload)
+            }
+        } else {
+            var imageURLs: [URL] = []
+            var imageKeys: [String] = []
+
+            for r in imagesAll {
+                let key = cacheKey(r)
+                guard let url = await signedURL(bucket: r.bucket, path: r.path, expiresInSeconds: 120) else { continue }
+                imageURLs.append(url)
+                imageKeys.append(key)
+            }
+
+            var videoURLs: [URL] = []
+            var videoKeys: [String] = []
+            var videoTitlesByKey: [String: String] = [:]
+
+            for r in videosAll {
+                let key = cacheKey(r)
+                guard let url = await signedURL(bucket: r.bucket, path: r.path, expiresInSeconds: 120) else { continue }
+                videoURLs.append(url)
+                videoKeys.append(key)
+                if let dn = r.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
+                    videoTitlesByKey[key] = dn
+                }
+            }
+
+            let startIndex: Int
+            if tappedKind == .image {
+                guard let idx = imageKeys.firstIndex(of: tappedKey) else {
+                    attachmentLoadError = "Unable to load attachment URLs."
+                    return
+                }
+                startIndex = idx
+            } else if tappedKind == .video {
+                guard let idx = videoKeys.firstIndex(of: tappedKey) else {
+                    attachmentLoadError = "Unable to load attachment URLs."
+                    return
+                }
+                startIndex = imageURLs.count + idx
+            } else {
+                // Unknown kind: fail closed rather than presenting an empty viewer.
+                attachmentLoadError = "Unable to load attachment URLs."
+                return
+            }
+
+            guard !(imageURLs.isEmpty && videoURLs.isEmpty) else {
+                attachmentLoadError = "Unable to load attachment URLs."
+                return
+            }
+
+            let payload = ViewerPayload(
+                mode: .visual,
+                startIndex: startIndex,
+                imageURLs: imageURLs,
+                videoURLs: videoURLs,
+                audioURLs: [],
+                audioKeys: [],
+                audioTitlesByKey: [:],
+                videoKeys: videoKeys,
+                videoTitlesByKey: videoTitlesByKey
+            )
+
+            await MainActor.run {
+                viewerRequest = nil
+                viewerRequest = ViewerRequest(payload: payload)
+            }
+        }
     }
 
     private func loadThumbURLsIfNeeded() async {
@@ -592,59 +715,6 @@ struct BackendSessionDetailView: View {
             if let url = await signedURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: 300) {
                 thumbSignedURLs[key] = url
             }
-        }
-    }
-
-    private func loadViewerSignedURLsIfNeeded() async {
-        guard !isLoadingAttachments else { return }
-        isLoadingAttachments = true
-        attachmentLoadError = nil
-        defer { isLoadingAttachments = false }
-
-        let refs = model.attachmentRefs
-        guard !refs.isEmpty else { return }
-
-        var images: [URL] = []
-        var videos: [URL] = []
-        var audios: [URL] = []
-        var audioKeys: [String] = []
-        var audioTitlesByKey: [String: String] = [:]
-        var videoKeys: [String] = []
-        var videoTitlesByKey: [String: String] = [:]
-
-        for ref in refs {
-            let k = kindEnum(ref)
-            if let url = await signedURL(bucket: ref.bucket, path: ref.path, expiresInSeconds: 120) {
-                switch k {
-                case .image: images.append(url)
-                case .video:
-                    videos.append(url)
-                    let key = cacheKey(ref)
-                    videoKeys.append(key)
-                    if let dn = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
-                        videoTitlesByKey[key] = dn
-                    }
-                case .audio:
-                    audios.append(url)
-                    let key = cacheKey(ref)
-                    audioKeys.append(key)
-                    if let dn = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !dn.isEmpty {
-                        audioTitlesByKey[key] = dn
-                    }
-                }
-            }
-        }
-
-        viewerImageURLs = images
-        viewerVideoURLs = videos
-        viewerAudioURLs = audios
-        viewerAudioKeys = audioKeys
-        viewerAudioTitles = audioTitlesByKey
-        viewerVideoKeys = videoKeys
-        viewerVideoTitles = videoTitlesByKey
-
-        if images.isEmpty && videos.isEmpty && audios.isEmpty {
-            attachmentLoadError = "Unable to load attachment URLs."
         }
     }
 
