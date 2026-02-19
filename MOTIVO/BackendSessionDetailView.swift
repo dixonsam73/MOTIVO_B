@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260219_222900_BSDV_AAVParity_FirstTapFix_4a12
-// SCOPE: BSDV — item-based AttachmentViewer launch + PRDV/SDV-style gallery grouping/startIndex (no UI redesign; BSDV-only).
+// CHANGE-ID: 20260219_233200_BSDV_VideoThumbs_IDFix_a1f3
+// SCOPE: BSDV — fix attachment thumbs grid duplicate IDs so videos render alongside images (no UI redesign; BSDV-only).
 // INVARIANTS: No backend/schema/RLS/RPC changes. No attachment persistence changes. No UI redesign. Changes localized to BSDV viewer launch.
 
 import SwiftUI
@@ -507,14 +507,20 @@ struct BackendSessionDetailView: View {
 
                 if !images.isEmpty || !videos.isEmpty {
                     LazyVGrid(columns: grid, spacing: 12) {
-                        ForEach(Array(images.enumerated()), id: \.offset) { (_, ref) in
+                        let imageItems: [(key: String, ref: BackendSessionViewModel.BackendAttachmentRef)] = images.map { (cacheKey($0), $0) }
+                        let videoItems: [(key: String, ref: BackendSessionViewModel.BackendAttachmentRef)] = videos.map { (cacheKey($0), $0) }
+
+                        ForEach(imageItems, id: \.key) { item in
+                            let ref = item.ref
                             BackendThumbCell(kind: .image, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
                                     Task { await presentViewer(tapped: ref) }
                                 }
                         }
-                        ForEach(Array(videos.enumerated()), id: \.offset) { (_, ref) in
+
+                        ForEach(videoItems, id: \.key) { item in
+                            let ref = item.ref
                             BackendThumbCell(kind: .video, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
                                 .contentShape(Rectangle())
                                 .onTapGesture {
