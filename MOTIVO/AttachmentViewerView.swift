@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260220_210900_AAVAudioTransportParity_SAFE_a6b3e2
+// CHANGE-ID: 20260220_212955_AAVAudioTransportParity_ScrubberSmooth_1b7a3d
 // SCOPE: AAV AudioPage — add transport controls parity with VideoPage (scrubber, ±10s, mute, AirPlay) and remove hidden waveform scrub gesture; preserve natural-end reset and position-preserving pause; no waveform redesign or routing/backend changes.
-// SEARCH-TOKEN: 20260220_210900_AAVAudioTransportParity_SAFE_a6b3e2
+// SEARCH-TOKEN: 20260220_212955_AAVAudioTransportParity_ScrubberSmooth_1b7a3d
 
 // CHANGE-ID: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
 // SCOPE: AAV AudioPage — on natural playback end, stop waveform timer, reset playhead/progress to 0, and reset waveform to hard-left; manual pause preserves position (bugfix only; no waveform redesign)
@@ -2257,8 +2257,10 @@ VStack(spacing: 8) {
             isAnyPlayerActive = false
         }
         .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
-            if isPlaybackPlaying && !isScrubbing {
-                audioDuration = playbackDuration
+            // Keep scrubber in sync even if play-state lags; only freeze while scrubbing.
+            if !isScrubbing && (audioController.canResume || remoteController.canResume) {
+                let dur = playbackDuration
+                if dur.isFinite && dur > 0 { audioDuration = dur }
                 audioCurrentTime = playbackCurrentTime
             }
         }
@@ -2334,6 +2336,12 @@ private func jump(by seconds: TimeInterval) {
         waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
             audioController.sampleLevel()
             writeWaveformSample(audioController.currentLevel)
+            // Keep scrubber synced during local playback (smooth updates).
+            if !isScrubbing {
+                let dur = playbackDuration
+                if dur.isFinite && dur > 0 { audioDuration = dur }
+                audioCurrentTime = playbackCurrentTime
+            }
         }
         if let waveformTimer {
             RunLoop.main.add(waveformTimer, forMode: .common)
