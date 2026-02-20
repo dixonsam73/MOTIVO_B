@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260206_100245_AVVKeysImmutable_079028
-// SCOPE: Fix crash risk by making audioKeys/videoKeys and title maps immutable inputs (not state/optional). No UI/layout/behavior changes beyond stable-key title resolution.
+// CHANGE-ID: 20260220_072500_AAVVideoEndReset_530c66
+// SCOPE: AAV VideoPage — on natural playback end, seek to 0 and reset paused/ready state (no UI redesign; manual pause preserves position)
 // SEARCH-TOKEN: 20260206_100245_AVVKeysImmutable_079028
 
 // CHANGE-ID: 20260206_095420_AVVInitKeys_1cd203
@@ -1664,7 +1664,20 @@ private struct VideoPage: View {
             object: player.currentItem,
             queue: .main
         ) { _ in
+            guard let player = self.player else { return }
+            // Natural end only: reset to start and leave paused/ready (do not auto-play).
             self.isPlayingState = false
+            self.isAnyPlayerActive = false
+            self.isScrubbing = false
+            self.currentTime = 0
+
+            player.pause()
+            let zero = CMTime(seconds: 0, preferredTimescale: 600)
+            player.seek(to: zero, toleranceBefore: .zero, toleranceAfter: .zero) { _ in
+                DispatchQueue.main.async {
+                    self.currentTime = 0
+                }
+            }
         }
         if let item = player.currentItem {
             itemStatusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
