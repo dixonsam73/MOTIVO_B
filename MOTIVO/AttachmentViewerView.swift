@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260220_212955_AAVAudioTransportParity_ScrubberSmooth_1b7a3d
+// CHANGE-ID: 20260220_213530_AAVAudioTransportParity_ControlsPosition
 // SCOPE: AAV AudioPage — add transport controls parity with VideoPage (scrubber, ±10s, mute, AirPlay) and remove hidden waveform scrub gesture; preserve natural-end reset and position-preserving pause; no waveform redesign or routing/backend changes.
-// SEARCH-TOKEN: 20260220_212955_AAVAudioTransportParity_ScrubberSmooth_1b7a3d
+// SEARCH-TOKEN: 20260220_213530_AAVAudioTransportParity_ControlsPosition
 
 // CHANGE-ID: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
 // SCOPE: AAV AudioPage — on natural playback end, stop waveform timer, reset playhead/progress to 0, and reset waveform to hard-left; manual pause preserves position (bugfix only; no waveform redesign)
@@ -2083,24 +2083,26 @@ private struct AudioPage: View {
             .frame(height: 60)
             .padding(.horizontal, Theme.Spacing.l)
             .accessibilityHidden(true)
-VStack(spacing: 8) {
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .safeAreaInset(edge: .bottom) {
+            VStack(spacing: 8) {
                 // Slider row
                 VStack(spacing: 8) {
                     Slider(
                         value: Binding(
                             get: {
-                                min(
-                                    max(audioCurrentTime, 0),
-                                    audioDuration > 0 ? audioDuration : 0
-                                )
+                                let maxV = audioDuration > 0 ? audioDuration : max(audioCurrentTime, 1)
+                                return min(max(audioCurrentTime, 0), maxV)
                             },
                             set: { newValue in
-                                let clamped = max(0, min(newValue, audioDuration))
+                                let maxV = audioDuration > 0 ? audioDuration : max(audioCurrentTime, 1)
+                                let clamped = max(0, min(newValue, maxV))
                                 audioCurrentTime = clamped
                                 setPlaybackTime(clamped)
                             }
                         ),
-                        in: 0...(audioDuration > 0 ? audioDuration : 1),
+                        in: 0...(audioDuration > 0 ? audioDuration : max(audioCurrentTime, 1)),
                         onEditingChanged: { began in
                             if began {
                                 wasPlayingBeforeScrub = isPlaybackPlaying
@@ -2228,11 +2230,15 @@ VStack(spacing: 8) {
                     RoutePickerView()
                         .frame(width: 28, height: 28)
                 }
+                .padding(.horizontal, Theme.Spacing.l)
+                .padding(.bottom, Theme.Spacing.m)
+                .background(
+                    Color.clear.cardSurface()
+                        .ignoresSafeArea(edges: .bottom)
+                )
             }
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.bottom, Theme.Spacing.m)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+
         .contentShape(Rectangle())
         .onAppear {
             audioController.onNaturalEnd = {
