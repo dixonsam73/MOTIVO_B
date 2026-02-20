@@ -9,6 +9,10 @@
 // SCOPE: Force A2DP-only output; prevent HFP mic takeover in VideoRecorder (DEBUG logs unchanged)
 // SEARCH-TOKEN: 20260201_183200_VidRec_RemoveAllowBluetooth
 
+// CHANGE-ID: 20260220_084520_VidRec_ReadinessGate
+// SCOPE: VideoRecorder first-launch UX stability — add interactive readiness gate + preparing overlay (Theme token fix only; no changes to A/V capture or writer timing)
+// SEARCH-TOKEN: 20260220_084520_VidRec_ReadinessGate
+
 import SwiftUI
 import AVFoundation
 import AVKit
@@ -41,10 +45,19 @@ public struct VideoRecorderView: View {
     @EnvironmentObject private var stagingStore: StagingStoreObject
     @Environment(\.colorScheme) private var colorScheme
 
+    @State private var showPreparingOverlay: Bool = false
+    @State private var preparingOverlayTask: Task<Void, Never>? = nil
+
     public var body: some View {
         ZStack {
-            CameraPreview(session: controller.captureSession, isLive: controller.isShowingLivePreview)
+            CameraPreview(session: controller.captureSession, isLive: controller.isShowingLivePreview && controller.isInteractiveReady)
                 .ignoresSafeArea()
+
+            if controller.state == .idle && showPreparingOverlay && !controller.isInteractiveReady {
+                VideoRecorderPreparingOverlay()
+                    .transition(.opacity)
+                    .accessibilityIdentifier("VideoRecorderView_PreparingOverlay")
+            }
 
             if controller.recordingURL != nil && !controller.isShowingLivePreview {
                 if controller.state == .playing {
@@ -124,7 +137,7 @@ public struct VideoRecorderView: View {
                     VStack(spacing: isLandscape ? 2 : 6) {
                         // In landscape we hide the title to save vertical space.
                         if !isLandscape {
-                            Text(controller.state == .idle && !controller.isRecorderReady ? "Preparing…" : controller.title)
+                            Text(controller.state == .idle && !controller.isInteractiveReady ? "Preparing…" : controller.title)
                                 .font(.headline)
                                 .accessibilityIdentifier("VideoRecorderView_Title")
                                 .lineLimit(1)
@@ -146,7 +159,7 @@ public struct VideoRecorderView: View {
                                           color: tintRecord,
                                           accessibilityLabel: controller.recordingButtonAccessibilityLabel,
                                           action: { controller.recordPauseResumeTapped() },
-                                          isDisabled: controller.recordingButtonDisabled || !controller.isRecorderReady || controller.state == .playing || controller.state == .paused)
+                                          isDisabled: controller.recordingButtonDisabled || !controller.isInteractiveReady || controller.state == .playing || controller.state == .paused)
                             ControlButton(systemName: "stop.fill",
                                           color: tintStopDelete,
                                           accessibilityLabel: "Stop",
@@ -181,9 +194,24 @@ public struct VideoRecorderView: View {
         }
         .onAppear {
             controller.onAppear()
+            startPreparingOverlayTimer()
+        }
+        .onChange(of: controller.isInteractiveReady) { ready in
+            if ready {
+                preparingOverlayTask?.cancel()
+                preparingOverlayTask = nil
+                if showPreparingOverlay {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showPreparingOverlay = false
+                    }
+                }
+            }
         }
         .onDisappear {
             controller.onDisappear()
+            preparingOverlayTask?.cancel()
+            preparingOverlayTask = nil
+            showPreparingOverlay = false
             Task {
                 try? await StagingStore.bootstrap()
             }
@@ -192,7 +220,29 @@ public struct VideoRecorderView: View {
     }
 
     // MARK: - ControlButton
-    private struct ControlButton: View {
+    
+    private func startPreparingOverlayTimer() {
+        preparingOverlayTask?.cancel()
+        preparingOverlayTask = nil
+        showPreparingOverlay = false
+
+        // Delay showing the overlay so warm launches feel instant.
+        preparingOverlayTask = Task {
+            try? await Task.sleep(nanoseconds: 250_000_000) // 0.25s
+            if Task.isCancelled { return }
+
+            let shouldShow = (controller.state == .idle) && (!controller.isInteractiveReady)
+            if shouldShow {
+                await MainActor.run {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showPreparingOverlay = true
+                    }
+                }
+            }
+        }
+    }
+
+private struct ControlButton: View {
         let systemName: String
         let color: Color
         let accessibilityLabel: String
@@ -266,6 +316,16 @@ final class VideoRecorderController: NSObject,
     
     // Recorder readiness for UI ("Preparing…" vs title). Set true on first received video frame.
     @Published private(set) var isRecorderReady: Bool = false
+
+    // Capture session running state (for interactive readiness gating)
+    @Published private(set) var isSessionRunning: Bool = false
+
+    // Interactive readiness for UX: preview + controls become available only once the session is running,
+    // the first video sample buffer has arrived, and a short settle delay has elapsed. This is set once per presentation.
+    @Published private(set) var isInteractiveReady: Bool = false
+
+    private var interactiveReadyWorkItem: DispatchWorkItem? = nil
+    private var hasSetInteractiveReady: Bool = false
 
     private var isArmedToRecord: Bool = false
 
@@ -738,6 +798,8 @@ final class VideoRecorderController: NSObject,
 
             // After session is running, refresh preview orientation on main
             DispatchQueue.main.async {
+                self.isSessionRunning = true
+                self.maybeScheduleInteractiveReady()
                 if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
                    let window = scene.windows.first,
                    let rootView = window.rootViewController?.view {
@@ -771,6 +833,34 @@ final class VideoRecorderController: NSObject,
         videoOutput = nil
         audioOutput = nil
         isSessionConfigured = false
+ 
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.isSessionRunning = false
+            self.isInteractiveReady = false
+            self.hasSetInteractiveReady = false
+            self.interactiveReadyWorkItem?.cancel()
+            self.interactiveReadyWorkItem = nil
+        }
+    }
+
+    private func maybeScheduleInteractiveReady() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            guard !self.hasSetInteractiveReady else { return }
+            guard self.isSessionRunning, self.isRecorderReady else { return }
+
+            // Debounce so we only become interactive once the capture pipeline has had a moment to settle.
+            self.interactiveReadyWorkItem?.cancel()
+            let item = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                guard !self.hasSetInteractiveReady else { return }
+                self.hasSetInteractiveReady = true
+                self.isInteractiveReady = true
+            }
+            self.interactiveReadyWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
+        }
     }
 
     // MARK: - Writer Setup
@@ -1500,6 +1590,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
                 if !self.isRecorderReady { self.isRecorderReady = true }
+                self.maybeScheduleInteractiveReady()
             }
         }
 
@@ -1722,6 +1813,36 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     }
 
 }
+private struct VideoRecorderPreparingOverlay: View {
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        ZStack {
+            // Fully occlude unstable first-run preview with a calm surface.
+            Color.black.opacity(0.001) // ensures taps don't hit underlying controls
+
+            VStack(spacing: Theme.Spacing.s) {
+                ProgressView()
+                    .progressViewStyle(.circular)
+                Text("Preparing camera…")
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, Theme.Spacing.m)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .fill(Theme.Colors.surface(scheme))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                    .stroke(Theme.Colors.cardStroke(scheme), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
 // MARK: - Preview & Player Views
 
 private struct CameraPreview: UIViewRepresentable {
