@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
+// SCOPE: AAV AudioPage — on natural playback end, stop waveform timer, reset playhead/progress to 0, and reset waveform to hard-left; manual pause preserves position (bugfix only; no waveform redesign)
+// SEARCH-TOKEN: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
+
 // CHANGE-ID: 20260220_072500_AAVVideoEndReset_530c66
 // SCOPE: AAV VideoPage — on natural playback end, seek to 0 and reset paused/ready state (no UI redesign; manual pause preserves position)
 // SEARCH-TOKEN: 20260206_100245_AVVKeysImmutable_079028
@@ -1800,7 +1804,12 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
     @Published var didFail: Bool = false
     @Published var currentLevel: Float = 0 // 0...1 for waveform
 
+
+    var onNaturalEnd: (() -> Void)?
+
     private var player: AVAudioPlayer?
+
+    var canResume: Bool { player != nil }
 
     var duration: TimeInterval { player?.duration ?? 0 }
     var currentTime: TimeInterval { player?.currentTime ?? 0 }
@@ -1826,6 +1835,19 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
         }
     }
 
+    func pause() {
+        player?.pause()
+        isPlaying = false
+        currentLevel = 0
+    }
+
+    func resume() {
+        guard let player else { return }
+        // Resume from currentTime without resetting.
+        player.play()
+        isPlaying = true
+    }
+
     func stop() {
         player?.stop()
         player = nil
@@ -1837,8 +1859,10 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
         DispatchQueue.main.async {
             self.isPlaying = false
             self.currentLevel = 0
+            self.onNaturalEnd?()
         }
     }
+
 
     /// Sample current audio power level and normalize to 0...1.
     func sampleLevel() {
@@ -1864,9 +1888,15 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
 final class RemoteAudioPlayerController: NSObject, ObservableObject {
     @Published var isPlaying: Bool = false
 
+
+    var onNaturalEnd: (() -> Void)?
+
     private var player: AVPlayer?
     private var timeObserver: Any?
+    private var endObserver: NSObjectProtocol?
     private var currentURL: URL?
+
+    var canResume: Bool { player != nil }
 
     private(set) var duration: TimeInterval = 0
     private(set) var currentTime: TimeInterval = 0
@@ -1874,6 +1904,9 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
     deinit {
         if let obs = timeObserver, let p = player {
             p.removeTimeObserver(obs)
+        }
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
         }
     }
 
@@ -1892,10 +1925,29 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
 
     func prepare(url: URL) {
         currentURL = url
+
+        // Clear any previous end observer so it never leaks across items.
+        if let endObserver {
+            NotificationCenter.default.removeObserver(endObserver)
+            self.endObserver = nil
+        }
+
         let item = AVPlayerItem(url: url)
         let p = AVPlayer(playerItem: item)
         player = p
         attachTimeObserver(to: p)
+
+        // Natural-end handler: pause/ready + notify view layer (which performs the reset).
+        endObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: item,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.isPlaying = false
+            self.onNaturalEnd?()
+        }
+
         duration = 0
         currentTime = 0
     }
@@ -2018,19 +2070,39 @@ private struct AudioPage: View {
             HStack(spacing: 16) {
                 Button(action: {
                     if isPlaybackPlaying {
-                        stopPlayback()
-                        audioCurrentTime = 0
+                        // Manual pause: preserve position (no reset).
+                        if isRemoteURL {
+                            remoteController.pause()
+                        } else {
+                            audioController.pause()
+                        }
+                        audioCurrentTime = playbackCurrentTime
                         stopWaveform()
                         isAnyPlayerActive = false
                     } else {
+                        // Play / resume.
                         if isRemoteURL {
+                            // toggle() will prepare+play on first use, and play() when paused.
                             remoteController.toggle(url: url)
                             audioDuration = playbackDuration
                             isAnyPlayerActive = true
                         } else {
-                            guard let resolvedURL = resolveAudioURL(url) else { return }
-                            audioController.play(url: resolvedURL)
-                            audioDuration = audioController.duration
+                            // Resume if we already have a prepared player; otherwise start fresh.
+                            if audioController.canResume {
+                                // If we're at start, ensure waveform is hard-left before animation begins.
+                                if audioCurrentTime <= 0.0001 {
+                                    resetWaveformToStart()
+                                    audioController.setCurrentTime(0)
+                                }
+                                audioController.resume()
+                            } else {
+                                guard let resolvedURL = resolveAudioURL(url) else { return }
+                                // Starting fresh always begins at time 0 and hard-left waveform.
+                                resetWaveformToStart()
+                                audioController.play(url: resolvedURL)
+                            }
+
+                            audioDuration = playbackDuration
                             isAnyPlayerActive = true
                             startWaveform()
                         }
@@ -2046,16 +2118,26 @@ private struct AudioPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
+        .onAppear {
+            audioController.onNaturalEnd = {
+                handleNaturalEnd()
+            }
+            remoteController.onNaturalEnd = {
+                handleNaturalEnd()
+            }
+        }
         .onChange(of: onRequestStopAll) { _, _ in
             stopPlayback()
             audioCurrentTime = 0
             stopWaveform()
+            resetWaveformToStart()
             isAnyPlayerActive = false
         }
         .onDisappear {
             stopPlayback()
             audioCurrentTime = 0
             stopWaveform()
+            resetWaveformToStart()
             isAnyPlayerActive = false
         }
         .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
@@ -2082,6 +2164,21 @@ private struct AudioPage: View {
             if fm.fileExists(atPath: candidate.path) { return candidate }
         }
         return nil
+    }
+
+    private func resetWaveformToStart() {
+        waveformSamples = Array(repeating: 0.1, count: waveformSamples.count)
+        waveformWriteIndex = 0
+        waveformHasWrapped = false
+    }
+
+    private func handleNaturalEnd() {
+        // Natural completion resets to start (manual pause does NOT).
+        stopWaveform()
+        setPlaybackTime(0)
+        audioCurrentTime = 0
+        resetWaveformToStart()
+        isAnyPlayerActive = false
     }
 
     // MARK: Waveform helpers
@@ -2129,7 +2226,7 @@ private struct AudioPage: View {
                 // On first change, enter scrubbing mode
                 if !isScrubbing {
                     isScrubbing = true
-                    wasPlayingBeforeScrub = audioController.isPlaying
+                    wasPlayingBeforeScrub = isPlaybackPlaying
                     // Pause metering updates while scrubbing (visual stability)
                     stopWaveform()
                     // Cache duration and current time
@@ -2150,7 +2247,7 @@ private struct AudioPage: View {
                 // Commit: capture final time once, resume metering, and resume playback if needed
                 audioCurrentTime = playbackCurrentTime
                 isScrubbing = false
-                startWaveform()
+                if !isRemoteURL { startWaveform() }
                 // If it was playing before, ensure playback continues from the new time; if not, remain paused at new position.
                 if wasPlayingBeforeScrub {
                     // If a player exists and is playing, we just keep going; if it paused itself, restart.
