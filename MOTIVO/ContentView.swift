@@ -514,8 +514,7 @@ fileprivate struct SessionsRootView: View {
                                 return "\(remotePosts.count)|\(remotePrewarmNonce)|\(head)"
                             }()
 
-                            Color.clear
-                                .frame(height: 0)
+                            Group {}
                                 .task(id: remoteWarmToken) {
                                     await warmRemoteFeedPreviews(posts: remotePosts, viewerUserID: effectiveBackendUserID, limit: 10)
                                 }
