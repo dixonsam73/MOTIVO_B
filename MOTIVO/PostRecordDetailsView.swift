@@ -960,9 +960,9 @@ isPrivate: { url in
                                         setPrivate(id: att.id, url: privURL, !current)
                                     } label: {
                                         let current = isPrivate(id: att.id, url: privURL)
-                                        Image(systemName: "eye")
+                                        Image(systemName: current ? "eye.slash" : "eye")
                                             .font(.system(size: 16, weight: .semibold))
-                                            .opacity((current || selectedThumbnailID == att.id) ? 0 : 1)
+                                            .opacity(selectedThumbnailID == att.id ? 0 : 1)
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
@@ -1964,14 +1964,14 @@ fileprivate struct AttachmentThumbCell: View {
                     setPrivate(att.id, resolvedURL, !priv)
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 } label: {
-                    Image(systemName: "eye")
+                    Image(systemName: priv ? "eye.slash" : "eye")
                         .font(.system(size: 16, weight: .semibold))
                         .padding(8)
                         .background(.ultraThinMaterial, in: Circle())
-                        .opacity((priv || isThumbnail) ? 0 : 1)
+                        .opacity(isThumbnail ? 0 : 1)
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+                .accessibilityLabel(priv ? "Mark attachment shared" : "Mark attachment private")
 
                 // Delete
                 Button {
