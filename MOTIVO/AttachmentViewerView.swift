@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260220_210900_AAVAudioTransportParity_SAFE_a6b3e2
+// SCOPE: AAV AudioPage — add transport controls parity with VideoPage (scrubber, ±10s, mute, AirPlay) and remove hidden waveform scrub gesture; preserve natural-end reset and position-preserving pause; no waveform redesign or routing/backend changes.
+// SEARCH-TOKEN: 20260220_210900_AAVAudioTransportParity_SAFE_a6b3e2
+
 // CHANGE-ID: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
 // SCOPE: AAV AudioPage — on natural playback end, stop waveform timer, reset playhead/progress to 0, and reset waveform to hard-left; manual pause preserves position (bugfix only; no waveform redesign)
 // SEARCH-TOKEN: 20260220_181209_AAVAudioWaveformEndReset_cc3cbb
@@ -1809,6 +1813,11 @@ private final class AudioPlayerController: NSObject, ObservableObject, AVAudioPl
 
     private var player: AVAudioPlayer?
 
+    var volume: Float {
+        get { player?.volume ?? 1.0 }
+        set { player?.volume = newValue }
+    }
+
     var canResume: Bool { player != nil }
 
     var duration: TimeInterval { player?.duration ?? 0 }
@@ -1892,6 +1901,12 @@ final class RemoteAudioPlayerController: NSObject, ObservableObject {
     var onNaturalEnd: (() -> Void)?
 
     private var player: AVPlayer?
+
+
+    var volume: Float {
+        get { player?.volume ?? 1.0 }
+        set { player?.volume = newValue }
+    }
     private var timeObserver: Any?
     private var endObserver: NSObjectProtocol?
     private var currentURL: URL?
@@ -2021,6 +2036,9 @@ private struct AudioPage: View {
     @State private var wasPlayingBeforeScrub: Bool = false
     @State private var isScrubbing: Bool = false
 
+    @State private var isMuted: Bool = false
+    @State private var lastVolume: Float = 1.0
+
 
     private var isRemoteURL: Bool {
         let s = url.scheme?.lowercased()
@@ -2065,56 +2083,154 @@ private struct AudioPage: View {
             .frame(height: 60)
             .padding(.horizontal, Theme.Spacing.l)
             .accessibilityHidden(true)
-            .highPriorityGesture(scrubGesture())
-
-            HStack(spacing: 16) {
-                Button(action: {
-                    if isPlaybackPlaying {
-                        // Manual pause: preserve position (no reset).
-                        if isRemoteURL {
-                            remoteController.pause()
-                        } else {
-                            audioController.pause()
-                        }
-                        audioCurrentTime = playbackCurrentTime
-                        stopWaveform()
-                        isAnyPlayerActive = false
-                    } else {
-                        // Play / resume.
-                        if isRemoteURL {
-                            // toggle() will prepare+play on first use, and play() when paused.
-                            remoteController.toggle(url: url)
-                            audioDuration = playbackDuration
-                            isAnyPlayerActive = true
-                        } else {
-                            // Resume if we already have a prepared player; otherwise start fresh.
-                            if audioController.canResume {
-                                // If we're at start, ensure waveform is hard-left before animation begins.
-                                if audioCurrentTime <= 0.0001 {
-                                    resetWaveformToStart()
-                                    audioController.setCurrentTime(0)
-                                }
-                                audioController.resume()
-                            } else {
-                                guard let resolvedURL = resolveAudioURL(url) else { return }
-                                // Starting fresh always begins at time 0 and hard-left waveform.
-                                resetWaveformToStart()
-                                audioController.play(url: resolvedURL)
+VStack(spacing: 8) {
+                // Slider row
+                VStack(spacing: 8) {
+                    Slider(
+                        value: Binding(
+                            get: {
+                                min(
+                                    max(audioCurrentTime, 0),
+                                    audioDuration > 0 ? audioDuration : 0
+                                )
+                            },
+                            set: { newValue in
+                                let clamped = max(0, min(newValue, audioDuration))
+                                audioCurrentTime = clamped
+                                setPlaybackTime(clamped)
                             }
-
-                            audioDuration = playbackDuration
-                            isAnyPlayerActive = true
-                            startWaveform()
+                        ),
+                        in: 0...(audioDuration > 0 ? audioDuration : 1),
+                        onEditingChanged: { began in
+                            if began {
+                                wasPlayingBeforeScrub = isPlaybackPlaying
+                                isScrubbing = true
+                                stopWaveform()
+                            } else {
+                                isScrubbing = false
+                                resetWaveformToStart()
+                                if wasPlayingBeforeScrub && !isRemoteURL {
+                                    startWaveform()
+                                }
+                            }
                         }
-                    }
-                }) {
-                    Image(systemName: isPlaybackPlaying ? "pause.fill" : "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                        .padding(12)
-                        .background(.ultraThinMaterial, in: Circle())
+                    )
+                    .tint(Theme.Colors.accent)
                 }
-                .buttonStyle(.plain)
+
+                // Transport controls row
+                HStack(spacing: 16) {
+                    // Speaker (mute/unmute)
+                    Button(action: { toggleMute() }) {
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    // Back 10s
+                    Button(action: { jump(by: -10) }) {
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: "gobackward.10")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // Play/Pause
+                    Button(action: {
+                        if isPlaybackPlaying {
+                            // Manual pause: preserve position (no reset).
+                            if isRemoteURL {
+                                remoteController.pause()
+                            } else {
+                                audioController.pause()
+                            }
+                            audioCurrentTime = playbackCurrentTime
+                            stopWaveform()
+                            isAnyPlayerActive = false
+                        } else {
+                            // Play / resume.
+                            if isRemoteURL {
+                                // toggle() will prepare+play on first use, and play() when paused.
+                                remoteController.toggle(url: url)
+                                audioDuration = playbackDuration
+                                isAnyPlayerActive = true
+                            } else {
+                                // Resume if we already have a prepared player; otherwise start fresh.
+                                if audioController.canResume {
+                                    // If we're at start, ensure waveform is hard-left before animation begins.
+                                    if audioCurrentTime <= 0.0001 {
+                                        resetWaveformToStart()
+                                        audioController.setCurrentTime(0)
+                                    }
+                                    audioController.resume()
+                                } else {
+                                    guard let resolvedURL = resolveAudioURL(url) else { return }
+                                    // Starting fresh always begins at time 0 and
+                                    // hard-left waveform.
+                                    resetWaveformToStart()
+                                    audioController.play(url: resolvedURL)
+                                }
+
+                                audioDuration = playbackDuration
+                                isAnyPlayerActive = true
+                                startWaveform()
+                            }
+                        }
+                    }) {
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: isPlaybackPlaying ? "pause.fill" : "play.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    // Forward 10s
+                    Button(action: { jump(by: 10) }) {
+                        ZStack {
+                            Circle()
+                                .fill(.thinMaterial)
+                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                            Image(systemName: "goforward.10")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    // AirPlay
+                    RoutePickerView()
+                        .frame(width: 28, height: 28)
+                }
             }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.m)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
@@ -2171,6 +2287,36 @@ private struct AudioPage: View {
         waveformWriteIndex = 0
         waveformHasWrapped = false
     }
+private func toggleMute() {
+    if isMuted {
+        let restore = lastVolume > 0.0001 ? lastVolume : 1.0
+        audioController.volume = restore
+        remoteController.volume = restore
+        isMuted = false
+    } else {
+        let current = isRemoteURL ? remoteController.volume : audioController.volume
+        let candidate = current > 0.0001 ? current : (lastVolume > 0.0001 ? lastVolume : 1.0)
+        lastVolume = candidate
+        audioController.volume = 0
+        remoteController.volume = 0
+        isMuted = true
+    }
+}
+
+private func jump(by seconds: TimeInterval) {
+    guard audioDuration > 0 else { return }
+    let wasPlaying = isPlaybackPlaying
+    let target = max(0, min(audioCurrentTime + seconds, audioDuration))
+    audioCurrentTime = target
+    setPlaybackTime(target)
+
+    resetWaveformToStart()
+    if wasPlaying && !isRemoteURL {
+        stopWaveform()
+        startWaveform()
+    }
+}
+
 
     private func handleNaturalEnd() {
         // Natural completion resets to start (manual pause does NOT).
@@ -2220,50 +2366,7 @@ private struct AudioPage: View {
         }
     }
 
-    private func scrubGesture() -> some Gesture {
-        DragGesture(minimumDistance: 3, coordinateSpace: .local)
-            .onChanged { value in
-                // On first change, enter scrubbing mode
-                if !isScrubbing {
-                    isScrubbing = true
-                    wasPlayingBeforeScrub = isPlaybackPlaying
-                    // Pause metering updates while scrubbing (visual stability)
-                    stopWaveform()
-                    // Cache duration and current time
-                    audioDuration = audioController.duration
-                    audioCurrentTime = playbackCurrentTime
-                }
-                guard audioDuration > 0 else { return }
-                // Map horizontal translation to seconds using a slower, more precise scaling
-                // 1 point of drag = duration / 1000 seconds (tweakable)
-                let secondsPerPoint = audioDuration / 900.0
-                let delta = TimeInterval(value.translation.width) * secondsPerPoint
-                let target = (audioCurrentTime + delta)
-                let clamped = max(0, min(target, audioDuration))
-                // Seek the player without updating state to avoid waveform redraws during drag
-                setPlaybackTime(clamped)
-            }
-            .onEnded { _ in
-                // Commit: capture final time once, resume metering, and resume playback if needed
-                audioCurrentTime = playbackCurrentTime
-                isScrubbing = false
-                if !isRemoteURL { startWaveform() }
-                // If it was playing before, ensure playback continues from the new time; if not, remain paused at new position.
-                if wasPlayingBeforeScrub {
-                    // If a player exists and is playing, we just keep going; if it paused itself, restart.
-                    // Restart from currentTime without resetting to beginning.
-                    if isRemoteURL {
-                        remoteController.play()
-                    } else if let resolvedURL = resolveAudioURL(url), !audioController.isPlaying {
-                        audioController.play(url: resolvedURL)
-                        audioController.setCurrentTime(audioCurrentTime)
-                    } else {
-                        // Ensure we're at the committed time
-                        audioController.setCurrentTime(audioCurrentTime)
-                    }
-                }
-            }
-    }
+    
 }
 
 /// MARK: - Waveform view
