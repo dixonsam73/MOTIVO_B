@@ -40,6 +40,10 @@
 // SCOPE: Identity data parity — include optional location in directory sync fingerprint + upsertSelfRow call (owner updates push to account_directory).
 // SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
+// CHANGE-ID: 20260221_150200_FollowInfraHardening_RequestsToggle_UX_b5a1
+// SCOPE: Follow infra hardening — immediate backend sync for follow request mode + request rejection UX wiring (no redesign).
+// SEARCH-TOKEN: 20260221_150200_FollowInfraHardening_TOKEN_b5a1
+
  import SwiftUI
  import CoreData
 import Foundation
@@ -1211,6 +1215,10 @@ case .failure(let error):
              }
              .onChange(of: discoveryModeRawPerUser) { _, newValue in
                  ProfileStore.setDiscoveryModeRaw(newValue, for: auth.backendUserID)
+                 Task { await syncDirectoryFromCurrentState() }
+             }
+             .onChange(of: followRequestModeRaw) { _, _ in
+                 // Hardening: push follow-request preference immediately to backend (no restart dependency).
                  Task { await syncDirectoryFromCurrentState() }
              }
              .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {

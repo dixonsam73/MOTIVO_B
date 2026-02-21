@@ -33,6 +33,10 @@
 // SCOPE: Phase 14.3H — (A) Clear connected feed state on sign-out via auth transition; (B) Prevent first sign-in UI from staying signed-out due to missing refresh token when access token is present (fail closed on network-auth-challenge). No UI/layout changes; no backend/schema changes.
 // SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
 
+// CHANGE-ID: 20260221_150200_FollowInfraHardening_RequestsToggle_UX_b5a1
+// SCOPE: Follow infra hardening — show message on backend reject of follow request; no UI redesign.
+// SEARCH-TOKEN: 20260221_150200_FollowInfraHardening_TOKEN_b5a1
+
 import Foundation
 import Combine
 
@@ -52,6 +56,10 @@ public final class FollowStore: ObservableObject {
     @Published private(set) public var followers: Set<String> = []
     @Published private(set) public var requests: Set<String> = []              // incoming requests (people who want to follow me)
     @Published private(set) public var outgoingRequests: Set<String> = []      // outgoing requests (I asked to follow them)
+
+    // Follow infra hardening: user-facing message for rejected follow requests.
+    @Published public var followActionMessage: String? = nil
+
 
 
     // Phase 14.3H (A): Connected-mode sign-out must clear any retained follow state
@@ -160,6 +168,7 @@ public final class FollowStore: ObservableObject {
             // Optimistic UI: flip to "requested" immediately.
             // Backend refresh will confirm/correct state, but we want instant feedback on tap.
             let normalized = targetUserID.lowercased()
+            self.followActionMessage = nil
             self.outgoingRequests.insert(normalized)
 
             Task { @MainActor in
@@ -170,6 +179,16 @@ public final class FollowStore: ObservableObject {
                 case .failure(let e):
                     // Roll back optimistic state on failure.
                     self.outgoingRequests.remove(normalized)
+
+                    // If the backend rejects the request (requests closed), show a calm message.
+                    if let ne = e as? NetworkManager.NetworkError,
+                       case .httpError(let status, _) = ne,
+                       (status == 401 || status == 403) {
+                        self.followActionMessage = "This user isn’t accepting follow requests right now."
+                    } else {
+                        self.followActionMessage = "Couldn’t send follow request. Please try again."
+                    }
+
                     NSLog("[FollowStore] backend requestFollow failed: %@", String(describing: e))
                 }
             }

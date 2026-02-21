@@ -25,6 +25,10 @@
 // SCOPE: Identity data parity — thread backend directory location into ProfilePeekView for non-owner peeks; owner continues to use local ProfileStore.
 // SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
+// CHANGE-ID: 20260221_150200_FollowInfraHardening_RequestsToggle_UX_b5a1
+// SCOPE: Follow infra hardening — surface backend follow-request rejection message as a calm alert (no redesign).
+// SEARCH-TOKEN: 20260221_150200_FollowInfraHardening_TOKEN_b5a1
+
 import SwiftUI
 import CoreData
 import Combine
@@ -255,6 +259,18 @@ struct ProfilePeekView: View {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
+        .alert("Follow request", isPresented: Binding(
+            get: { followStore.followActionMessage != nil },
+            set: { newValue in
+                if newValue == false {
+                    followStore.followActionMessage = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) { followStore.followActionMessage = nil }
+        } message: {
+            Text(followStore.followActionMessage ?? "")
         }
     }
 
