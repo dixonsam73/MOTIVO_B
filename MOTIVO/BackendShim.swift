@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_071500_NotesPrivacyClear_4c8a
+// SCOPE: Notes privacy toggle (connected mode) — PATCH must clear posts.notes when notes are private or empty, so follower surfaces never show stale notes.
+// SEARCH-TOKEN: 20260221_071500_NotesPrivacyClear_4c8a
+
 // CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
 // SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
 // SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
@@ -906,11 +910,16 @@ items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, c
             meta["instrument_label"] = instr
         }
 
-        // Notes: only include when not private (or omitted). If notes become private later,
-        // this patch intentionally does not force-clear server notes (out of scope).
-        if !payload.areNotesPrivate, let notes = payload.notes {
-            let trimmed = notes.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            if !trimmed.isEmpty {
+        // Notes (connected mode):
+        // - If notes are marked private → force-clear server notes (NULL) so followers cannot see stale notes.
+        // - If notes are not private → publish trimmed notes, or clear (NULL) when empty.
+        if payload.areNotesPrivate {
+            meta["notes"] = NSNull()
+        } else {
+            let trimmed = (payload.notes ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                meta["notes"] = NSNull()
+            } else {
                 meta["notes"] = trimmed
             }
         }
