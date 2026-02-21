@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
+// SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
+// SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
+
 // CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
 // SCOPE: FollowersListView: pass avatar_key into PeopleUserRow so follower rows can render remote avatars.
 // SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
@@ -17,6 +21,8 @@ struct FollowersListView: View {
 
 
     @State private var directory: [String: DirectoryAccount] = [:]
+    @State private var pendingRemoveUserID: String? = nil
+    @State private var pendingRemoveName: String? = nil
     private var userIDs: [String] {
         Array(followStore.followers).sorted()
     }
@@ -46,11 +52,43 @@ struct FollowersListView: View {
                             directoryInstruments: acct?.instruments,
                         )
                     }
-                    .listRowBackground(Color.clear)
+                    
+.swipeActions(edge: .trailing, allowsFullSwipe: false) {
+    Button(role: .destructive) {
+        pendingRemoveUserID = userID
+        pendingRemoveName = acct?.displayName
+    } label: {
+        Label("Remove", systemImage: "person.fill.xmark")
+    }
+}
+.listRowBackground(Color.clear)
                 }
             }
         }
-        .listStyle(.plain)
+        
+.alert("Remove follower?", isPresented: Binding(
+    get: { pendingRemoveUserID != nil },
+    set: { if !$0 { pendingRemoveUserID = nil; pendingRemoveName = nil } }
+)) {
+    Button("Cancel", role: .cancel) {
+        pendingRemoveUserID = nil
+        pendingRemoveName = nil
+    }
+    Button("Remove", role: .destructive) {
+        if let id = pendingRemoveUserID {
+            _ = followStore.removeFollower(id)
+        }
+        pendingRemoveUserID = nil
+        pendingRemoveName = nil
+    }
+} message: {
+    if let name = pendingRemoveName, !name.isEmpty {
+        Text("They will lose access immediately.")
+    } else {
+        Text("They will lose access immediately.")
+    }
+}
+.listStyle(.plain)
         .scrollContentBackground(.hidden)
         .appBackground()
         .task(id: userIDs) {

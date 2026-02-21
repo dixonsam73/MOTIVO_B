@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
+// SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
+// SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
+
 // CHANGE-ID: 20260211_141746_PPV_Instruments_Writeback_ADS_a3d9c1
 // SCOPE: Owner instruments write-back to account_directory.instruments via upsertSelfRow payload + cache merge
 // SEARCH-TOKEN: 20260211_141746_PPV_Instruments_Writeback_ADS_a3d9c1
@@ -190,7 +194,7 @@ public final class AccountDirectoryService {
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
-    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
+    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, followRequestsEnabled: Bool? = nil, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
         var payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
@@ -198,6 +202,10 @@ public final class AccountDirectoryService {
             "lookup_enabled": lookupEnabled,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
+
+        if let followRequestsEnabled = followRequestsEnabled {
+            payload["follow_requests_enabled"] = followRequestsEnabled
+        }
 
         if let instruments = instruments {
             payload["instruments"] = instruments

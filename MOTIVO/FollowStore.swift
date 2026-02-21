@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260221_141120_FollowInfraFixBrace_88710f8d
+// SCOPE: Fix FollowStore compile error (removeFollower inserted inside declineFollow) — restore correct method scope and access control.
+// SEARCH-TOKEN: 20260221_141120_FollowInfraFixBrace_88710f8d
+
+// CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
+// SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
+// SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
+
 // CHANGE-ID: 20260121_124000_P13F_FollowStoreFollowersWire
 // SCOPE: Phase 13F — Store followers set; refresh from backend; wire failure logging.
 // SEARCH-TOKEN: 20260121_124000_P13F_FollowStoreFollowersWire
@@ -201,22 +209,70 @@ public final class FollowStore: ObservableObject {
     @discardableResult
     public func declineFollow(from requesterUserID: String) -> FollowState {
         if isBackendHTTPActive {
+            // Optimistic UI: remove immediately so the list updates even if refresh is delayed.
+            let id = requesterUserID.lowercased()
+            if requests.contains(id) {
+                requests.remove(id)
+                save()
+            }
+
             Task { @MainActor in
-                let result = await BackendEnvironment.shared.follow.declineFollow(from: requesterUserID)
+                let result = await BackendEnvironment.shared.follow.declineFollow(from: id)
                 switch result {
                 case .success:
                     await self.refreshFromBackendIfPossible()
                 case .failure(let e):
                     NSLog("[FollowStore] backend declineFollow failed: %@", String(describing: e))
+                    // Fail closed: refresh to restore the true backend state.
+                    await self.refreshFromBackendIfPossible()
                 }
             }
+
             return .none
         }
 
+        // Local simulation: declining removes an INCOMING request.
         requests.remove(requesterUserID)
         save()
         NSLog("[FollowStore] decline ← %@", requesterUserID)
         return .none
+    }
+
+    /// Remove / revoke an already-approved follower (i.e. someone who follows you).
+    /// Backend: deletes the follow row (hardened to attempt both directions).
+    @discardableResult
+    public func removeFollower(_ followerUserID: String) -> Bool {
+        let id = followerUserID.lowercased()
+
+        if isBackendHTTPActive {
+            // Optimistic UI: remove immediately.
+            if followers.contains(id) {
+                followers.remove(id)
+                save()
+            }
+
+            Task { @MainActor in
+                let result = await BackendEnvironment.shared.follow.unfollow(id)
+                switch result {
+                case .success:
+                    await self.refreshFromBackendIfPossible()
+                case .failure(let e):
+                    NSLog("[FollowStore] backend removeFollower failed: %@", String(describing: e))
+                    await self.refreshFromBackendIfPossible()
+                }
+            }
+
+            return true
+        }
+
+        if followers.contains(id) {
+            followers.remove(id)
+            save()
+            NSLog("[FollowStore] removeFollower ← %@", id)
+            return true
+        }
+
+        return false
     }
 
     @discardableResult

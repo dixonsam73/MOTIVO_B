@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
+// SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
+// SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
+
 // CHANGE-ID: 20260213_210205_ConnectedOfflineResilience_FeedSnapshot
 // SCOPE: Connected-mode Offline Resilience — preserve last-known feed snapshot on refresh failure; no UI changes; no backend/schema changes.
 // SEARCH-TOKEN: 20260213_210205_FeedSnapshotRetention
@@ -540,32 +544,38 @@ public func fetchIncomingRequests() async -> Result<[String], Error> {
     }
 
     private func deleteRelationship(with otherUserID: String) async -> Result<Void, Error> {
-        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
-            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
-        }
-        guard let me = currentBackendUserID(), !me.isEmpty else {
-            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
-        }
-
-        // Try both directions (either party can delete).
-        let path1 = "rest/v1/follows?follower_user_id=eq.\(me)&followed_user_id=eq.\(otherUserID)"
-        let r1 = await NetworkManager.shared.request(path: path1, method: "DELETE", headers: headers(apiKey: apiKey))
-        switch r1 {
-        case .success:
-            return .success(())
-        case .failure:
-            break
-        }
-
-        let path2 = "rest/v1/follows?follower_user_id=eq.\(otherUserID)&followed_user_id=eq.\(me)"
-        let r2 = await NetworkManager.shared.request(path: path2, method: "DELETE", headers: headers(apiKey: apiKey))
-        switch r2 {
-        case .success:
-            return .success(())
-        case .failure(let e2):
-            return .failure(e2)
-        }
+    guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+        return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
     }
+    guard let me = currentBackendUserID(), !me.isEmpty else {
+        return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing backend user id"]))
+    }
+
+    // IMPORTANT:
+    // PostgREST DELETE commonly returns 204 even when 0 rows matched (especially with Prefer: return=minimal).
+    // So we MUST attempt both directional deletes; otherwise an incoming request (other -> me) can look like
+    // a "success" while deleting nothing.
+    let path1 = "rest/v1/follows?follower_user_id=eq.\(me)&followed_user_id=eq.\(otherUserID)"
+    let r1 = await NetworkManager.shared.request(path: path1, method: "DELETE", headers: headers(apiKey: apiKey))
+
+    let path2 = "rest/v1/follows?follower_user_id=eq.\(otherUserID)&followed_user_id=eq.\(me)"
+    let r2 = await NetworkManager.shared.request(path: path2, method: "DELETE", headers: headers(apiKey: apiKey))
+
+    // Treat overall success if either call succeeded.
+    if case .success = r1 { return .success(()) }
+    if case .success = r2 { return .success(()) }
+
+    // Prefer the second error if present (it corresponds to the inverse direction, common for decline/remove-follower).
+    switch (r1, r2) {
+    case (.failure, .failure(let e2)):
+        return .failure(e2)
+    case (.failure(let e1), _):
+        return .failure(e1)
+    default:
+        return .failure(NSError(domain: "Backend", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unknown follow delete failure"]))
+    }
+}
+
 }
 
 public final class HTTPBackendPublishService: BackendPublishService {

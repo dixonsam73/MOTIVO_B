@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
+// SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
+// SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
+
 // CHANGE-ID: 20260221_094021_PV_AuthUI_Simplify_d930d3
 // SCOPE: UI-only — ProfileView account section simplification (remove Account header + UUID display; single auth action card)
 // SEARCH-TOKEN: 20260221_094021_PV_AuthUI_Simplify_d930d3
@@ -1003,6 +1007,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
          // If user hasn’t opted in, ensure lookup is disabled (row may still exist).
          let enabled = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
+         let frm = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual)
+         let followRequestsEnabled = !(frm == .autoApproveContacts || frm == .closed)
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
          let acctOrNil: String? = (acct.count >= 3) ? acct : nil
          let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1015,13 +1021,14 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          }
 
          let instrumentsFP = instrumentsSorted.joined(separator: ",")
-         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")|i:\(instrumentsFP)"
+         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")|fr:\(followRequestsEnabled ? "1" : "0")|i:\(instrumentsFP)"
          if fingerprint == lastDirectorySyncFingerprint { return }
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
              displayName: display,
              accountID: acctOrNil,
              lookupEnabled: enabled,
+             followRequestsEnabled: followRequestsEnabled,
              location: locOrNil,
              instruments: instrumentsSorted
          )
