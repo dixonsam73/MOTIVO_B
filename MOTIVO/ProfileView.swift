@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260221_094021_PV_AuthUI_Simplify_d930d3
+// SCOPE: UI-only — ProfileView account section simplification (remove Account header + UUID display; single auth action card)
+// SEARCH-TOKEN: 20260221_094021_PV_AuthUI_Simplify_d930d3
+
 // CHANGE-ID: 20260211_141746_PPV_Instruments_Writeback_PV_a3d9c1
 // SCOPE: Sync local instruments to account_directory on instrument manager dismiss + include instruments in directory upsert fingerprint
 // SEARCH-TOKEN: 20260211_141746_PPV_Instruments_Writeback_PV_a3d9c1
@@ -691,20 +695,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  
      @ViewBuilder
      private var accountSection: some View {
-         Section(header: Text("Account").sectionHeader()) {
+         Section {
              VStack(alignment: .leading, spacing: 0) {
                  VStack(alignment: .leading, spacing: 4) {
                      if auth.isSignedIn {
-                         Text(auth.displayName ?? "Signed in")
-                             .font(Theme.Text.body)
-                             .frame(minHeight: 44, alignment: .center)
-                         Text("User ID: \(auth.currentUserID ?? "--")")
-                             .font(.footnote)
-                             .foregroundStyle(.secondary)
-                             .lineLimit(3)
-                             .truncationMode(.tail)
-                             .padding(.bottom, 8)
-                         Divider().padding(.leading, 16)
                          HStack {
                              Spacer()
                              Button(role: .destructive) { auth.signOut() } label: {
@@ -731,7 +725,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
              .cardSurface()
          }
      }
- 
+
+
      // MARK: - Toolbar
 
      @ToolbarContentBuilder
