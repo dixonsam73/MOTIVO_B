@@ -258,7 +258,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for auto-selection. Adjust global privacy to control who sees what.")
+                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for auto-selection. Accounts are private by default. Sessions are shared intentionally, and attachments remain personal unless you choose to include them. Adjust global privacy to control who sees what.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -269,18 +269,18 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Your activity history appears here (and posts from users you follow). Use the Feed Filter to switch between All (you + the accounts you follow) or Mine (just you). Use search to find posts by title or content (e.g. Bach, scales, SLAP). Tap a post to open full session details, view media, and like or comment.")
+                                 Text("Your activity history appears here. If you follow other musicians, you’ll also see the sessions they’ve chosen to share. Use the Feed Filter to switch between All (you + accounts you follow) or Mine (just you). Use search to find posts by title or content. Tap a session to open full details and view media. Comments are private conversations between you and the author. Replies are not visible to other commenters. There are no public follower counts, like counts, or rankings. The heart icon saves a session privately, and saved sessions can be filtered in the Feed Filter.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
 
-                             // Practice Timer
+                             // Session Timer
                              VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Practice Timer")
+                                 Text("Session Timer")
                                      .font(Theme.Text.body.weight(.semibold))
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Launched from the feed's record button. Use it to log your practice, rehearsal, performance, or recording sessions. Attach photos, record audio or video, and trim those recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that automatically appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page (e.g., a setlist for a rehearsal, warm-ups and scales for a practice session).")
+                                 Text("Launched from the feed’s record button. Use it to log any of your activities — practice, rehearsal, performance, writing, or recording sessions. Attach photos, record audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -296,10 +296,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
 
-                             // Closing
-                             Text("Happy noting!")
-                                 .font(Theme.Text.body.weight(.semibold))
-                                 .foregroundStyle(Theme.Colors.accent)
+                         
                          }
                          .frame(maxWidth: .infinity, alignment: .leading)
                      }
@@ -499,7 +496,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
              .listRowSeparator(.hidden)
 
              // 4) Philosophy line OUTSIDE the cards (quiet footer)
-             Text("Your profile is private by default, and follows are always intentional.")
+             Text("Your account is private by default, and follows are always intentional.")
                  .font(.caption)
                  .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                  .padding(.top, Theme.Spacing.xs)
