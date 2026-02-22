@@ -1547,12 +1547,45 @@ isPrivate: { url in
 
     private func stageData(_ data: Data, kind: AttachmentKind) {
         let id = UUID()
-        stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
+
+        let finalData: Data
+        if kind == .image {
+            finalData = clampImageDataIfNeeded(data, maxDimension: 2048, jpegQuality: 0.8)
+        } else {
+            finalData = data
+        }
+
+        stagedAttachments.append(StagedAttachment(id: id, data: finalData, kind: kind))
+
         if kind == .image {
             let imageCount = stagedAttachments.filter { $0.kind == .image }.count
             if imageCount == 1 { selectedThumbnailID = id }
         }
     }
+
+    private func clampImageDataIfNeeded(_ data: Data, maxDimension: CGFloat, jpegQuality: CGFloat) -> Data {
+        guard let image = UIImage(data: data) else { return data }
+
+        let w = image.size.width
+        let h = image.size.height
+        let longest = max(w, h)
+        guard longest > maxDimension, longest > 0 else { return data }
+
+        let scale = maxDimension / longest
+        let newSize = CGSize(width: max(1, floor(w * scale)), height: max(1, floor(h * scale)))
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1 // pixel-accurate output
+        format.opaque = true
+
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+
+        return resized.jpegData(compressionQuality: jpegQuality) ?? data
+    }
+
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
         stagedAttachments.removeAll { $0.id == a.id }
