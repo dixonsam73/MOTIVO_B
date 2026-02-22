@@ -489,12 +489,11 @@ final class VideoRecorderController: NSObject,
     }
 
     static func formatTime(_ time: TimeInterval) -> String {
-        guard time.isFinite && time >= 0 else { return "00:00.0" }
-        let totalTenths = Int(time * 10)
-        let minutes = totalTenths / 600
-        let seconds = (totalTenths / 10) % 60
-        let tenths = totalTenths % 10
-        return String(format: "%02d:%02d.%d", minutes, seconds, tenths)
+        guard time.isFinite && time >= 0 else { return "00:00" }
+        let totalSeconds = Int(time)
+        let minutes = totalSeconds / 60
+        let seconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 
     var recordingButtonSystemName: String {
@@ -1950,3 +1949,4 @@ private final class PlayerContainerView: UIView {
     }
 }
 #endif
+
