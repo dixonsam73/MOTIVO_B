@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260222_142900_DelPostStorageCleanup_50MB_1f3c
+// SCOPE: Storage & Media Hygiene — deletePost now deletes referenced storage objects (fail-closed) before deleting posts row; no UI changes
+// SEARCH-TOKEN: 20260222_142900_DelPostStorageCleanup_50MB_1f3c
+
 // CHANGE-ID: 20260222_123955_MediaHygieneCap50MB_9a1f
 // SCOPE: Storage & Media Hygiene — Cap uploads at 50MB fail-closed before Data(contentsOf:) in BackendShim.uploadStorageObject
 // SEARCH-TOKEN: 20260222_123955_MediaHygieneCap50MB_9a1f
@@ -269,9 +273,142 @@ public final class SimulatedPublishService: BackendPublishService {
 
     @MainActor
     public func deletePost(_ postID: UUID) async -> Result<Void, Error> {
-        await BackendDiagnostics.shared.simulatedCall("PublishService.deletePost", meta: ["postID": postID.uuidString])
-        return .success(())
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+
+        // 1) Fetch attachments refs first so we can delete storage objects (prevents orphans).
+        let fetchPath = "rest/v1/posts?id=eq.\(postID.uuidString)&select=attachments"
+        let fetchHeaders: [String: String] = [
+            "apikey": apiKey
+        ]
+
+        let fetchResult = await NetworkManager.shared.request(
+            path: fetchPath,
+            method: "GET",
+            query: nil,
+            jsonBody: nil,
+            headers: fetchHeaders
+        )
+
+        switch fetchResult {
+        case .success(let data):
+            do {
+                let decoder = JSONDecoder()
+                let rows = try decoder.decode([PostAttachmentsRow].self, from: data)
+                let refs: [AttachmentRef] = rows.first?.attachments.refs ?? []
+
+                // 2) Delete storage objects (fail-closed). If any delete fails, do not delete the post row.
+                for ref in refs {
+                    guard !ref.bucket.isEmpty, !ref.path.isEmpty else { continue }
+                    let delResult = await deleteStorageObject(apiKey: apiKey, bucket: ref.bucket, objectPath: ref.path)
+                    if case .failure(let e) = delResult {
+                        return .failure(e)
+                    }
+                }
+            } catch {
+                // Fail-closed: if we cannot decode attachment refs, do not proceed to delete the post row.
+                return .failure(error)
+            }
+
+        case .failure(let e):
+            // Fail-closed: if we cannot fetch refs, do not proceed to delete the post row.
+            return .failure(e)
+        }
+
+        // 3) Delete the post row.
+        let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let deleteHeaders: [String: String] = [
+            "apikey": apiKey,
+            "Prefer": "return=minimal"
+        ]
+
+        let deleteResult = await NetworkManager.shared.request(
+            path: deletePath,
+            method: "DELETE",
+            query: nil,
+            jsonBody: nil,
+            headers: deleteHeaders
+        )
+
+        switch deleteResult {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
     }
+
+    private struct PostAttachmentsRow: Decodable {
+        let attachments: AttachmentsField
+    }
+
+    private struct AttachmentsField: Decodable {
+        let refs: [AttachmentRef]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+
+            // Common case: attachments is a JSON array (jsonb column).
+            if let direct = try? container.decode([AttachmentRef].self) {
+                self.refs = direct
+                return
+            }
+
+            // Fallback: attachments may arrive as an escaped JSON string.
+            if let str = try? container.decode(String.self) {
+                let data = Data(str.utf8)
+                self.refs = (try? JSONDecoder().decode([AttachmentRef].self, from: data)) ?? []
+                return
+            }
+
+            self.refs = []
+        }
+    }
+
+    private struct AttachmentRef: Decodable {
+        let kind: String?
+        let bucket: String
+        let path: String
+        let display_name: String?
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.kind = try? c.decode(String.self, forKey: .kind)
+            self.bucket = (try? c.decode(String.self, forKey: .bucket)) ?? ""
+            self.path = (try? c.decode(String.self, forKey: .path)) ?? ""
+            self.display_name = try? c.decode(String.self, forKey: .display_name)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case kind, bucket, path, display_name
+        }
+    }
+
+    @MainActor
+    private func deleteStorageObject(apiKey: String, bucket: String, objectPath: String) async -> Result<Void, Error> {
+        let path = "storage/v1/object/\(bucket)/\(objectPath)"
+        let headers: [String: String] = [
+            "apikey": apiKey,
+            "Prefer": "return=minimal"
+        ]
+
+        let result = await NetworkManager.shared.request(
+            path: path,
+            method: "DELETE",
+            query: nil,
+            jsonBody: nil,
+            headers: headers
+        )
+
+        switch result {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
 
     @MainActor
     public func updatePost(_ postID: UUID) async -> Result<Void, Error> {
@@ -1064,7 +1201,117 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
             return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
         }
 
-        let path = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        // 1) Fetch attachments refs first so we can delete storage objects (prevents orphans).
+        let fetchPath = "rest/v1/posts?id=eq.\(postID.uuidString)&select=attachments"
+        let fetchHeaders: [String: String] = [
+            "apikey": apiKey
+        ]
+
+        let fetchResult = await NetworkManager.shared.request(
+            path: fetchPath,
+            method: "GET",
+            query: nil,
+            jsonBody: nil,
+            headers: fetchHeaders
+        )
+
+        switch fetchResult {
+        case .success(let data):
+            do {
+                let decoder = JSONDecoder()
+                let rows = try decoder.decode([PostAttachmentsRow].self, from: data)
+                let refs: [AttachmentRef] = rows.first?.attachments.refs ?? []
+
+                // 2) Delete storage objects (fail-closed). If any delete fails, do not delete the post row.
+                for ref in refs {
+                    guard !ref.bucket.isEmpty, !ref.path.isEmpty else { continue }
+                    let delResult = await deleteStorageObject(apiKey: apiKey, bucket: ref.bucket, objectPath: ref.path)
+                    if case .failure(let e) = delResult {
+                        return .failure(e)
+                    }
+                }
+            } catch {
+                // Fail-closed: if we cannot decode attachment refs, do not proceed to delete the post row.
+                return .failure(error)
+            }
+
+        case .failure(let e):
+            // Fail-closed: if we cannot fetch refs, do not proceed to delete the post row.
+            return .failure(e)
+        }
+
+        // 3) Delete the post row.
+        let deletePath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let deleteHeaders: [String: String] = [
+            "apikey": apiKey,
+            "Prefer": "return=minimal"
+        ]
+
+        let deleteResult = await NetworkManager.shared.request(
+            path: deletePath,
+            method: "DELETE",
+            query: nil,
+            jsonBody: nil,
+            headers: deleteHeaders
+        )
+
+        switch deleteResult {
+        case .success:
+            return .success(())
+        case .failure(let e):
+            return .failure(e)
+        }
+    }
+
+    private struct PostAttachmentsRow: Decodable {
+        let attachments: AttachmentsField
+    }
+
+    private struct AttachmentsField: Decodable {
+        let refs: [AttachmentRef]
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+
+            // Common case: attachments is a JSON array (jsonb column).
+            if let direct = try? container.decode([AttachmentRef].self) {
+                self.refs = direct
+                return
+            }
+
+            // Fallback: attachments may arrive as an escaped JSON string.
+            if let str = try? container.decode(String.self) {
+                let data = Data(str.utf8)
+                self.refs = (try? JSONDecoder().decode([AttachmentRef].self, from: data)) ?? []
+                return
+            }
+
+            self.refs = []
+        }
+    }
+
+    private struct AttachmentRef: Decodable {
+        let kind: String?
+        let bucket: String
+        let path: String
+        let display_name: String?
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            self.kind = try? c.decode(String.self, forKey: .kind)
+            self.bucket = (try? c.decode(String.self, forKey: .bucket)) ?? ""
+            self.path = (try? c.decode(String.self, forKey: .path)) ?? ""
+            self.display_name = try? c.decode(String.self, forKey: .display_name)
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case kind, bucket, path, display_name
+        }
+    }
+
+    @MainActor
+    private func deleteStorageObject(apiKey: String, bucket: String, objectPath: String) async -> Result<Void, Error> {
+        let path = "storage/v1/object/\(bucket)/\(objectPath)"
         let headers: [String: String] = [
             "apikey": apiKey,
             "Prefer": "return=minimal"
@@ -1085,6 +1332,7 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
             return .failure(e)
         }
     }
+
 
     @MainActor
     public func updatePost(_ postID: UUID) async -> Result<Void, Error> {
