@@ -6,6 +6,10 @@
 // ADD-ON: Step 8G Option 1 — DEBUG-only: attach last uploaded Storage objectPath to backend posts.attachments (jsonb) via REST PATCH.
 // SEARCH-TOKEN: 20260108_134900_Step8G_StorageHello_DebugViewer
 
+// CHANGE-ID: 20260222_210500_LocalOrphanCleaner_DebugViewer
+// SCOPE: DEBUG-only local orphan cleaner for persisted attachment media in Documents (delete unreferenced files via Core Data Attachment scan).
+// SEARCH-TOKEN: 20260222_210500_LocalOrphanCleaner_DebugViewer
+
 #if DEBUG
 // CHANGE-ID: 20260122_113000_Phase142_DebugOverridesIgnoredInConnected
 // SCOPE: Phase 14.2 — Label debug identity overrides as ignored in Connected mode and disable interaction
@@ -23,6 +27,7 @@ import SwiftUI
 import UIKit
 #endif
 import Foundation
+import CoreData
 
 struct FollowContextDump: Encodable {
     let viewerID: String
@@ -58,6 +63,7 @@ extension DebugDump {
 
 public struct DebugViewerView: View {
     @EnvironmentObject private var auth: AuthManager
+    @Environment(\.managedObjectContext) private var viewContext
     private let title: String
     @Binding private var jsonString: String
     @State private var isPretty: Bool = true
@@ -66,6 +72,11 @@ public struct DebugViewerView: View {
     @StateObject private var followStore = FollowStore.shared
     @State private var deletePostIDText: String = ""
     @State private var deletePostStatusText: String? = nil
+
+    // Local filesystem hygiene (DEBUG-only): one-shot orphan cleaner for persisted attachments in Documents.
+    @State private var orphanCleanIsBusy: Bool = false
+    @State private var orphanCleanStatus: String = ""
+    @State private var orphanCleanLastDeletedCount: Int? = nil
 
 
     // Step 8G (debug-only): Storage “Hello” pipeline (upload a bundled test image, then download via authenticated endpoint)
@@ -539,6 +550,184 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
 
     // MARK: - Backend feed debug section (Step 8A/8B)
 
+    @ViewBuilder private var localOrphanCleanerBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Local Filesystem Hygiene").font(.headline)
+
+            Text("One-shot cleanup: deletes media files in Documents that are not referenced by any Attachment record. DEBUG-only.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Button(orphanCleanIsBusy ? "Cleaning…" : "Clean orphaned attachment files (Documents)") {
+                    runLocalOrphanCleaner()
+                }
+                .disabled(orphanCleanIsBusy)
+
+                if let n = orphanCleanLastDeletedCount {
+                    Text("Deleted: \(n)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            if !orphanCleanStatus.isEmpty {
+                Text(orphanCleanStatus)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(Color(.secondarySystemBackground))
+        )
+    }
+
+    private func runLocalOrphanCleaner() {
+        guard !orphanCleanIsBusy else { return }
+        orphanCleanIsBusy = true
+        orphanCleanStatus = "Running…"
+        orphanCleanLastDeletedCount = nil
+
+        let ctx = viewContext
+        ctx.perform {
+            let referenced = Self.collectReferencedDocumentFilenames(context: ctx)
+            let result = Self.cleanOrphanedMediaFilesInDocuments(referencedFilenames: referenced)
+
+            DispatchQueue.main.async {
+                orphanCleanLastDeletedCount = result.deletedCount
+                orphanCleanStatus = result.summary
+                orphanCleanIsBusy = false
+            }
+        }
+    }
+
+    private struct OrphanCleanResult {
+        let deletedCount: Int
+        let deletedNamesPreview: [String]
+        let summary: String
+    }
+
+    private static func collectReferencedDocumentFilenames(context: NSManagedObjectContext) -> Set<String> {
+        var out = Set<String>()
+
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Attachment")
+        req.includesPendingChanges = true
+        req.returnsObjectsAsFaults = false
+
+        let rows = (try? context.fetch(req)) ?? []
+        for obj in rows {
+            // Only access declared attributes to avoid KVC crashes on unknown keys.
+            for attrName in obj.entity.attributesByName.keys {
+                guard let raw = obj.value(forKey: attrName) else { continue }
+
+                // Common cases: String path / filename, or URL/NSURL.
+                if let s = raw as? String {
+                    let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { continue }
+                    if let cand = Self.extractDocumentFilenameCandidate(from: trimmed) {
+                        out.insert(cand)
+                    }
+                } else if let u = raw as? URL {
+                    let name = u.lastPathComponent
+                    if !name.isEmpty { out.insert(name) }
+                } else if let u = raw as? NSURL, let url = u as URL? {
+                    let name = url.lastPathComponent
+                    if !name.isEmpty { out.insert(name) }
+                }
+            }
+        }
+
+        return out
+    }
+
+    private static func extractDocumentFilenameCandidate(from raw: String) -> String? {
+        // Accept:
+        // - bare filenames (UUID.ext)
+        // - absolute paths (…/Documents/UUID.ext)
+        // - file:// URLs
+        // Return only the lastPathComponent, filtered to media-ish filenames.
+        if raw.hasPrefix("file://"), let u = URL(string: raw) {
+            let name = u.lastPathComponent
+            return Self.isLikelyMediaFilename(name) ? name : nil
+        }
+
+        // Raw path or filename
+        let name = (raw as NSString).lastPathComponent
+        return Self.isLikelyMediaFilename(name) ? name : nil
+    }
+
+    private static func isLikelyMediaFilename(_ name: String) -> Bool {
+        let lower = name.lowercased()
+        // Media extensions we ever persist in Documents for attachments/derivatives/posters.
+        let mediaExts: Set<String> = [
+            "m4a", "aac", "caf", "wav",
+            "mov", "mp4", "m4v",
+            "jpg", "jpeg", "png", "heic", "gif"
+        ]
+        guard let ext = lower.split(separator: ".").last.map(String.init), mediaExts.contains(ext) else {
+            return false
+        }
+        // Basic sanity: avoid deleting bizarre filenames like ".mp4"
+        return lower.count > (ext.count + 1)
+    }
+
+    private static func cleanOrphanedMediaFilesInDocuments(referencedFilenames: Set<String>) -> OrphanCleanResult {
+        let fm = FileManager.default
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return OrphanCleanResult(deletedCount: 0, deletedNamesPreview: [], summary: "No Documents directory found.")
+        }
+
+        let mediaExts: Set<String> = [
+            "m4a", "aac", "caf", "wav",
+            "mov", "mp4", "m4v",
+            "jpg", "jpeg", "png", "heic", "gif"
+        ]
+
+        var deleted: [String] = []
+
+        let items: [URL]
+        do {
+            items = try fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles])
+        } catch {
+            return OrphanCleanResult(deletedCount: 0, deletedNamesPreview: [], summary: "Failed to enumerate Documents: \(error.localizedDescription)")
+        }
+
+        for url in items {
+            let name = url.lastPathComponent
+            let ext = url.pathExtension.lowercased()
+
+            // Only consider media files. Never touch SQLite or other app metadata.
+            guard mediaExts.contains(ext) else { continue }
+
+            // Keep anything still referenced.
+            if referencedFilenames.contains(name) { continue }
+
+            // Best-effort delete orphan.
+            do {
+                try fm.removeItem(at: url)
+                deleted.append(name)
+            } catch {
+                // Ignore individual delete failures; continue.
+            }
+        }
+
+        let preview = Array(deleted.prefix(25))
+        let extra = max(0, deleted.count - preview.count)
+        var summary = "Referenced attachments: \(referencedFilenames.count). Deleted orphans: \(deleted.count)."
+        if !preview.isEmpty {
+            summary += "\nDeleted (first \(preview.count)\(extra > 0 ? " of \(deleted.count)" : "")):"
+            for n in preview {
+                summary += "\n• \(n)"
+            }
+        } else {
+            summary += "\nNo orphaned media files found in Documents."
+        }
+
+        return OrphanCleanResult(deletedCount: deleted.count, deletedNamesPreview: preview, summary: summary)
+    }
     @ViewBuilder private var backendFeedSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Backend • Step 8A/8B Feed").font(.headline)
@@ -802,6 +991,8 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                 backendStep6ABlock
 
                 backendStorageHelloBlock
+
+                localOrphanCleanerBlock
 
                 backendFeedSection
 
