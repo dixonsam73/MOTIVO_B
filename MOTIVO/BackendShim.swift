@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260222_142900_DelPostStorageCleanup_50MB_1f3c
-// SCOPE: Storage & Media Hygiene — deletePost now deletes referenced storage objects (fail-closed) before deleting posts row; no UI changes
+// CHANGE-ID: 20260222_163858_PublishSkipOversize_OptionB
+// SCOPE: Storage & Media Hygiene — Option B publish behavior: skip oversized attachments (>50MB) but publish remaining refs (no UI changes)
 // SEARCH-TOKEN: 20260222_142900_DelPostStorageCleanup_50MB_1f3c
 
 // CHANGE-ID: 20260222_123955_MediaHygieneCap50MB_9a1f
@@ -883,7 +883,9 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         var refs: [[String: String]] = []
         refs.reserveCapacity(included.count)
 
-        for item in included {
+        var skippedOversizedCount = 0
+
+        uploadLoop: for item in included {
             let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: item.ext)
             let upload = await uploadStorageObject(from: item.fileURL, bucket: "attachments", objectPath: objectPath, contentType: item.contentType)
             switch upload {
@@ -899,9 +901,27 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
                 }
 
                 refs.append(ref)
+
             case .failure(let e):
+                // Option B: skip oversized attachments, but keep the publish alive for valid ones.
+                if let preflight = e as? StorageUploadPreflightError {
+                    switch preflight {
+                    case .fileTooLarge(let actualBytes, let limitBytes):
+                        skippedOversizedCount += 1
+                        print("[BackendShim] Skipping attachment \(item.id.uuidString) — too large (\(actualBytes) > \(limitBytes) bytes)")
+                        continue uploadLoop
+                    case .cannotDetermineFileSize:
+                        return .failure(e)
+                    }
+                }
+
+                // Other errors remain fatal.
                 return .failure(e)
             }
+        }
+
+        if skippedOversizedCount > 0 {
+            print("[BackendShim] Publish completed with \(skippedOversizedCount) oversized attachment(s) skipped (kept local-only).")
         }
 
         let patch = await patchPostAttachments(postID: payload.id, refs: refs)

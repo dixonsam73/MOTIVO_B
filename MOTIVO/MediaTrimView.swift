@@ -1,8 +1,8 @@
 import SwiftUI
 import AVFoundation
 import AVKit
-// CHANGE-ID: 20251224_171800-mediatrim-landscape-scroll-keep-portrait
-// SCOPE: Landscape-only scroll + dismiss disable; keep portrait layout unchanged; stabilize video sizing in landscape
+// CHANGE-ID: 20260222_160500_MediaTrim_BoundedFallback
+// SCOPE: Replace HighestQuality fallback with bounded export presets (HEVC/1080p/720p/Medium) for video trim
 
 
 // MARK: - MediaTrimView
@@ -1107,8 +1107,24 @@ extension MediaTrimView {
                     preset = AVAssetExportPresetAppleM4A
                 }
             } else {
-                if !AVAssetExportSession.exportPresets(compatibleWith: asset).contains(preset) {
-                    preset = AVAssetExportPresetHighestQuality
+                let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+                if !compatiblePresets.contains(preset) {
+                    let boundedFallbacks: [String] = [
+                        AVAssetExportPresetHEVC1920x1080,
+                        AVAssetExportPreset1920x1080,
+                        AVAssetExportPreset1280x720,
+                        AVAssetExportPresetMediumQuality
+                    ]
+                    if let chosen = boundedFallbacks.first(where: { compatiblePresets.contains($0) }) {
+                        preset = chosen
+                    } else if let chosen = compatiblePresets.first(where: { $0 != AVAssetExportPresetHighestQuality }) ?? compatiblePresets.first {
+                        // Last-resort fallback: choose the first compatible preset that isn't HighestQuality if possible.
+                        preset = chosen
+                    } else {
+                        isExporting = false
+                        alert = ModelAlert(title: "Export failed", message: "No compatible export preset available for this video.")
+                        return
+                    }
                 }
             }
 
