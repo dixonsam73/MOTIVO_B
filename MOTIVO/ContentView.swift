@@ -1,3 +1,7 @@
+
+// CHANGE-ID: 20260222_103500_PublishSkipOversizeWarningRoot_7d9c
+// SCOPE: Show a user-visible alert when publish skips oversized attachments (>50MB). Subscribe at root (SessionsRootView) so alert appears after PRDV/AESV dismiss.
+
 // CHANGE-ID: 20260215_114000_UnreadComments_PeoplePlusFix2
 // SCOPE: Compose People "+" with unread private comments. Do not block existing presence refreshes; fire unread refresh non-blocking to avoid regressions.
 // SEARCH-TOKEN: 20260215_114000_UnreadComments_PeoplePlusFix2
@@ -294,6 +298,9 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
+
+    @State private var showPublishSkipOversizeAlert = false
+    @State private var publishSkipOversizeMessage = ""
 
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
@@ -915,6 +922,21 @@ Spacer()
                 }
             }
             .appBackground()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .backendPublishSkippedOversizedAttachments)) { note in
+            let count = (note.userInfo?["count"] as? Int) ?? 0
+            guard count > 0 else { return }
+            if count == 1 {
+                publishSkipOversizeMessage = "1 attachment was too large to publish. It remains saved locally."
+            } else {
+                publishSkipOversizeMessage = "\(count) attachments were too large to publish. They remain saved locally."
+            }
+            showPublishSkipOversizeAlert = true
+        }
+        .alert("Publish limit", isPresented: $showPublishSkipOversizeAlert) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text(publishSkipOversizeMessage)
         }
     }
 

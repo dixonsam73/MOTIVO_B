@@ -1,3 +1,11 @@
+
+// CHANGE-ID: 20260222_103500_PublishSkipOversizeWarningRoot_7d9c
+// SCOPE: Post publish warning when oversized attachments are skipped (>50MB) using NotificationCenter; show alert in ContentView root. No publish logic changes.
+
+extension Notification.Name {
+    static let backendPublishSkippedOversizedAttachments = Notification.Name("backendPublishSkippedOversizedAttachments_v1")
+}
+
 // CHANGE-ID: 20260222_163858_PublishSkipOversize_OptionB
 // SCOPE: Storage & Media Hygiene — Option B publish behavior: skip oversized attachments (>50MB) but publish remaining refs (no UI changes)
 // SEARCH-TOKEN: 20260222_142900_DelPostStorageCleanup_50MB_1f3c
@@ -927,6 +935,13 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         let patch = await patchPostAttachments(postID: payload.id, refs: refs)
         switch patch {
         case .success:
+            if skippedOversizedCount > 0 {
+                NotificationCenter.default.post(
+                    name: .backendPublishSkippedOversizedAttachments,
+                    object: nil,
+                    userInfo: ["count": skippedOversizedCount]
+                )
+            }
             return .success(())
         case .failure(let e):
             return .failure(e)
