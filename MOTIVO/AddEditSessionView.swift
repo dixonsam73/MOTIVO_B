@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260222_195620_AESV_TmpHygieneHardening
+// SCOPE: Local filesystem hygiene hardening — best-effort cleanup of AESV tmp surrogate/alias files on remove, cancel, and successful save. No UI/behavior changes.
+// SEARCH-TOKEN: 20260222_195620_AESV_TmpHygieneHardening
+
 // CHANGE-ID: 20260222_141200_AESV_DeletePersist_Warn50MB
 // SCOPE: AESV: persist local attachment deletions on save (existing Core Data attachments) + warn on Files-picker attachments >50MB that they will remain local and not publish. No UI/layout changes beyond a single alert.
 // SEARCH-TOKEN: 20260222_141200_AESV_DeletePersist_Warn50MB
@@ -809,7 +813,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .font(Theme.Text.pageTitle)
             }
             ToolbarItem(placement: .cancellationAction) {
-                Button(action: { dismiss() }) {
+                Button(action: { cancelAndCleanup_AESV_bestEffort() }) {
                     Text("Cancel")
                         .font(Theme.Text.body)
                 }
@@ -1332,10 +1336,21 @@ private var instrumentPicker: some View {
         }
 
 // Commit staged attachments (skip existing to avoid duplicates; update thumbnail flags)
+
+        // Snapshot AESV tmp surrogate/alias targets before commit clears stagedAttachments.
+        // Cleanup runs only after a successful save (hardening; no user-visible behavior changes).
+        let __tmpCleanupSnapshot: [(UUID, AttachmentKind)] = stagedAttachments.map { ($0.id, $0.kind) }
+
         commitStagedAttachments(to: s, ctx: viewContext)
 
         do {
             try viewContext.save()
+
+            // AESV tmp hygiene: best-effort delete surrogate/alias files created in tmp during this edit session.
+            for (id, kind) in __tmpCleanupSnapshot {
+                cleanupTempArtifacts_AESV_bestEffort(for: id, kind: kind)
+            }
+
 
             deletedExistingAttachmentIDs.removeAll()
 
@@ -1718,6 +1733,7 @@ private var instrumentPicker: some View {
             // No auto-reassign: removing the thumbnail clears it.
             selectedThumbnailID = nil
         }
+        cleanupTempArtifacts_AESV_bestEffort(for: a.id, kind: a.kind)
     }
 
 
@@ -2026,6 +2042,46 @@ private var instrumentPicker: some View {
             .appendingPathExtension(ext)
     }
 
+    // Local filesystem hygiene hardening (AESV tmp artifacts)
+    // - Surrogate URLs: tmp/<attachmentID>.(jpg|mov|m4a|dat)
+    // - Audio viewer aliases: tmp/<attachmentID>.m4a (same naming contract)
+    // Best-effort only: failures must not affect user-visible behavior.
+    private func cleanupTempArtifacts_AESV_bestEffort(for id: UUID, kind: AttachmentKind?) {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+
+        // Limit deletions to tmp only (defensive).
+        func tryRemove(_ url: URL) {
+            guard url.standardizedFileURL.path.hasPrefix(tmp.standardizedFileURL.path) else { return }
+            if fm.fileExists(atPath: url.path) { try? fm.removeItem(at: url) }
+        }
+
+        if let k = kind {
+            let ext: String = (k == .image ? "jpg" : k == .audio ? "m4a" : k == .video ? "mov" : "dat")
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension(ext))
+            // For extra safety, remove the audio alias path (same as surrogate when kind == .audio; harmless otherwise).
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension("m4a"))
+        } else {
+            // Unknown kind: attempt common media extensions (still confined to tmp).
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension("jpg"))
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension("mov"))
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension("m4a"))
+            tryRemove(tmp.appendingPathComponent(id.uuidString).appendingPathExtension("dat"))
+        }
+    }
+
+    private func cleanupAllTempArtifacts_AESV_bestEffort() {
+        for att in stagedAttachments {
+            cleanupTempArtifacts_AESV_bestEffort(for: att.id, kind: att.kind)
+        }
+    }
+
+    private func cancelAndCleanup_AESV_bestEffort() {
+        cleanupAllTempArtifacts_AESV_bestEffort()
+        dismiss()
+    }
+
+
 
     // Step 6A — Viewer population hardening:
     // Ensure a real file exists at the surrogate URL before passing it into AttachmentViewerView.
@@ -2115,6 +2171,7 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         let stem = url.deletingPathExtension().lastPathComponent
                                         if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
                                             let removed = stagedAttachments.remove(at: idx)
+                                            cleanupTempArtifacts_AESV_bestEffort(for: removed.id, kind: removed.kind)
                                             existingAttachmentIDs.remove(removed.id)
                                             if selectedThumbnailID == removed.id {
                                                 // No auto-reassign: removing the thumbnail clears it.

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260222_195930_LH_FileHygiene_AVV_TempTrimCleanup
+// SCOPE: Local filesystem hygiene hardening (Fix 3): if MediaTrimView export adoption/replacement fails in AttachmentViewerView, best-effort delete the temp export in tmp. No UI or behavior changes.
+// SEARCH-TOKEN: 20260222_195930_LH_FileHygiene_AVV_TempTrimCleanup
+
 // CHANGE-ID: 20260220_213530_AAVAudioTransportParity_ControlsPosition
 // SCOPE: AAV AudioPage — add transport controls parity with VideoPage (scrubber, ±10s, mute, AirPlay) and remove hidden waveform scrub gesture; preserve natural-end reset and position-preserving pause; no waveform redesign or routing/backend changes.
 // SEARCH-TOKEN: 20260220_213530_AAVAudioTransportParity_ControlsPosition
@@ -1059,6 +1063,14 @@ private func currentURL() -> URL? {
                             if let cb = onSaveAsNewAttachment {
                                 cb(newURL, globalKind)
                             }
+                        } else {
+                            // File hygiene hardening: if adoption fails, remove temp export (best-effort).
+                            let fm = FileManager.default
+                            let tmpRoot = fm.temporaryDirectory.standardizedFileURL
+                            let candidate = tempURL.standardizedFileURL
+                            if candidate.path.hasPrefix(tmpRoot.path) {
+                                try? fm.removeItem(at: candidate)
+                            }
                         }
                         isShowingTrimmer = false
                         trimURL = nil
@@ -1117,6 +1129,14 @@ private func currentURL() -> URL? {
                                 }
                                 #endif
                                 mediaMutationTick += 1
+                            } else {
+                                // File hygiene hardening: if replacement fails, remove temp export (best-effort).
+                                let fm = FileManager.default
+                                let tmpRoot = fm.temporaryDirectory.standardizedFileURL
+                                let candidate = tempURL.standardizedFileURL
+                                if candidate.path.hasPrefix(tmpRoot.path) {
+                                    try? fm.removeItem(at: candidate)
+                                }
                             }
                         case .deferred:
                             let finalURL = tempURL

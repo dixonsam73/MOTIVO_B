@@ -1,6 +1,10 @@
 import Foundation
 import UniformTypeIdentifiers
 
+// CHANGE-ID: 20260222_195434_LH_FileHygiene_StagingStore
+// SCOPE: Fix1 copy-fallback source cleanup (safe); Fix5 root-path guard for remove(_:)
+
+
 /// Lightweight reference to a staged media file stored under Application Support/MOTIVO/Staging.
 /// Only small metadata is stored in a JSON file under Application Support; raw media bytes are kept on disk.
 struct StagedAttachmentRef: Codable, Hashable, Identifiable {
@@ -189,17 +193,36 @@ enum StagingStore {
 
     /// Remove ref and delete associated files (media + poster if any).
     static func remove(_ ref: StagedAttachmentRef) {
-        let fm = FileManager.default
-        let abs = absoluteURL(for: ref)
+    let fm = FileManager.default
+    let abs = absoluteURL(for: ref).standardizedFileURL
+
+    let base = baseURL.standardizedFileURL
+    let rootPath = base.path.hasSuffix("/") ? base.path : base.path + "/"
+
+    // Safety guard — never delete anything outside our staging container
+    if abs.path.hasPrefix(rootPath) {
         if fm.fileExists(atPath: abs.path) { try? fm.removeItem(at: abs) }
-        if let poster = ref.posterPath {
-            let p = absoluteURL(forRelative: poster)
-            if fm.fileExists(atPath: p.path) { try? fm.removeItem(at: p) }
-        }
-        var list = loadRefs()
-        list.removeAll { $0.id == ref.id }
-        saveRefs(list)
+    } else {
+        #if DEBUG
+        print("[StagingStore] remove — refusing to delete outside baseURL: \(abs.path)")
+        #endif
     }
+
+    if let poster = ref.posterPath {
+        let p = absoluteURL(forRelative: poster).standardizedFileURL
+        if p.path.hasPrefix(rootPath) {
+            if fm.fileExists(atPath: p.path) { try? fm.removeItem(at: p) }
+        } else {
+            #if DEBUG
+            print("[StagingStore] remove — refusing to delete poster outside baseURL: \(p.path)")
+            #endif
+        }
+    }
+
+    var list = loadRefs()
+    list.removeAll { $0.id == ref.id }
+    saveRefs(list)
+}
 
     static func absoluteURL(for ref: StagedAttachmentRef) -> URL {
         absoluteURL(forRelative: ref.relativePath)
@@ -242,16 +265,53 @@ enum StagingStore {
     }
 
     private static func moveOrCopy(sourceURL: URL, to destURL: URL) throws {
-        let fm = FileManager.default
-        if fm.fileExists(atPath: destURL.path) {
-            try fm.removeItem(at: destURL)
-        }
-        do {
-            try fm.moveItem(at: sourceURL, to: destURL)
-        } catch {
-            try fm.copyItem(at: sourceURL, to: destURL)
+    let fm = FileManager.default
+    if fm.fileExists(atPath: destURL.path) {
+        try fm.removeItem(at: destURL)
+    }
+    do {
+        try fm.moveItem(at: sourceURL, to: destURL)
+    } catch {
+        // Copy fallback. If copy succeeds, best-effort delete the source *only* when it's inside our sandbox roots.
+        try fm.copyItem(at: sourceURL, to: destURL)
+
+        // Defensive: avoid deleting any external user-provided file URLs (e.g. from Files / iCloud Drive).
+        if shouldDeleteSourceAfterCopyFallback(sourceURL),
+           fm.fileExists(atPath: sourceURL.path) {
+            do {
+                try fm.removeItem(at: sourceURL)
+            } catch {
+                #if DEBUG
+                print("[StagingStore] moveOrCopy — copy succeeded but failed to delete source: \(sourceURL.path) err=\(error)")
+                #endif
+            }
+        } else {
+            #if DEBUG
+            if !shouldDeleteSourceAfterCopyFallback(sourceURL) {
+                print("[StagingStore] moveOrCopy — copy succeeded; refusing to delete non-sandbox source: \(sourceURL.path)")
+            }
+            #endif
         }
     }
+}
+
+private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Bool {
+    let src = sourceURL.standardizedFileURL.path
+
+    // temporaryDirectory is always safe (our process owns it)
+    let tmpRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
+    if src.hasPrefix(tmpRoot.hasSuffix("/") ? tmpRoot : tmpRoot + "/") { return true }
+
+    // Also allow cleanup within our own container roots
+    let roots: [FileManager.SearchPathDirectory] = [.documentDirectory, .cachesDirectory, .applicationSupportDirectory]
+    for dir in roots {
+        if let root = FileManager.default.urls(for: dir, in: .userDomainMask).first?.standardizedFileURL.path {
+            let rp = root.hasSuffix("/") ? root : root + "/"
+            if src.hasPrefix(rp) { return true }
+        }
+    }
+    return false
+}
 
     private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
         StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioUserTitle: ref.audioUserTitle, audioAutoTitle: ref.audioAutoTitle, audioDisplayTitle: ref.audioDisplayTitle)
@@ -452,4 +512,3 @@ enum StagingStore {
         } catch {}
     }
 }
-

@@ -3,6 +3,9 @@
 //  MOTIVO
 //
 
+// CHANGE-ID: 20260222_200155_LH_FileHygiene_AttachmentStore_BackupExclusion
+// SCOPE: Local Attachment Deletion & Filesystem Hygiene Hardening — Fix4: exclude persisted attachment media in Documents from backup (best-effort)
+
 import Foundation
 import CoreData
 import UniformTypeIdentifiers
@@ -57,6 +60,7 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
         let url = dir.appendingPathComponent(filename, isDirectory: false)
         try data.write(to: url, options: [.atomic])
+        bestEffortExcludeFromBackup(url)
         return url.path
     }
 
@@ -66,11 +70,22 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
         let url = dir.appendingPathComponent(filename, isDirectory: false)
         try data.write(to: url, options: [.atomic])
+        bestEffortExcludeFromBackup(url)
         let rollback = { removeIfExists(path: url.path) }
         return (url.path, rollback)
     }
 
-    // Best-effort removal helper (safe no-op if missing)
+    
+    // Best-effort: exclude persisted attachments from iCloud/iTunes backup.
+    // Failure to set the flag must not abort saves.
+    private static func bestEffortExcludeFromBackup(_ url: URL) {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = url
+        try? mutableURL.setResourceValues(values)
+    }
+
+// Best-effort removal helper (safe no-op if missing)
     static func removeIfExists(path: String) {
         let fm = FileManager.default
         if fm.fileExists(atPath: path) {
@@ -220,6 +235,7 @@ struct AttachmentStore {
 
         // Move temp into Documents (atomic move removes tempURL path on success).
         try fm.moveItem(at: tempURL, to: finalURL)
+        bestEffortExcludeFromBackup(finalURL)
 
         // Delete old/original file (best-effort, restricted to Documents).
         deleteAttachmentFile(atPath: existingPath)
@@ -248,6 +264,7 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: docs)
         let finalURL = docs.appendingPathComponent(filename, isDirectory: false)
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        bestEffortExcludeFromBackup(finalURL)
         #if canImport(UIKit)
         if kind == .video { _ = generateVideoPoster(url: finalURL) }
         #endif
