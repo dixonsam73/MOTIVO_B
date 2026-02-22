@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260222_123955_MediaHygieneCap50MB_9a1f
+// SCOPE: Storage & Media Hygiene — Cap uploads at 50MB fail-closed before Data(contentsOf:) in BackendShim.uploadStorageObject
+// SEARCH-TOKEN: 20260222_123955_MediaHygieneCap50MB_9a1f
+
 // CHANGE-ID: 20260221_071500_NotesPrivacyClear_4c8a
 // SCOPE: Notes privacy toggle (connected mode) — PATCH must clear posts.notes when notes are private or empty, so follower surfaces never show stale notes.
 // SEARCH-TOKEN: 20260221_071500_NotesPrivacyClear_4c8a
@@ -585,6 +589,40 @@ public func fetchIncomingRequests() async -> Result<[String], Error> {
 public final class HTTPBackendPublishService: BackendPublishService {
     public init() {}
 
+
+// MARK: - Storage upload preflight (Media Hygiene)
+private static let maxUploadBytes: Int64 = 50 * 1024 * 1024
+
+private enum StorageUploadPreflightError: LocalizedError {
+    case cannotDetermineFileSize
+    case fileTooLarge(actualBytes: Int64, limitBytes: Int64)
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotDetermineFileSize:
+            return "Cannot determine file size for upload."
+        case .fileTooLarge(let actual, let limit):
+            return "File too large to upload (\(actual) bytes; limit \(limit) bytes)."
+        }
+    }
+}
+
+private func localFileSizeBytes(_ url: URL) -> Int64? {
+    // Prefer URL resource values first.
+    if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+       let size = values.fileSize {
+        return Int64(size)
+    }
+
+    // Fallback to FileManager attributes.
+    if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+       let num = attrs[.size] as? NSNumber {
+        return num.int64Value
+    }
+
+    return nil
+}
+
     @MainActor
     public func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error> {
         guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
@@ -844,6 +882,15 @@ items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, c
     }
 
     private func uploadStorageObject(from localURL: URL, bucket: String, objectPath: String, contentType: String) async -> Result<Void, Error> {
+        let limit = Self.maxUploadBytes
+        guard let size = localFileSizeBytes(localURL) else {
+            return .failure(StorageUploadPreflightError.cannotDetermineFileSize)
+        }
+
+        if size > limit {
+            return .failure(StorageUploadPreflightError.fileTooLarge(actualBytes: size, limitBytes: limit))
+        }
+
         let data: Data
         do {
             data = try await Task.detached(priority: .userInitiated) {

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260222_141200_AESV_DeletePersist_Warn50MB
+// SCOPE: AESV: persist local attachment deletions on save (existing Core Data attachments) + warn on Files-picker attachments >50MB that they will remain local and not publish. No UI/layout changes beyond a single alert.
+// SEARCH-TOKEN: 20260222_141200_AESV_DeletePersist_Warn50MB
+
 // CHANGE-ID: 20260209_123100_AESV_StarPersistParity_7c2d3f
 // SCOPE: AESV: allow clearing ⭐ to persist (no forced single-image thumbnail); AVV favourite toggle now mirrors AESV toggle + ⭐⇒👁; no UI/layout changes.
 // SEARCH-TOKEN: 20260209_113255_AESV_StarToggle_VisualGrid
@@ -112,6 +116,9 @@ struct AddEditSessionView: View {
     @State private var showCamera = false
     @State private var photoPickerItem: PhotosPickerItem?
     @State private var showCameraDeniedAlert = false
+    @State private var showPublishLimitAlert = false
+    @State private var publishLimitAlertMessage: String = ""
+
 
     @State private var viewerRequest: AttachmentViewerRequest? = nil
     @State private var attachmentTitlesRefreshTick: Int = 0
@@ -122,6 +129,12 @@ struct AddEditSessionView: View {
 
     // Track which staged attachments came from Core Data (existing) to prevent duplication on save
     @State private var existingAttachmentIDs: Set<UUID> = []
+
+    // Track existing (Core Data) attachment IDs that were deleted in AESV so we can delete them from Core Data on save.
+    @State private var deletedExistingAttachmentIDs: Set<UUID> = []
+
+    private static let publishUploadLimitBytes: Int64 = 50 * 1024 * 1024
+
 
     // Map existing (Core Data) attachment IDs to their resolved on-disk URLs so the viewer can play audio/video without relying on staged bytes.
     @State private var existingAttachmentURLMap: [UUID: URL] = [:]
@@ -849,6 +862,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                    }
                },
                message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        .alert("Publish limit",
+               isPresented: $showPublishLimitAlert,
+               actions: { Button("OK", role: .cancel) {} },
+               message: { Text(publishLimitAlertMessage) })
         .fullScreenCover(item: $viewerRequest) { req in
             let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
             let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
@@ -1296,11 +1313,31 @@ private var instrumentPicker: some View {
             print("Failed to apply replacement URLs before save: \(error)")
         }
 
-        // Commit staged attachments (skip existing to avoid duplicates; update thumbnail flags)
+        
+        // Apply pending deletions for existing attachments (delete from Core Data + remove local file).
+        if !deletedExistingAttachmentIDs.isEmpty {
+            do {
+                let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                req.predicate = NSPredicate(format: "session == %@ AND id IN %@", s, Array(deletedExistingAttachmentIDs) as NSArray)
+                let matches = try viewContext.fetch(req)
+                for a in matches {
+                    if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                        AttachmentStore.removeIfExists(path: path)
+                    }
+                    viewContext.delete(a)
+                }
+            } catch {
+                print("Failed to delete existing attachments before save: \(error)")
+            }
+        }
+
+// Commit staged attachments (skip existing to avoid duplicates; update thumbnail flags)
         commitStagedAttachments(to: s, ctx: viewContext)
 
         do {
             try viewContext.save()
+
+            deletedExistingAttachmentIDs.removeAll()
 
             // ===== v7.12A • Publish hook after successful save =====
             guard let sid = s.id else {
@@ -1670,6 +1707,11 @@ private var instrumentPicker: some View {
     }
 
     private func removeStagedAttachment(_ a: StagedAttachment) {
+        // If this staged item corresponds to an existing Core Data Attachment, mark it for deletion on save.
+        if existingAttachmentIDs.contains(a.id) {
+            deletedExistingAttachmentIDs.insert(a.id)
+        }
+
         stagedAttachments.removeAll { $0.id == a.id }
         existingAttachmentIDs.remove(a.id)
         if selectedThumbnailID == a.id {
@@ -1678,12 +1720,36 @@ private var instrumentPicker: some View {
         }
     }
 
+
+    private func localFileSizeBytes(_ url: URL) -> Int64? {
+        // Attempt resource values first (works for many URLs, including security-scoped ones if access is granted).
+        if let values = try? url.resourceValues(forKeys: [.fileSizeKey]),
+           let fileSize = values.fileSize {
+            return Int64(fileSize)
+        }
+
+        // Fallback to file attributes.
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+           let size = attrs[.size] as? NSNumber {
+            return size.int64Value
+        }
+
+        return nil
+    }
+
     private func handleFileImport(_ result: Result<[URL], Error>) {
         if case .success(let urls) = result {
             for url in urls {
                 let accessed = url.startAccessingSecurityScopedResource()
                 defer { if accessed { url.stopAccessingSecurityScopedResource() } }
                 do {
+                    // Preflight publish cap warning (do not block local attach).
+                    let limit = Self.publishUploadLimitBytes
+                    if let size = localFileSizeBytes(url), size > limit {
+                        publishLimitAlertMessage = "This attachment is larger than 50MB and will stay local (it won’t publish)."
+                        showPublishLimitAlert = true
+                    }
+
                     let data = try Data(contentsOf: url)
                     let kind = kindForURL(url)
                     stageData(data, kind: kind)
