@@ -274,9 +274,10 @@ struct AudioRecorderView: View {
 
         let settings: [String: Any] = [
             AVFormatIDKey: Int(kAudioFormatMPEG4AAC),
-            AVSampleRateKey: 44100,
+            AVSampleRateKey: 44_100,
             AVNumberOfChannelsKey: 1,
-            AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+            AVEncoderBitRateKey: 192_000,
+            AVEncoderBitRateStrategyKey: AVAudioBitRateStrategy_Constant
         ]
 
         stopAll()
