@@ -1793,11 +1793,23 @@ let stagedURL = surrogateURL(for: att)
         // Match by surrogate URL basename (staged id)
         let stem = originalURL.deletingPathExtension().lastPathComponent
         guard let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) else { return }
-        // Replace data by reading from newURL; keep id and kind stable
-        if let data = try? Data(contentsOf: newURL) {
-            var att = stagedAttachments[idx]
-            att = StagedAttachment(id: att.id, data: data, kind: att.kind)
-            stagedAttachments[idx] = att
+
+        // Replace bytes by reading from newURL; keep id stable (and keep kind stable from the existing staged item).
+        guard let data = try? Data(contentsOf: newURL) else { return }
+        var att = stagedAttachments[idx]
+        att = StagedAttachment(id: att.id, data: data, kind: att.kind)
+        stagedAttachments[idx] = att
+
+        // Phase 1A: Overwrite surrogate after staged bytes mutate (video + audio).
+        if let surl = surrogateURL(for: att) {
+            try? att.data.write(to: surl, options: .atomic)
+        }
+
+        // Best-effort delete temp export only if it lives under temporaryDirectory.
+        let tmpRoot = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let candidate = newURL.resolvingSymlinksInPath()
+        if candidate.path.hasPrefix(tmpRoot.path) {
+            try? FileManager.default.removeItem(at: candidate)
         }
     }
 
@@ -1806,14 +1818,7 @@ let stagedURL = surrogateURL(for: att)
         let newID = UUID()
         let data = (try? Data(contentsOf: newURL)) ?? Data()
         let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
-        // Phase 2: Seed a reasonable display title for new audio trims so UI doesn't fall back to "Audio clip".
-        if kind == .audio {
-            let stem = newURL.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = stem.isEmpty ? "Audio clip" : stem
-            var dict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-            dict[newID.uuidString] = title
-            UserDefaults.standard.set(dict, forKey: "stagedAudioNames_temp")
-        }
+
         // Compute gallery ordering position: after the tapped item within its section
         let images = stagedAttachments.filter { $0.kind == .image }
         let videos = stagedAttachments.filter { $0.kind == .video }
@@ -1821,7 +1826,7 @@ let stagedURL = surrogateURL(for: att)
         let combined: [StagedAttachment] = images + videos + audios
         let stem = originalURL.deletingPathExtension().lastPathComponent
         let currentIndex = combined.firstIndex(where: { $0.id.uuidString == stem }) ?? (combined.count - 1)
-        // Determine target array and base index
+
         switch kind {
         case .image:
             // Append to end of images
@@ -1830,6 +1835,7 @@ let stagedURL = surrogateURL(for: att)
             } else {
                 stagedAttachments.append(newAtt)
             }
+
         case .video:
             // Insert after current video within videos section
             let videosOnly = stagedAttachments.enumerated().filter { $0.element.kind == .video }
@@ -1853,9 +1859,14 @@ let stagedURL = surrogateURL(for: att)
                 } else {
                     // If no videos yet, insert after images
                     let lastImageIndex = stagedAttachments.lastIndex(where: { $0.kind == .image })
-                    if let lastImageIndex { stagedAttachments.insert(newAtt, at: lastImageIndex + 1) } else { stagedAttachments.append(newAtt) }
+                    if let lastImageIndex {
+                        stagedAttachments.insert(newAtt, at: lastImageIndex + 1)
+                    } else {
+                        stagedAttachments.append(newAtt)
+                    }
                 }
             }
+
         case .audio:
             // Insert after current audio within audios section
             let audiosOnly = stagedAttachments.enumerated().filter { $0.element.kind == .audio }
@@ -1874,8 +1885,21 @@ let stagedURL = surrogateURL(for: att)
             } else {
                 stagedAttachments.append(newAtt)
             }
+
         case .file:
             stagedAttachments.append(newAtt)
+        }
+
+        // Phase 1A: Seed surrogate immediately for new staged item (video + audio).
+        if let surl = surrogateURL(for: newAtt) {
+            try? newAtt.data.write(to: surl, options: .atomic)
+        }
+
+        // Best-effort delete temp export only if it lives under temporaryDirectory.
+        let tmpRoot = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+        let candidate = newURL.resolvingSymlinksInPath()
+        if candidate.path.hasPrefix(tmpRoot.path) {
+            try? FileManager.default.removeItem(at: candidate)
         }
     }
 
