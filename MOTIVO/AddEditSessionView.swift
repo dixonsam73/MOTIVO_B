@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260224_095210_AESV_AudioReplacePersistFix_v2
+// SCOPE: AESV: launch AVV audio edits with resolved Documents URL (no tmp alias) so Trim→Replace persists correctly; keep all UI/logic unchanged.
+// SEARCH-TOKEN: 20260224_095210_AESV_AudioReplacePersistFix_v2_Token
+
 // CHANGE-ID: 20260222_195620_AESV_TmpHygieneHardening
 // SCOPE: Local filesystem hygiene hardening — best-effort cleanup of AESV tmp surrogate/alias files on remove, cancel, and successful save. No UI/behavior changes.
 // SEARCH-TOKEN: 20260222_195620_AESV_TmpHygieneHardening
@@ -665,7 +669,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                             ensureSurrogateFilesExistForViewer_edit()
 
                                             let audioItems: [(UUID, URL)] = audioOnly.compactMap { item in
-                                                guard let url = viewerAliasURLForAudio_edit(for: item) else { return nil }
+                                                guard let url = (viewerResolvedURL_edit(for: item) ?? guaranteedSurrogateURL_edit(for: item)) else { return nil }
                                                 return (item.id, url)
                                             }
                                             let audioURLs: [URL] = audioItems.map { $0.1 }
@@ -2372,8 +2376,7 @@ isPrivate: { url in
 
                                     onReplaceAttachment: { originalURL, newURL, kind in
                                         // Replace should preserve attachment identity.
-                                        // AttachmentViewerView has already written the replacement file to disk and passes
-                                        // the final on-disk URL here as newURL.
+
                                         if let (attID, _) = existingAttachmentURLMap.first(where: { $0.value.standardizedFileURL == originalURL.standardizedFileURL }) {
                                             existingAttachmentURLMap[attID] = newURL
         
