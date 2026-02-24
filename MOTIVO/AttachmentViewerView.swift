@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260224_072759_AESVReplaceFix_Option1_AVVDeferredUpgrade
+// SCOPE: AVV Replace (deferred) auto-upgrades to persisted replace when original attachment is in Documents, preventing tmp URLs from being persisted by AESV. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260224_072759_AESVReplaceFix_Option1_AVVDeferredUpgrade
+
 // CHANGE-ID: 20260222_195930_LH_FileHygiene_AVV_TempTrimCleanup
 // SCOPE: Local filesystem hygiene hardening (Fix 3): if MediaTrimView export adoption/replacement fails in AttachmentViewerView, best-effort delete the temp export in tmp. No UI or behavior changes.
 // SEARCH-TOKEN: 20260222_195930_LH_FileHygiene_AVV_TempTrimCleanup
@@ -1138,36 +1142,89 @@ private func currentURL() -> URL? {
                                     try? fm.removeItem(at: candidate)
                                 }
                             }
-                        case .deferred:
-                            let finalURL = tempURL
-                            switch kind {
-                            case .video:
-                                var newVideos = videoURLs
-                                let videoIndex = currentMediaIndex - imageURLs.count
-                                if videoIndex >= 0 && videoIndex < newVideos.count {
-                                    newVideos[videoIndex] = finalURL
-                                }
-                                self.videoURLs = newVideos
-                            case .audio:
-                                var newAudios = audioURLs
-                                let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
-                                if audioIndex >= 0 && audioIndex < newAudios.count {
-                                    newAudios[audioIndex] = finalURL
-                                }
-                                self.audioURLs = newAudios
-                            case .image: break
-                            case .file: break
-                            }
-                            cachedURL = finalURL
-                            onReplaceAttachment?(url, finalURL, globalKind)
-                            stopAllPlayersToggle.toggle()
-                            #if canImport(UIKit)
-                            if kind == .video {
-                                _ = AttachmentStore.generateVideoPoster(url: finalURL)
-                            }
-                            #endif
-                            mediaMutationTick += 1
-                        }
+                        
+case .deferred:
+    // Hardening: if the original attachment is already persisted in Documents,
+    // perform a real on-disk replace (move temp export into Documents + delete old)
+    // so callers never end up persisting a tmp URL as the final reference.
+    let fm = FileManager.default
+    let originalCandidate = originalURL.standardizedFileURL
+    let docsRoot = (fm.urls(for: .documentDirectory, in: .userDomainMask).first ?? fm.temporaryDirectory).standardizedFileURL
+
+    if originalCandidate.isFileURL && originalCandidate.path.hasPrefix(docsRoot.path) {
+        if let finalPath = try? AttachmentStore.replaceAttachmentFile(
+            withTempURL: tempURL,
+            forExistingPath: originalCandidate.path,
+            kind: globalKind
+        ) {
+            let finalURL = URL(fileURLWithPath: finalPath)
+            switch kind {
+            case .video:
+                var newVideos = videoURLs
+                let videoIndex = currentMediaIndex - imageURLs.count
+                if videoIndex >= 0 && videoIndex < newVideos.count {
+                    newVideos[videoIndex] = finalURL
+                }
+                self.videoURLs = newVideos
+            case .audio:
+                var newAudios = audioURLs
+                let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+                if audioIndex >= 0 && audioIndex < newAudios.count {
+                    newAudios[audioIndex] = finalURL
+                }
+                self.audioURLs = newAudios
+            case .image: break
+            case .file: break
+            }
+            cachedURL = finalURL
+            onReplaceAttachment?(url, finalURL, globalKind)
+            stopAllPlayersToggle.toggle()
+            #if canImport(UIKit)
+            if kind == .video {
+                _ = AttachmentStore.generateVideoPoster(url: finalURL)
+            }
+            #endif
+            mediaMutationTick += 1
+        } else {
+            // If persisted replace fails, do not mutate state. Best-effort cleanup of temp export.
+            let tmpRoot = fm.temporaryDirectory.standardizedFileURL
+            let candidate = tempURL.standardizedFileURL
+            if candidate.path.hasPrefix(tmpRoot.path) {
+                try? fm.removeItem(at: candidate)
+            }
+        }
+    } else {
+        // True deferred behavior (staged/temp realm): update in-memory state and let presenter decide persistence.
+        let finalURL = tempURL
+        switch kind {
+        case .video:
+            var newVideos = videoURLs
+            let videoIndex = currentMediaIndex - imageURLs.count
+            if videoIndex >= 0 && videoIndex < newVideos.count {
+                newVideos[videoIndex] = finalURL
+            }
+            self.videoURLs = newVideos
+        case .audio:
+            var newAudios = audioURLs
+            let audioIndex = currentMediaIndex - imageURLs.count - videoURLs.count
+            if audioIndex >= 0 && audioIndex < newAudios.count {
+                newAudios[audioIndex] = finalURL
+            }
+            self.audioURLs = newAudios
+        case .image: break
+        case .file: break
+        }
+        cachedURL = finalURL
+        onReplaceAttachment?(url, finalURL, globalKind)
+        stopAllPlayersToggle.toggle()
+        #if canImport(UIKit)
+        if kind == .video {
+            _ = AttachmentStore.generateVideoPoster(url: finalURL)
+        }
+        #endif
+        mediaMutationTick += 1
+    }
+}
 
                         isShowingTrimmer = false
                         trimURL = nil
