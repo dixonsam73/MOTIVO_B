@@ -347,7 +347,10 @@ public final class SimulatedPublishService: BackendPublishService {
         }
     }
 
-    private struct PostAttachmentsRow: Decodable {
+    // CHANGE-ID: 20260224_223900_DeletePost_FailClosed_AttachmentsDecode_9c31
+// SCOPE: Fail-closed decode for posts.attachments when deleting a post. Null/empty allowed; malformed non-empty string throws to abort delete.
+
+private struct PostAttachmentsRow: Decodable {
         let attachments: AttachmentsField
     }
 
@@ -357,6 +360,12 @@ public final class SimulatedPublishService: BackendPublishService {
         init(from decoder: Decoder) throws {
             let container = try decoder.singleValueContainer()
 
+            // Allow null/empty => no attachments.
+            if container.decodeNil() {
+                self.refs = []
+                return
+            }
+
             // Common case: attachments is a JSON array (jsonb column).
             if let direct = try? container.decode([AttachmentRef].self) {
                 self.refs = direct
@@ -365,12 +374,30 @@ public final class SimulatedPublishService: BackendPublishService {
 
             // Fallback: attachments may arrive as an escaped JSON string.
             if let str = try? container.decode(String.self) {
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    self.refs = []
+                    return
+                }
+
                 let data = Data(str.utf8)
-                self.refs = (try? JSONDecoder().decode([AttachmentRef].self, from: data)) ?? []
-                return
+                do {
+                    self.refs = try JSONDecoder().decode([AttachmentRef].self, from: data)
+                    return
+                } catch {
+                    // Fail-closed: non-empty string that cannot be decoded is a hard error.
+                    throw DecodingError.dataCorruptedError(
+                        in: container,
+                        debugDescription: "posts.attachments malformed JSON string"
+                    )
+                }
             }
 
-            self.refs = []
+            // Fail-closed: unexpected type (neither array, string, nor null).
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "posts.attachments unexpected type"
+            )
         }
     }
 
