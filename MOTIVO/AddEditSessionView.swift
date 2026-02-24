@@ -1,5 +1,8 @@
-// CHANGE-ID: 20260224_095210_AESV_AudioReplacePersistFix_v2
-// SCOPE: AESV: launch AVV audio edits with resolved Documents URL (no tmp alias) so Trim→Replace persists correctly; keep all UI/logic unchanged.
+// CHANGE-ID: 20260224_135000_AESV_OptionalSessionHelperFix
+// SCOPE: AESV: fix protectedPersistedAttachmentPaths_edit to accept optional Session? and guard nil; no UI/behaviour changes beyond intended trim-persist hygiene scope.
+// SEARCH-TOKEN: TRIM_NOORPHANS_20260224_135000_AESV_HELPER_FIX
+// CHANGE-ID: 20260224_125814_TrimPersist_NoOrphans
+// SCOPE: Trim Persistence Canonicalization — eliminate duplicate/orphan container siblings (PRDV + AESV staged-byte paths only)
 // SEARCH-TOKEN: 20260224_095210_AESV_AudioReplacePersistFix_v2_Token
 
 // CHANGE-ID: 20260222_195620_AESV_TmpHygieneHardening
@@ -1825,7 +1828,13 @@ private var instrumentPicker: some View {
         // 1) Add ONLY newly staged attachments (skip those that were preloaded from Core Data)
         for att in stagedAttachments where existingAttachmentIDs.contains(att.id) == false {
             do {
-                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                let ext: String = {
+                    if let surl = surrogateURL(for: att) {
+                        let e = surl.pathExtension.lowercased()
+                        if !e.isEmpty { return e }
+                    }
+                    return (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                }()
                 let suggestedName: String = {
                     switch att.kind {
                     case .audio:
@@ -2040,11 +2049,81 @@ private var instrumentPicker: some View {
     }
 
     private func surrogateURL(for att: StagedAttachment) -> URL? {
+        if let existing = existingSurrogateURL_edit(id: att.id, kind: att.kind) {
+            return existing
+        }
         let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent(att.id.uuidString)
-            .appendingPathExtension(ext)
+        return FileManager.default.temporaryDirectory.appendingPathComponent("\(att.id.uuidString).\(ext)")
     }
+
+    // MARK: - Trim Persistence Canonicalization (Byte-backed, no-hybrid)
+    // Search token: TRIM_NOORPHANS_20260224_125814_TrimPersist_NoOrphans
+
+    private func kindScopedTmpExtensions_edit(for kind: AttachmentKind) -> [String] {
+        switch kind {
+        case .video:
+            return ["mov", "mp4"]
+        case .audio:
+            return ["m4a"]
+        case .image:
+            return ["jpg"]
+        case .file:
+            return ["dat"]
+        }
+    }
+
+    private func existingSurrogateURL_edit(id: UUID, kind: AttachmentKind) -> URL? {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        for ext in kindScopedTmpExtensions_edit(for: kind) {
+            let url = tmp.appendingPathComponent("\(id.uuidString).\(ext)")
+            if fm.fileExists(atPath: url.path) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private func cleanupSurrogateSiblings_tmpOnly_edit(id: UUID, keepExt: String, kind: AttachmentKind) {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        let keep = keepExt.lowercased()
+        for ext in kindScopedTmpExtensions_edit(for: kind) {
+            let e = ext.lowercased()
+            guard e != keep else { continue }
+            let url = tmp.appendingPathComponent("\(id.uuidString).\(e)")
+            if fm.fileExists(atPath: url.path) {
+                try? fm.removeItem(at: url)
+            }
+        }
+    }
+
+    private func protectedPersistedAttachmentPaths_edit(for session: Session?) -> Set<String> {
+        guard let session else { return [] }
+        var out: Set<String> = []
+        if let set = session.attachments as? Set<Attachment> {
+            for a in set {
+                if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
+                    out.insert(path)
+                }
+            }
+        }
+        // Also protect any currently-adopted URLs in existingAttachmentURLMap (cheap)
+        for (_, url) in existingAttachmentURLMap {
+            out.insert(url.resolvingSymlinksInPath().path)
+        }
+        return out
+    }
+
+    private func bestEffortDeleteNewURLIfSafe_edit(_ newURL: URL, surrogateTarget: URL, protectedPaths: Set<String>) {
+        let candidate = newURL.resolvingSymlinksInPath()
+        let target = surrogateTarget.resolvingSymlinksInPath()
+        guard candidate.path != target.path else { return }
+        guard !protectedPaths.contains(candidate.path) else { return }
+        try? FileManager.default.removeItem(at: candidate)
+    }
+
+
 
     // Local filesystem hygiene hardening (AESV tmp artifacts)
     // - Surrogate URLs: tmp/<attachmentID>.(jpg|mov|m4a|dat)
@@ -2401,57 +2480,69 @@ isPrivate: { url in
                                             // Fallback: this may be a newly-staged (not-yet-persisted) item. Update staged bytes by id-stem.
                                             let stem = originalURL.deletingPathExtension().lastPathComponent
                                             if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
-                                                if let data = try? Data(contentsOf: newURL) {
-                                                    let old = stagedAttachments[idx]
-                                                    stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+                                                let protectedPaths = protectedPersistedAttachmentPaths_edit(for: session)
+
+                                                guard let data = try? Data(contentsOf: newURL) else { return }
+                                                let old = stagedAttachments[idx]
+
+                                                let extCandidate = newURL.pathExtension.lowercased()
+                                                let ext: String
+                                                if !extCandidate.isEmpty {
+                                                    ext = extCandidate
+                                                } else {
+                                                    ext = (old.kind == .image ? "jpg" : old.kind == .audio ? "m4a" : old.kind == .video ? "mov" : "dat")
                                                 }
+
+                                                let surrogateTarget = FileManager.default.temporaryDirectory.appendingPathComponent("\(old.id.uuidString).\(ext)")
+
+                                                // Ordering: read bytes (above) → write surrogate successfully → update staged state → cleanup → delete newURL (if safe)
+                                                do {
+                                                    try data.write(to: surrogateTarget, options: .atomic)
+                                                } catch {
+                                                    return
+                                                }
+
+                                                stagedAttachments[idx] = StagedAttachment(id: old.id, data: data, kind: old.kind)
+
+                                                cleanupSurrogateSiblings_tmpOnly_edit(id: old.id, keepExt: ext, kind: old.kind)
+                                                bestEffortDeleteNewURLIfSafe_edit(newURL, surrogateTarget: surrogateTarget, protectedPaths: protectedPaths)
                                             }
                                         }
         
                                     },
                                     onSaveAsNewAttachment: { newURL, kind in
+                                        let protectedPaths = protectedPersistedAttachmentPaths_edit(for: session)
+
                                         // Append a new staged item of provided kind after current index section-wise
                                         let newID = UUID()
-                                        let data = (try? Data(contentsOf: newURL)) ?? Data()
-                                        let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
-                                        // Ensure a real file exists at a stable URL for poster generation + playback.
-                                        // (VideoPosterView relies on a file URL; temp exports can disappear.)
-                                        if kind == .video, let sur = guaranteedSurrogateURL_edit(for: newAtt) {
-                                            
-                                            // Write the trimmed output to the surrogate URL so poster generation has a real file.
-                                            do {
-                                                // Ensure tmp folder exists
-                                                try FileManager.default.createDirectory(
-                                                    at: sur.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true,
-                                                    attributes: nil
-                                                )
-                                                // Prefer copy for large files; fall back to write if needed.
-                                                if FileManager.default.fileExists(atPath: sur.path) {
-                                                    try FileManager.default.removeItem(at: sur)
-                                                }
-                                                try FileManager.default.copyItem(at: newURL, to: sur)
-                                                existingAttachmentURLMap[newID] = sur
-                                            } catch {
-                                                // Fallback: keep using the export temp URL
-                                                existingAttachmentURLMap[newID] = newURL
-                                            }
+                                        guard let data = try? Data(contentsOf: newURL) else { return }
+
+                                        let extCandidate = newURL.pathExtension.lowercased()
+                                        let ext: String
+                                        if !extCandidate.isEmpty {
+                                            ext = extCandidate
                                         } else {
-                                            existingAttachmentURLMap[newID] = newURL
+                                            ext = (kind == .image ? "jpg" : kind == .audio ? "m4a" : kind == .video ? "mov" : "dat")
                                         }
-        
-                                        // Seed audio title for save-as-new so we don't fall back to "audio clip"
-                                        if kind == .audio {
-                                            let key = "stagedAudioNames_temp"
-                                            var dict = (UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]
-                                            let stem = newURL.deletingPathExtension().lastPathComponent
-                                            if !stem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                                dict[newID.uuidString] = stem
-                                                UserDefaults.standard.set(dict, forKey: key)
-                                            }
+
+                                        let surrogateTarget = FileManager.default.temporaryDirectory.appendingPathComponent("\(newID.uuidString).\(ext)")
+
+                                        // Ordering: read bytes (above) → write surrogate successfully → insert staged state → cleanup → delete newURL (if safe)
+                                        do {
+                                            try data.write(to: surrogateTarget, options: .atomic)
+                                        } catch {
+                                            return
                                         }
-                                        // Insert by section: images, then videos, then audios
-                                        switch kind {
+
+                                        let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+
+                                        #if canImport(UIKit)
+                                        if kind == .video {
+                                            _ = AttachmentStore.generateVideoPoster(url: surrogateTarget)
+                                        }
+                                        #endif
+
+switch kind {
                                         case .image:
                                             if let splitIndex = stagedAttachments.firstIndex(where: { $0.kind != .image }) {
                                                 stagedAttachments.insert(newAtt, at: splitIndex)
@@ -2467,6 +2558,9 @@ isPrivate: { url in
                                         case .file:
                                             stagedAttachments.append(newAtt)
                                         }
+                                        cleanupSurrogateSiblings_tmpOnly_edit(id: newID, keepExt: ext, kind: kind)
+                                        bestEffortDeleteNewURLIfSafe_edit(newURL, surrogateTarget: surrogateTarget, protectedPaths: protectedPaths)
+
                                     },
                                     canShare: false,
                                     replaceStrategy: .deferred

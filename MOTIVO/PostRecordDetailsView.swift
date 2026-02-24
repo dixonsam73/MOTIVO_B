@@ -200,7 +200,13 @@ struct PostRecordDetailsView: View {
     private func purgeStagedTempFiles() {
         let fm = FileManager.default
         for att in stagedAttachments {
-            let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+            let ext: String = {
+                    if let surl = surrogateURL(for: att) {
+                        let e = surl.pathExtension.lowercased()
+                        if !e.isEmpty { return e }
+                    }
+                    return defaultSurrogateExtension(for: att.kind)
+                }()
             let url = FileManager.default.temporaryDirectory
                 .appendingPathComponent(att.id.uuidString)
                 .appendingPathExtension(ext)
@@ -1523,11 +1529,78 @@ isPrivate: { url in
     }
 
     private func surrogateURL(for att: StagedAttachment) -> URL? {
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        // Surrogate URLs live in tmp and must preserve the most recently written extension
+        // for this staged UUID (video: mov/mp4; audio: m4a; image: jpg).
+        if let existing = existingSurrogateURL_tmpOnly(id: att.id, kind: att.kind) {
+            return existing
+        }
+        let ext = defaultSurrogateExtension(for: att.kind)
         return FileManager.default.temporaryDirectory
             .appendingPathComponent(att.id.uuidString)
             .appendingPathExtension(ext)
     }
+
+    private func defaultSurrogateExtension(for kind: AttachmentKind) -> String {
+        switch kind {
+        case .image: return "jpg"
+        case .audio: return "m4a"
+        case .video: return "mov"
+        case .file:  return "dat"
+        }
+    }
+
+    private func kindScopedTmpExtensions_tmpOnly(for kind: AttachmentKind) -> [String] {
+        switch kind {
+        case .image: return ["jpg"]
+        case .audio: return ["m4a"]
+        case .video: return ["mov", "mp4"]
+        case .file:  return ["dat"]
+        }
+    }
+
+    private func existingSurrogateURL_tmpOnly(id: UUID, kind: AttachmentKind) -> URL? {
+        let tmp = FileManager.default.temporaryDirectory
+        for ext in kindScopedTmpExtensions_tmpOnly(for: kind) {
+            let u = tmp.appendingPathComponent(id.uuidString).appendingPathExtension(ext)
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+        }
+        return nil
+    }
+
+    private func cleanupSurrogateSiblings_tmpOnly(id: UUID, keepExt: String, kind: AttachmentKind) {
+        let tmp = FileManager.default.temporaryDirectory
+        for ext in kindScopedTmpExtensions_tmpOnly(for: kind) where ext.lowercased() != keepExt.lowercased() {
+            let u = tmp.appendingPathComponent(id.uuidString).appendingPathExtension(ext)
+            try? FileManager.default.removeItem(at: u)
+        }
+    }
+
+    private func isPathReferencedInCoreData(_ path: String) -> Bool {
+        // Safety constraint: never delete a URL that is already referenced by any Attachment.fileURL.
+        // Cheap check: exact match on stored fileURL string.
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Attachment")
+        req.fetchLimit = 1
+        req.predicate = NSPredicate(format: "fileURL == %@", path)
+        do {
+            let hits = try viewContext.fetch(req)
+            return !hits.isEmpty
+        } catch {
+            return false
+        }
+    }
+
+    private func bestEffortDeleteNewURLIfSafe(newURL: URL, surrogateTarget: URL) {
+        // Safety constraint:
+        // - only delete after surrogate write succeeded (caller responsibility)
+        // - never delete if it equals surrogate target
+        // - never delete if Core Data already references this path as Attachment.fileURL
+        let candidate = newURL.resolvingSymlinksInPath()
+        let surrogate = surrogateTarget.resolvingSymlinksInPath()
+        if candidate.path == surrogate.path { return }
+        if isPathReferencedInCoreData(candidate.path) { return }
+        try? FileManager.default.removeItem(at: candidate)
+    }
+
 
     // CHANGE-ID: 20260105_prdv_star_toggle_sync
     // SCOPE: PRDV attachments card star toggle must be bidirectional and consistent with AttachmentViewerView.
@@ -1800,16 +1873,25 @@ let stagedURL = surrogateURL(for: att)
         att = StagedAttachment(id: att.id, data: data, kind: att.kind)
         stagedAttachments[idx] = att
 
-        // Phase 1A: Overwrite surrogate after staged bytes mutate (video + audio).
-        if let surl = surrogateURL(for: att) {
-            try? att.data.write(to: surl, options: .atomic)
-        }
+        // Surrogate extension must follow the source/export type.
+        let ext = {
+            let e = newURL.pathExtension.lowercased()
+            return e.isEmpty ? defaultSurrogateExtension(for: att.kind) : e
+        }()
+        let surrogateTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(att.id.uuidString)
+            .appendingPathExtension(ext)
 
-        // Best-effort delete temp export only if it lives under temporaryDirectory.
-        let tmpRoot = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        let candidate = newURL.resolvingSymlinksInPath()
-        if candidate.path.hasPrefix(tmpRoot.path) {
-            try? FileManager.default.removeItem(at: candidate)
+        // Write the staged bytes to the surrogate temp URL so the viewer can load by URL.
+        do {
+            try att.data.write(to: surrogateTarget, options: .atomic)
+            // tmp-only sibling cleanup (kind-scoped)
+            cleanupSurrogateSiblings_tmpOnly(id: att.id, keepExt: ext, kind: att.kind)
+            // Best-effort delete newURL after surrogate write succeeds (even if in Documents),
+            // but only if safe (not surrogate target, not referenced by Core Data).
+            bestEffortDeleteNewURLIfSafe(newURL: newURL, surrogateTarget: surrogateTarget)
+        } catch {
+            // Preserve prior behavior: fail silently on write errors.
         }
     }
 
@@ -1890,16 +1972,25 @@ let stagedURL = surrogateURL(for: att)
             stagedAttachments.append(newAtt)
         }
 
-        // Phase 1A: Seed surrogate immediately for new staged item (video + audio).
-        if let surl = surrogateURL(for: newAtt) {
-            try? newAtt.data.write(to: surl, options: .atomic)
-        }
+        // Surrogate extension must follow the source/export type.
+        let ext = {
+            let e = newURL.pathExtension.lowercased()
+            return e.isEmpty ? defaultSurrogateExtension(for: newAtt.kind) : e
+        }()
+        let surrogateTarget = FileManager.default.temporaryDirectory
+            .appendingPathComponent(newAtt.id.uuidString)
+            .appendingPathExtension(ext)
 
-        // Best-effort delete temp export only if it lives under temporaryDirectory.
-        let tmpRoot = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-        let candidate = newURL.resolvingSymlinksInPath()
-        if candidate.path.hasPrefix(tmpRoot.path) {
-            try? FileManager.default.removeItem(at: candidate)
+        // Seed surrogate immediately for new staged item (video + audio).
+        do {
+            try newAtt.data.write(to: surrogateTarget, options: .atomic)
+            // tmp-only sibling cleanup (kind-scoped)
+            cleanupSurrogateSiblings_tmpOnly(id: newAtt.id, keepExt: ext, kind: newAtt.kind)
+            // Best-effort delete newURL after surrogate write succeeds (even if in Documents),
+            // but only if safe (not surrogate target, not referenced by Core Data).
+            bestEffortDeleteNewURLIfSafe(newURL: newURL, surrogateTarget: surrogateTarget)
+        } catch {
+            // Fail silently.
         }
     }
 
