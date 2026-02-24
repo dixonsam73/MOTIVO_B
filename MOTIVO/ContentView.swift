@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260224_223000_DeleteFailClosed_ContentView_1a2b
-// SCOPE: ContentView swipe-to-delete is fail-closed in connected mode; use session.id as backend postID; skip local delete on backend failure.
+// CHANGE-ID: 20260224_224800_DeleteSwipeActions_NoOptimisticRemoval_6f4c
+// SCOPE: Prevent optimistic List onDelete removal by replacing onDelete with per-row swipeActions delete; preserves fail-closed backend delete gate; no UI/layout changes.
 
 // CHANGE-ID: 20260222_103500_PublishSkipOversizeWarningRoot_7d9c
 // SCOPE: Show a user-visible alert when publish skips oversized attachments (>50MB). Subscribe at root (SessionsRootView) so alert appears after PRDV/AESV dismiss.
@@ -567,6 +567,17 @@ fileprivate struct SessionsRootView: View {
                                         .buttonStyle(.plain)
                                         .listRowSeparator(.hidden)
                                         .deleteDisabled(false)
+                                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                            Button {
+                                                if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
+                                                    deleteSessions(at: IndexSet(integer: localIndex))
+                                                }
+                                            } label: {
+                                                Label("Delete", systemImage: "trash")
+                                            }
+                                            .tint(.red)
+                                        }
+                                        
 
                                     case .remote(let post):
                                         ZStack {
@@ -604,20 +615,7 @@ fileprivate struct SessionsRootView: View {
                                         .deleteDisabled(true)
                                     }
                                 }
-                                .onDelete { offsets in
-                                    // Local sessions only — remote rows are deleteDisabled(true)
-                                    var localOffsets = IndexSet()
-                                    for idx in offsets {
-                                        guard idx < renderFeedItems.count else { continue }
-                                        if case .local(let s) = renderFeedItems[idx].kind,
-                                           let localIndex = localRows.firstIndex(where: { $0.objectID == s.objectID }) {
-                                            localOffsets.insert(localIndex)
-                                        }
-                                    }
-                                    if !localOffsets.isEmpty {
-                                        deleteSessions(at: localOffsets)
-                                    }
-                                }
+                                
                             }
                         }
                         .listSectionSeparator(.hidden, edges: .all)
@@ -1241,9 +1239,9 @@ Spacer()
                 // Invariant (published sessions): posts.id is client-assigned and equals the local Session UUID.
                 if useBackendFeed {
                     guard let postID = session.id else {
-                        // Fail-closed: if we cannot derive the backend postID, do not delete locally.
-                        print("[Delete][FAIL-CLOSED] session.id missing; cannot delete backend post. Skipping local delete.")
-                        continue
+                        // Fail-closed: if we cannot derive the backend postID, abort the entire delete operation.
+                        print("[Delete][FAIL-CLOSED] session.id missing; cannot delete backend post. Aborting delete.")
+                        return
                     }
 
                     let result = await BackendEnvironment.shared.publish.deletePost(postID)
@@ -1251,9 +1249,9 @@ Spacer()
                     case .success:
                         break
                     case .failure(let err):
-                        // Fail-closed: do not delete locally if backend delete failed.
+                        // Fail-closed: abort immediately — do NOT proceed to any local deletion.
                         print("[Delete][FAIL-CLOSED] backend deletePost failed postID=\(postID) err=\(err)")
-                        continue
+                        return
                     }
                 }
 
