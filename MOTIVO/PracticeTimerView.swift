@@ -1245,32 +1245,47 @@ private var tasksPadSection: some View {
     }
 
     private func finish() {
-          // Resolve true start time in order: in-memory startDate, per-session key, global fallback
-          let ud = UserDefaults.standard
-          var resolvedStart: Date? = startDate
-          if resolvedStart == nil {
-              if let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty {
-                  let perSessionKey = "PracticeTimer.currentSessionStartTimestamp.\(sid)"
-                  if ud.object(forKey: perSessionKey) != nil {
-                      let epoch = ud.double(forKey: perSessionKey)
-                      if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
-                  }
-              }
-          }
-          if resolvedStart == nil {
-              if ud.object(forKey: "PracticeTimer.currentSessionStartTimestamp") != nil {
-                  let epoch = ud.double(forKey: "PracticeTimer.currentSessionStartTimestamp")
-                  if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
-              }
-          }
-          finalizedStartDate = resolvedStart
+        let finishTappedAt = Date()
+        let total = trueElapsedSeconds()
 
-          let total = trueElapsedSeconds()
-          finalizedDuration = total
-          pause()
-          didSaveFromReview = false
-          showReviewSheet = true
-      }
+        // Resolve true start time in order: in-memory startDate, per-session key, global fallback
+        let ud = UserDefaults.standard
+        var resolvedStart: Date? = startDate
+
+        if resolvedStart == nil {
+            if let sid = ud.string(forKey: currentSessionIDKey), !sid.isEmpty {
+                let perSessionKey = "PracticeTimer.currentSessionStartTimestamp.\(sid)"
+                if ud.object(forKey: perSessionKey) != nil {
+                    let epoch = ud.double(forKey: perSessionKey)
+                    if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
+                }
+            }
+        }
+
+        if resolvedStart == nil {
+            if ud.object(forKey: "PracticeTimer.currentSessionStartTimestamp") != nil {
+                let epoch = ud.double(forKey: "PracticeTimer.currentSessionStartTimestamp")
+                if epoch > 0 { resolvedStart = Date(timeIntervalSince1970: epoch) }
+            }
+        }
+
+        // If the timer was never started, treat "Finish" time as the start time for PRDV display.
+        if startDate == nil && total == 0 {
+            resolvedStart = finishTappedAt
+
+            // Seed a session ID so PRDV's review/session isolation stays consistent even if Start wasn't tapped.
+            let sid = ud.string(forKey: currentSessionIDKey) ?? ""
+            if sid.isEmpty {
+                ud.set(UUID().uuidString, forKey: currentSessionIDKey)
+            }
+        }
+
+        finalizedStartDate = resolvedStart
+        finalizedDuration = total
+        pause()
+        didSaveFromReview = false
+        showReviewSheet = true
+    }
 
     // MARK: - UI ticker
     private func startTicker() {
