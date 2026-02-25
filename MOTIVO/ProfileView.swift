@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260225_151900_PV_ProfileAuthGate_SignedOutNoCard_FixTypes_4d8a2c
+// SCOPE: UI-only — ProfileView auth gate: signed-out shows only centered Sign in with Apple button; fix SwiftUI modifier placement for type stability.
+// SEARCH-TOKEN: 20260225_151900_PV_ProfileAuthGate_SignedOutNoCard_FixTypes_4d8a2c
+
 // CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
 // SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
 // SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
@@ -116,6 +120,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  struct ProfileView: View {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager
+    @Environment(\.colorScheme) private var colorScheme
  
      // Close-first strategy
      var onClose: (() -> Void)? = nil
@@ -193,7 +198,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      var body: some View {
          modalsAndAlerts(
              NavigationStack {
-                 Form {
+                ZStack {
+                    if auth.isSignedIn {
+                        Form {
                      if showWelcomeSection {
                          welcomeSection
                      }
@@ -208,21 +215,58 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                              appSettingsSection
                              accountSection
                      }
-                 }
-                 .font(.callout)
-                 .navigationTitle("")
-                 .toolbar {
+                        }
+                    } else {
+                        signedOutGateView
+                    }
+                }
+                .font(.callout)
+                .navigationTitle("")
+                .toolbar {
                      ToolbarItem(placement: .principal) {
                          Text("Profile").font(Theme.Text.pageTitle)
                      }
                      toolbarContent
-                 }
-                 .appBackground()
-             }
+                }
+                .appBackground()
+            }
          )
      }
  
-     // MARK: - Sections
+     
+    // MARK: - Signed-out gate
+
+    private var signedOutGateView: some View {
+        GeometryReader { geo in
+            VStack {
+                Spacer().frame(height: geo.size.height * 0.30)
+
+                SignInWithAppleButton(.signIn) { request in
+                    auth.configure(request)
+                } onCompletion: { result in
+                    auth.handle(result)
+                }
+                .signInWithAppleButtonStyle(.whiteOutline)
+                .frame(height: 52)
+                .frame(maxWidth: 360)
+                .background(Theme.Colors.surface(colorScheme))
+                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                // Mask the built-in outline stroke so the button reads as a soft surface chip.
+                .overlay(
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .stroke(Theme.Colors.surface(colorScheme), lineWidth: 2)
+                )
+                .fixedSize(horizontal: false, vertical: true)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.horizontal, Theme.Spacing.l)
+        }
+    }
+
+
+// MARK: - Sections
 
      @ViewBuilder
      private var welcomeSection: some View {
