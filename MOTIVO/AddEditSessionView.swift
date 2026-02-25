@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260225_122845_AESV_ThumbIconParity_00e0df34
+// SCOPE: AESV attachment thumbnails — overlay icon parity with PRDV (eye/eye.slash indicators; hide privacy only when starred; audio star toggles). UI-only; no other logic changes.
+// SEARCH-TOKEN: 20260225_122845_AESV_ThumbIconParity_00e0df34
+
 // CHANGE-ID: 20260225_093600_aesv_audio_saveas_titles
 // SCOPE: AESV: seed stagedAudioNames_temp for audio Save-as-New to retain title + _n suffix; naming-only
 // SEARCH-TOKEN: TRIM_NOORPHANS_20260224_135000_AESV_HELPER_FIX
@@ -526,12 +530,12 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                                         } label: {
                                                                             // Quiet Mode: show badge only when included (not private)
                                                                             ZStack {
-                                                                                Image(systemName: "eye")
+                                                                                Image(systemName: priv ? "eye.slash" : "eye")
                                                                                     .font(.system(size: 16, weight: .semibold))
                                                                                     .padding(8)
                                                                                     .background(.ultraThinMaterial, in: Circle())
                                                                             }
-                                                                            .opacity((priv || selectedThumbnailID == att.id) ? 0 : 1)
+                                                                            .opacity((selectedThumbnailID == att.id) ? 0 : 1)
                                                                         }
                                                                         .buttonStyle(.plain)
                                                                         .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
@@ -716,13 +720,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                         // PRDV-parity control stack (Option A: present, no-op)
                                         VStack(spacing: 6) {
                                             Button {
-                                                selectedThumbnailID = att.id
+                                                if selectedThumbnailID == att.id {
+                                                    selectedThumbnailID = nil
+                                                } else {
+                                                    selectedThumbnailID = att.id
+                                                }
                                             } label: {
                                                 Image(systemName: selectedThumbnailID == att.id ? "star.fill" : "star")
                                                     .font(.system(size: 16, weight: .semibold))
                                             }
                                             .buttonStyle(.plain)
-                                            .accessibilityLabel("Set as thumbnail")
+                                            .accessibilityLabel(selectedThumbnailID == att.id ? "Unset thumbnail" : "Set as thumbnail")
 
                                             let privURL = url
                                             let isPriv = isPrivate(id: att.id, url: privURL)
@@ -731,9 +739,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                                 setPrivate(id: att.id, url: privURL, !current)
                                             } label: {
                                                 // Quiet Mode: only show when included
-                                                Image(systemName: "eye")
+                                                Image(systemName: isPriv ? "eye.slash" : "eye")
                                                     .font(.system(size: 16, weight: .semibold))
-                                                    .opacity(isPriv ? 0 : 1)
+                                                    .opacity(selectedThumbnailID == att.id ? 0 : 1)
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Toggle privacy")
