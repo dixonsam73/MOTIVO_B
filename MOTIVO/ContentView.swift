@@ -1928,7 +1928,7 @@ fileprivate struct SessionRow: View {
 
     private func shareText() -> String {
         let title = SessionActivity.feedTitle(for: session)
-        return "Check out my session: \(title) — via Etudes"
+        return "Check out my session: \(title) — via Études"
     }
 }
 

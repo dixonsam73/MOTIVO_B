@@ -795,7 +795,7 @@ struct BackendSessionDetailView: View {
 
     private func shareText() -> String {
         let title = headerTitle
-        return "Check out my session: \(title) — via Etudes"
+        return "Check out my session: \(title) — via Études"
     }
 
     // MARK: - Directory lookup (Phase 14)

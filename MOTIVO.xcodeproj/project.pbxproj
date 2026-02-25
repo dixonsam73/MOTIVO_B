@@ -437,7 +437,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
+				INFOPLIST_KEY_CFBundleDisplayName = "Études";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Etudes needs access to the camera to capture photos for your sessions.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Etudes needs access to the microphone to record audio for your sessions.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Etudes needs permission to save photos to your library from your sessions.";
@@ -472,7 +472,7 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = MOTIVO/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = Etudes;
+				INFOPLIST_KEY_CFBundleDisplayName = "Études";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Etudes needs access to the camera to capture photos for your sessions.";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Etudes needs access to the microphone to record audio for your sessions.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Etudes needs permission to save photos to your library from your sessions.";
