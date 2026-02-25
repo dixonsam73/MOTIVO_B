@@ -7,6 +7,8 @@
 //  Silent if one instrument, chevron row if multiple.
 
 // CHANGE-ID: 20260130_164830_PRDV_ShareDebug
+// CHANGE-ID: 20260225_092800_prdv_audio_saveas_titles
+// SCOPE: PRDV — Audio Save-as-New retains title + suffix (_1, _2...) by seeding stagedAudioNames_temp for new staged audio IDs.
 // SCOPE: PRDV — Add definitive debug logging for Share toggle (isPublic) at toggle-change, draft hydration, and save-tap to identify where it flips to true.
 import SwiftUI
 import CoreData
@@ -1970,6 +1972,34 @@ let stagedURL = surrogateURL(for: att)
 
         case .file:
             stagedAttachments.append(newAtt)
+        }
+
+        // Naming: for audio Save-as-New, retain the source title (user or auto) and append an edit suffix.
+        if kind == .audio {
+            let audioNamesKey = "stagedAudioNames_temp"
+            var dict = (UserDefaults.standard.dictionary(forKey: audioNamesKey) as? [String: String]) ?? [:]
+
+            let sourceStem = originalURL.deletingPathExtension().lastPathComponent
+            if let sourceID = UUID(uuidString: sourceStem),
+               let rawBase = dict[sourceID.uuidString] {
+                let base = rawBase.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !base.isEmpty {
+                    // Find next available suffix among existing titles matching base or base_<n>.
+                    var maxN = 0
+                    for (_, v) in dict {
+                        let t = v.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if t == base { maxN = max(maxN, 0); continue }
+                        if t.hasPrefix(base + "_") {
+                            let suffix = String(t.dropFirst((base + "_").count))
+                            if let n = Int(suffix) { maxN = max(maxN, n) }
+                        }
+                    }
+                    let nextN = maxN + 1
+                    dict[newID.uuidString] = base + "_\(nextN)"
+                    UserDefaults.standard.set(dict, forKey: audioNamesKey)
+                    attachmentTitlesRefreshTick &+= 1
+                }
+            }
         }
 
         // Surrogate extension must follow the source/export type.

@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260225_092000_ptv_audio_saveas_titles
+// SCOPE: Naming-only — PTV audio trim Save-as-New retains source title and appends _N suffix (no UI/layout changes).
+
 // CHANGE-ID: 20260105_231900_ptv_thumbnail_invariants
 // CHANGE-ID: 20260105_235950_ptv_remove_last_auto_thumbnail
 // SCOPE: Remove remaining auto-thumbnail assignment when first image is added (PTV).
@@ -2214,9 +2217,37 @@ private func openAudioViewer(_ id: UUID) {
                     audioDurations[newID] = max(0, Int(player.duration.rounded()))
                 }
                 // Seed title metadata so viewer/UI doesn't fall back to generic labels.
-                let title = formattedAutoTitle(from: Date())
-                audioAutoTitles[newID] = title
-                audioTitles[newID] = title
+                // Save-as-new should retain the source clip title (user or auto) and append an edit suffix.
+                let trimmedSourceTitle: String? = {
+                    if let t = audioTitles[item.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                    if let t = audioAutoTitles[item.id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
+                    return nil
+                }()
+                let baseTitle = trimmedSourceTitle ?? formattedAutoTitle(from: Date())
+
+                // Find the next available suffix for this base title among existing audio titles in this session.
+                let existingTitles: Set<String> = {
+                    var s = Set<String>()
+                    for t in audioTitles.values {
+                        let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !v.isEmpty { s.insert(v) }
+                    }
+                    for t in audioAutoTitles.values {
+                        let v = t.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if !v.isEmpty { s.insert(v) }
+                    }
+                    return s
+                }()
+
+                var suffix = 1
+                var candidate = "\(baseTitle)_\(suffix)"
+                while existingTitles.contains(candidate) {
+                    suffix += 1
+                    candidate = "\(baseTitle)_\(suffix)"
+                }
+
+                audioAutoTitles[newID] = candidate
+                audioTitles[newID] = candidate
             } else {
                 stagedVideos.append(newItem)
                 if let thumb = generateVideoThumbnail(from: data, id: newID) {

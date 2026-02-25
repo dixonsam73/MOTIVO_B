@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260224_135000_AESV_OptionalSessionHelperFix
-// SCOPE: AESV: fix protectedPersistedAttachmentPaths_edit to accept optional Session? and guard nil; no UI/behaviour changes beyond intended trim-persist hygiene scope.
+// CHANGE-ID: 20260225_093600_aesv_audio_saveas_titles
+// SCOPE: AESV: seed stagedAudioNames_temp for audio Save-as-New to retain title + _n suffix; naming-only
 // SEARCH-TOKEN: TRIM_NOORPHANS_20260224_135000_AESV_HELPER_FIX
 // CHANGE-ID: 20260224_125814_TrimPersist_NoOrphans
 // SCOPE: Trim Persistence Canonicalization — eliminate duplicate/orphan container siblings (PRDV + AESV staged-byte paths only)
@@ -2534,7 +2534,45 @@ isPrivate: { url in
                                             return
                                         }
 
-                                        let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
+                                        // Naming-only: for Audio "Save as new", retain the source title and append an incrementing suffix.
+                                        /// This seeds stagedAudioNames_temp for the new staged UUID so both AESV inline list and AVV show the right name.
+                                        if kind == .audio {
+                                            if let req = viewerRequest,
+                                               req.mode == .audio,
+                                               req.startIndex >= 0,
+                                               req.startIndex < req.viewerAttachmentIDs.count {
+                                                let sourceID = req.viewerAttachmentIDs[req.startIndex]
+                                                let sourceKey = sourceID.uuidString
+
+                                                let namesKey = "stagedAudioNames_temp"
+                                                var namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
+                                                let persistedTitles = loadPersistedAudioTitles()
+
+                                                let baseRaw: String? = {
+                                                    if let p = persistedTitles[sourceKey] { return p }
+                                                    if let s = namesDict[sourceKey] { return s }
+                                                    return nil
+                                                }()
+                                                if let baseRaw {
+                                                    let base = baseRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    if !base.isEmpty {
+                                                        let existingTitles = Set(namesDict.values.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+                                                        var n = 1
+                                                        var candidate = "\(base)_\(n)"
+                                                        while existingTitles.contains(candidate) {
+                                                            n += 1
+                                                            candidate = "\(base)_\(n)"
+                                                        }
+                                                        namesDict[newID.uuidString] = candidate
+                                                        UserDefaults.standard.set(namesDict, forKey: namesKey)
+                                                        attachmentTitlesRefreshTick &+= 1
+                                                    }
+                                                }
+                                            }
+                                        }
+
+
+let newAtt = StagedAttachment(id: newID, data: data, kind: kind)
 
                                         #if canImport(UIKit)
                                         if kind == .video {
