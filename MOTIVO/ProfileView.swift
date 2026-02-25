@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260225_151900_PV_ProfileAuthGate_SignedOutNoCard_FixTypes_4d8a2c
-// SCOPE: UI-only — ProfileView auth gate: signed-out shows only centered Sign in with Apple button; fix SwiftUI modifier placement for type stability.
-// SEARCH-TOKEN: 20260225_151900_PV_ProfileAuthGate_SignedOutNoCard_FixTypes_4d8a2c
+// CHANGE-ID: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
+// SCOPE: UI-only — ProfileView: align signed-in Sign out action styling with signed-out Sign in (soft surface button, same size/typography); no logic/auth changes.
+// SEARCH-TOKEN: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
 
 // CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
 // SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
@@ -742,21 +742,23 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          }
      }
  
-     @ViewBuilder
+   
      private var accountSection: some View {
          Section {
              VStack(alignment: .leading, spacing: 0) {
                  VStack(alignment: .leading, spacing: 4) {
                      if auth.isSignedIn {
-                         HStack {
-                             Spacer()
-                             Button(role: .destructive) { auth.signOut() } label: {
-                                 Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
-                             }
-                             .font(Theme.Text.body)
-                             .frame(minHeight: 44)
+                         Button {
+                             auth.signOut()
+                         } label: {
+                             Text("Sign out")
+                                 .font(Theme.Text.body.weight(.semibold))
+                                 .frame(maxWidth: .infinity)
+                                 .frame(height: 52)
                          }
-                     } else {
+                         .buttonStyle(.plain)
+                         .contentShape(Rectangle())
+                    } else {
                          SignInWithAppleButton(.signIn) { request in
                              auth.configure(request)
                          } onCompletion: { result in
@@ -769,7 +771,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                  }
              }
              .padding(.horizontal, 16)
-             .padding(.vertical, 12)
+             .padding(.vertical, 6)
              .padding(.top, Theme.Spacing.s)
              .cardSurface()
          }
