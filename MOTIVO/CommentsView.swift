@@ -561,9 +561,10 @@ public struct CommentsView: View {
                 .task {
                     if case .connectedPost(let pid, let ownerUserID, let viewerUserID, _) = mode {
                         await backendStore.refresh(postID: pid)
-                        // Calm unread presence: opening comments clears owner-only pending state for this post.
-                        if ownerUserID.lowercased() == viewerUserID.lowercased() {
-                            await UnreadCommentsStore.shared.markViewed(postID: pid)
+                        // Clear unread for this viewer if this post is currently flagged unread
+                        let unreadStore = UnreadCommentsStore.shared
+                        if unreadStore.unreadGroups.contains(where: { $0.postID == pid }) {
+                            await unreadStore.markViewed(postID: pid)
                         }
 
                         // Owner default: if there are any commenters, default the composer to "Respond to all commenters".
