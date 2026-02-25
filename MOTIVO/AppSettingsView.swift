@@ -25,6 +25,7 @@ struct AppSettingsView: View {
                         Text("Show Welcome Message")
                             .font(Theme.Text.body)
                     }
+                    .tint(Theme.Colors.accent)
                 }
 
                 // SESSION TIMER SECTION
@@ -33,11 +34,13 @@ struct AppSettingsView: View {
                         Text("Show Drone")
                             .font(Theme.Text.body)
                     }
-
+                    .tint(Theme.Colors.accent)
+                    
                     Toggle(isOn: $showMetronomeStrip) {        // NEW
                         Text("Show Metronome")
                             .font(Theme.Text.body)
                     }
+                    .tint(Theme.Colors.accent)
                 }
             }
             .navigationTitle("App Settings")

@@ -159,6 +159,7 @@ struct TasksManagerView: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    .tint(Theme.Colors.accent)
                     .onChange(of: autofillEnabled) { _ in
                         saveToggle()
                     }

@@ -40,7 +40,12 @@ struct InstrumentListView: View {
                             .font(Theme.Text.body)
                             .disabled(!isSignedIn)
                             .textInputAutocapitalization(.words)
-                        Button(action: { add() }) { Text("Add").font(Theme.Text.body) }
+                        Button(action: { add() }) {
+                            Text("Add")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
+                        }
+                        .buttonStyle(.plain)
                             .disabled(!isSignedIn || newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }

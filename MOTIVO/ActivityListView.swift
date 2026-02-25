@@ -62,8 +62,11 @@ struct ActivityListView: View {
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
                         Button(action: { if isSignedIn { add() } }) {
-                            Text("Add").font(Theme.Text.body)
+                            Text("Add")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
                         }
+                        .buttonStyle(.plain)
                         .disabled(!isSignedIn || newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
