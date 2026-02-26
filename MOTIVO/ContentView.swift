@@ -301,6 +301,8 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
 
+    @EnvironmentObject private var auth: AuthManager
+
     @State private var showPublishSkipOversizeAlert = false
     @State private var publishSkipOversizeMessage = ""
 
@@ -334,6 +336,7 @@ fileprivate struct SessionsRootView: View {
 
     // Sheets
     @State private var showProfile = false
+    @State private var showAppSetUp = false
     @State private var showTimer = false
     @State private var showAdd = false
     @State private var showPeople = false
@@ -871,7 +874,14 @@ Spacer()
 
 
             // Sheets
-            .sheet(isPresented: $showTimer) {
+                        .fullScreenCover(isPresented: $showAppSetUp) {
+                            AppSetUpView(onComplete: {
+                                showAppSetUp = false
+                            })
+                            .interactiveDismissDisabled(true)
+                        }
+                        
+.sheet(isPresented: $showTimer) {
                 PracticeTimerView(isPresented: $showTimer)
             }
             .sheet(isPresented: $showAdd) {
@@ -901,9 +911,11 @@ Spacer()
                 setUpDebounce()
                 await sharedWithYouStore.refreshUnreadShares()
                 Task { await unreadCommentsStore.refresh(force: true) }
+                evaluateAppSetUpGate()
             }
             .onChange(of: userID) { _, _ in
                 refreshStats()
+                evaluateAppSetUpGate()
             }
             .task(id: searchText) {
                 debounceCancellable?.cancel()
@@ -915,6 +927,7 @@ Spacer()
             .onChange(of: scenePhase) { _, phase in
                 // Phase 14.1: refresh incoming follow requests when returning to foreground (no polling)
                 guard phase == .active else { return }
+                evaluateAppSetUpGate()
                 Task { @MainActor in
                     await followStore.refreshFromBackendIfPossible()
                     await sharedWithYouStore.refreshUnreadShares()
@@ -939,6 +952,49 @@ Spacer()
             Text(publishSkipOversizeMessage)
         }
     }
+
+    private func requiresAppSetUpNow() -> Bool {
+        // Gate only applies when actually signed in *and* backend config is present.
+        // (On fresh installs in DEBUG/local-sim mode, auth state may restore from Keychain before connected mode is configured.)
+        guard auth.isSignedIn else { return false }
+        guard BackendConfig.isConfigured else { return false }
+        // CHANGE-ID: 20260226_162000_AppSetUpGateFix3_c21b3c
+        guard let uid = userID, !uid.isEmpty else { return false }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+        let p = (try? viewContext.fetch(req))?.first
+
+        // If no local profile exists yet, force setup.
+        guard let profile = p else { return true }
+
+        let n = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if n.isEmpty { return true }
+
+        // Require at least one Instrument attached to the profile.
+        let hasInstrument = instruments.contains(where: { $0.profile == profile })
+        return !hasInstrument
+    }
+
+    private func evaluateAppSetUpGate() {
+        // Never show the setup gate while signed out (ProfileView must present the Sign in with Apple gate first).
+        guard auth.isSignedIn else {
+            if showAppSetUp { showAppSetUp = false }
+            return
+        }
+
+        // Never show the setup gate until connected mode config is present (baseURL + anon key applied).
+        guard BackendConfig.isConfigured else {
+            if showAppSetUp { showAppSetUp = false }
+            return
+        }
+
+        let shouldShow = requiresAppSetUpNow()
+        if shouldShow != showAppSetUp {
+            showAppSetUp = shouldShow
+        }
+    }
+
 
 
     private func notificationTouchesSessions(_ note: Notification) -> Bool {
