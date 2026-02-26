@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260226_153900_ContentView_AutoRefreshOnReturn_SheetDismiss_1c7e
+// SCOPE: Auto refresh notification bundle when returning to feed; reuse existing pull-to-refresh bundle; no UI/layout changes.
+
 // CHANGE-ID: 20260224_224800_DeleteSwipeActions_NoOptimisticRemoval_6f4c
 // SCOPE: Prevent optimistic List onDelete removal by replacing onDelete with per-row swipeActions delete; preserves fail-closed backend delete gate; no UI/layout changes.
 
@@ -351,6 +354,10 @@ fileprivate struct SessionsRootView: View {
     @State private var lastBackendAutoFetchKey: String = ""
     @State private var lastBackendAutoFetchAt: Date = .distantPast
 
+
+    // Auto-refresh bundle debounce (return-to-feed)
+    @State private var lastBackendAutoBundleKey: String = ""
+    @State private var lastBackendAutoBundleAt: Date = .distantPast
     #if DEBUG
     private var effectiveUserID: String? {
         if BackendEnvironment.shared.isConnected == false,
@@ -644,21 +651,14 @@ fileprivate struct SessionsRootView: View {
                         lastBackendAutoFetchAt = Date()
 
                         _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+                   
+
+                        await performAutoReturnRefreshBundle(scopeKey: scopeKey)
                     }
                 }
 
                 .refreshable {
-                    // User-initiated refresh (pull-to-refresh)
-                    if useBackendFeed {
-                        let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-                        _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
-                    }
-                    await followStore.refreshFromBackendIfPossible()
-                    await sharedWithYouStore.refreshUnreadShares()
-                    Task { await unreadCommentsStore.refresh(force: true) }
-                    await MainActor.run {
-                        refreshStats()
-                    }
+                    await performUserInitiatedRefreshBundle()
                 }
                 .id(backendModeChangeTick)
                 .listStyle(.plain)
@@ -906,7 +906,31 @@ Spacer()
                 }
             }
 #endif
-            // Debounce lifecycle
+            
+            // Auto refresh notifications when returning to the feed from modal sheets (timer/add/profile/people).
+            // This covers the common “navigate away and come back” flow because these destinations are presented as sheets.
+            .onChange(of: showTimer) { _, isPresented in
+                guard isPresented == false else { return }
+                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
+            }
+            .onChange(of: showAdd) { _, isPresented in
+                guard isPresented == false else { return }
+                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
+            }
+            .onChange(of: showProfile) { _, isPresented in
+                guard isPresented == false else { return }
+                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
+            }
+            .onChange(of: showPeople) { _, isPresented in
+                guard isPresented == false else { return }
+                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
+            }
+
+// Debounce lifecycle
             .task {
                 setUpDebounce()
                 await sharedWithYouStore.refreshUnreadShares()
@@ -1012,6 +1036,46 @@ Spacer()
             || containsSession(in: info[NSInvalidatedObjectsKey])
             || containsSession(in: info[NSInvalidatedAllObjectsKey])
     }
+    // CHANGE-ID: 20260226_152200_ContentView_AutoRefreshBundleOnReturn
+    // SCOPE: Reuse existing refresh bundle on pull-to-refresh; add debounced notification refresh on return-to-feed (no UI changes).
+    private func performUserInitiatedRefreshBundle() async {
+        // User-initiated refresh (pull-to-refresh)
+        if useBackendFeed {
+            let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
+            _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+        }
+        await followStore.refreshFromBackendIfPossible()
+        await sharedWithYouStore.refreshUnreadShares()
+        Task { await unreadCommentsStore.refresh(force: true) }
+        await MainActor.run {
+            refreshStats()
+        }
+    }
+
+    private func performAutoReturnRefreshBundle(scopeKey: String) async {
+        // Auto refresh when returning to the feed: notifications only (posts refresh already handled separately).
+        // Keep the same BSDV back-pop suppression window to avoid one-frame list rebind/flash.
+        if Date().timeIntervalSince(BackendDetailPopGate.lastPopAt) < 0.75 {
+            return
+        }
+
+        let key = "bundle:\(scopeKey)"
+
+        // Debounce: prevent rapid consecutive auto refreshes for the same scope
+        if key == lastBackendAutoBundleKey &&
+           Date().timeIntervalSince(lastBackendAutoBundleAt) < 1.5 {
+            return
+        }
+
+        lastBackendAutoBundleKey = key
+        lastBackendAutoBundleAt = Date()
+
+        await followStore.refreshFromBackendIfPossible()
+        await sharedWithYouStore.refreshUnreadShares()
+        Task { await unreadCommentsStore.refresh(force: true) }
+    }
+
+
 
     private func refreshStats() {
         // De-populate when signed out to mirror other data fields
