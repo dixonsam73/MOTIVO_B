@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260105_235800_attachmentscard_star_toggle_no_fallback
-// SCOPE: Toggle star bidirectionally and clear selection on delete; remove auto-fallback to first image. No layout changes.
+// CHANGE-ID: 20260227_213731_PTV_audio_pencil_214aa856
+// SCOPE: Visual-only: show a small pencil icon next to audio clip titles when not editing (PTV AttachmentsCard).
 // AttachmentsCard.swift
 // Extracted from PracticeTimerView as part of refactor step 3 (fixed).
 // Renders staged images, audio, and videos for the session.
@@ -255,76 +255,67 @@ struct AttachmentsCard: View {
                             }
                         }
                     )
-                    
-                    TextField("Title", text: titleBinding)
-                        .textFieldStyle(.plain)
-                        .disableAutocorrection(true)
-                        .focused(focusedAudioTitleID, equals: att.id)
-                        .onTapGesture {
-                            // Enter focus and initialize an empty buffer so the field clears for fresh input
-                            focusedAudioTitleID.wrappedValue = att.id
-                        }
-                        .onChange(of: focusedAudioTitleID.wrappedValue) { _, newFocus in
-                            if newFocus == att.id {
-                                #if DEBUG
-                                if PracticeTimerDebug.titlesLoggingEnabled {
-                                    print("[PracticeTimer] focus gained id=\(att.id)")
-                                }
-                                #endif
-                                // Gained focus: clear the editing buffer so user starts from empty
-                                audioTitleEditingBuffer[att.id] = ""
-                            } else if newFocus == nil || newFocus != att.id {
-                                #if DEBUG
-                                if PracticeTimerDebug.titlesLoggingEnabled {
-                                    print("[PracticeTimer] focus lost id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
-                                }
-                                #endif
-                                
-                                // Lost focus from this field: commit buffer to stored titles
-                                if let buffer = audioTitleEditingBuffer[att.id] {
-                                    let trimmed = buffer.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                                    
-                                    if trimmed.isEmpty {
-                                        // Restore auto-title if user left it empty
-                                        audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
+
+                    HStack(spacing: 6) {
+                        TextField("Title", text: titleBinding)
+                            .textFieldStyle(.plain)
+                            .disableAutocorrection(true)
+                            .focused(focusedAudioTitleID, equals: att.id)
+                            .onTapGesture {
+                                // Enter focus and initialize an empty buffer so the field clears for fresh input
+                                focusedAudioTitleID.wrappedValue = att.id
+                            }
+                            .onChange(of: focusedAudioTitleID.wrappedValue) { _, newFocus in
+                                if newFocus == att.id {
+                                    #if DEBUG
+                                    if PracticeTimerDebug.titlesLoggingEnabled {
+                                        print("[PracticeTimer] focus gained id=\(att.id)")
+                                    }
+                                    #endif
+
+                                    // When focus enters, clear any previous buffer and initialize empty so the field clears visually.
+                                    audioTitleEditingBuffer[att.id] = ""
+                                } else if newFocus == nil || newFocus != att.id {
+                                    // Leaving focus: commit pending title edits.
+                                    let buffer = (audioTitleEditingBuffer[att.id] ?? "")
+                                        .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+
+                                    #if DEBUG
+                                    if PracticeTimerDebug.titlesLoggingEnabled {
+                                        print("[PracticeTimer] focus lost id=\(att.id) buffer=\(buffer)")
+                                    }
+                                    #endif
+
+                                    if audioTitleDidImmediatePersist.contains(att.id) {
+                                        // Immediate persist already happened; just finalize local state.
+                                        if buffer.isEmpty {
+                                            audioTitles[att.id] = ""
+                                        } else {
+                                            audioTitles[att.id] = buffer
+                                        }
                                     } else {
                                         audioTitles[att.id] = buffer
                                     }
-                                    
-                                    // Clean up buffer
                                     audioTitleEditingBuffer.removeValue(forKey: att.id)
-                                    
-                                    // Persist immediately to StagingStore
                                     onPersistCommittedAudioTitle(att.id)
-                                    
-                                    // Persist after any change (debounced)
                                     DispatchQueue.main.async {
                                         onPersistStagedAttachments()
                                     }
                                 }
                             }
+
+                        // Visual affordance: indicates the title is editable.
+                        // Shows only when the field is not actively focused/editing.
+                        if focusedAudioTitleID.wrappedValue != att.id {
+                            Image(systemName: "pencil")
+                                .font(.subheadline)
+                                .imageScale(.medium)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .opacity(0.8)
+                                .accessibilityHidden(true)
                         }
-                        .onSubmit {
-                            #if DEBUG
-                            if PracticeTimerDebug.titlesLoggingEnabled {
-                                print("[PracticeTimer] Title.submit id=\(att.id) buffer=\(audioTitleEditingBuffer[att.id] ?? "")")
-                            }
-                            #endif
-                            // Commit on submit as well (Enter/Return key)
-                            let buffer = audioTitleEditingBuffer[att.id] ?? ""
-                            let trimmed = buffer.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                            if trimmed.isEmpty {
-                                audioTitles[att.id] = audioAutoTitles[att.id] ?? ""
-                            } else {
-                                audioTitles[att.id] = buffer
-                            }
-                            audioTitleEditingBuffer.removeValue(forKey: att.id)
-                            onPersistCommittedAudioTitle(att.id)
-                            DispatchQueue.main.async {
-                                onPersistStagedAttachments()
-                            }
-                        }
-                    
+                    }
+
                     if let secs = audioDurations[att.id] {
                         Text(formattedClipDuration(secs))
                             .foregroundStyle(Theme.Colors.secondaryText)

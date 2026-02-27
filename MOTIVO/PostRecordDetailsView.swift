@@ -10,6 +10,9 @@
 // CHANGE-ID: 20260225_092800_prdv_audio_saveas_titles
 // SCOPE: PRDV — Audio Save-as-New retains title + suffix (_1, _2...) by seeding stagedAudioNames_temp for new staged audio IDs.
 // SCOPE: PRDV — Add definitive debug logging for Share toggle (isPublic) at toggle-change, draft hydration, and save-tap to identify where it flips to true.
+// CHANGE-ID: 20260227_215900_PRDV_desc_pencil
+// SCOPE: Visual-only — add pencil cue beside Description header in PRDV; hide while Description field is focused; no other UI/logic changes.
+
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -62,6 +65,8 @@ struct PostRecordDetailsView: View {
     @State private var activityDetail: String = ""
     @State private var lastAutoActivityDetail: String = ""
     @State private var userEditedActivityDetail: Bool = false
+
+    @FocusState private var isActivityDetailFocused: Bool
 
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
@@ -352,10 +357,25 @@ struct PostRecordDetailsView: View {
                     // ---------- Activity description ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Description").sectionHeader()
-                        TextField("Activity description", text: $activityDetail, axis: .vertical)
-                            .lineLimit(1...3)
-                            .textInputAutocapitalization(.never)
-                            .font(Theme.Text.body)
+
+                        HStack(spacing: 6) {
+                            TextField("Activity description", text: $activityDetail, axis: .vertical)
+                                .focused($isActivityDetailFocused)
+                                .lineLimit(1...3)
+                                .textInputAutocapitalization(.never)
+                                .font(Theme.Text.body)
+
+                            if !isActivityDetailFocused {
+                                Image(systemName: "pencil")
+                                    .font(.subheadline)          // match the editable text line
+                                    .imageScale(.medium)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .opacity(0.8)
+                                    .accessibilityHidden(true)
+                            }
+
+                            Spacer()
+                        }
                     }
                     .cardSurface()
 
@@ -2319,4 +2339,3 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-
