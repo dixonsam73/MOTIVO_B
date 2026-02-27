@@ -10,9 +10,8 @@
 // CHANGE-ID: 20260225_092800_prdv_audio_saveas_titles
 // SCOPE: PRDV — Audio Save-as-New retains title + suffix (_1, _2...) by seeding stagedAudioNames_temp for new staged audio IDs.
 // SCOPE: PRDV — Add definitive debug logging for Share toggle (isPublic) at toggle-change, draft hydration, and save-tap to identify where it flips to true.
-// CHANGE-ID: 20260227_215900_PRDV_desc_pencil
-// SCOPE: Visual-only — add pencil cue beside Description header in PRDV; hide while Description field is focused; no other UI/logic changes.
-
+// CHANGE-ID: 20260227_223200_PRDV_focusDismiss_desc_notes
+// SCOPE: PRDV — Dismiss keyboard/focus for Description + Notes on tap outside/scroll; keep pencil affordance; no other UI/logic changes.
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -66,13 +65,14 @@ struct PostRecordDetailsView: View {
     @State private var lastAutoActivityDetail: String = ""
     @State private var userEditedActivityDetail: Bool = false
 
-    @FocusState private var isActivityDetailFocused: Bool
-
     @State private var isTitleEdited = false
     @State private var initialAutoTitle = ""
     
     @State private var areNotesPrivate: Bool = false
 
+
+    @FocusState private var isActivityDetailFocused: Bool
+    @FocusState private var isNotesFocused: Bool
     @State private var attachmentTitlesRefreshTick: Int = 0
 
 
@@ -365,16 +365,16 @@ struct PostRecordDetailsView: View {
                                 .textInputAutocapitalization(.never)
                                 .font(Theme.Text.body)
 
+                            Spacer()
+
                             if !isActivityDetailFocused {
                                 Image(systemName: "pencil")
-                                    .font(.subheadline)          // match the editable text line
+                                    .font(.subheadline)
                                     .imageScale(.medium)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                                     .opacity(0.8)
                                     .accessibilityHidden(true)
                             }
-
-                            Spacer()
                         }
                     }
                     .cardSurface()
@@ -468,6 +468,7 @@ struct PostRecordDetailsView: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         TextEditor(text: $notes)
+                            .focused($isNotesFocused)
                             .frame(minHeight: 120)
                             .font(Theme.Text.body)
                     }
@@ -485,6 +486,13 @@ struct PostRecordDetailsView: View {
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    isActivityDetailFocused = false
+                    isNotesFocused = false
+                }
+            )
             .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .principal) {
@@ -2339,3 +2347,4 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
+
