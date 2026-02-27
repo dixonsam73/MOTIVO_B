@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260227_122600_PV_AccountCards_SplitSections_CompactDeleteFix
+// SCOPE: UI-only — ProfileView: split Sign out and Delete account into separate Sections; make Delete card compact; no logic/strings changes.
+// SEARCH-TOKEN: 20260227_122600_PV_AccountCards_SplitSections_CompactDeleteFix
+
+// CHANGE-ID: 20260227_150500_PV_DeleteOutsideSignOutCard
+// SCOPE: UI-only — ProfileView: move Delete account into its own card below Sign out; no logic changes.
+// SEARCH-TOKEN: 20260227_150500_PV_DeleteOutsideSignOutCard
+
 // CHANGE-ID: 20260227_123000_Profile_DeleteAccount_401Fix
 // SCOPE: Delete Account — fix 401 by using functions domain + session preflight; no other UI/logic changes.
 // SEARCH-TOKEN: 20260227_124200_DeleteAccount_InvalidJWT_Fix
@@ -762,54 +770,64 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  
    
      private var accountSection: some View {
-         Section {
-             VStack(alignment: .leading, spacing: 0) {
-                 VStack(alignment: .leading, spacing: 4) {
-                     if auth.isSignedIn {
-                         Button {
-                             auth.signOut()
-                         } label: {
-                             Text("Sign out")
-                                 .font(Theme.Text.body.weight(.semibold))
-                                 .frame(maxWidth: .infinity)
-                                 .frame(height: 52)
+         Group {
+             if auth.isSignedIn {
+                 // Sign out (primary) — its own container/card
+                 Section {
+                     VStack(alignment: .leading, spacing: 0) {
+                         VStack(alignment: .leading, spacing: 4) {
+                             Button {
+                                 auth.signOut()
+                             } label: {
+                                 Text("Sign out")
+                                     .font(Theme.Text.body.weight(.semibold))
+                                     .frame(maxWidth: .infinity)
+                                     .frame(height: 52)
+                             }
+                             .buttonStyle(.plain)
+                             .contentShape(Rectangle())
                          }
-                         .buttonStyle(.plain)
-                         .contentShape(Rectangle())
-                    
-
-                         // Delete Account (destructive)
-                         Button {
-                             deleteAccountConfirmText = ""
-                             showDeleteAccountSheet = true
-                         } label: {
-                             Text("Delete account")
-                                 .font(Theme.Text.body.weight(.semibold))
-                                 .frame(maxWidth: .infinity)
-                                 .frame(height: 52)
-                                 .foregroundStyle(.red)
-                         }
-                         .buttonStyle(.plain)
-                         .contentShape(Rectangle())
-} else {
-                         SignInWithAppleButton(.signIn) { request in
-                             auth.configure(request)
-                         } onCompletion: { result in
-                             auth.handle(result)
-                         }
-                         .signInWithAppleButtonStyle(.black)
-                         .frame(height: 44)
-                         .accessibilityLabel(Text("Sign in with Apple"))
                      }
+                     .padding(.horizontal, 16)
+                     .padding(.vertical, 6)
+                     .padding(.top, Theme.Spacing.s)
+                     .cardSurface()
+                 }
+
+                 // Delete Account (destructive) — its own container/card, compact
+                 Section {
+                     Button {
+                         deleteAccountConfirmText = ""
+                         showDeleteAccountSheet = true
+                     } label: {
+                         Text("Delete account")
+                             .font(Theme.Text.body.weight(.semibold))
+                             .foregroundStyle(.red)
+                             .frame(maxWidth: .infinity)
+                             .padding(.vertical, 10)
+                     }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .padding(.horizontal, 16)
+                     .padding(.vertical, 2)
+                     .padding(.top, Theme.Spacing.s)
+                     .cardSurface()
+                 }
+                 .padding(.bottom, Theme.Spacing.m)
+             } else {
+                 Section {
+                     SignInWithAppleButton(.signIn) { request in
+                         auth.configure(request)
+                     } onCompletion: { result in
+                         auth.handle(result)
+                     }
+                     .signInWithAppleButtonStyle(.black)
+                     .frame(height: 44)
+                     .accessibilityLabel(Text("Sign in with Apple"))
                  }
              }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 6)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
          }
      }
-
 
      // MARK: - Toolbar
 
