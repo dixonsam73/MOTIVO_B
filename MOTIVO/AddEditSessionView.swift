@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260227_223900_AESV_desc_pencil_focusDismiss
+// SCOPE: AESV visual-only — add pencil affordance to Description editable line (hide while editing) + dismiss keyboard/focus for Description + Notes on tap/scroll. No other UI/logic changes.
+// SEARCH-TOKEN: 20260227_223900_AESV_desc_pencil_focusDismiss
+
 // CHANGE-ID: 20260225_122845_AESV_ThumbIconParity_00e0df34
 // SCOPE: AESV attachment thumbnails — overlay icon parity with PRDV (eye/eye.slash indicators; hide privacy only when starred; audio star toggles). UI-only; no other logic changes.
 // SEARCH-TOKEN: 20260225_122845_AESV_ThumbIconParity_00e0df34
@@ -113,6 +117,10 @@ struct AddEditSessionView: View {
     @State private var isPublic: Bool = true
     @State private var notes: String = ""
     @State private var areNotesPrivate_edit: Bool = false
+
+    // Focus (UI-only) — used to dismiss cursor/keyboard on tap away
+    @FocusState private var isActivityDetailFocused: Bool
+    @FocusState private var isNotesFocused: Bool
 
     // Wheels
     @State private var showStartPicker = false
@@ -366,11 +374,24 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 // Activity description (short detail)
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Description").sectionHeader()
+                    HStack(spacing: 6) {
                     TextField("Activity description", text: $activityDetail, axis: .vertical)
+                        .focused($isActivityDetailFocused)
                         .lineLimit(1...3)
                         .font(Theme.Text.body)
                         .onChange(of: activityDetail) { _, new in handleActivityDetailChange_v2(new) }
-                }
+
+                    if !isActivityDetailFocused {
+                        Image(systemName: "pencil")
+                            .font(.subheadline)
+                            .imageScale(.medium)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .opacity(0.8)
+                            .accessibilityHidden(true)
+                    }
+
+                    Spacer(minLength: 0)
+                }                }
                 .cardSurface()
 
                 // Start Time
@@ -459,6 +480,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     }
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes)
+                            .focused($isNotesFocused)
                             .font(Theme.Text.body)
                             .frame(minHeight: 120)
                             .accessibilityLabel("Notes")
@@ -821,6 +843,13 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             .padding(.top, Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isActivityDetailFocused = false
+                isNotesFocused = false
+            }
+        )
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .principal) {
