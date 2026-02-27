@@ -1,6 +1,14 @@
+// CHANGE-ID: 20260227_123000_Profile_DeleteAccount_401Fix
+// SCOPE: Delete Account — fix 401 by using functions domain + session preflight; no other UI/logic changes.
+// SEARCH-TOKEN: 20260227_124200_DeleteAccount_InvalidJWT_Fix
+
 // CHANGE-ID: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
 // SCOPE: UI-only — ProfileView: align signed-in Sign out action styling with signed-out Sign in (soft surface button, same size/typography); no logic/auth changes.
 // SEARCH-TOKEN: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
+
+// CHANGE-ID: 20260227_115200_Profile_DeleteAccount_Action
+// SCOPE: ProfileView — add Delete Account action (signed-in) + confirmation sheet; invokes Edge Function delete_account_v1; no other UI/logic changes.
+// SEARCH-TOKEN: 20260227_115200_Profile_DeleteAccount_Action
 
 // CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
 // SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
@@ -150,6 +158,16 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var avatarSyncErrorMessage: String? = nil
     @State private var showAvatarSyncErrorAlert: Bool = false
     @State private var avatarSyncInFlight: Bool = false
+
+
+    // CHANGE-ID: 20260227_114900_DeleteAccount_UIHook
+    // SCOPE: ProfileView — add Delete Account UI + confirmation sheet (calls Edge Function delete_account_v1); no other UI/logic changes.
+    // SEARCH-TOKEN: 20260227_114900_DeleteAccount_UIHook
+    @State private var showDeleteAccountSheet: Bool = false
+    @State private var deleteAccountConfirmText: String = ""
+    @State private var deleteAccountInFlight: Bool = false
+    @State private var deleteAccountErrorMessage: String? = nil
+    @State private var showDeleteAccountErrorAlert: Bool = false
 
      @State private var showPhotoPicker: Bool = false
      @State private var locationText: String = ""
@@ -758,7 +776,22 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                          }
                          .buttonStyle(.plain)
                          .contentShape(Rectangle())
-                    } else {
+                    
+
+                         // Delete Account (destructive)
+                         Button {
+                             deleteAccountConfirmText = ""
+                             showDeleteAccountSheet = true
+                         } label: {
+                             Text("Delete account")
+                                 .font(Theme.Text.body.weight(.semibold))
+                                 .frame(maxWidth: .infinity)
+                                 .frame(height: 52)
+                                 .foregroundStyle(.red)
+                         }
+                         .buttonStyle(.plain)
+                         .contentShape(Rectangle())
+} else {
                          SignInWithAppleButton(.signIn) { request in
                              auth.configure(request)
                          } onCompletion: { result in
@@ -1197,7 +1230,152 @@ case .failure(let error):
 
 
      // New helper method to compute initials from a string
-     private func initials(from string: String) -> String {
+     
+
+     private var deleteAccountSheet: some View {
+         NavigationStack {
+             Form {
+                 Section {
+                     Text("This permanently deletes your account and all backend data (posts, attachments, follows, comments, and your avatar). This can’t be undone.")
+                         .font(Theme.Text.body)
+                         .foregroundStyle(Theme.Colors.secondaryText)
+                 }
+
+                 Section(header: Text("Type DELETE to confirm").sectionHeader()) {
+                     TextField("DELETE", text: $deleteAccountConfirmText)
+                         .textInputAutocapitalization(.characters)
+                         .autocorrectionDisabled()
+                         .font(Theme.Text.body)
+                 }
+
+                 Section {
+                     Button(role: .destructive) {
+                         Task { await performDeleteAccount() }
+                     } label: {
+                         HStack {
+                             Spacer()
+                             if deleteAccountInFlight {
+                                 ProgressView()
+                                     .padding(.trailing, 6)
+                             }
+                             Text(deleteAccountInFlight ? "Deleting…" : "Delete account")
+                                 .font(Theme.Text.body.weight(.semibold))
+                             Spacer()
+                         }
+                         .frame(height: 52)
+                     }
+                     .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "DELETE")
+                 }
+             }
+             .navigationTitle("Delete account")
+             .navigationBarTitleDisplayMode(.inline)
+             .toolbar {
+                 ToolbarItem(placement: .cancellationAction) {
+                     Button("Cancel") {
+                         showDeleteAccountSheet = false
+                     }
+                 }
+             }
+         }
+     }
+
+
+     private func performDeleteAccount() async {
+         // Guard: must be connected and have a stored Supabase access token.
+         guard BackendEnvironment.shared.isConnected else {
+             deleteAccountErrorMessage = "Delete Account is only available in Connected mode."
+             showDeleteAccountErrorAlert = true
+             return
+         }
+
+         // Preflight: ensure we have a fresh, valid Supabase session/token before invoking the function.
+let sessionOK = await auth.ensureValidSession(reason: "delete-account")
+guard sessionOK else {
+    deleteAccountErrorMessage = "Session is not valid. Please sign out, sign in, then try again."
+    showDeleteAccountErrorAlert = true
+    return
+}
+
+let tokenKey = "supabaseAccessToken_v1"
+         guard let accessTokenRaw = Keychain.get(tokenKey), accessTokenRaw.isEmpty == false else {
+             deleteAccountErrorMessage = "Missing Supabase session token. Please sign out and sign back in, then try again."
+             showDeleteAccountErrorAlert = true
+             return
+         }
+
+         // Defensive: Keychain values can carry stray whitespace; JWT must be header.payload.signature (2 dots).
+         let accessToken = accessTokenRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+         let dotCount = accessToken.filter { $0 == "." }.count
+         guard dotCount == 2 else {
+             deleteAccountErrorMessage = "Invalid Supabase session token format (dotCount=\(dotCount)). Please sign out and sign back in, then try again."
+             showDeleteAccountErrorAlert = true
+             return
+         }
+
+         guard let baseURL = BackendConfig.apiBaseURL, let anonKey = BackendConfig.apiToken else {
+             deleteAccountErrorMessage = "Backend is not configured."
+             showDeleteAccountErrorAlert = true
+             return
+         }
+
+         deleteAccountInFlight = true
+         defer { deleteAccountInFlight = false }
+
+         // Prefer the dedicated functions domain to avoid gateway/header quirks:
+// https://<project-ref>.functions.supabase.co/<function>
+let functionURL: URL = {
+    if let host = baseURL.host,
+       host.hasSuffix(".supabase.co") {
+        let projectRef = host.replacingOccurrences(of: ".supabase.co", with: "")
+        if let url = URL(string: "https://\(projectRef).functions.supabase.co/delete_account_v1") {
+            return url
+        }
+    }
+    // Fallback to the REST-style endpoint if we cannot derive the project ref.
+    return baseURL
+        .appendingPathComponent("functions")
+        .appendingPathComponent("v1")
+        .appendingPathComponent("delete_account_v1")
+}()
+
+         var request = URLRequest(url: functionURL)
+         request.httpMethod = "POST"
+         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+         request.setValue(anonKey, forHTTPHeaderField: "apikey")
+         request.setValue(anonKey, forHTTPHeaderField: "x-api-key")
+         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+         do {
+             let (data, response) = try await URLSession.shared.data(for: request)
+             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+             if status != 200 {
+                 let body = String(data: data, encoding: .utf8) ?? ""
+                 deleteAccountErrorMessage = "Server returned \(status). \(body)"
+                 showDeleteAccountErrorAlert = true
+                 return
+             }
+
+             // Expect: { "success": true }
+             if let obj = try? JSONSerialization.jsonObject(with: data, options: []),
+                let dict = obj as? [String: Any],
+                let ok = dict["success"] as? Bool,
+                ok == true {
+                 showDeleteAccountSheet = false
+                 auth.signOut()
+                 return
+             }
+
+             let body = String(data: data, encoding: .utf8) ?? ""
+             deleteAccountErrorMessage = "Unexpected response: \(body)"
+             showDeleteAccountErrorAlert = true
+         } catch {
+             deleteAccountErrorMessage = String(describing: error)
+             showDeleteAccountErrorAlert = true
+         }
+     }
+
+private func initials(from string: String) -> String {
          let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
          if trimmed.isEmpty {
              return "Y"
@@ -1277,6 +1455,16 @@ case .failure(let error):
              } message: {
                  Text(avatarSyncErrorMessage ?? "Couldn’t update your avatar. Please try again.")
              }
+
+             .alert("Delete account failed", isPresented: $showDeleteAccountErrorAlert) {
+                 Button("OK", role: .cancel) {}
+             } message: {
+                 Text(deleteAccountErrorMessage ?? "Couldn’t delete your account. Please try again.")
+             }
+             .sheet(isPresented: $showDeleteAccountSheet) {
+                 deleteAccountSheet
+             }
+
              .sheet(isPresented: $showInstrumentManager) {
                  InstrumentListView()
                      .environment(\.managedObjectContext, ctx)
