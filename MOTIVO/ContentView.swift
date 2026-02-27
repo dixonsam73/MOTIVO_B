@@ -3504,7 +3504,6 @@ struct RemoteAttachmentPreview: View {
         case .audio: return "waveform"
         case .video: return "video"
         case .image: return "photo"
-        default:     return "doc"
         }
     }
 }
