@@ -1,5 +1,6 @@
-// CHANGE-ID: 20260226_153900_ContentView_AutoRefreshOnReturn_SheetDismiss_1c7e
-// SCOPE: Auto refresh notification bundle when returning to feed; reuse existing pull-to-refresh bundle; no UI/layout changes.
+// CHANGE-ID: 20260227_152600_ContentView_AwaitUnreadRefresh_5f3b
+// SCOPE: Await unread comments refresh in all refresh bundles to clear + badge immediately; no UI/layout changes.
+// SEARCH-TOKEN: 20260227_152600_ContentView_AwaitUnreadRefresh_5f3b
 
 // CHANGE-ID: 20260224_224800_DeleteSwipeActions_NoOptimisticRemoval_6f4c
 // SCOPE: Prevent optimistic List onDelete removal by replacing onDelete with per-row swipeActions delete; preserves fail-closed backend delete gate; no UI/layout changes.
@@ -934,7 +935,7 @@ Spacer()
             .task {
                 setUpDebounce()
                 await sharedWithYouStore.refreshUnreadShares()
-                Task { await unreadCommentsStore.refresh(force: true) }
+                await unreadCommentsStore.refresh(force: true)
                 evaluateAppSetUpGate()
             }
             .onChange(of: userID) { _, _ in
@@ -955,7 +956,7 @@ Spacer()
                 Task { @MainActor in
                     await followStore.refreshFromBackendIfPossible()
                     await sharedWithYouStore.refreshUnreadShares()
-                    Task { await unreadCommentsStore.refresh(force: true) }
+                    await unreadCommentsStore.refresh(force: true)
                 }
             }
             .appBackground()
@@ -1046,7 +1047,7 @@ Spacer()
         }
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
-        Task { await unreadCommentsStore.refresh(force: true) }
+        await unreadCommentsStore.refresh(force: true)
         await MainActor.run {
             refreshStats()
         }
@@ -1072,7 +1073,7 @@ Spacer()
 
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
-        Task { await unreadCommentsStore.refresh(force: true) }
+        await unreadCommentsStore.refresh(force: true)
     }
 
 
