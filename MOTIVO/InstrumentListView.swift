@@ -5,6 +5,9 @@
 //  Created by Samuel Dixon on 09/09/2025.
 //
 
+// CHANGE-ID: 20260228_223800_InstrumentList_KeyboardDismiss
+// SCOPE: Dismiss Add Instrument keyboard after Add tapped (no other UI/logic changes)
+
 // CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Instruments
 // SCOPE: Correctness/hygiene — Instruments Manager renders empty when signed out; no other UI/logic changes
 
@@ -26,6 +29,7 @@ struct InstrumentListView: View {
     private var profiles: FetchedResults<Profile>
 
     @State private var newInstrument: String = ""
+    @FocusState private var isAddInstrumentFocused: Bool
 
     private var isSignedIn: Bool {
         PersistenceController.shared.currentUserID != nil
@@ -40,6 +44,7 @@ struct InstrumentListView: View {
                             .font(Theme.Text.body)
                             .disabled(!isSignedIn)
                             .textInputAutocapitalization(.words)
+                            .focused($isAddInstrumentFocused)
                         Button(action: { add() }) {
                             Text("Add")
                                 .font(Theme.Text.body)
@@ -90,7 +95,7 @@ struct InstrumentListView: View {
 
         // Avoid duplicates (case-insensitive)
         let existing = instrumentsForProfile().compactMap { $0.name?.lowercased() }
-        if existing.contains(name.lowercased()) { newInstrument = ""; return }
+        if existing.contains(name.lowercased()) { newInstrument = ""; isAddInstrumentFocused = false; return }
 
         let inst = Instrument(context: moc)
         inst.id = UUID()
@@ -114,6 +119,7 @@ struct InstrumentListView: View {
 
         try? moc.save()
         newInstrument = ""
+        isAddInstrumentFocused = false
     }
 
     private func delete(at offsets: IndexSet) {
@@ -151,4 +157,3 @@ struct InstrumentListView: View {
         return p
     }
 }
-

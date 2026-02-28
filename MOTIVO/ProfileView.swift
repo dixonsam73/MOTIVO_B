@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260228_230200_Profile_NameFields_FocusDismiss
+// SCOPE: UI-only — dismiss keyboard for Name/Location/Account ID fields on Return and on tap elsewhere; no other UI/logic changes.
+// SEARCH-TOKEN: 20260228_230200_Profile_NameFields_FocusDismiss
+
 // CHANGE-ID: 20260227_122600_PV_AccountCards_SplitSections_CompactDeleteFix
 // SCOPE: UI-only — ProfileView: split Sign out and Delete account into separate Sections; make Delete card compact; no logic/strings changes.
 // SEARCH-TOKEN: 20260227_122600_PV_AccountCards_SplitSections_CompactDeleteFix
@@ -152,6 +156,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @AppStorage("appSettings_showWelcomeSection") private var showWelcomeSection: Bool = true
 
 @FocusState private var isNameFocused: Bool
+@FocusState private var isLocationFocused: Bool
 @FocusState private var isAccountIDFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
@@ -242,6 +247,11 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                              accountSection
                      }
                         }
+                        .simultaneousGesture(TapGesture().onEnded {
+                            isNameFocused = false
+                            isLocationFocused = false
+                            isAccountIDFocused = false
+                        })
                     } else {
                         signedOutGateView
                     }
@@ -403,6 +413,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      .textInputAutocapitalization(.words)
                      .disableAutocorrection(true)
                      .focused($isNameFocused)
+                     .onSubmit { isNameFocused = false }
                      .scaleEffect(isNameFocused ? 0.995 : 1)
                      .overlay(alignment: .bottomLeading) {
                          Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
@@ -413,6 +424,8 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
              TextField("Location (optional)", text: $locationText)
                  .textInputAutocapitalization(.words)
                  .disableAutocorrection(true)
+                 .focused($isLocationFocused)
+                 .onSubmit { isLocationFocused = false }
 
              TextField("Account ID : How people find you.", text: $accountIDText)
                  .textInputAutocapitalization(.never)
@@ -441,6 +454,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      // Commit-only: on Return/Done, sync once.
                      lastAccountIDSubmitAt = Date()
                      Task { await syncDirectoryFromCurrentState() }
+                     isAccountIDFocused = false
                  }
                  .font(Theme.Text.meta)
                  .foregroundStyle(Color.primary)

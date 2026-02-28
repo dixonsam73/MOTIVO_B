@@ -12,6 +12,7 @@
 
 
 // CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Activities
+// CHANGE-ID: 20260228_225000_ActivityList_KeyboardDismiss
 // SCOPE: Correctness/hygiene — Activities Manager renders empty when signed out; list is owner-scoped when signed in
 
 import SwiftUI
@@ -31,7 +32,9 @@ struct ActivityListView: View {
 
     @State private var newActivity: String = ""
 
-    // Primary Activity (AppStorage)
+    
+    @FocusState private var isAddActivityFocused: Bool
+// Primary Activity (AppStorage)
     // Format: "core:<raw>" or "custom:<name>"
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
     // One-time notice flag to be consumed by ProfileView
@@ -61,6 +64,7 @@ struct ActivityListView: View {
                         TextField("e.g., Sight-reading", text: $newActivity)
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
+                            .focused($isAddActivityFocused)
                         Button(action: { if isSignedIn { add() } }) {
                             Text("Add")
                                 .font(Theme.Text.body)
@@ -113,6 +117,7 @@ struct ActivityListView: View {
             _ = try PersistenceController.shared.fetchOrCreateUserActivity(named: name, mapTo: 0, in: moc)
             try moc.save()
             newActivity = ""
+            isAddActivityFocused = false
         } catch {
             print("Add activity error: \(error)")
         }
