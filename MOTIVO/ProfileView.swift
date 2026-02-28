@@ -1,4 +1,8 @@
-// CHANGE-ID: 20260228_230200_Profile_NameFields_FocusDismiss
+// CHANGE-ID: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
+// SCOPE: UI-only — clear Name/Location/Account ID FocusState when tapping other cards/scrolling in Form; no other UI/logic changes.
+// SEARCH-TOKEN: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
+
+// CHANGE-ID: 20260228_231800_Profile_NameFields_FocusDismiss_Fix2
 // SCOPE: UI-only — dismiss keyboard for Name/Location/Account ID fields on Return and on tap elsewhere; no other UI/logic changes.
 // SEARCH-TOKEN: 20260228_230200_Profile_NameFields_FocusDismiss
 
@@ -160,6 +164,13 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 @FocusState private var isAccountIDFocused: Bool
  
      @State private var showInstrumentManager: Bool = false
+
+    private func clearNameFieldFocus() {
+        isNameFocused = false
+        isLocationFocused = false
+        isAccountIDFocused = false
+    }
+
      @State private var showActivityManager: Bool = false
      @State private var showTasksManager: Bool = false
      @State private var showAppSettings: Bool = false
@@ -247,10 +258,11 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                              accountSection
                      }
                         }
-                        .simultaneousGesture(TapGesture().onEnded {
-                            isNameFocused = false
-                            isLocationFocused = false
-                            isAccountIDFocused = false
+                        .background(KeyboardDismissFormTapCatcher(onDismiss: {
+                            clearNameFieldFocus()
+                        }))
+                        .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
+                            clearNameFieldFocus()
                         })
                     } else {
                         signedOutGateView
@@ -270,6 +282,92 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      }
  
      
+
+#if canImport(UIKit)
+private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
+    let onDismiss: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onDismiss: onDismiss)
+    }
+
+    func makeUIView(context: Context) -> UIView {
+        let v = UIView(frame: .zero)
+        v.isUserInteractionEnabled = true
+        // Installation onto the Form/List backing view happens in updateUIView once we're in the hierarchy.
+        return v
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        context.coordinator.onDismiss = onDismiss
+        context.coordinator.installIfNeeded(from: uiView)
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var onDismiss: (() -> Void)?
+        private weak var installedOnView: UIView?
+        private weak var gesture: UITapGestureRecognizer?
+
+        init(onDismiss: (() -> Void)?) {
+            self.onDismiss = onDismiss
+        }
+
+        func installIfNeeded(from host: UIView) {
+            // Find the nearest scroll/table backing view (Form/List is typically a UITableView).
+            let target = nearestScrollOrTable(from: host)
+            guard let target else { return }
+
+            if installedOnView === target { return }
+
+            // Remove from old target if needed.
+            if let old = installedOnView, let g = gesture {
+                old.removeGestureRecognizer(g)
+            }
+
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+            tap.cancelsTouchesInView = false
+            tap.delegate = self
+
+            target.addGestureRecognizer(tap)
+            installedOnView = target
+            gesture = tap
+        }
+
+        @objc private func handleTap() {
+            onDismiss?()
+            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
+        }
+
+        // Allow taps everywhere except taps that begin inside a text input.
+        func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+            guard let v = touch.view else { return true }
+            if isTextInputOrInsideTextInput(v) { return false }
+            return true
+        }
+
+        private func isTextInputOrInsideTextInput(_ view: UIView) -> Bool {
+            var current: UIView? = view
+            while let v = current {
+                if v is UITextField || v is UITextView { return true }
+                current = v.superview
+            }
+            return false
+        }
+
+        private func nearestScrollOrTable(from view: UIView) -> UIView? {
+            var current: UIView? = view
+            while let v = current {
+                if v is UITableView { return v }
+                if v is UIScrollView { return v }
+                current = v.superview
+            }
+            return nil
+        }
+    }
+}
+#endif
+
     // MARK: - Signed-out gate
 
     private var signedOutGateView: some View {
