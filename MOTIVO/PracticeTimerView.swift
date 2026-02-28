@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260228_223200_ptv_tasks_inst_activity_instrument_sync_fix
+// SCOPE: Fix instrument change in Session sheet to update instrument state before reloading task defaults; no UI/layout changes
+
 // CHANGE-ID: 20260225_092000_ptv_audio_saveas_titles
 // SCOPE: Naming-only — PTV audio trim Save-as-New retains source title and appends _N suffix (no UI/layout changes).
 
@@ -253,77 +256,116 @@ struct PracticeTimerView: View {
         return "core:0"
     }
 
-    /// Per-activity default tasks loader (core + custom).
-    /// Uses keys:
-    ///   tasks:  "practiceTasks_v1::<ownerScope>::<activityRef>"
-    ///   toggle: "practiceTasks_autofill_enabled::<ownerScope>::<activityRef>"
-    ///
-    /// Also migrates old practice-only lists from "practiceTasks_v1::<ownerScope>" on first use.
-    private func loadPracticeDefaultsIfNeeded() {
-        let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
-        let activityRef = currentActivityRefForTasks()
-        let defaults = UserDefaults.standard
+    /// Per-activity default tasks loader (core + custom), with optional Instrument×Activity overrides.
+/// Uses keys:
+///   activity tasks:  "practiceTasks_v1::<ownerScope>::<activityRef>"
+///   activity toggle: "practiceTasks_autofill_enabled::<ownerScope>::<activityRef>"
+///   inst+activity tasks:  "practiceTasks_v1::<ownerScope>::<activityRef>::inst:<instrumentUUID>"
+///   inst+activity toggle: "practiceTasks_autofill_enabled::<ownerScope>::<activityRef>::inst:<instrumentUUID>"
+///
+/// Also migrates old practice-only lists from "practiceTasks_v1::<ownerScope>" on first use.
+private func loadPracticeDefaultsIfNeeded() {
+    let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
+    let activityRef = currentActivityRefForTasks()
+    let defaults = UserDefaults.standard
 
-        // Decide whether we should block due to an explicit clear.
-        // If the user cleared for this same activity, don't auto-refill.
-        let clearedForSameActivity: Bool
-        if let lastRef = lastDefaultsActivityRef {
-            clearedForSameActivity = userClearedTasksForCurrentContext && (lastRef == activityRef)
+    // Instrument identity (stable when signed in). If absent, we stay on activity-only presets.
+    let instrumentUUID: String? = instrument?.id?.uuidString
+    let contextKey: String = {
+        if let u = instrumentUUID {
+            return "\(activityRef)::inst:\(u)"
         } else {
-            clearedForSameActivity = userClearedTasksForCurrentContext
+            return activityRef
         }
+    }()
 
-        // Only proceed if we currently have no lines AND we're not blocked by a clear
-        guard taskLines.isEmpty, !clearedForSameActivity else { return }
+    // Decide whether we should block due to an explicit clear.
+    // If the user cleared for this same context, don't auto-refill.
+    let clearedForSameContext: Bool
+    if let lastRef = lastDefaultsActivityRef {
+        clearedForSameContext = userClearedTasksForCurrentContext && (lastRef == contextKey)
+    } else {
+        clearedForSameContext = userClearedTasksForCurrentContext
+    }
 
-        let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
-        let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
+    // Only proceed if we currently have no lines AND we're not blocked by a clear
+    guard taskLines.isEmpty, !clearedForSameContext else { return }
 
-        // Default ON when no explicit preference exists.
-        let toggleValue: Bool
-        if defaults.object(forKey: toggleKey) == nil {
-            toggleValue = true
-        } else {
-            toggleValue = defaults.bool(forKey: toggleKey)
+    // Helper to apply a loaded template and update tracking flags
+    func applyTemplate(_ strings: [String]) {
+        let mapped = strings.map { TaskLine(text: $0, isDone: false) }
+        self.taskLines = mapped
+        autoTaskTexts.removeAll()
+        for line in mapped {
+            autoTaskTexts[line.id] = line.text
         }
-        guard toggleValue else { return }
+        lastDefaultsActivityRef = contextKey
+        userClearedTasksForCurrentContext = false
+    }
 
-        // Helper to apply a loaded template and update tracking flags
-        func applyTemplate(_ strings: [String]) {
-            let mapped = strings.map { TaskLine(text: $0, isDone: false) }
-            self.taskLines = mapped
-            autoTaskTexts.removeAll()
-            for line in mapped {
-                autoTaskTexts[line.id] = line.text
-            }
-            lastDefaultsActivityRef = activityRef
-            userClearedTasksForCurrentContext = false
-        }
+    // 0) Preferred path (when instrument is selected): Instrument×Activity template.
+    if let inst = instrumentUUID {
+        let instTasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)::inst:\(inst)"
+        let instToggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)::inst:\(inst)"
 
-        // 1) Preferred path: per-activity template already exists.
-        if let arr = defaults.array(forKey: tasksKey) as? [String] {
-            applyTemplate(arr)
+        // If explicitly OFF for this instrument+activity, do not fall back.
+        if defaults.object(forKey: instToggleKey) != nil, defaults.bool(forKey: instToggleKey) == false {
             return
         }
 
-        // 2) Backwards-compat: if we're on Practice, migrate from legacy practice-only key.
-        if activity == .practice {
-            let legacyKey = "practiceTasks_v1::\(ownerScope)"
-            if let legacyArr = defaults.array(forKey: legacyKey) as? [String] {
-                applyTemplate(legacyArr)
-                // Persist into the per-activity slot for next time.
-                defaults.set(legacyArr, forKey: tasksKey)
-            } else {
-                // Very old global data path (no ownerScope).
-                if let arr = defaults.array(forKey: "practiceTasks_v1") as? [String] {
-                    applyTemplate(arr)
-                    defaults.set(arr, forKey: tasksKey)
-                }
+        // Default ON when no explicit preference exists.
+        let instToggleValue: Bool
+        if defaults.object(forKey: instToggleKey) == nil {
+            instToggleValue = true
+        } else {
+            instToggleValue = defaults.bool(forKey: instToggleKey)
+        }
+
+        if instToggleValue, let arr = defaults.array(forKey: instTasksKey) as? [String] {
+            applyTemplate(arr)
+            return
+        }
+        // If no instrument-specific list exists (or it's empty/missing), fall through to activity-only.
+    }
+
+    // 1) Activity-only path (existing behavior).
+    let tasksKey = "practiceTasks_v1::\(ownerScope)::\(activityRef)"
+    let toggleKey = "practiceTasks_autofill_enabled::\(ownerScope)::\(activityRef)"
+
+    // Default ON when no explicit preference exists.
+    let toggleValue: Bool
+    if defaults.object(forKey: toggleKey) == nil {
+        toggleValue = true
+    } else {
+        toggleValue = defaults.bool(forKey: toggleKey)
+    }
+    guard toggleValue else { return }
+
+    // 1a) Preferred: per-activity template already exists.
+    if let arr = defaults.array(forKey: tasksKey) as? [String] {
+        applyTemplate(arr)
+        return
+    }
+
+    // 2) Backwards-compat: if we're on Practice, migrate from legacy practice-only key.
+    if activity == .practice {
+        let legacyKey = "practiceTasks_v1::\(ownerScope)"
+        if let legacyArr = defaults.array(forKey: legacyKey) as? [String] {
+            applyTemplate(legacyArr)
+            // Persist into the per-activity slot for next time.
+            defaults.set(legacyArr, forKey: tasksKey)
+        } else {
+            // Very old global data path (no ownerScope).
+            if let arr = defaults.array(forKey: "practiceTasks_v1") as? [String] {
+                applyTemplate(arr)
+                defaults.set(arr, forKey: tasksKey)
             }
         }
     }
+}
 
-    // END TASKS DEFAULTS PATCH
+
+// END TASKS DEFAULTS PATCH
     private func composeNotesString() -> String? {
         // Keep only non-empty lines (trimmed)
         let nonEmpty = taskLines
@@ -811,6 +853,30 @@ struct PracticeTimerView: View {
             // Persist snapshot so the pad survives suspends/resumes
             persistTasksSnapshot()
         }
+        .onChange(of: instrumentIndex) { _, _ in
+            // Switching instruments should swap the auto-fill template for the new Instrument×Activity context.
+            applyInstrumentIndex()
+            taskLines.removeAll()
+            autoTaskTexts.removeAll()
+            loadPracticeDefaultsIfNeeded()
+            persistTasksSnapshot()
+        }
+        .onChange(of: activity) { _, newValue in
+            // Keep the tasks template in sync when the core activity changes from the Session sheet.
+            let desired = "core:\(newValue.rawValue)"
+            let trimmed = activityChoice.trimmingCharacters(in: .whitespacesAndNewlines)
+            if (trimmed.isEmpty || trimmed.hasPrefix("core:")) && trimmed != desired {
+                // Let the activityChoice onChange handler perform the refresh to avoid double-work.
+                activityChoice = desired
+                return
+            }
+
+            taskLines.removeAll()
+            autoTaskTexts.removeAll()
+            loadPracticeDefaultsIfNeeded()
+            persistTasksSnapshot()
+        }
+
         // Info sheets for recording help
         .sheet(isPresented: $showAudioHelp) {
             audioHelpSheet

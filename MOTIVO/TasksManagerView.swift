@@ -1,5 +1,11 @@
 import SwiftUI
 import CoreData
+#if canImport(UIKit)
+import UIKit
+#endif
+
+// CHANGE-ID: 20260228_214215_TasksManager_AddButtonKeyboardDismiss
+// SCOPE: Dismiss keyboard on return and Add button in Add Task; no other UI/logic changes
 
 /// TasksManagerView
 ///
@@ -29,6 +35,17 @@ struct TasksManagerView: View {
     @State private var newItemText: String = ""
     @State private var autofillEnabled: Bool = true
     @State private var userActivities: [UserActivity] = []
+
+    @FetchRequest(
+        entity: Instrument.entity(),
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)]
+    )
+    private var instruments: FetchedResults<Instrument>
+
+    @FetchRequest(entity: Profile.entity(), sortDescriptors: [])
+    private var profiles: FetchedResults<Profile>
+
+    @State private var selectedInstrumentID: UUID? = nil
 
     // MARK: - Init
 
@@ -61,8 +78,8 @@ struct TasksManagerView: View {
     }
 
     /// Per-activity keys (v7.12+)
-    private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef }
-    private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef }
+    private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
+    private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
 
     /// Legacy keys (v7.9–v7.11, practice-only)
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
@@ -116,6 +133,34 @@ struct TasksManagerView: View {
         return SessionActivityType.practice.label
     }
 
+
+    // MARK: - Instrument helpers
+
+    private var isSignedIn: Bool {
+        PersistenceController.shared.currentUserID != nil
+    }
+
+    private var instrumentsForProfile: [Instrument] {
+        guard isSignedIn else { return [] }
+        guard let p = profiles.first else { return [] }
+        return instruments.filter { $0.profile == p }
+    }
+
+    private var shouldShowInstrumentSelector: Bool {
+        instrumentsForProfile.count > 1
+    }
+
+    private var currentInstrumentKeySuffix: String {
+        guard shouldShowInstrumentSelector else { return "" }
+        guard let id = selectedInstrumentID else { return "" }
+        return "::inst:" + id.uuidString
+    }
+
+    private func instrumentDisplayName(for id: UUID?) -> String {
+        guard let id else { return "" }
+        return instrumentsForProfile.first(where: { $0.id == id })?.name ?? ""
+    }
+
     // MARK: - Body
 
     var body: some View {
@@ -149,6 +194,37 @@ struct TasksManagerView: View {
                     }
                 }
 
+
+                // Instrument selector (only when user has 2+ instruments)
+                if shouldShowInstrumentSelector {
+                    Section(header: Text("Instrument").sectionHeader()) {
+                        HStack {
+                            Menu {
+                                ForEach(instrumentsForProfile, id: \.objectID) { inst in
+                                    Button {
+                                        selectedInstrumentID = inst.id
+                                    } label: {
+                                        Label(
+                                            inst.name ?? "",
+                                            systemImage: (inst.id == selectedInstrumentID) ? "checkmark" : "circle"
+                                        )
+                                    }
+                                }
+                            } label: {
+                                HStack(spacing: 6) {
+                                    Text(instrumentDisplayName(for: selectedInstrumentID))
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(Theme.Colors.accent)
+
+                                    Image(systemName: "chevron.up.chevron.down")
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Auto-fill toggle
                 Section(header: Text("Auto-fill for this activity").sectionHeader()) {
                     Toggle(isOn: $autofillEnabled) {
@@ -171,6 +247,10 @@ struct TasksManagerView: View {
                         TextField("Add task", text: $newItemText)
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.sentences)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                hideKeyboard()
+                            }
 
                         if !newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Button(action: addItem) {
@@ -218,10 +298,18 @@ struct TasksManagerView: View {
                 // Normalize initial ref and load data
                 selectedActivityRef = normalizedActivityRef(activityRef)
                 loadUserActivities()
+                // Seed instrument selection only when 2+ instruments exist (keeps UI/behavior identical for 0–1 instrument).
+                if shouldShowInstrumentSelector, selectedInstrumentID == nil {
+                    selectedInstrumentID = instrumentsForProfile.first?.id
+                }
                 loadAll()
             }
             .onChange(of: selectedActivityRef) { _ in
                 // When user switches activity, reload its defaults
+                loadAll()
+            }
+            .onChange(of: selectedInstrumentID) { _ in
+                // When user switches instrument, reload its defaults (only relevant when selector is visible)
                 loadAll()
             }
             .appBackground()
@@ -236,7 +324,22 @@ struct TasksManagerView: View {
         items.append(trimmed)
         newItemText = ""
         saveItems()
+    
+
+        // Dismiss keyboard after user commits via Add.
+        #if canImport(UIKit)
+        hideKeyboard()
+        #endif
+}
+
+
+    #if canImport(UIKit)
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+    #else
+    private func hideKeyboard() { }
+    #endif
 
     private func deleteItem(at index: Int) {
         guard items.indices.contains(index) else { return }
@@ -257,7 +360,8 @@ struct TasksManagerView: View {
         // Tasks — prefer per-activity key, fall back to legacy practice-only key for migration.
         if let arr = defaults.array(forKey: tasksKey) as? [String] {
             items = arr
-        } else if currentNormalizedActivityRef == "core:0",
+        } else if !shouldShowInstrumentSelector,
+                  currentNormalizedActivityRef == "core:0",
                   let legacyArr = defaults.array(forKey: legacyTasksKey) as? [String] {
             items = legacyArr
             // Migrate to the new per-activity slot for the current activity.
@@ -269,7 +373,8 @@ struct TasksManagerView: View {
         // Toggle — prefer per-activity key, fall back to legacy key, default ON if missing.
         if defaults.object(forKey: toggleKey) != nil {
             autofillEnabled = defaults.bool(forKey: toggleKey)
-        } else if currentNormalizedActivityRef == "core:0",
+        } else if !shouldShowInstrumentSelector,
+                  currentNormalizedActivityRef == "core:0",
                   defaults.object(forKey: legacyToggleKey) != nil {
             autofillEnabled = defaults.bool(forKey: legacyToggleKey)
             saveToggle()
