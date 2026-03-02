@@ -37,6 +37,10 @@
 // SCOPE: Phase 15 Step 3A — add owner-only PATCH helper to update/clear account_directory.avatar_key and merge into live identity caches.
 // SEARCH-TOKEN: 20260210_182200_Phase15_Step3A_AvatarKeyWrite
 
+// CHANGE-ID: 20260302_093339_ProfileHydrateDirectory_3b1f
+// SCOPE: Profile privacy hydration — fetch account_directory self row on sign-in to hydrate local ProfileStore discoveryMode/account_id (fresh install consistency). No UI changes.
+// SEARCH-TOKEN: 20260302_093339_ProfileHydrateDirectory_3b1f
+
 import Foundation
 
 public struct DirectoryAccount: Codable, Identifiable, Hashable {
@@ -56,6 +60,18 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
         case location = "location"
         case avatarKey = "avatar_key"
         case instruments = "instruments"
+    }
+}
+
+public struct SelfDirectoryRow: Decodable, Hashable {
+    public let accountID: String?
+    public let lookupEnabled: Bool
+    public let followRequestsEnabled: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case accountID = "account_id"
+        case lookupEnabled = "lookup_enabled"
+        case followRequestsEnabled = "follow_requests_enabled"
     }
 }
 
@@ -100,6 +116,40 @@ public final class AccountDirectoryService {
     }
 
     private let cache = DirectoryAccountCache()
+
+    /// Fetch the caller's own account_directory row via RLS (owner-only).
+    /// Used to hydrate ProfileStore defaults on fresh installs (e.g. lookup_enabled).
+    func fetchSelfRow(userID: String) async -> Result<SelfDirectoryRow?, Error> {
+        let trimmed = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .success(nil) }
+
+        let query: [URLQueryItem] = [
+            URLQueryItem(name: "select", value: "account_id,lookup_enabled,follow_requests_enabled"),
+            URLQueryItem(name: "user_id", value: "eq.\(trimmed)"),
+            URLQueryItem(name: "limit", value: "1")
+        ]
+
+        let result = await NetworkManager.shared.request(
+            path: "rest/v1/account_directory",
+            method: "GET",
+            query: query,
+            jsonBody: nil,
+            headers: [:]
+        )
+
+        switch result {
+        case .failure(let error):
+            return .failure(error)
+        case .success(let data):
+            do {
+                let rows = try JSONDecoder().decode([SelfDirectoryRow].self, from: data)
+                return .success(rows.first)
+            } catch {
+                return .failure(error)
+            }
+        }
+    }
+
 
     /// Resolve directory identity for a set of backend user IDs via SECURITY DEFINER RPC.
     /// - Returns: Map keyed by user_id (string UUID) for fast lookup in feed/profile-peek.

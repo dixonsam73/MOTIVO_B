@@ -31,6 +31,10 @@
 // SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
 
 
+// CHANGE-ID: 20260302_093339_ProfileHydrateDirectory_3b1f
+// SCOPE: Profile privacy hydration — on sign-in/session restore, fetch account_directory self row and hydrate ProfileStore discoveryMode/account_id to match backend (fresh install consistency). No UI changes.
+// SEARCH-TOKEN: 20260302_093339_ProfileHydrateDirectory_3b1f
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -95,6 +99,11 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var displayName: String?
     @Published private(set) var backendUserID: String?
     @Published private(set) var isSigningIn: Bool = false
+
+    // Profile privacy hydration (fresh install consistency)
+    private var directoryHydrationTask: Task<Void, Never>?
+    private var lastHydratedDirectoryUserID: String?
+
 
 
     // CHANGE-ID: 20260129_221500_14_3H_B4_fixTokenGuard
@@ -183,6 +192,8 @@ final class AuthManager: NSObject, ObservableObject {
             return await self.ensureValidSession(reason: "network-auth-challenge")
         }
 
+        scheduleDirectoryHydrationIfNeeded(reason: "init")
+
 }
 
         // Existing users (signed in before Step 5): perform a one-time handshake
@@ -193,6 +204,51 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     var isSignedIn: Bool { currentUserID != nil }
+
+
+    // MARK: - Directory hydration (ProfileStore defaults)
+
+    /// Hydrate local ProfileStore values (discovery mode + account handle) from the backend account_directory row.
+    /// This keeps Profile privacy UI consistent on fresh installs / new devices.
+    private func scheduleDirectoryHydrationIfNeeded(reason: String) {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        guard lastHydratedDirectoryUserID != bid else { return }
+
+        directoryHydrationTask?.cancel()
+        directoryHydrationTask = Task { [weak self] in
+            guard let self else { return }
+            await self.hydrateDirectoryStateFromBackend(userID: bid, reason: reason)
+        }
+    }
+
+    private func hydrateDirectoryStateFromBackend(userID: String, reason: String) async {
+        // Avoid spamming on repeated refreshes.
+        guard lastHydratedDirectoryUserID != userID else { return }
+
+        let result = await AccountDirectoryService.shared.fetchSelfRow(userID: userID)
+        switch result {
+        case .failure(let error):
+            // Offline/not-configured is not fatal — leave local defaults as-is.
+            NSLog("[Auth] directory hydration skipped user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
+        case .success(let row):
+            guard let row else {
+                NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
+                return
+            }
+
+            // Backend is canonical for privacy defaults. Map lookup_enabled -> DiscoveryMode rawValue.
+            let discoveryRaw = row.lookupEnabled ? 1 : 0
+            ProfileStore.setDiscoveryModeRaw(discoveryRaw, for: userID)
+
+            // Store handle/account_id (lowercased); empty clears.
+            ProfileStore.setAccountID(row.accountID ?? "", for: userID)
+
+            lastHydratedDirectoryUserID = userID
+            NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
+                  userID, reason, row.lookupEnabled ? "1" : "0", row.accountID ?? "nil")
+        }
+    }
+
 
     // MARK: - Session liveness
 
@@ -317,6 +373,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
             await MainActor.run {
                 self.backendUserID = supaUserID
+                self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
             }
 
             NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
@@ -427,6 +484,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             UserDefaults.standard.set(backendID, forKey: Self.backendUserDefaultsKey)
             await MainActor.run {
                 self.backendUserID = backendID
+                self.scheduleDirectoryHydrationIfNeeded(reason: "ensureBackendIdentityIfNeeded")
             }
         }
     }
@@ -472,6 +530,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
             await MainActor.run {
                 self.backendUserID = supaUserID
+                self.scheduleDirectoryHydrationIfNeeded(reason: "supabaseSignIn")
             }
 
             NetworkManager.shared.setBearerToken(accessToken)
