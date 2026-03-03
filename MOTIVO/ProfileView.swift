@@ -1,7 +1,3 @@
-// CHANGE-ID: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
-// SCOPE: Delete Account v2 Stage 1 — add LocalFactoryReset scaffold + hook from ProfileView; gate foreground liveness; no wipe yet.
-// SEARCH-TOKEN: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
-
 // CHANGE-ID: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
 // SCOPE: UI-only — clear Name/Location/Account ID FocusState when tapping other cards/scrolling in Form; no other UI/logic changes.
 // SEARCH-TOKEN: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
@@ -1538,6 +1534,12 @@ private func initials(from string: String) -> String {
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
                 // before we clear UI state (location is stored per-user in ProfileStore).
                 if newValue == nil {
+                // Delete Account v2: during a factory reset, never persist per-user location back to ProfileStore.
+                if LocalFactoryReset.isInProgress {
+                    clearUserPresentedStateForSignOut()
+                    return
+                }
+
                     if let oldID = oldValue {
                         ProfileStore.setLocation(locationText, for: oldID)
                     }

@@ -49,6 +49,10 @@
 // SCOPE: Phase 14.2.2 — Add 401/403 auth-challenge hook and single retry to avoid zombie signed-in state; no behavioural changes beyond auth correctness.
 // SEARCH-TOKEN: 20260127_130352_NetworkAuthChallenge_RefreshRetry
 
+// CHANGE-ID: 20260303_105500_DeleteAccountV2_Stage5_RemoteAvatarCacheWipe
+// SCOPE: Delete Account v2 Stage 5 — add resetForFactoryReset hooks to RemoteAvatarSignedURLCache and RemoteAvatarImageCache so LocalFactoryReset can clear remote avatar caches. No other behavior changes.
+// SEARCH-TOKEN: 20260303_105500_DeleteAccountV2Stage5_RemoteAvatarCacheWipe
+
 // CHANGE-ID: 20260129_140900_14_3H_B6c_BearerReason
 // SCOPE: Phase 14.3H — Add clearBearerToken(reason:) overload + reason-tagged log; keep legacy clearBearerToken() shim; no networking behavior change.
 // SEARCH-TOKEN: 20260129_140900_14_3H_B6c_BearerReason
@@ -613,6 +617,11 @@ actor RemoteAvatarSignedURLCache {
     func invalidate(_ key: String) {
         map.removeValue(forKey: key)
     }
+
+    func resetForFactoryReset() {
+        map.removeAll()
+    }
+
 }
 
 #if canImport(UIKit)
@@ -634,6 +643,11 @@ enum RemoteAvatarImageCache {
     static func invalidate(_ key: String) {
         imageCache.removeObject(forKey: key as NSString)
     }
+
+    static func resetForFactoryReset() {
+        imageCache.removeAllObjects()
+    }
+
 }
 #endif
 

@@ -2,6 +2,10 @@
 // SCOPE: Phase 12C — per-backend-user lookup settings + account_id storage; legacy allowDiscovery_v1 adopted as initial default.
 // SEARCH-TOKEN: 20260120_124800_Phase12C_ProfileStore_PerUserLookup
 
+// CHANGE-ID: 20260303_162500_DeleteAccountV2_Stage5_ProfileStoreWipe_FIX
+// SCOPE: Delete Account v2 Stage 5 — fix syntax + add ProfileStore.wipeLocalIdentityForFactoryReset to purge profile.* UserDefaults keys and delete Application Support/Profiles avatar files. No other behavior changes.
+// SEARCH-TOKEN: 20260303_162500_DeleteAccountV2Stage5_ProfileStoreWipe_FIX
+
 import Foundation
 #if canImport(UIKit)
 import UIKit
@@ -93,6 +97,44 @@ struct ProfileStore {
     static func avatarURL(for userID: String?) -> URL? {
         // Compatibility: legacy calls refer to the derived (display) avatar
         return avatarDerivedURL(for: userID)
+    }
+
+
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Wipes local profile identity artifacts for a factory reset.
+    /// - Removes per-user `profile.*` UserDefaults keys (location, discovery mode, account id).
+    /// - Removes legacy device-level allowDiscovery_v1.
+    /// - Deletes on-disk avatar artifacts under Application Support/Profiles and clears in-memory cache.
+    /// Best-effort and safe to call multiple times.
+    static func wipeLocalIdentityForFactoryReset(backendUserID: String?) {
+        let defaults = UserDefaults.standard
+
+        if let uid = backendUserID, !uid.isEmpty {
+            defaults.removeObject(forKey: locationKey(for: uid))
+            defaults.removeObject(forKey: discoveryModeKey(for: uid))
+            defaults.removeObject(forKey: accountIDKey(for: uid))
+        } else {
+            // If caller cannot provide a user id, purge any per-user profile.* keys.
+            for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("profile.") {
+                defaults.removeObject(forKey: key)
+            }
+        }
+
+        defaults.removeObject(forKey: legacyAllowDiscoveryKey)
+
+        #if canImport(UIKit)
+        cache.removeAllObjects()
+        #endif
+
+        let fm = FileManager.default
+        if let dir = baseProfilesDir(), fm.fileExists(atPath: dir.path) {
+            do {
+                try fm.removeItem(at: dir)
+            } catch {
+                NSLog("[ProfileStore] wipeLocalIdentityForFactoryReset — failed to remove Profiles dir: \(error)")
+            }
+        }
     }
 
     #if canImport(UIKit)

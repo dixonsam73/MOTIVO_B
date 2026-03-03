@@ -1,12 +1,12 @@
-// CHANGE-ID: 20260303_103200_DeleteAccountV2_Stage4B_CoreDataResetFix
-// SCOPE: Delete Account v2 Stage 4 — extend LocalFactoryReset to destroy + recreate Core Data store after Stage 3 file wipes. No other UI/logic changes.
-// SEARCH-TOKEN: 20260303_103200-DELETE-ACCOUNT-V2-STAGE4B-LOCALFACTORYRESET
+// CHANGE-ID: 20260303_165200_DeleteAccountV2_Stage5C_UserDefaultsDomainWipe
+// SCOPE: Delete Account v2 Stage 5C — extend LocalFactoryReset to wipe ProfileStore (UserDefaults + local avatar files) and remote avatar caches. No other UI/logic changes.
+// SEARCH-TOKEN: 20260303_165200-DELETE-ACCOUNT-V2-STAGE5C-LOCALFACTORYRESET
 
 import Foundation
 
 /// Delete Account v2 — Local Factory Reset coordinator.
-/// Stage 4: invoked from delete-account success path; performs sign-out, stops publish queue, wipes backend config, wipes local files, and resets Core Data.
-/// Subsequent stage adds deeper UserDefaults wipes (if needed beyond current evidence-based keys).
+/// Stage 5: invoked from delete-account success path; performs sign-out, stops publish queue, wipes backend config,
+/// wipes local identity artifacts (ProfileStore + avatar caches), wipes local files, and wipes Core Data (batch delete).
 @MainActor
 enum LocalFactoryReset {
 
@@ -22,10 +22,10 @@ enum LocalFactoryReset {
         isInProgress = true
         defer {
             isInProgress = false
-            NSLog("[LocalFactoryReset] completed (stage 4b) reason=\(reason)")
+            NSLog("[LocalFactoryReset] completed (stage 5c) reason=\(reason)")
         }
 
-        NSLog("[LocalFactoryReset] begin (stage 4b) reason=\(reason)")
+        NSLog("[LocalFactoryReset] begin (stage 5c) reason=\(reason)")
 
         // Prevent any background publish attempts while we reset.
         SessionSyncQueue.shared.stopForFactoryReset()
@@ -36,6 +36,22 @@ enum LocalFactoryReset {
         // Drop to signed-out state immediately and clear auth tokens.
         auth.signOut()
 
+        // Wipe entire UserDefaults domain to prevent any per-user keys (e.g. profile.*) or mode flags from surviving.
+        // This is a factory reset: preferences should return to a fresh-install baseline.
+        if let domain = Bundle.main.bundleIdentifier {
+            UserDefaults.standard.removePersistentDomain(forName: domain)
+        }
+
+        // Wipe local profile identity artifacts (UserDefaults profile.* keys + local avatar files).
+        // We intentionally do not rely on a user id here; ProfileStore will purge any profile.* keys.
+        ProfileStore.wipeLocalIdentityForFactoryReset(backendUserID: nil)
+
+        // Wipe remote avatar caches (directory avatars).
+        await RemoteAvatarSignedURLCache.shared.resetForFactoryReset()
+        #if canImport(UIKit)
+        RemoteAvatarImageCache.resetForFactoryReset()
+        #endif
+
         // Wipe local files (Documents + Application Support stores + tmp).
         AttachmentStore.wipeDocumentsAttachmentsForFactoryReset()
         StagingStore.wipeOnDiskForFactoryReset()
@@ -44,7 +60,7 @@ enum LocalFactoryReset {
         AttachmentPrivacy.wipeOnDiskAndCacheForFactoryReset()
         wipeTemporaryMediaArtifactsBestEffort()
 
-        // Reset Core Data persistent stores (destroy + recreate empty store).
+        // Reset Core Data persistent stores (store-safe wipe via batch delete).
         do {
             try PersistenceController.shared.destroyAndRebuildStoresForFactoryReset()
         } catch {
