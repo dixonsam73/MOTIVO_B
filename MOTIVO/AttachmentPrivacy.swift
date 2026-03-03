@@ -7,6 +7,10 @@
 // CHANGE-ID: 20260103_203738
 // SCOPE: Default attachments to owner-only: empty/missing map entry => private; reset map key to v2
 
+// CHANGE-ID: 20260303_100900_DeleteAccountV2_Stage3_AttachmentPrivacyWipeFix
+// SCOPE: Delete Account v2 Stage 3 — add AttachmentPrivacy.wipeOnDiskAndCacheForFactoryReset using existing queue+fileURL helpers. No other behavior changes.
+// SEARCH-TOKEN: 20260303_100900-DELETE-ACCOUNT-V2-STAGE3-ATTACHMENTPRIVACY
+
 import Foundation
 
 public enum AttachmentPrivacy {
@@ -123,6 +127,25 @@ public enum AttachmentPrivacy {
             try data.write(to: url, options: .atomic)
         } catch {
             // silently ignore write errors
+        }
+    }
+
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Deletes the on-disk privacy map and clears the in-memory cache.
+    /// Best-effort; safe to call multiple times.
+    public static func wipeOnDiskAndCacheForFactoryReset() {
+        queue.sync {
+            cache = nil
+        }
+        guard let url = fileURL() else { return }
+        do {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        } catch {
+            // Best-effort
+            NSLog("[AttachmentPrivacy] wipeOnDiskAndCacheForFactoryReset — failed to remove \(url.path): \(error)")
         }
     }
 }

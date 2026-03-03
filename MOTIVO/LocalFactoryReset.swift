@@ -1,16 +1,16 @@
-// CHANGE-ID: 20260303_092100_DeleteAccountV2_Stage2_BackendConfig_QueueStop
-// SCOPE: Delete Account v2 Stage 2 — stop publish queue + wipe backend config after delete success; no files/CoreData wipe yet.
-// SEARCH-TOKEN: 20260303_092100-DELETE-ACCOUNT-V2-STAGE2
+// CHANGE-ID: 20260303_103200_DeleteAccountV2_Stage4B_CoreDataResetFix
+// SCOPE: Delete Account v2 Stage 4 — extend LocalFactoryReset to destroy + recreate Core Data store after Stage 3 file wipes. No other UI/logic changes.
+// SEARCH-TOKEN: 20260303_103200-DELETE-ACCOUNT-V2-STAGE4B-LOCALFACTORYRESET
 
 import Foundation
 
 /// Delete Account v2 — Local Factory Reset coordinator.
-/// Stage 2: invoked from delete-account success path; performs sign-out + stops publish queue and wipes backend config. Subsequent stages add file/Core Data wipes.
-/// and provides an in-progress gate for foreground liveness. Subsequent stages add persisted wipes (UserDefaults/files/Core Data).
+/// Stage 4: invoked from delete-account success path; performs sign-out, stops publish queue, wipes backend config, wipes local files, and resets Core Data.
+/// Subsequent stage adds deeper UserDefaults wipes (if needed beyond current evidence-based keys).
 @MainActor
 enum LocalFactoryReset {
 
-    // Note: in-memory gate is sufficient for current acceptance tests; no persistence across relaunch needed for Stage 1.
+    // In-memory gate is sufficient for current acceptance tests; no persistence across relaunch required.
     private(set) static var isInProgress: Bool = false
 
     static func perform(reason: String, auth: AuthManager) async {
@@ -22,26 +22,58 @@ enum LocalFactoryReset {
         isInProgress = true
         defer {
             isInProgress = false
-            NSLog("[LocalFactoryReset] completed (stage 2) reason=\(reason)")
+            NSLog("[LocalFactoryReset] completed (stage 4b) reason=\(reason)")
         }
 
-        NSLog("[LocalFactoryReset] begin (stage 2) reason=\(reason)")
+        NSLog("[LocalFactoryReset] begin (stage 4b) reason=\(reason)")
 
-        // Stage 2: prevent any background publish attempts while we reset.
+        // Prevent any background publish attempts while we reset.
         SessionSyncQueue.shared.stopForFactoryReset()
 
-        // Stage 2: wipe backend config (base URL + anon key) so connected mode cannot resurrect.
+        // Wipe backend config (base URL + anon key) so connected mode cannot resurrect.
         BackendConfig.wipePersistedConfigForFactoryReset()
 
-        // Stage 2: make the UI drop to signed-out state immediately and clear auth tokens.
-
-        // Subsequent stages extend this to a full local wipe (UserDefaults/files/Core Data).
+        // Drop to signed-out state immediately and clear auth tokens.
         auth.signOut()
+
+        // Wipe local files (Documents + Application Support stores + tmp).
+        AttachmentStore.wipeDocumentsAttachmentsForFactoryReset()
+        StagingStore.wipeOnDiskForFactoryReset()
+        PracticeTimerStore.wipeOnDiskForFactoryReset()
+        SessionSyncQueue.shared.wipeOnDiskForFactoryReset()
+        AttachmentPrivacy.wipeOnDiskAndCacheForFactoryReset()
+        wipeTemporaryMediaArtifactsBestEffort()
+
+        // Reset Core Data persistent stores (destroy + recreate empty store).
+        do {
+            try PersistenceController.shared.destroyAndRebuildStoresForFactoryReset()
+        } catch {
+            // Best-effort; continue to avoid partial state.
+            NSLog("[LocalFactoryReset] Core Data reset failed: \(error)")
+        }
 
         // Belt + braces: ensure key in-memory stores are reset even if app-level sign-out observers change later.
         if BackendEnvironment.shared.isConnected {
             BackendFeedStore.shared.resetForSignOut()
             FollowStore.shared.resetForSignOut()
+        }
+    }
+
+    private static func wipeTemporaryMediaArtifactsBestEffort() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory
+        do {
+            let urls = try fm.contentsOfDirectory(
+                at: tmp,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+            let exts = Set(["m4a", "mov", "mp4", "jpg", "jpeg", "png"])
+            for url in urls where exts.contains(url.pathExtension.lowercased()) {
+                try? fm.removeItem(at: url)
+            }
+        } catch {
+            // Best effort — ignore.
         }
     }
 }

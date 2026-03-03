@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260303_095600_DeleteAccountV2_Stage3_FileWipes
+// SCOPE: Delete Account v2 Stage 3 — file wipes helpers (Application Support/MOTIVO/PracticeTimer). No behavior changes unless invoked by LocalFactoryReset.
+// SEARCH-TOKEN: 20260303_095600-DELETE-ACCOUNT-V2-STAGE3
+
 //
 // PracticeTimerStore.swift
 //
@@ -131,5 +135,20 @@ enum PracticeTimerStore {
     static func clear() {
         saveStagedVideo(nil)
     }
-}
 
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Best-effort removal of staged PracticeTimer payload(s) under Application Support/MOTIVO/PracticeTimer.
+    static func wipeOnDiskForFactoryReset() {
+        let fm = FileManager.default
+        let dir = baseDir.standardizedFileURL
+        do {
+            if fm.fileExists(atPath: dir.path) {
+                try fm.removeItem(at: dir)
+            }
+        } catch {
+            NSLog("[PracticeTimerStore] wipeOnDiskForFactoryReset — failed to remove \(dir.path): \(error)")
+        }
+    }
+
+}

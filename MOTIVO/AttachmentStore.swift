@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260303_095600_DeleteAccountV2_Stage3_FileWipes
+// SCOPE: Delete Account v2 Stage 3 — file wipes helpers (Documents media). No behavior changes unless invoked by LocalFactoryReset.
+// SEARCH-TOKEN: 20260303_095600-DELETE-ACCOUNT-V2-STAGE3
+
 ///
 ///  AttachmentStore.swift
 //  MOTIVO
@@ -290,4 +294,33 @@ struct AttachmentStore {
         }
         return candidate
     }
+
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Best-effort wipe of attachment media persisted in the app's Documents directory.
+    /// - Important: Constrained to common media extensions to avoid deleting unrelated user documents.
+    static func wipeDocumentsAttachmentsForFactoryReset() {
+        let fm = FileManager.default
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first?.standardizedFileURL else {
+            print("[AttachmentStore] wipeDocumentsAttachmentsForFactoryReset — unable to resolve Documents directory")
+            return
+        }
+
+        let exts: Set<String> = ["m4a","mp4","mov","m4v","jpg","jpeg","png","heic","wav","aif","aiff","caf","dat"]
+        guard let items = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
+            print("[AttachmentStore] wipeDocumentsAttachmentsForFactoryReset — unable to list Documents")
+            return
+        }
+
+        for url in items {
+            let ext = url.pathExtension.lowercased()
+            guard exts.contains(ext) else { continue }
+            do {
+                try fm.removeItem(at: url)
+            } catch {
+                print("[AttachmentStore] wipeDocumentsAttachmentsForFactoryReset — failed to remove \(url.lastPathComponent): \(error)")
+            }
+        }
+    }
+
 }

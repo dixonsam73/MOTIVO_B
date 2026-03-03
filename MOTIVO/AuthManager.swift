@@ -35,6 +35,11 @@
 // SCOPE: Profile privacy hydration — on sign-in/session restore, fetch account_directory self row and hydrate ProfileStore discoveryMode/account_id to match backend (fresh install consistency). No UI changes.
 // SEARCH-TOKEN: 20260302_093339_ProfileHydrateDirectory_3b1f
 
+// CHANGE-ID: 20260303_104100_DeleteAccountV2_Stage4B_AuthHydrationGuard
+// SCOPE: Delete Account v2 Stage 4b — prevent directory hydration/ProfileStore writes during factory reset; cancel hydration task on signOut. No UI changes.
+// SEARCH-TOKEN: 20260303_104100_DeleteAccountV2_AuthHydrationGuard
+
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -222,6 +227,13 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     private func hydrateDirectoryStateFromBackend(userID: String, reason: String) async {
+        // Skip during factory reset or when signed out; avoids mutating ProfileStore/Core Data after wipe.
+        guard !LocalFactoryReset.isInProgress else {
+            NSLog("[Auth] directory hydration skipped user=%@ reason=%@ (factory reset in progress)", userID, reason)
+            return
+        }
+        guard self.backendUserID == userID else { return }
+
         // Avoid spamming on repeated refreshes.
         guard lastHydratedDirectoryUserID != userID else { return }
 
@@ -419,6 +431,10 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
     // Local sign-out
     func signOut() {
+        // Cancel any in-flight hydration so it can't write into stores after sign-out/reset.
+        directoryHydrationTask?.cancel()
+        directoryHydrationTask = nil
+        lastHydratedDirectoryUserID = nil
         Keychain.delete("appleUserID")
         Keychain.delete("displayName")
 

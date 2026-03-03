@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260303_095600_DeleteAccountV2_Stage3_FileWipes
+// SCOPE: Delete Account v2 Stage 3 — file wipes helpers (Application Support/MOTIVO/Staging). No behavior changes unless invoked by LocalFactoryReset.
+// SEARCH-TOKEN: 20260303_095600-DELETE-ACCOUNT-V2-STAGE3
+
 import Foundation
 import UniformTypeIdentifiers
 
@@ -511,4 +515,20 @@ private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Boo
             try data.write(to: url, options: [.atomic])
         } catch {}
     }
+
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Best-effort removal of all staged media and metadata under Application Support/MOTIVO/Staging.
+    static func wipeOnDiskForFactoryReset() {
+        let fm = FileManager.default
+        let dir = baseURL.standardizedFileURL
+        do {
+            if fm.fileExists(atPath: dir.path) {
+                try fm.removeItem(at: dir)
+            }
+        } catch {
+            NSLog("[StagingStore] wipeOnDiskForFactoryReset — failed to remove \(dir.path): \(error)")
+        }
+    }
+
 }

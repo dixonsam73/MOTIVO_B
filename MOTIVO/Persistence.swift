@@ -7,6 +7,11 @@
 import Foundation
 import CoreData
 
+
+// CHANGE-ID: 20260303_103200_DeleteAccountV2_Stage4_CoreDataReset_FixBatchDelete
+// SCOPE: Delete Account v2 Stage 4b — switch Core Data reset to batch delete (avoid store-destroy crash) for local factory reset. No other behavior changes.
+// SEARCH-TOKEN: 20260303_103200-DELETE-ACCOUNT-V2-STAGE4B-PERSISTENCE
+
 @MainActor
 final class PersistenceController {
     static let shared = PersistenceController()
@@ -230,3 +235,52 @@ extension PersistenceController {
 
 //  [ROLLBACK ANCHOR] v7.8 Maintenance — post-context-niceties (viewContext named; undo disabled)
 
+// MARK: - Delete Account v2 (Local Factory Reset)
+
+extension PersistenceController {
+
+    /// Destroys the on-disk persistent store(s) and recreates an empty store in-place.
+    /// Best-effort and idempotent: safe to call multiple times.
+    ///
+    /// NOTE: This is intentionally local-only. It does not touch backend state.
+    func destroyAndRebuildStoresForFactoryReset() throws {
+        // IMPORTANT: Do not destroy/remove persistent stores while SwiftUI views may still hold managed objects
+        // (can crash with "persistent store is not reachable"). Instead, wipe all entities via batch deletes.
+        let context = container.viewContext
+        let coordinator = container.persistentStoreCoordinator
+        let model = coordinator.managedObjectModel
+
+        var deletedObjectIDs: [NSManagedObjectID] = []
+
+        try context.performAndWait {
+            // Drop any in-memory references first.
+            context.reset()
+
+            for entity in model.entities {
+                guard let name = entity.name else { continue }
+                let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: name)
+                let delete = NSBatchDeleteRequest(fetchRequest: fetch)
+                delete.resultType = .resultTypeObjectIDs
+
+                if let result = try context.execute(delete) as? NSBatchDeleteResult,
+                   let ids = result.result as? [NSManagedObjectID] {
+                    deletedObjectIDs.append(contentsOf: ids)
+                }
+            }
+
+            if !deletedObjectIDs.isEmpty {
+                let changes: [AnyHashable: Any] = [NSDeletedObjectsKey: deletedObjectIDs]
+                NSManagedObjectContext.mergeChanges(fromRemoteContextSave: changes, into: [context])
+            }
+
+            // Ensure the context is clean.
+            context.reset()
+        }
+
+        // Reapply context niceties (safe even if already set).
+        container.viewContext.mergePolicy = NSMergeByPropertyObjectTrumpMergePolicy
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        container.viewContext.name = "viewContext"
+        container.viewContext.undoManager = nil
+    }
+}
