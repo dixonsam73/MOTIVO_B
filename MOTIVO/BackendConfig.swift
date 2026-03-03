@@ -10,6 +10,12 @@
 //  SEARCH-TOKEN: 20260303_092100-DELETE-ACCOUNT-V2-STAGE2
 //
 
+//
+//  CHANGE-ID: 20260303_173500_DeleteAccountV2_Stage6_RuntimeBootstrap
+//  SCOPE: Delete Account v2 Stage 6 — add runtime backend config bootstrap helper used after factory reset to re-enable AppSetup gating without restart. No other behavior change.
+//  SEARCH-TOKEN: 20260303_173500-DELETE-ACCOUNT-V2-STAGE6-RUNTIMEBOOTSTRAP
+//
+
 import Foundation
 
 public enum BackendConfigKeys {
@@ -48,6 +54,41 @@ public enum BackendConfig {
         d.removeObject(forKey: BackendConfigKeys.baseURL)
         d.removeObject(forKey: BackendConfigKeys.token)
         apply()
+    }
+
+
+
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Re-applies bundled backend configuration (SUPABASE_URL / SUPABASE_ANON_KEY) if config is missing.
+    /// This mirrors MOTIVOApp.init() bootstrap, but is callable at runtime so AppSetup gating works immediately
+    /// after a factory reset without requiring an app restart.
+    ///
+    /// Best-effort: if bundle keys are missing, this does nothing.
+    public static func bootstrapFromBundleIfNeededForFactoryReset() {
+        // If already configured, just ensure NetworkManager is in sync.
+        if isConfigured {
+            apply()
+            return
+        }
+
+        let rawURL = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let rawKey = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard !rawURL.isEmpty, !rawKey.isEmpty else {
+            NSLog("[BackendConfig] bootstrapFromBundleIfNeededForFactoryReset — skipped (missing bundle keys)")
+            apply()
+            return
+        }
+
+        let d = UserDefaults.standard
+        d.set(rawURL, forKey: BackendConfigKeys.baseURL)
+        d.set(rawKey, forKey: BackendConfigKeys.token)
+
+        apply()
+        NSLog("[BackendConfig] bootstrapFromBundleIfNeededForFactoryReset — applied bundled config")
     }
 
     public static func apply() {

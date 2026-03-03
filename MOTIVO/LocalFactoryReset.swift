@@ -2,6 +2,11 @@
 // SCOPE: Delete Account v2 Stage 5C — extend LocalFactoryReset to wipe ProfileStore (UserDefaults + local avatar files) and remote avatar caches. No other UI/logic changes.
 // SEARCH-TOKEN: 20260303_165200-DELETE-ACCOUNT-V2-STAGE5C-LOCALFACTORYRESET
 
+//
+// CHANGE-ID: 20260303_173500_DeleteAccountV2_Stage6_RuntimeBootstrap
+// SCOPE: Delete Account v2 Stage 6 — after wiping defaults/domain, re-bootstrap bundled backend config at runtime so immediate re-sign-in shows AppSetup without app restart. No other UI/logic changes.
+// SEARCH-TOKEN: 20260303_173500-DELETE-ACCOUNT-V2-STAGE6-RUNTIMEBOOTSTRAP
+
 import Foundation
 
 /// Delete Account v2 — Local Factory Reset coordinator.
@@ -41,6 +46,9 @@ enum LocalFactoryReset {
         if let domain = Bundle.main.bundleIdentifier {
             UserDefaults.standard.removePersistentDomain(forName: domain)
         }
+
+        // Re-apply bundled backend config (if present) so AppSetup gating can work immediately without restart.
+        BackendConfig.bootstrapFromBundleIfNeededForFactoryReset()
 
         // Wipe local profile identity artifacts (UserDefaults profile.* keys + local avatar files).
         // We intentionally do not rely on a user id here; ProfileStore will purge any profile.* keys.
