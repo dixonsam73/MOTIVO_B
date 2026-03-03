@@ -40,6 +40,10 @@
 // SEARCH-TOKEN: 20260303_104100_DeleteAccountV2_AuthHydrationGuard
 
 
+// CHANGE-ID: 20260303_172000_DeleteAccountV2_FinalHardening_AuthGuards
+// SCOPE: Delete Account v2 final hardening — add guardrails in AuthManager to suppress backend identity/session/directory hydration work during/after LocalFactoryReset when BackendConfig is not configured. Prevents post-reset background tasks from emitting errors or mutating state. No UI changes.
+// SEARCH-TOKEN: 20260303_172000_DeleteAccountV2_FinalHardening_AuthManagerGuards
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
@@ -216,6 +220,11 @@ final class AuthManager: NSObject, ObservableObject {
     /// Hydrate local ProfileStore values (discovery mode + account handle) from the backend account_directory row.
     /// This keeps Profile privacy UI consistent on fresh installs / new devices.
     private func scheduleDirectoryHydrationIfNeeded(reason: String) {
+        // Delete Account v2: do not schedule hydration during/after factory reset or when backend not configured.
+        guard !LocalFactoryReset.isInProgress else { return }
+        guard BackendConfig.isConfigured else { return }
+        guard self.currentUserID != nil else { return }
+
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
         guard lastHydratedDirectoryUserID != bid else { return }
 
@@ -227,6 +236,12 @@ final class AuthManager: NSObject, ObservableObject {
     }
 
     private func hydrateDirectoryStateFromBackend(userID: String, reason: String) async {
+        // If backend config is not available (e.g., after factory reset), do not attempt hydration.
+        guard BackendConfig.isConfigured else {
+            NSLog("[Auth] directory hydration skipped user=%@ reason=%@ (BackendConfig not configured)", userID, reason)
+            return
+        }
+
         // Skip during factory reset or when signed out; avoids mutating ProfileStore/Core Data after wipe.
         guard !LocalFactoryReset.isInProgress else {
             NSLog("[Auth] directory hydration skipped user=%@ reason=%@ (factory reset in progress)", userID, reason)
@@ -269,6 +284,12 @@ final class AuthManager: NSObject, ObservableObject {
     /// Ensures the Supabase session is valid for connected-mode network calls.
     /// - Returns: true if a valid bearer token is available after the check.
     func ensureValidSession(reason: String) async -> Bool {
+        // Delete Account v2: suppress auth/identity work during a local factory reset.
+        guard !LocalFactoryReset.isInProgress else {
+            NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
+            return false
+        }
+
         // Only meaningful in Connected mode.
         guard BackendEnvironment.shared.isConnected else {
             return self.isSignedIn
@@ -352,6 +373,12 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 }
 
     private func refreshSupabaseSession(reason: String) async -> Bool {
+        // Delete Account v2: suppress refresh during a local factory reset.
+        guard !LocalFactoryReset.isInProgress else {
+            NSLog("[Auth] refreshSupabaseSession skipped (factory reset in progress) reason=%@", reason)
+            return false
+        }
+
         #if canImport(Supabase)
         guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
             if self.isSigningIn {
@@ -491,6 +518,17 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     }
 
     private func ensureBackendIdentityIfNeeded(for appleID: String) {
+        // Delete Account v2: never attempt identity handshake during/after a factory reset.
+        guard !LocalFactoryReset.isInProgress else {
+            NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (factory reset in progress)")
+            return
+        }
+        // If backend config is not configured (e.g., after factory reset), do not attempt backend identity.
+        guard BackendConfig.isConfigured else {
+            NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (BackendConfig not configured)")
+            return
+        }
+
         guard backendUserID == nil else { return }
 
         Task { [weak self] in
