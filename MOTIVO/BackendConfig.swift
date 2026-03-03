@@ -5,6 +5,10 @@
 //  CHANGE-ID: 20251112-BackendConfig-b31f
 //  SCOPE: v7.12D — Centralized baseURL/token storage
 //
+//  CHANGE-ID: 20260303_092100_DeleteAccountV2_Stage2_BackendConfig_QueueStop
+//  SCOPE: Delete Account v2 Stage 2 — add factory-reset wipe for backend config (no behavior change unless called)
+//  SEARCH-TOKEN: 20260303_092100-DELETE-ACCOUNT-V2-STAGE2
+//
 
 import Foundation
 
@@ -37,6 +41,13 @@ public enum BackendConfig {
 
     public static var isConfigured: Bool {
         apiBaseURL != nil && (apiToken?.isEmpty == false)
+    }
+
+    public static func wipePersistedConfigForFactoryReset() {
+        let d = UserDefaults.standard
+        d.removeObject(forKey: BackendConfigKeys.baseURL)
+        d.removeObject(forKey: BackendConfigKeys.token)
+        apply()
     }
 
     public static func apply() {

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
+// SCOPE: Delete Account v2 Stage 1 — add LocalFactoryReset scaffold + hook from ProfileView; gate foreground liveness; no wipe yet.
+// SEARCH-TOKEN: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
+
 //
 //  MOTIVOApp.swift
 //  MOTIVO
@@ -185,6 +189,8 @@ struct MOTIVOApp: App {
                 }
                 .onChange(of: scenePhase) { phase in
                     guard phase == .active else { return }
+                    // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
+                    guard !LocalFactoryReset.isInProgress else { return }
                     // Phase 14.2: Connected-mode liveness trigger (idempotent apply + lightweight refresh/flush)
                     BackendConfig.apply()
                     guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
+// SCOPE: Delete Account v2 Stage 1 — add LocalFactoryReset scaffold + hook from ProfileView; gate foreground liveness; no wipe yet.
+// SEARCH-TOKEN: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
+
 // CHANGE-ID: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
 // SCOPE: UI-only — clear Name/Location/Account ID FocusState when tapping other cards/scrolling in Form; no other UI/logic changes.
 // SEARCH-TOKEN: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
@@ -1492,7 +1496,7 @@ let functionURL: URL = {
                 let ok = dict["success"] as? Bool,
                 ok == true {
                  showDeleteAccountSheet = false
-                 auth.signOut()
+                 await LocalFactoryReset.perform(reason: "delete-account-success", auth: auth)
                  return
              }
 

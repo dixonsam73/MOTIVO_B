@@ -16,6 +16,10 @@
 
 // SEARCH-TOKEN: 20260122_113000_Phase142_QueueFlushConnected
 
+// CHANGE-ID: 20260303_092100_DeleteAccountV2_Stage2_BackendConfig_QueueStop
+// SCOPE: Delete Account v2 Stage 2 — add stop/wipe hooks and reset gate for flushNow (inactive unless invoked)
+// SEARCH-TOKEN: 20260303_092100-DELETE-ACCOUNT-V2-STAGE2
+
 // CHANGE-ID: 20260130_143500_PubPrivacyFinal
 // SCOPE: Decouple publish vs share: always publish session-backed post; is_public reflects Share toggle; eliminate stub posts from Share OFF.
 import Foundation
@@ -23,6 +27,8 @@ import Foundation
 @MainActor
 public final class SessionSyncQueue: ObservableObject {
     public static let shared = SessionSyncQueue()
+
+    private var isFactoryResetting: Bool = false
 
     public struct PostPublishPayload: Codable, Identifiable {
       public let id: UUID            // == postID
@@ -156,6 +162,11 @@ public final class SessionSyncQueue: ObservableObject {
     /// Flush now. In Backend Preview: prints simulated upload logs and drains on success.
     /// In Local Simulation: logs and keeps items to reflect "waiting to publish".
     public func flushNow() async {
+        if isFactoryResetting {
+            NSLog("[SessionSyncQueue] flushNow ignored (factory reset in progress)")
+            BackendLogger.notice("Flush ignored (factory reset in progress)")
+            return
+        }
         let mode = BackendEnvironment.shared.mode
         NSLog("[SessionSyncQueue] flushNow requested • mode=%@ • queued=%d", String(describing: mode), items.count)
         BackendLogger.notice("Flush requested • mode=\(String(describing: mode)) • queued=\(items.count)")
@@ -212,7 +223,34 @@ public final class SessionSyncQueue: ObservableObject {
 
     // MARK: - Persistence
 
-    private func persist() {
+    
+// MARK: - Delete Account v2 (Local Factory Reset)
+
+/// Prevents any further flush attempts and clears queued items in-memory (best-effort).
+func stopForFactoryReset() {
+    isFactoryResetting = true
+    items.removeAll()
+    persist()
+    NSLog("[SessionSyncQueue] stopForFactoryReset applied (items cleared)")
+    BackendLogger.notice("stopForFactoryReset applied (items cleared)")
+}
+
+/// Deletes the on-disk queue file (best-effort). Safe to call multiple times.
+func wipeOnDiskForFactoryReset() {
+    let url = Self.makeFileURL()
+    do {
+        if FileManager.default.fileExists(atPath: url.path) {
+            try FileManager.default.removeItem(at: url)
+        }
+        NSLog("[SessionSyncQueue] wipeOnDiskForFactoryReset ok")
+        BackendLogger.notice("wipeOnDiskForFactoryReset ok")
+    } catch {
+        NSLog("[SessionSyncQueue] wipeOnDiskForFactoryReset failed • %@", error.localizedDescription)
+        BackendLogger.notice("wipeOnDiskForFactoryReset failed • \(error.localizedDescription)")
+    }
+}
+
+private func persist() {
         do {
             let data = try JSONEncoder().encode(items)
             try data.write(to: fileURL, options: [.atomic])
