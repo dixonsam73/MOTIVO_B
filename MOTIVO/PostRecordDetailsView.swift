@@ -12,6 +12,9 @@
 // SCOPE: PRDV — Add definitive debug logging for Share toggle (isPublic) at toggle-change, draft hydration, and save-tap to identify where it flips to true.
 // CHANGE-ID: 20260227_223200_PRDV_focusDismiss_desc_notes
 // SCOPE: PRDV — Dismiss keyboard/focus for Description + Notes on tap outside/scroll; keep pencil affordance; no other UI/logic changes.
+// CHANGE-ID: 20260304_081800_Threads_S3_PRDV_ThreadCardAndPersist
+// SCOPE: PRDV — Add owner-only Thread selector card under Description; bind to Session.threadLabel on save; present ThreadPickerView. No other UI/logic changes.
+
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -62,6 +65,7 @@ struct PostRecordDetailsView: View {
     @State private var effort: Int = 5
     @State private var notes: String = ""
     @State private var activityDetail: String = ""
+@State private var threadLabel: String? = nil
     @State private var lastAutoActivityDetail: String = ""
     @State private var userEditedActivityDetail: Bool = false
 
@@ -78,6 +82,7 @@ struct PostRecordDetailsView: View {
 
     @State private var showStartPicker = false
     @State private var showDurationPicker = false
+@State private var showThreadPicker = false
     @State private var showActivityPicker = false
     @State private var showInstrumentPicker = false
     @State private var tempDate = Date()
@@ -377,9 +382,37 @@ struct PostRecordDetailsView: View {
                             }
                         }
                     }
-                    .cardSurface()
+                    
+.cardSurface()
 
-                    // ---------- Start time ----------
+// ---------- Thread ----------
+VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+    Text("Thread").sectionHeader()
+    Button {
+        showThreadPicker = true
+    } label: {
+        HStack {
+            if let thread = threadLabel, !thread.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(thread)
+                    .font(Theme.Text.body)
+            } else {
+                Text("None")
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+    }
+    .buttonStyle(.plain)
+}
+.cardSurface()
+
+// ---------- Start time ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Start Time").sectionHeader()
                         Button {
@@ -686,6 +719,9 @@ isPrivate: { url in
             .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
+            .sheet(isPresented: $showThreadPicker) {
+                ThreadPickerView(selectedThread: $threadLabel)
+            }
             .photosPicker(isPresented: $showPhotoPicker,
                         selection: $photoPickerItem,
                         matching: .any(of: [.images, .videos]))
@@ -1468,6 +1504,10 @@ isPrivate: { url in
         s.notes = notes
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
+        if s.entity.attributesByName.keys.contains("threadLabel") {
+            s.setValue(threadLabel, forKey: "threadLabel")
+        }
+
         
         let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
         let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
@@ -2347,4 +2387,3 @@ fileprivate struct VideoPlayerSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
 #endif
-

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260304_113500_Threads_S4_AESV_ThreadCardAndPersist
+// SCOPE: AESV — Add owner-only Thread selector card under Description; bind to Session.threadLabel on save; present ThreadPickerView. No other UI/logic changes.
+// SEARCH-TOKEN: 20260304_113500_Threads_S4_AESV_ThreadCardAndPersist
+
 // CHANGE-ID: 20260227_223900_AESV_desc_pencil_focusDismiss
 // SCOPE: AESV visual-only — add pencil affordance to Description editable line (hide while editing) + dismiss keyboard/focus for Description + Notes on tap/scroll. No other UI/logic changes.
 // SEARCH-TOKEN: 20260227_223900_AESV_desc_pencil_focusDismiss
@@ -113,6 +117,10 @@ struct AddEditSessionView: View {
     @State private var activityChoice: String = "core:0"
     /// If user picked a custom activity, hold its name separately (do NOT store in activityDetail)
     @State private var selectedCustomName: String = ""
+
+    // Threads v1 (owner-only metadata)
+    @State private var threadLabel: String? = nil
+    @State private var showThreadPicker: Bool = false
 
     @State private var isPublic: Bool = true
     @State private var notes: String = ""
@@ -306,6 +314,36 @@ struct AddEditSessionView: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .cardSurface()
+
+
+                // ---------- Thread ----------
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Thread").sectionHeader()
+                    Button {
+                        showThreadPicker = true
+                    } label: {
+                        HStack {
+                            if let thread = threadLabel, !thread.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(thread)
+                                    .font(Theme.Text.body)
+                            } else {
+                                Text("None")
+                                    .font(Theme.Text.body)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                }
+                .cardSurface()
+
                     } else {
                         // Render nothing until either the arm time passes or instruments arrive
                         EmptyView()
@@ -876,6 +914,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
         .sheet(isPresented: $showStartPicker) { startPicker }
         .sheet(isPresented: $showDurationPicker) { durationPicker }
+        .sheet(isPresented: $showThreadPicker) {
+            ThreadPickerView(selectedThread: $threadLabel)
+        }
         .photosPicker(isPresented: $showPhotoPicker,
                       selection: $photoPickerItem,
                       matching: .any(of: [.images, .videos]))
@@ -1208,6 +1249,12 @@ private var instrumentPicker: some View {
             activity = SessionActivityType(rawValue: raw) ?? .practice
             activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
 
+            if s.entity.attributesByName.keys.contains("threadLabel") {
+                threadLabel = (s.value(forKey: "threadLabel") as? String)
+            } else {
+                threadLabel = nil
+            }
+
             // Reconcile auto vs custom on edit hydrate: keep auto-updates alive if detail equals the computed default.
             do {
                 let expectedAuto = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: ((s.value(forKey: "userActivityLabel") as? String) ?? selectedCustomName))
@@ -1297,6 +1344,15 @@ private var instrumentPicker: some View {
         // Title = activityDetail (trimmed) or fallback
         let trimmedDetail = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
         s.title = trimmedDetail.isEmpty ? defaultTitle(for: instrument, activity: activity) : trimmedDetail
+
+        // Threads v1: persist owner-only thread label (optional)
+        if s.entity.attributesByName.keys.contains("threadLabel") {
+            if let t = threadLabel, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                s.setValue(t, forKey: "threadLabel")
+            } else {
+                s.setValue(nil, forKey: "threadLabel")
+            }
+        }
 
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
