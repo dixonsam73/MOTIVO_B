@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260304_202700_ThreadMetaPill_1c9e
+// SCOPE: Session row metadata: render thread label as subtle pill using segmented-style fill (visual-only)
+// SEARCH-TOKEN: 20260304_202700_ThreadMetaPill_1c9e
+
 // CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
 // SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260304_164700_FeedFilter_ThreadParityMenu_5b40
@@ -1945,24 +1949,35 @@ fileprivate struct SessionRow: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("row.title")
 
-                // Instrument / Activity subtitle (metadata) — prefix Thread when present (local-only)
+                // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
                 let metaLine = instrumentActivityLine
                 let thread = ThreadLabelSanitizer.sanitize(session.threadLabel ?? "", maxLength: 32)
 
-                let combinedMeta: String = {
-                    if let thread, !thread.isEmpty {
-                        if !metaLine.isEmpty {
-                            return "\(thread) · \(metaLine)"
-                        } else {
-                            return thread
-                        }
-                    } else {
-                        return metaLine
-                    }
-                }()
+                if let thread, !thread.isEmpty {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(thread)
+                            .font(Theme.Text.body)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(Color(uiColor: .tertiarySystemFill))
+                            .clipShape(Capsule())
 
-                if !combinedMeta.isEmpty {
-                    Text(combinedMeta)
+                        if !metaLine.isEmpty {
+                            Text("·")
+                                .font(Theme.Text.body)
+
+                            Text(metaLine)
+                                .font(Theme.Text.body)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.top, 3)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Instrument and activity")
+                    .accessibilityIdentifier("row.subtitle")
+                } else if !metaLine.isEmpty {
+                    Text(metaLine)
                         .font(Theme.Text.body)
                         .lineLimit(2)
                         .padding(.top, 3)
