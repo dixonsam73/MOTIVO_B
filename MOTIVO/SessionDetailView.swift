@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260304_080300_Threads_S1_SDV_ReadOnly
-// SCOPE: Stage 1 — SessionDetailView: show owner-only thread label in meta line under title (read-only).
-// SEARCH-TOKEN: 20260304_080300_Threads_S1_SDV_ReadOnly
+// CHANGE-ID: 20260304_204900_SDV_ThreadMetaPill
+// SCOPE: Visual-only — render owner-only thread label as subtle capsule in meta line (SessionDetailView).
+// SEARCH-TOKEN: 20260304_204900_SDV_ThreadMetaPill
 
 // CHANGE-ID: 20260219_212900_SDV_AAV_TappedSelection_Fix
 // SCOPE: Bugfix — SDV attachment tap opens AttachmentViewer on tapped item (first-tap fix) + PRDV-style two-gallery launch
@@ -634,10 +634,28 @@ return AttachmentViewerView(
                             .accessibilitySortPriority(2)
                         Spacer()
                     }
-                    Text(metaLineWithThread)
+                    // Thread (owner-only) — pill + meta line
+                    if let thread = threadLabelForDisplay {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(thread)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color(uiColor: .tertiarySystemFill))
+                                .clipShape(Capsule())
+                            Text("·")
+                            Text(metaLine)
+                        }
                         .font(Theme.Text.meta)
                         .foregroundStyle(.secondary)
+                        .accessibilityLabel(metaLineWithThread)
                         .accessibilitySortPriority(1)
+                    } else {
+                        Text(metaLine)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(metaLineWithThread)
+                            .accessibilitySortPriority(1)
+                    }
                 }
                 .accessibilityElement(children: .contain)
             }
@@ -1536,4 +1554,3 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
         }
     }
 }
-
