@@ -1963,15 +1963,21 @@ fileprivate struct SessionRow: View {
                 if let thread, !thread.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         Button {
-                            // Feed pivot: tapping the thread pill filters to this thread and reveals the filter panel.
-                            if selectedThread != thread { selectedThread = thread }
-                            filtersExpanded = true
+                            if selectedThread == thread {
+                                selectedThread = nil
+                            } else {
+                                selectedThread = thread
+                            }
                         } label: {
                             Text(thread)
                                 .font(Theme.Text.body)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
-                                .background(Color(uiColor: .tertiarySystemFill))
+                                .background(
+                                    selectedThread == thread
+                                    ? Color(uiColor: .systemGray2)
+                                    : Color(uiColor: .tertiarySystemFill)
+                                )
                                 .clipShape(Capsule())
                         }
                         .buttonStyle(.plain)
