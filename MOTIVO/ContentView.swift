@@ -1487,7 +1487,7 @@ fileprivate struct FilterBar: View {
         VStack(alignment: .leading, spacing: 6) {
             // This view only renders contents when expanded (logic unchanged)
             if filtersExpanded {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 20) {
 
                     // Scope
                     Picker("Scope", selection: $selectedScope) {
@@ -1600,6 +1600,7 @@ fileprivate struct FilterBar: View {
                         Spacer(minLength: 0)
                         Toggle("", isOn: $savedOnly)
                             .labelsHidden()
+                            .tint(Theme.Colors.accent)
                             .controlSize(.small)
                             .scaleEffect(1.0, anchor: .trailing)
                             .padding(.trailing, 10) // aligns switch with menu picker trailing inset
