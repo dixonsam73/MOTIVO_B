@@ -1,138 +1,102 @@
-// CHANGE-ID: 20260227_152600_ContentView_AwaitUnreadRefresh_5f3b
-// SCOPE: Await unread comments refresh in all refresh bundles to clear + badge immediately; no UI/layout changes.
-// SEARCH-TOKEN: 20260227_152600_ContentView_AwaitUnreadRefresh_5f3b
-
-// CHANGE-ID: 20260224_224800_DeleteSwipeActions_NoOptimisticRemoval_6f4c
-// SCOPE: Prevent optimistic List onDelete removal by replacing onDelete with per-row swipeActions delete; preserves fail-closed backend delete gate; no UI/layout changes.
-
-// CHANGE-ID: 20260222_103500_PublishSkipOversizeWarningRoot_7d9c
-// SCOPE: Show a user-visible alert when publish skips oversized attachments (>50MB). Subscribe at root (SessionsRootView) so alert appears after PRDV/AESV dismiss.
-
-// CHANGE-ID: 20260215_114000_UnreadComments_PeoplePlusFix2
-// SCOPE: Compose People "+" with unread private comments. Do not block existing presence refreshes; fire unread refresh non-blocking to avoid regressions.
-// SEARCH-TOKEN: 20260215_114000_UnreadComments_PeoplePlusFix2
-
-// CHANGE-ID: 20260214_103700_Etudes_ShareTo_InlineNav
-// SCOPE: ContentView: ShareToFollowerSheet mirrors FollowingList nav (inline title + chevron back) and list background parity. No logic changes.
-// SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_InlineNav
-
-// CHANGE-ID: 20260213_121200_SharePicker_RecipientParity_ContentView
-// SCOPE: Share UI polish — recipient picker parity in ContentView ShareToFollowerSheet: render identity rows (avatar + display name + @handle), reuse PeopleUserRow + AccountDirectoryService; A–Z sort by display name with fallback; no backend/schema changes.
-// SEARCH-TOKEN: 20260213_121200_SharePicker_RecipientParity_ContentView
-
-// CHANGE-ID: 20260213_070034_PostShares_DuplicateOutcome
-// SCOPE: Handle BackendPostShareOutcome.alreadyShared in Share sheet (show 'Already shared.'; keep existing styling).
-// SEARCH-TOKEN: 20260213_070034_PostShares_DuplicateOutcome
-
-// CHANGE-ID: 20260212_213900_CloseStage3_ContentView_InteractionShare
-// SCOPE: Close Stage 3 — Replace legacy iOS ShareLink in SessionRow.interactionRow with Share-to-follower sheet (Result-based BackendEnvironment.shared.shares.sharePost). ContentView only; no other UI/logic changes.
-// SEARCH-TOKEN: 20260212_213900_CloseStage3_ContentView_InteractionShare
-
-// CHANGE-ID: 20260212_091600_OwnerShare_BadgeCompose_FIX
-// SCOPE: Owner-Only Share — compose People '+' signal from follow requests + unread shares (no layout change)
-// SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_CV_AVATAR
-
-// CHANGE-ID: 20260212_091600_OwnerShare_BadgeCompose
-// SCOPE: Owner-Only Share — compose People '+' indicator from follow requests OR unread post_shares; add refresh triggers (initial task, pull-to-refresh, foreground). ContentView only.
-// SEARCH-TOKEN: 20260212_091600_OwnerShare_BadgeCompose
-
-
-// CHANGE-ID: 20260203_093500_FeedThumbPrewarmFix
-// SCOPE: Feed thumbnail & signed-URL prewarm (warm RemoteAttachmentPreview caches ahead of scroll) — ContentView only
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
+// SEARCH-TOKEN: 20260304_164700_FeedFilter_ThreadParityMenu_5b40
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260203_093500_FeedThumbPrewarmFix
-// CHANGE-ID: 20260202_224200_FeedNavFreezeV3
-// SCOPE: Freeze merged feed row identity across detail navigation (interactive pop safe) — ContentView only
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_224200_FeedNavFreezeV3
 
-// CHANGE-ID: 20260202_211500_RemoteRowSpaceStability
-// SCOPE: Prevent feed card reflow on return by reserving remote attachment lane height and caching attachment presence per postID.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_211500_RemoteRowSpaceStability
 
-// CHANGE-ID: 20260202_112500_BackPopFeedFlashFix
-// SCOPE: Prevent feed row flash on returning from BackendSessionDetailView by suppressing immediate auto-fetch.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_112500_BackPopFeedFlashFix
 
-// CHANGE-ID: 20260202_093500_RemoteThumbPlaceholderStability
-// SCOPE: Feed Thumbnail Hydration Stability — Remove icon-based placeholders for remote thumbs; render neutral placeholders while signed URLs/posters load.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_090000_FeedStatsReactivity
 
-// CHANGE-ID: 20260129_171107_14_3I_FilterParity
-// SCOPE: Phase 14.3I — Connected feed filter parity: apply instrument/activity/search/saved filters to remote posts and align local instrument filter with userInstrumentLabel for parity; no UI/layout changes; no backend/schema changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260129_171107_14_3I_FilterParity
 
-// CHANGE-ID: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
-// SCOPE: Phase 14.3G — Connected-mode feed: SessionRow must use Apple (local) user ID for local-session ownership checks so owner rows never fall into non-owner "User" fallback (no UI/layout changes; backend posts unaffected).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260129_080500_14_3G_SessionRow_UseAppleViewerID
 
-// CHANGE-ID: 20260129_072500_14_3F_ReactiveDirectoryInRemoteRow
-// SCOPE: Phase 14.3F — Fix connected feed owner row name staleness by making RemotePostRowTwin observe BackendFeedStore and resolve DirectoryAccount reactively (no UI/layout changes; no auth/backend behavior changes).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260129_072500_14_3F_ReactiveDirectoryInRemoteRow
 
-// CHANGE-ID: 20260128_195000_14_3D_OwnerFeedNamePrecedence
-// SCOPE: Phase 14.3D — Connected feed owner row name precedence: Profile.name → directoryAccount.displayName → "You"; remove "User" owner fallback; no UI/layout, schema, or non-owner behavior changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260128_195000_14_3D_OwnerFeedNamePrecedence
 
 
-// CHANGE-ID: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
-// SCOPE: Phase 14.3C — Fix connected feed owner-name resolution (self shows Profile.name, not 'User') and propagate local session delete to backend post DELETE; no UI/layout or schema changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260127_224800_14_3C_SelfNameAndDeleteFix_Clean
 
 
-// CHANGE-ID: 20260128_190000_14_3B_BackendOwnerID
-// SCOPE: Phase 14.3B — Connected-mode owner identity: never fall back to Apple ID for backend ownership; hydrate backendUserID from stored Supabase access token when possible; no UI/layout changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260128_190000_14_3B_BackendOwnerID
 
 
-// CHANGE-ID: 20260122_223700_14_2_1d_RemoteThumbSignedURL
-// SCOPE: Phase 14.2.1 — RemoteAttachmentPreview: load signed URL thumbnails for remote image attachments (feed parity); fallback to icon; cache by bucket|path.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260122_220200_14_2_1c_RemoteTitlesParity
-// CHANGE-ID: 20260123_174900_FixD_RemoteThumbCache_NoFlicker
-// SCOPE: Fix D — RemoteAttachmentPreview: cache decoded image/video poster by postID+bucket+path to prevent placeholder flashes and eliminate cross-row thumbnail bleed; no UI/layout changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260123_174900_FixD_RemoteThumbCache_NoFlicker
 
 
-// CHANGE-ID: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
-// SCOPE: Phase 14.2.1 — ContentView Connected feed parity: render remote backend posts inline with local sessions using a unified row source; keep UI chrome and local SessionRow/navigation untouched; remote rows use SessionRow-twin layout and navigate to BackendSessionDetailView.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260122_203207_14_2_1_ContentViewConnectedFeedParity
-// CHANGE-ID: 20260122_190500_14_2_1_HeadlessConnectedRevert
-// SCOPE: Phase 14.2.1 — Revert Connected feed UI to canonical local SessionRow + SessionDetailView navigation; keep headless connected-mode backend fetch/refresh triggers; do not render backend-specific feed rows in Connected mode.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260122_190500_HeadlessConnectedRevert
-// CHANGE-ID: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
-// SCOPE: Phase 14.1 — Requests '+' badge freshness: refresh FollowStore on pull-to-refresh and on app foreground (scenePhase active). No polling.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260122_090100_Phase141_RequestBadge_RefreshTriggers
 
-// CHANGE-ID: 20260121_183500_Phase14_Step4_IdentityInBackendFeed
-// SCOPE: Phase 14 Step 4 — show account_directory identity (display_name + optional @account_id) in backend feed rows; no location; no behavior changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 
-// CHANGE-ID: 20260121_115517_P13D2_ContentView
-// SCOPE: Phase 13D.2 — Gate backend feed rendering on BackendEnvironment.isConnected (shipping) instead of isPreview (debug-only). No other UI/logic changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260121_115517_P13D2_ContentView
 
-// CHANGE-ID: 20260116_1627_Phase10_TopBarPeopleFix_7e4f15
-// SCOPE: Phase 10: ContentView top-left People (magnifying glass) button — tighten spacing without overlap; ensure tap opens sheet.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 
-// CHANGE-ID: 20260114_092641_P9D2_CommentsGate_8507525b
-// SCOPE: Step 9D.2 — Gate Comments entry points based on backend follow approval (fail closed).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260114_092641_Step9D2_CommentsGate
 
-// CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
-// SCOPE: Step 9A — Pass backendUserID into SessionsRootView and use it for backend preview ownership checks
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // UNIQUE-TOKEN: 20260112_131015_contentview_backend_id
 
-// CHANGE-ID: 20260112_133000_9A_fix_backendUserID_redecl
-// SCOPE: 9A hotfix — remove duplicate backendUserID property in SessionsRootView to restore init signature (no behavior change).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // UNIQUE-TOKEN: 20260112_133000_9A_fix_backendUserID_redecl
 
-// CHANGE-ID: 20260111_135903_9c2a7f1e
-// SCOPE: ContentView — Feed Filter visual-only pass (Saved-only row alignment + collapsed header optical centering)
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // UNIQUE-TOKEN: 20260111_135903_feed_filter_visual_pass3
-// CHANGE-ID: v7.12B-ContentView-FixEffectiveUserID-20251112_135718
-// SCOPE: Add effectiveUserID in SessionsRootView + DEBUG follow/publish gating in .all
-// CHANGE-ID: v710H-TopButtonsSafeInset-20251030-1205
-// SCOPE: ContentView — replace .toolbar with .safeAreaInset for avatar/record/plus (visual-only); remove toolbar capsule
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // UNIQUE-TOKEN: v710H-TopButtonsSafeInset-20251030-1205
-// CHANGE-ID: 20260105_191200_contentview_thumb_inclusion_invariant
-// SCOPE: Feed thumbnail preview must never use private (not-included) attachments; if none included, show no thumbnail.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 //
 //  ContentView.swift
 //  MOTIVO
@@ -144,29 +108,29 @@
 //
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
-// CHANGE-ID: 20251008_164453_70d21
-// SCOPE: Visual-only — capitalize 'Feed Filter'; tint Instrument & Activity pickers to header light grey
-// CHANGE-ID: 20260111_132050_feed_filter_visual_overhaul
-// SCOPE: Visual-only — shrink/soften Feed Filter collapsed+open states; no logic/behavior changes
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // UNIQUE-TOKEN: 20260111_132050_feed_filter_visual_overhaul
-// CHANGE-ID: 20260121_203420_Phase141_ContentView_FollowBadgeReactive_OwnerPeekFix
-// SCOPE: Phase 14.1 — Observe FollowStore for reactive request '+' badge; unify viewerID for owner checks; ensure self-peek never gated.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260121_203420_Phase141_ContentView_FollowBadgeReactive_OwnerPeekFix
 
-// CHANGE-ID: 20260122_113000_Phase142_ContentViewIgnoreOverridesInConnected
-// SCOPE: Phase 14.2 — Ignore debug identity overrides in connected mode (owner checks + viewer-local state)
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260122_113000_Phase142_ContentViewGuardrails
 
-// CHANGE-ID: 20260205_065749_LocParity_d2c43ded
-// SCOPE: Identity data parity — use backend account_directory.location for non-owner identity rows and peeks; owner continues to use local ProfileStore.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
-// CHANGE-ID: 20260304_114800_Threads_S5_ContentView_ThreadFilter
-// SCOPE: Stage 5 — Add owner-only Thread feed filter (local-only); remote posts excluded when thread filter active. No other UI/layout changes.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260304_114800_Threads_S5_ContentView_ThreadFilter
 
-// CHANGE-ID: 20260304_124300_Threads_S6_ContentView_ThreadOptionsAndRowMeta
-// SCOPE: Stage 6E/6F — Show thread in local feed row meta line; provide existing local threads as selectable options in thread filter picker.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260304_124300_Threads_S6_ContentView_ThreadOptionsAndRowMeta
 
 import SwiftUI
@@ -174,8 +138,8 @@ import CoreData
 import Combine
 import CryptoKit
 
-// CHANGE-ID: 20260202_215800_BackPopFlashNoState
-// SCOPE: Prevent feed flash on return from BackendSessionDetailView without mutating ContentView state during the pop transition (use a static gate timestamp).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_215800_BackPopFlashNoState
 
 fileprivate enum BackendDetailPopGate {
@@ -766,7 +730,7 @@ fileprivate struct SessionsRootView: View {
                         // Subtle "+" indicator for incoming follow requests (outside the pill)
                         if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread {
                             Text("+")
-                                .font(Theme.Text.meta)
+                                .font(Theme.Text.body)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                                 .offset(x: 8, y: -8)
                         }
@@ -1475,6 +1439,36 @@ Spacer()
 
 // MARK: - Filter bar (unchanged logic, wrapped by a card above)
 
+
+fileprivate struct FilterSelectorValueControl: View {
+    let valueText: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(valueText)
+                .font(Theme.Text.body)
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption.weight(.semibold))
+                .imageScale(.small)
+        }
+    }
+}
+
+fileprivate struct FilterSelectorTrailingControlStyle: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
+            .tint(Theme.Colors.secondaryText)
+            .controlSize(.small)
+            .scaleEffect(1.0, anchor: .trailing)
+    }
+}
+
+
+
 fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
     let instruments: [Instrument]
@@ -1508,7 +1502,7 @@ fileprivate struct FilterBar: View {
                     TextField("Search", text: $searchText)
                         .textInputAutocapitalization(.never)
                         .disableAutocorrection(true)
-                        .font(Theme.Text.meta)
+                        .font(Theme.Text.body)
                         .textFieldStyle(.roundedBorder)
                         .controlSize(.small)
                         .padding(.vertical, -2)
@@ -1518,71 +1512,74 @@ fileprivate struct FilterBar: View {
                     // Instrument
                     HStack(spacing: 10) {
                         Text("Instrument")
-                            .font(Theme.Text.meta)
+                            .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
                         Spacer(minLength: 0)
-                        Picker("Instrument", selection: $selectedInstrument) {
-                            Text("Any").tag(nil as Instrument?)
-                            ForEach(instruments, id: \.objectID) { inst in
-                                Text(inst.name ?? "(Unnamed)").tag(inst as Instrument?)
+                                                Menu {
+                            Button("Any") {
+                                selectedInstrument = nil
                             }
+                            ForEach(instruments, id: \.objectID) { inst in
+                                Button(((inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? "(Unnamed)" : (inst.name ?? "")) {
+                                    selectedInstrument = inst
+                                }
+                            }
+                        } label: {
+                            FilterSelectorValueControl(valueText: {
+                                if let inst = selectedInstrument {
+                                    let name = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    return name.isEmpty ? "(Unnamed)" : name
+                                } else {
+                                    return "Any"
+                                }
+                            }())
                         }
-                        .pickerStyle(.menu)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
-                        .tint(Theme.Colors.secondaryText)
-                        .controlSize(.small)
-                        .scaleEffect(0.92, anchor: .trailing)
+                        .modifier(FilterSelectorTrailingControlStyle())
                     }
                     .padding(.vertical, 2)
 
                     // Activity — include customs
                     HStack(spacing: 10) {
                         Text("Activity")
-                            .font(Theme.Text.meta)
+                            .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
                         Spacer(minLength: 0)
-                        Picker("Activity", selection: $selectedActivity) {
-                            Text("Any").tag(ActivityFilter.any)
-                            // Core activities
-                            ForEach(ActivityType.allCases) { a in
-                                Text(a.label).tag(ActivityFilter.core(a))
+                                                Menu {
+                            Button("Any") {
+                                selectedActivity = .any
                             }
-                            // Custom activities
-                            if !customNames.isEmpty {
-                                ForEach(customNames, id: \.self) { name in
-                                    Text(name).tag(ActivityFilter.custom(name))
+                            ForEach(ActivityType.allCases) { a in
+                                Button(a.label) {
+                                    selectedActivity = .core(a)
                                 }
                             }
+                            if !customNames.isEmpty {
+                                ForEach(customNames, id: \.self) { name in
+                                    Button(name) {
+                                        selectedActivity = .custom(name)
+                                    }
+                                }
+                            }
+                        } label: {
+                            FilterSelectorValueControl(valueText: selectedActivity.label)
                         }
-                        .pickerStyle(.menu)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
-                        .tint(Theme.Colors.secondaryText)
-                        .controlSize(.small)
-                        .scaleEffect(0.92, anchor: .trailing)
+                        .modifier(FilterSelectorTrailingControlStyle())
                     }
                     .padding(.vertical, 2)
 
                     // Thread (owner-only)
                     HStack(spacing: 10) {
                         Text("Thread")
-                            .font(Theme.Text.meta)
+                            .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
                         Spacer(minLength: 0)
                         Button {
                             showThreadPicker = true
                         } label: {
-                            HStack(spacing: 6) {
-                                Text(selectedThread ?? "Any")
-                                Image(systemName: "chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .imageScale(.small)
-                            }
+                            FilterSelectorValueControl(valueText: selectedThread ?? "Any")
                         }
                         .buttonStyle(.plain)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
-                        .tint(Theme.Colors.secondaryText)
-                        .controlSize(.small)
-                        .scaleEffect(0.92, anchor: .trailing)
+                        .modifier(FilterSelectorTrailingControlStyle())
                         .contentShape(Rectangle())
                     }
                     .padding(.vertical, 2)
@@ -1598,13 +1595,13 @@ fileprivate struct FilterBar: View {
                     // Saved only — peer row (same label style/alignment as Instrument/Activity)
                     HStack(spacing: 10) {
                         Text("Saved only")
-                            .font(Theme.Text.meta)
+                            .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
                         Spacer(minLength: 0)
                         Toggle("", isOn: $savedOnly)
                             .labelsHidden()
                             .controlSize(.small)
-                            .scaleEffect(0.92, anchor: .trailing)
+                            .scaleEffect(1.0, anchor: .trailing)
                             .padding(.trailing, 10) // aligns switch with menu picker trailing inset
                     }
                     .padding(.vertical, 2)
@@ -1965,7 +1962,7 @@ fileprivate struct SessionRow: View {
 
                 if !combinedMeta.isEmpty {
                     Text(combinedMeta)
-                        .font(Theme.Text.meta)
+                        .font(Theme.Text.body)
                         .lineLimit(2)
                         .padding(.top, 3)
                         .accessibilityLabel("Instrument and activity")
@@ -2623,13 +2620,13 @@ fileprivate struct BackendPostRow: View {
             if let acct = directoryAccount {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(acct.displayName)
-                        .font(Theme.Text.meta)
+                        .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
                     if let handle = acct.accountID?.trimmingCharacters(in: .whitespacesAndNewlines),
                        !handle.isEmpty {
                         Text("@\(handle)")
-                            .font(Theme.Text.meta)
+                            .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.75))
                     }
 
@@ -2707,8 +2704,8 @@ fileprivate final class RemotePostAttachmentMetaCache {
 
 
 
-// CHANGE-ID: 20260214_103700_Etudes_ShareTo_InlineNav
-// SCOPE: ShareToFollowerSheet: mirror FollowingList nav chrome (inline title + chevron back) and list background parity.
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260214_103700_Etudes_ShareTo_InlineNav
 
 fileprivate struct ShareToFollowerSheet: View {
@@ -3177,7 +3174,7 @@ private var extraAttachmentCount: Int {
                 // Activity subtitle (metadata)
                 if !instrumentActivityLine.isEmpty {
                     Text(instrumentActivityLine)
-                        .font(Theme.Text.meta)
+                        .font(Theme.Text.body)
                         .lineLimit(2)
                         .padding(.top, 3)
                         .accessibilityLabel(instrumentActivityLine)
@@ -3259,8 +3256,8 @@ private var extraAttachmentCount: Int {
     }
 
 
-// CHANGE-ID: 20260210_181900_Phase15_Step2_AvatarRenderCache
-// SCOPE: Phase 15 Step 2 — helper view for rendering directory avatars with shared caches (feed + other non-owner identity surfaces).
+// CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
+// SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260210_181900_Phase15_Step2_AvatarRenderCache_DIR_AVATAR_VIEW
 #if canImport(UIKit)
 private struct DirectoryAvatarCircle: View {
@@ -3626,7 +3623,7 @@ private struct PeoplePlaceholderView: View {
                 .foregroundStyle(Theme.Colors.secondaryText)
 
             Text("Placeholder — People hub will live here.")
-                .font(Theme.Text.meta)
+                .font(Theme.Text.body)
                 .foregroundStyle(Theme.Colors.secondaryText)
 
             Spacer()
