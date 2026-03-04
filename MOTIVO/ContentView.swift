@@ -161,6 +161,10 @@
 // SCOPE: Identity data parity — use backend account_directory.location for non-owner identity rows and peeks; owner continues to use local ProfileStore.
 // SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
+// CHANGE-ID: 20260304_114800_Threads_S5_ContentView_ThreadFilter
+// SCOPE: Stage 5 — Add owner-only Thread feed filter (local-only); remote posts excluded when thread filter active. No other UI/layout changes.
+// SEARCH-TOKEN: 20260304_114800_Threads_S5_ContentView_ThreadFilter
+
 import SwiftUI
 import CoreData
 import Combine
@@ -324,6 +328,7 @@ fileprivate struct SessionsRootView: View {
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
+    @State private var selectedThread: String? = nil
     @State private var selectedScope: FeedScope = .all
     @State private var searchText: String = ""
     @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
@@ -492,7 +497,8 @@ fileprivate struct SessionsRootView: View {
                         selectedActivity: $selectedActivity,
                         selectedScope: $selectedScope,
                         searchText: $searchText,
-                        savedOnly: $savedOnly
+                        savedOnly: $savedOnly,
+                        selectedThread: $selectedThread
                     )
                 }
                 .padding(.vertical, 8)
@@ -1164,6 +1170,22 @@ Spacer()
             }
         }
 
+        // Thread (owner-only; local-only)
+        if let selected = selectedThread {
+            let target = selected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if let me = effectiveUserID, !target.isEmpty {
+                out = out.filter { s in
+                    guard s.ownerUserID == me else { return false }
+                    let raw = ((s.value(forKey: "threadLabel") as? String) ?? "")
+                    let norm = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    return !norm.isEmpty && norm == target
+                }
+            } else {
+                out = []
+            }
+        }
+
+
         // Saved-only (viewer-local)
         if savedOnly {
             guard let vid = effectiveUserID else { return [] }
@@ -1259,6 +1281,9 @@ Spacer()
     private func filteredRemotePosts(_ posts: [BackendPost]) -> [BackendPost] {
         // Ensure no data is shown when signed out
         guard userID != nil else { return [] }
+
+        // Thread filter is owner-only metadata; remote posts never participate.
+        if selectedThread != nil { return [] }
 
         return posts.filter { post in
             remoteMatchesSelectedInstrument(post) &&
@@ -1426,6 +1451,9 @@ fileprivate struct FilterBar: View {
     @Binding var selectedScope: FeedScope
     @Binding var searchText: String
     @Binding var savedOnly: Bool
+    @Binding var selectedThread: String?
+
+    @State private var showThreadPicker: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1499,6 +1527,34 @@ fileprivate struct FilterBar: View {
                         .scaleEffect(0.92, anchor: .trailing)
                     }
                     .padding(.vertical, 2)
+
+                    // Thread (owner-only)
+                    HStack(spacing: 10) {
+                        Text("Thread")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        Spacer(minLength: 0)
+                        Button {
+                            showThreadPicker = true
+                        } label: {
+                            HStack(spacing: 6) {
+                                Text(selectedThread ?? "Any")
+                                Image(systemName: "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .imageScale(.small)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
+                        .tint(Theme.Colors.secondaryText)
+                        .controlSize(.small)
+                        .scaleEffect(0.92, anchor: .trailing)
+                        .contentShape(Rectangle())
+                    }
+                    .padding(.vertical, 2)
+                    .sheet(isPresented: $showThreadPicker) {
+                        ThreadPickerView(selectedThread: $selectedThread)
+                    }
 
                     // Saved only — peer row (same label style/alignment as Instrument/Activity)
                     HStack(spacing: 10) {
