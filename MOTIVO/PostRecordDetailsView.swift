@@ -15,12 +15,48 @@
 // CHANGE-ID: 20260304_081800_Threads_S3_PRDV_ThreadCardAndPersist
 // SCOPE: PRDV — Add owner-only Thread selector card under Description; bind to Session.threadLabel on save; present ThreadPickerView. No other UI/logic changes.
 
+// CHANGE-ID: 20260304_140500_Threads_S6_1_PRDV_ThreadSuggestions
+// SCOPE: PRDV Threads v1 Stage 6.1 — pass existing thread suggestions into ThreadPickerView from local Core Data Sessions. No other UI/logic changes.
+// SEARCH-TOKEN: 20260304_140500_Threads_S6_1_PRDV_ThreadSuggestions
+
 import SwiftUI
 import CoreData
 import PhotosUI
 import UniformTypeIdentifiers
 import AVFoundation
 import UIKit
+
+// MARK: - Threads v1 Stage 6.1 (PRDV/AESV suggestions)
+// Local-only helper to sanitize, de-duplicate (case-insensitive), and sort thread labels.
+// Kept file-local to avoid cross-file dependencies.
+private enum ThreadLabelSanitizer_Stage6_1 {
+    static let maxLength: Int = 32
+
+    static func sanitize(_ s: String) -> String? {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        let collapsed = trimmed
+            .replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if collapsed.isEmpty { return nil }
+        if collapsed.count <= maxLength { return collapsed }
+        return String(collapsed.prefix(maxLength))
+    }
+
+    static func uniqueSorted(_ raw: [String]) -> [String] {
+        var seen: Set<String> = []
+        var out: [String] = []
+        out.reserveCapacity(raw.count)
+        for s in raw {
+            guard let clean = sanitize(s) else { continue }
+            let key = clean.lowercased()
+            if seen.contains(key) { continue }
+            seen.insert(key)
+            out.append(clean)
+        }
+        return out.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+}
+
 
 
 // MARK: - Attachment Viewer Request (Step 1)
@@ -46,6 +82,21 @@ private struct AttachmentViewerRequest: Identifiable {
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
+
+    private var existingThreadOptions: [String] {
+        let request: NSFetchRequest<Session> = Session.fetchRequest()
+        request.predicate = NSPredicate(format: "threadLabel != nil AND threadLabel != ''")
+        request.fetchLimit = 500
+        request.returnsObjectsAsFaults = true
+
+        do {
+            let sessions = try viewContext.fetch(request)
+            let raw = sessions.compactMap { $0.threadLabel }
+            return ThreadLabelSanitizer_Stage6_1.uniqueSorted(raw)
+        } catch {
+            return []
+        }
+    }
 
     @Binding var isPresented: Bool
     private let prefillTimestamp: Date
@@ -720,7 +771,7 @@ isPrivate: { url in
             .sheet(isPresented: $showStartPicker) { startPicker }
             .sheet(isPresented: $showDurationPicker) { durationPicker }
             .sheet(isPresented: $showThreadPicker) {
-                ThreadPickerView(selectedThread: $threadLabel)
+                ThreadPickerView(selectedThread: $threadLabel, recentThreads: existingThreadOptions)
             }
             .photosPicker(isPresented: $showPhotoPicker,
                         selection: $photoPickerItem,

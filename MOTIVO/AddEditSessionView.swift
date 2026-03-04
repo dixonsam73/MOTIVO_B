@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260304_144500_Threads_S6_1_AESV_ThreadSuggestions
+// SCOPE: Threads v1 Stage 6.1 — provide existing local thread suggestions to ThreadPickerView when launched from AESV. No other UI/logic changes.
+// SEARCH-TOKEN: 20260304_144500_Threads_S6_1_AESV_ThreadSuggestions
+
 // CHANGE-ID: 20260304_124500_Threads_S4R2_AESV_TypecheckFix
 // SCOPE: AESV Threads v1 — Fix SwiftUI type-check timeout by extracting body content stack into a @ViewBuilder computed property. No UI/logic changes beyond Stage 4 Threads scope.
 // SEARCH-TOKEN: 20260304_124500_Threads_S4R2_AESV_TypecheckFix
@@ -71,6 +75,38 @@ import AVFoundation
 import UIKit
 import UniformTypeIdentifiers
 
+// MARK: - Threads v1 Stage 6.1 (AESV) — local suggestions
+fileprivate enum ThreadLabelSanitizer_Stage6_1_AESV {
+    static let maxLength: Int = 32
+
+    static func sanitize(_ s: String) -> String? {
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return nil }
+        let collapsed = trimmed.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        if collapsed.isEmpty { return nil }
+        if collapsed.count <= maxLength { return collapsed }
+        let idx = collapsed.index(collapsed.startIndex, offsetBy: maxLength)
+        return String(collapsed[..<idx])
+    }
+}
+
+fileprivate func uniqueSortedThreadOptions_Stage6_1_AESV(_ raw: [String]) -> [String] {
+    var seen = Set<String>()
+    var out: [String] = []
+    out.reserveCapacity(min(raw.count, 32))
+    for s in raw {
+        guard let clean = ThreadLabelSanitizer_Stage6_1_AESV.sanitize(s) else { continue }
+        let key = clean.lowercased()
+        if seen.contains(key) { continue }
+        seen.insert(key)
+        out.append(clean)
+    }
+    out.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    return out
+}
+
+
+
 
 // MARK: - Attachment Viewer Request (AESV)
 // Atomic presentation payload for AttachmentViewerView.
@@ -124,6 +160,21 @@ struct AddEditSessionView: View {
     // Threads v1 (owner-only metadata)
     @State private var threadLabel: String? = nil
     @State private var showThreadPicker: Bool = false
+
+    private var existingThreadOptions: [String] {
+        guard let uid = PersistenceController.shared.currentUserID, !uid.isEmpty else { return [] }
+        let req = NSFetchRequest<Session>(entityName: "Session")
+        req.predicate = NSPredicate(format: "ownerUserID == %@ AND threadLabel != nil AND threadLabel != ''", uid)
+        req.fetchLimit = 500
+        do {
+            let results = try viewContext.fetch(req)
+            let raw = results.compactMap { $0.threadLabel }
+            return uniqueSortedThreadOptions_Stage6_1_AESV(raw)
+        } catch {
+            return []
+        }
+    }
+
 
     @State private var isPublic: Bool = true
     @State private var notes: String = ""
@@ -346,7 +397,7 @@ struct AddEditSessionView: View {
         }
         .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
         .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
-        .sheet(isPresented: $showThreadPicker) { ThreadPickerView(selectedThread: $threadLabel) }
+        .sheet(isPresented: $showThreadPicker) { ThreadPickerView(selectedThread: $threadLabel, recentThreads: existingThreadOptions) }
         .sheet(isPresented: $showStartPicker) { startPicker }
         .sheet(isPresented: $showDurationPicker) { durationPicker }
         .photosPicker(isPresented: $showPhotoPicker,
