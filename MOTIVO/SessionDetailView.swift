@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260304_080300_Threads_S1_SDV_ReadOnly
+// SCOPE: Stage 1 — SessionDetailView: show owner-only thread label in meta line under title (read-only).
+// SEARCH-TOKEN: 20260304_080300_Threads_S1_SDV_ReadOnly
+
 // CHANGE-ID: 20260219_212900_SDV_AAV_TappedSelection_Fix
 // SCOPE: Bugfix — SDV attachment tap opens AttachmentViewer on tapped item (first-tap fix) + PRDV-style two-gallery launch
 // SEARCH-TOKEN: 20260219_205130_SDV_AAV_TappedSelection
@@ -630,7 +634,7 @@ return AttachmentViewerView(
                             .accessibilitySortPriority(2)
                         Spacer()
                     }
-                    Text(metaLine)
+                    Text(metaLineWithThread)
                         .font(Theme.Text.meta)
                         .foregroundStyle(.secondary)
                         .accessibilitySortPriority(1)
@@ -812,6 +816,21 @@ return AttachmentViewerView(
 
         return "\(dateStr) • \(timeStr) • \(durStr)"
     }
+
+    private var threadLabelForDisplay: String? {
+        guard session.ownerUserID == auth.currentUserID else { return nil }
+        let raw = session.threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard raw.isEmpty == false else { return nil }
+        return raw
+    }
+
+    private var metaLineWithThread: String {
+        if let thread = threadLabelForDisplay {
+            return "\(thread) · \(metaLine)"
+        }
+        return metaLine
+    }
+
 
     private func formattedDurationDisplay(_ seconds: Int) -> String {
         let h = seconds / 3600
