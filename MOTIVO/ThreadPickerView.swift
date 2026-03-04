@@ -1,6 +1,8 @@
 //
 // CHANGE-ID: 20260304_081250_Threads_S2_ThreadPickerView_Skeleton
+// CHANGE-ID: 20260304_131900_Threads_S6F_ThreadPickerView_Options_FixIsSelected
 // SCOPE: Add standalone ThreadPickerView (compile-only skeleton; not wired yet).
+// SCOPE: Stage 6F — Display selectable thread options (passed in as recentThreads) with selected indicator.
 //
 // NOTE: This file intentionally avoids dependencies on Theme/Auth/CoreData so it can compile
 // in isolation for Stage 2. Wiring + recents sourcing happens in later stages.
@@ -41,12 +43,20 @@ struct ThreadPickerView: View {
                 }
 
                 if !recentThreads.isEmpty {
-                    Section("Recent") {
+                    Section("Threads") {
                         ForEach(recentThreads, id: \.self) { thread in
                             Button {
                                 applySelection(thread)
                             } label: {
-                                Text(thread)
+                                HStack {
+                                    Text(thread)
+                                    Spacer()
+                                    if isSelected(thread) {
+                                        Image(systemName: "checkmark")
+                                            .font(.footnote.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
                             }
                         }
                     }
@@ -93,6 +103,14 @@ struct ThreadPickerView: View {
     private func isEffectivelyEmpty(_ raw: String) -> Bool {
         sanitize(raw, maxLength: maxLength) == nil
     }
+
+
+    private func isSelected(_ thread: String) -> Bool {
+        guard let a = sanitize(thread, maxLength: maxLength)?.lowercased() else { return false }
+        guard let b = sanitize(selectedThread ?? "", maxLength: maxLength)?.lowercased() else { return false }
+        return a == b
+    }
+
 
     /// Trims, collapses internal whitespace, enforces max length, and returns nil for empty.
     private func sanitize(_ raw: String, maxLength: Int) -> String? {

@@ -165,6 +165,10 @@
 // SCOPE: Stage 5 — Add owner-only Thread feed filter (local-only); remote posts excluded when thread filter active. No other UI/layout changes.
 // SEARCH-TOKEN: 20260304_114800_Threads_S5_ContentView_ThreadFilter
 
+// CHANGE-ID: 20260304_124300_Threads_S6_ContentView_ThreadOptionsAndRowMeta
+// SCOPE: Stage 6E/6F — Show thread in local feed row meta line; provide existing local threads as selectable options in thread filter picker.
+// SEARCH-TOKEN: 20260304_124300_Threads_S6_ContentView_ThreadOptionsAndRowMeta
+
 import SwiftUI
 import CoreData
 import Combine
@@ -498,7 +502,8 @@ fileprivate struct SessionsRootView: View {
                         selectedScope: $selectedScope,
                         searchText: $searchText,
                         savedOnly: $savedOnly,
-                        selectedThread: $selectedThread
+                        selectedThread: $selectedThread,
+                        threadOptions: existingThreadOptions
                     )
                 }
                 .padding(.vertical, 8)
@@ -1294,6 +1299,34 @@ Spacer()
     }
 
 
+
+    // MARK: - Thread options (owner-only; local-only)
+
+    private var existingThreadOptions: [String] {
+        // Ensure no data is shown when signed out
+        guard userID != nil else { return [] }
+        guard let me = effectiveUserID else { return [] }
+
+        var out: [String] = []
+        var seen: Set<String> = []
+
+        for s in sessions {
+            guard s.ownerUserID == me else { continue }
+            let raw = ((s.value(forKey: "threadLabel") as? String) ?? "")
+            guard let sanitized = ThreadLabelSanitizer.sanitize(raw, maxLength: 32) else { continue }
+
+            let key = sanitized.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(sanitized)
+        }
+
+        // Consistent ordering: alphabetical (case-insensitive).
+        return out.sorted { a, b in
+            a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+        }
+    }
+
     // MARK: - Remote feed preview prewarm
 
     private func warmRemoteFeedPreviews(posts: [BackendPost], viewerUserID: String?, limit: Int = 10) async {
@@ -1452,6 +1485,7 @@ fileprivate struct FilterBar: View {
     @Binding var searchText: String
     @Binding var savedOnly: Bool
     @Binding var selectedThread: String?
+    let threadOptions: [String]
 
     @State private var showThreadPicker: Bool = false
 
@@ -1553,7 +1587,12 @@ fileprivate struct FilterBar: View {
                     }
                     .padding(.vertical, 2)
                     .sheet(isPresented: $showThreadPicker) {
-                        ThreadPickerView(selectedThread: $selectedThread)
+                        ThreadPickerView(
+                            selectedThread: $selectedThread,
+                            title: "Thread",
+                            recentThreads: threadOptions,
+                            maxLength: 32
+                        )
                     }
 
                     // Saved only — peer row (same label style/alignment as Instrument/Activity)
@@ -1908,9 +1947,24 @@ fileprivate struct SessionRow: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("row.title")
 
-                // Instrument / Activity subtitle (metadata)
-                if !instrumentActivityLine.isEmpty {
-                    Text(instrumentActivityLine)
+                // Instrument / Activity subtitle (metadata) — prefix Thread when present (local-only)
+                let metaLine = instrumentActivityLine
+                let thread = ThreadLabelSanitizer.sanitize(session.threadLabel ?? "", maxLength: 32)
+
+                let combinedMeta: String = {
+                    if let thread, !thread.isEmpty {
+                        if !metaLine.isEmpty {
+                            return "\(thread) · \(metaLine)"
+                        } else {
+                            return thread
+                        }
+                    } else {
+                        return metaLine
+                    }
+                }()
+
+                if !combinedMeta.isEmpty {
+                    Text(combinedMeta)
                         .font(Theme.Text.meta)
                         .lineLimit(2)
                         .padding(.top, 3)
@@ -3580,5 +3634,30 @@ private struct PeoplePlaceholderView: View {
         .padding(Theme.Spacing.l)
         .appBackground()
         // No navigationTitle here — keep it quiet.
+    }
+}
+
+
+// MARK: - Thread label sanitizer (shared)
+
+fileprivate enum ThreadLabelSanitizer {
+    /// Trims, collapses internal whitespace, enforces max length, and returns nil for empty.
+    static func sanitize(_ raw: String, maxLength: Int = 32) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let collapsed = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        guard !collapsed.isEmpty else { return nil }
+
+        if collapsed.count <= maxLength {
+            return collapsed
+        } else {
+            let idx = collapsed.index(collapsed.startIndex, offsetBy: maxLength)
+            return String(collapsed[..<idx])
+        }
     }
 }
