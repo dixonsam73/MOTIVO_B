@@ -1,6 +1,9 @@
-// CHANGE-ID: 20260304_113500_Threads_S4_AESV_ThreadCardAndPersist
-// SCOPE: AESV — Add owner-only Thread selector card under Description; bind to Session.threadLabel on save; present ThreadPickerView. No other UI/logic changes.
-// SEARCH-TOKEN: 20260304_113500_Threads_S4_AESV_ThreadCardAndPersist
+// CHANGE-ID: 20260304_124500_Threads_S4R2_AESV_TypecheckFix
+// SCOPE: AESV Threads v1 — Fix SwiftUI type-check timeout by extracting body content stack into a @ViewBuilder computed property. No UI/logic changes beyond Stage 4 Threads scope.
+// SEARCH-TOKEN: 20260304_124500_Threads_S4R2_AESV_TypecheckFix
+// CHANGE-ID: 20260304_122500_Threads_S4R_AESV_ThreadCardVisibleAndPersist
+// SCOPE: AESV Threads v1 — add visible Thread selector card under Description; bind to Session.threadLabel on hydrate+save; present ThreadPickerView. No other UI/logic changes.
+// SEARCH-TOKEN: 20260304_122500_Threads_S4R_AESV_ThreadCardVisibleAndPersist
 
 // CHANGE-ID: 20260227_223900_AESV_desc_pencil_focusDismiss
 // SCOPE: AESV visual-only — add pencil affordance to Description editable line (hide while editing) + dismiss keyboard/focus for Description + Notes on tap/scroll. No other UI/logic changes.
@@ -290,6 +293,12 @@ struct AddEditSessionView: View {
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
             _durationSeconds = State(initialValue: Int(s.durationSeconds))
+
+            // Threads v1 (owner-only metadata)
+            if s.entity.attributesByName.keys.contains("threadLabel") {
+                let raw = (s.value(forKey: "threadLabel") as? String) ?? ""
+                _threadLabel = State(initialValue: sanitizeThreadLabel_v1(raw))
+            }
         }
     }
 
@@ -301,7 +310,150 @@ struct AddEditSessionView: View {
     var body: some View {
     NavigationStack {
         ScrollView {
-            VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                        contentStack
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.l)
+            .padding(.bottom, Theme.Spacing.xl)
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                isActivityDetailFocused = false
+                isNotesFocused = false
+            }
+        )
+        .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                Text(isEdit ? "Edit Session" : "New Session")
+                    .font(Theme.Text.pageTitle)
+            }
+            ToolbarItem(placement: .cancellationAction) {
+                Button(action: { cancelAndCleanup_AESV_bestEffort() }) {
+                    Text("Cancel")
+                        .font(Theme.Text.body)
+                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(action: { save() }) {
+                    Text("Save")
+                        .font(Theme.Text.body)
+                }
+                .disabled(durationSeconds == 0 || instrument == nil)
+                .accessibilityLabel("Save session")
+                .accessibilityIdentifier("button.saveSession")
+            }
+        }
+        .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
+        .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
+        .sheet(isPresented: $showThreadPicker) { ThreadPickerView(selectedThread: $threadLabel) }
+        .sheet(isPresented: $showStartPicker) { startPicker }
+        .sheet(isPresented: $showDurationPicker) { durationPicker }
+        .photosPicker(isPresented: $showPhotoPicker,
+                      selection: $photoPickerItem,
+                      matching: .any(of: [.images, .videos]))
+        .task(id: photoPickerItem) {
+            guard let item = photoPickerItem else { return }
+            if let contentType = item.supportedContentTypes.first {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    if contentType.conforms(to: .image) {
+                        stageData(data, kind: .image)
+                    } else if contentType.conforms(to: .movie) {
+                        stageData(data, kind: .video)
+                    } else {
+                        stageData(data, kind: .file)
+                    }
+                }
+            } else if let data = try? await item.loadTransferable(type: Data.self) {
+                stageData(data, kind: .file)
+            }
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureView { image in
+                if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
+            }
+        }
+        .alert("Camera access denied",
+               isPresented: $showCameraDeniedAlert,
+               actions: {
+                   Button("OK", role: .cancel) {}
+                   Button("Open Settings") {
+                       if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                   }
+               },
+               message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
+        .alert("Publish limit",
+               isPresented: $showPublishLimitAlert,
+               actions: { Button("OK", role: .cancel) {} },
+               message: { Text(publishLimitAlertMessage) })
+        .fullScreenCover(item: $viewerRequest) { req in
+            let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
+            let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
+            let audioURLs: [URL] = (req.mode == .audio) ? req.audioURLs : []
+            let combined = imageURLs + videoURLs + audioURLs
+            let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
+
+            let viewerAttachmentIDs: [UUID] = req.viewerAttachmentIDs
+
+            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+            let persistedTitles = loadPersistedAudioTitles()
+            let audioTitles: [String] = audioURLs.map { u in
+                let stem = u.deletingPathExtension().lastPathComponent
+                // Prefer persisted override; then staged map; finally fall back to stem
+                let persisted = (persistedTitles[stem] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !persisted.isEmpty { return persisted }
+                let staged = (namesDict[stem] ?? stem).trimmingCharacters(in: .whitespacesAndNewlines)
+                return staged.isEmpty ? stem : staged
+            }
+
+attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, audioTitles: audioTitles, req: req)
+        }
+        .task { hydrate() } // unified first-appearance init
+        .onAppear {
+            preselectFocusFromNotesIfNeeded_edit()
+            syncActivityChoiceFromState()
+            loadPrivacyMap()
+            // Ensure token is hidden in Notes whenever view appears
+            stripFocusTokensFromNotes_edit()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: AttachmentPrivacy.didChangeNotification)) { _ in
+            loadPrivacyMap()
+        }
+        .onChange(of: activity) { _, _ in
+            maybeUpdateActivityDetailFromDefaults()
+        }
+        .onChange(of: timestamp) { _, _ in
+            maybeUpdateActivityDetailFromDefaults()
+        }
+        .onChange(of: timestamp) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
+        .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
+        .onChange(of: activityDetail) { old, new in
+            let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
+            userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+        }
+        .onAppear {
+            instrumentsGateArmed = false
+            instrumentsReady = false
+            // Give instruments a breath to bind if they’re coming from Core Data
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                instrumentsGateArmed = true
+                // If they’re already non-empty by now, mark ready
+                if !instruments.isEmpty { instrumentsReady = true }
+            }
+        }
+        .onChange(of: instruments.count) { _, newCount in
+            // As soon as instruments arrive, it's safe to render their section
+            if newCount > 0 { instrumentsReady = true }
+        }
+        .appBackground()
+    }
+}
+
+    // Threads v1 — compiler assistance (no UI/logic change)
+    @ViewBuilder
+    private var contentStack: some View {
+VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
                 // No instruments / Instrument picker
                 if hasNoInstruments {
@@ -314,36 +466,6 @@ struct AddEditSessionView: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .cardSurface()
-
-
-                // ---------- Thread ----------
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Thread").sectionHeader()
-                    Button {
-                        showThreadPicker = true
-                    } label: {
-                        HStack {
-                            if let thread = threadLabel, !thread.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                Text(thread)
-                                    .font(Theme.Text.body)
-                            } else {
-                                Text("None")
-                                    .font(Theme.Text.body)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .padding(6)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .padding(.vertical, 12)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .cardSurface()
-
                     } else {
                         // Render nothing until either the arm time passes or instruments arrive
                         EmptyView()
@@ -430,6 +552,31 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                     Spacer(minLength: 0)
                 }                }
+                .cardSurface()
+
+                // Thread (owner-only metadata)
+                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                    Text("Thread").sectionHeader()
+                    Button {
+                        showThreadPicker = true
+                    } label: {
+                        HStack {
+                            Text((threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? threadLabel! : "None")
+                                .font(Theme.Text.body)
+                                .foregroundStyle((threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? .primary : Theme.Colors.secondaryText)
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.footnote.weight(.semibold))
+                                .padding(6)
+                                .background(.ultraThinMaterial, in: Circle())
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .padding(.vertical, 12)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Thread")
+                    .accessibilityIdentifier("picker.thread")
+                }
                 .cardSurface()
 
                 // Start Time
@@ -877,146 +1024,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 .cardSurface(padding: Theme.Spacing.m)
 
             }
-            .padding(.horizontal, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.l)
-            .padding(.bottom, Theme.Spacing.xl)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                isActivityDetailFocused = false
-                isNotesFocused = false
-            }
-        )
-        .navigationTitle("")
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(isEdit ? "Edit Session" : "New Session")
-                    .font(Theme.Text.pageTitle)
-            }
-            ToolbarItem(placement: .cancellationAction) {
-                Button(action: { cancelAndCleanup_AESV_bestEffort() }) {
-                    Text("Cancel")
-                        .font(Theme.Text.body)
-                }
-            }
-            ToolbarItem(placement: .confirmationAction) {
-                Button(action: { save() }) {
-                    Text("Save")
-                        .font(Theme.Text.body)
-                }
-                .disabled(durationSeconds == 0 || instrument == nil)
-                .accessibilityLabel("Save session")
-                .accessibilityIdentifier("button.saveSession")
-            }
-        }
-        .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
-        .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
-        .sheet(isPresented: $showStartPicker) { startPicker }
-        .sheet(isPresented: $showDurationPicker) { durationPicker }
-        .sheet(isPresented: $showThreadPicker) {
-            ThreadPickerView(selectedThread: $threadLabel)
-        }
-        .photosPicker(isPresented: $showPhotoPicker,
-                      selection: $photoPickerItem,
-                      matching: .any(of: [.images, .videos]))
-        .task(id: photoPickerItem) {
-            guard let item = photoPickerItem else { return }
-            if let contentType = item.supportedContentTypes.first {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    if contentType.conforms(to: .image) {
-                        stageData(data, kind: .image)
-                    } else if contentType.conforms(to: .movie) {
-                        stageData(data, kind: .video)
-                    } else {
-                        stageData(data, kind: .file)
-                    }
-                }
-            } else if let data = try? await item.loadTransferable(type: Data.self) {
-                stageData(data, kind: .file)
-            }
-        }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
-        .sheet(isPresented: $showCamera) {
-            CameraCaptureView { image in
-                if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
-            }
-        }
-        .alert("Camera access denied",
-               isPresented: $showCameraDeniedAlert,
-               actions: {
-                   Button("OK", role: .cancel) {}
-                   Button("Open Settings") {
-                       if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
-                   }
-               },
-               message: { Text("Enable camera access in Settings → Privacy → Camera to take photos.") })
-        .alert("Publish limit",
-               isPresented: $showPublishLimitAlert,
-               actions: { Button("OK", role: .cancel) {} },
-               message: { Text(publishLimitAlertMessage) })
-        .fullScreenCover(item: $viewerRequest) { req in
-            let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
-            let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
-            let audioURLs: [URL] = (req.mode == .audio) ? req.audioURLs : []
-            let combined = imageURLs + videoURLs + audioURLs
-            let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
-
-            let viewerAttachmentIDs: [UUID] = req.viewerAttachmentIDs
-
-            let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
-            let persistedTitles = loadPersistedAudioTitles()
-            let audioTitles: [String] = audioURLs.map { u in
-                let stem = u.deletingPathExtension().lastPathComponent
-                // Prefer persisted override; then staged map; finally fall back to stem
-                let persisted = (persistedTitles[stem] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                if !persisted.isEmpty { return persisted }
-                let staged = (namesDict[stem] ?? stem).trimmingCharacters(in: .whitespacesAndNewlines)
-                return staged.isEmpty ? stem : staged
-            }
-
-attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, audioTitles: audioTitles, req: req)
-        }
-        .task { hydrate() } // unified first-appearance init
-        .onAppear {
-            preselectFocusFromNotesIfNeeded_edit()
-            syncActivityChoiceFromState()
-            loadPrivacyMap()
-            // Ensure token is hidden in Notes whenever view appears
-            stripFocusTokensFromNotes_edit()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: AttachmentPrivacy.didChangeNotification)) { _ in
-            loadPrivacyMap()
-        }
-        .onChange(of: activity) { _, _ in
-            maybeUpdateActivityDetailFromDefaults()
-        }
-        .onChange(of: timestamp) { _, _ in
-            maybeUpdateActivityDetailFromDefaults()
-        }
-        .onChange(of: timestamp) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
-        .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
-        .onChange(of: activityDetail) { old, new in
-            let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-            userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
-        }
-        .onAppear {
-            instrumentsGateArmed = false
-            instrumentsReady = false
-            // Give instruments a breath to bind if they’re coming from Core Data
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
-                instrumentsGateArmed = true
-                // If they’re already non-empty by now, mark ready
-                if !instruments.isEmpty { instrumentsReady = true }
-            }
-        }
-        .onChange(of: instruments.count) { _, newCount in
-            // As soon as instruments arrive, it's safe to render their section
-            if newCount > 0 { instrumentsReady = true }
-        }
-        .appBackground()
     }
-}
 
     // Instrument picker sheet (wheel style)
 private var instrumentPicker: some View {
@@ -1249,12 +1257,6 @@ private var instrumentPicker: some View {
             activity = SessionActivityType(rawValue: raw) ?? .practice
             activityDetail = (s.value(forKey: "activityDetail") as? String) ?? ""
 
-            if s.entity.attributesByName.keys.contains("threadLabel") {
-                threadLabel = (s.value(forKey: "threadLabel") as? String)
-            } else {
-                threadLabel = nil
-            }
-
             // Reconcile auto vs custom on edit hydrate: keep auto-updates alive if detail equals the computed default.
             do {
                 let expectedAuto = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: ((s.value(forKey: "userActivityLabel") as? String) ?? selectedCustomName))
@@ -1269,10 +1271,21 @@ private var instrumentPicker: some View {
             }
 
             selectedCustomName = (s.value(forKey: "userActivityLabel") as? String) ?? "" // remains blank unless user selects a custom in the picker
+
+            // Threads v1 (owner-only metadata)
+            if s.entity.attributesByName.keys.contains("threadLabel") {
+                let raw = (s.value(forKey: "threadLabel") as? String) ?? ""
+                threadLabel = sanitizeThreadLabel_v1(raw)
+            } else {
+                threadLabel = nil
+            }
         } else {
             // New mode defaults
             timestamp = Date()
             durationSeconds = 0
+
+            // Threads v1 (owner-only metadata)
+            threadLabel = nil
 
             if instrument == nil {
                 if let primaryName = fetchPrimaryInstrumentName(),
@@ -1332,7 +1345,24 @@ private var instrumentPicker: some View {
         selectedCustomName = ""
     }
 
-    // MARK: - Actions
+    
+    // MARK: - Threads v1 helpers
+
+    private func sanitizeThreadLabel_v1(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        // Trim and collapse internal whitespace.
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.isEmpty { return nil }
+        while s.contains("  ") { s = s.replacingOccurrences(of: "  ", with: " ") }
+        if s.count > 32 {
+            s = String(s.prefix(32))
+            s = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if s.isEmpty { return nil }
+        }
+        return s
+    }
+
+// MARK: - Actions
 
     private func save() {
         let s = session ?? Session(context: viewContext)
@@ -1344,15 +1374,6 @@ private var instrumentPicker: some View {
         // Title = activityDetail (trimmed) or fallback
         let trimmedDetail = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
         s.title = trimmedDetail.isEmpty ? defaultTitle(for: instrument, activity: activity) : trimmedDetail
-
-        // Threads v1: persist owner-only thread label (optional)
-        if s.entity.attributesByName.keys.contains("threadLabel") {
-            if let t = threadLabel, !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                s.setValue(t, forKey: "threadLabel")
-            } else {
-                s.setValue(nil, forKey: "threadLabel")
-            }
-        }
 
         s.timestamp = timestamp
         s.durationSeconds = Int64(durationSeconds)
@@ -1381,6 +1402,11 @@ private var instrumentPicker: some View {
         // Persist activity type + detail
         s.setValue(activity.rawValue, forKey: "activityType")
         s.setValue(trimmedDetail, forKey: "activityDetail")
+
+        // Threads v1 (owner-only metadata)
+        if s.entity.attributesByName.keys.contains("threadLabel") {
+            s.setValue(sanitizeThreadLabel_v1(threadLabel), forKey: "threadLabel")
+        }
 
         // If a custom name is selected, stamp userActivityLabel; otherwise clear any previous custom label
         let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
