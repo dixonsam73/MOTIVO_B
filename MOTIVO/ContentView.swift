@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260304_210000_FeedPivot_ThreadPillTap_2f6b
+// SCOPE: ContentView SessionRow thread pill: tap filters feed to that thread and expands filter panel (visual/control only; no filter logic changes)
+// SEARCH-TOKEN: 20260304_210000_FeedPivot_ThreadPillTap_2f6b
+
 // CHANGE-ID: 20260304_202700_ThreadMetaPill_1c9e
 // SCOPE: Session row metadata: render thread label as subtle pill using segmented-style fill (visual-only)
 // SEARCH-TOKEN: 20260304_202700_ThreadMetaPill_1c9e
@@ -543,7 +547,7 @@ fileprivate struct SessionsRootView: View {
                                             ) { EmptyView() }
                                             .opacity(0)
 
-                                            SessionRow(session: session, scope: selectedScope)
+                                            SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
                                                 .contentShape(Rectangle())
                                                 .onTapGesture {
                                                 feedNavFreezeTask?.cancel()
@@ -1670,6 +1674,9 @@ fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
     let scope: FeedScope
 
+    @Binding var selectedThread: String?
+    @Binding var filtersExpanded: Bool
+
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
 
@@ -1955,12 +1962,19 @@ fileprivate struct SessionRow: View {
 
                 if let thread, !thread.isEmpty {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(thread)
-                            .font(Theme.Text.body)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 2)
-                            .background(Color(uiColor: .tertiarySystemFill))
-                            .clipShape(Capsule())
+                        Button {
+                            // Feed pivot: tapping the thread pill filters to this thread and reveals the filter panel.
+                            if selectedThread != thread { selectedThread = thread }
+                            filtersExpanded = true
+                        } label: {
+                            Text(thread)
+                                .font(Theme.Text.body)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color(uiColor: .tertiarySystemFill))
+                                .clipShape(Capsule())
+                        }
+                        .buttonStyle(.plain)
 
                         if !metaLine.isEmpty {
                             Text("·")
