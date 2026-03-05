@@ -1,4 +1,8 @@
+// CHANGE-ID: 20260305_103500_timecard_sessioncount_secondary
+// SCOPE: MeView TimeCard typography: render session count as secondary text; no layout/logic changes.
 // CHANGE-ID: 20260305_094600_meview_thread_analytics_v3
+// CHANGE-ID: 20260305_100200_meview_avg_first_session
+// SCOPE: MeView analytics: add Average session length + First session in range cards. MeView-only; no other logic/UI changes.
 // SCOPE: MeView analytics: add time-by-thread distribution + top thread; rename activity distribution title. No changes outside MeView.
 // CHANGE-ID: 20260106_221700-meview-calmtext-scrollindicators
 // SCOPE: Visual-only: soften key highlight text + hide scroll indicators in MeView. No logic/state changes.
@@ -81,10 +85,10 @@ private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count 
 
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     @State private var range: StatsRange = .week
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
+    @State private var avgSessionSeconds: Int64? = nil
+    @State private var firstSessionDate: Date? = nil
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
     @State private var topInstrument: (name: String, count: Int)? = nil
@@ -105,7 +109,13 @@ struct MeView: View {
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range))
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
+                    if let avg = avgSessionSeconds {
+                        AverageSessionCard(seconds: avg)
+                    }
                     FocusCard(average: avgFocus)
+                    if let first = firstSessionDate {
+                        FirstSessionCard(range: range, date: first)
+                    }
                     TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
                     if threadUniqueCountInRange >= 2 {
                         TimeDistributionCard(title: "Time by thread", slices: threadDistributionSlices)
@@ -149,6 +159,14 @@ struct MeView: View {
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
         self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
         self.totalInRange = totalSessionsCount(in: sessionsInRange)
+        // Average session length (range-scoped)
+        if sessionStats.count > 0 {
+            avgSessionSeconds = Int64(sessionStats.seconds) / Int64(sessionStats.count)
+        } else {
+            avgSessionSeconds = nil
+        }
+        // First session in range (earliest timestamp)
+        firstSessionDate = sessionsInRange.compactMap { ($0.value(forKey: "timestamp") as? Date) }.min()
         let threadStats = threadAnalytics(from: sessionsInRange)
         self.threadDistributionSlices = threadStats.slices
         self.threadUniqueCountInRange = threadStats.uniqueCount
@@ -374,8 +392,6 @@ fileprivate struct StatTile: View {
 // MARK: - Cards
 
 fileprivate struct TimeCard: View {
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     let seconds: Int; let count: Int; @Binding var range: StatsRange
     var dateRange: String? = nil
 
@@ -401,10 +417,16 @@ fileprivate struct TimeCard: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            Text("\(StatsHelper.formatDuration(seconds)) · \(count) sessions")
-                .font(.headline)
-                .fontWeight(.semibold)
-                .foregroundStyle(.primary)
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(StatsHelper.formatDuration(seconds))
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.primary)
+                Text(" · \(count) sessions")
+                    .font(.headline)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+            }
         }
 .frame(maxWidth: .infinity, alignment: .leading)
 .cardSurface(padding: Theme.Spacing.m)
@@ -412,8 +434,6 @@ fileprivate struct TimeCard: View {
 }
 
 fileprivate struct StreaksCard: View {
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     let current: Int; let best: Int
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -431,8 +451,6 @@ fileprivate struct StreaksCard: View {
 }
 
 fileprivate struct FocusCard: View {
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     let average: Double?
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -453,6 +471,52 @@ fileprivate struct FocusCard: View {
         .accessibilityLabel(average != nil ? "Focus average" : "No focus data")
     }
 }
+
+
+fileprivate struct AverageSessionCard: View {
+    let seconds: Int64
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Average session").sectionHeader()
+            Text(StatsHelper.formatDuration(Int(seconds)))
+                .font(.title3.weight(.semibold))
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+    }
+}
+
+fileprivate struct FirstSessionCard: View {
+    let range: StatsRange
+    let date: Date
+
+    private static let df: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = .current
+        df.dateFormat = "EEE d MMM · HH:mm"
+        return df
+    }()
+
+    private var title: String {
+        switch range {
+        case .week:  return "First session this week"
+        case .month: return "First session this month"
+        case .year:  return "First session this year"
+        case .total: return "First recorded session"
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text(title).sectionHeader()
+            Text(Self.df.string(from: date))
+                .font(.title3.weight(.semibold))
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+    }
+}
+
 
 fileprivate struct FocusDots: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -513,8 +577,6 @@ fileprivate struct FocusDots: View {
 }
 
 fileprivate struct TopWinnerCard: View {
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     let title: String
     let winner: (name: String, count: Int)?
     let totalCount: Int
@@ -602,8 +664,6 @@ fileprivate struct TopThreadCard: View {
 }
 
 fileprivate struct TimeDistributionCard: View {
-    @Environment(\.horizontalSizeClass) private var hSizeClass
-
     let title: String
     let slices: [ActivitySlice]
 
