@@ -64,6 +64,44 @@ enum Stats {
         return best
     }
 
+
+    /// Best (longest) streak across all history, including its date range (start/end day keys in Europe/London).
+    /// Returns nil when there are no sessions.
+    static func bestStreakRange(sessions: [Session]) -> (days: Int, start: Date, end: Date)? {
+        let keys = dayKeySet(sessions: sessions).sorted()
+        guard !keys.isEmpty else { return nil }
+
+        var bestDays = 1
+        var bestStart = keys[0]
+        var bestEnd = keys[0]
+
+        var runStart = keys[0]
+        var runDays = 1
+
+        for i in 1..<keys.count {
+            if let prev = cal.date(byAdding: .day, value: -1, to: keys[i]), prev == keys[i - 1] {
+                runDays += 1
+            } else {
+                // close run
+                if runDays > bestDays {
+                    bestDays = runDays
+                    bestStart = runStart
+                    bestEnd = keys[i - 1]
+                }
+                runStart = keys[i]
+                runDays = 1
+            }
+        }
+
+        // close final run
+        if runDays > bestDays {
+            bestDays = runDays
+            bestStart = runStart
+            bestEnd = keys.last ?? runStart
+        }
+return (days: bestDays, start: bestStart, end: bestEnd)
+    }
+
     // MARK: - Helpers
     private static func dayKeySet(sessions: [Session]) -> Set<Date> {
         var keys = Set<Date>()

@@ -89,6 +89,10 @@ struct MeView: View {
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var avgSessionSeconds: Int64? = nil
     @State private var firstSessionDate: Date? = nil
+    @State private var longestSessionSeconds: Int64? = nil
+    @State private var longestSessionDate: Date? = nil
+    @State private var bestStreakRangeText: String? = nil
+
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
     @State private var topInstrument: (name: String, count: Int)? = nil
@@ -108,9 +112,12 @@ struct MeView: View {
                 // Full-width Time card with date range header
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range, firstSessionDate: firstSessionDate))
                 AdaptiveGrid {
-                    StreaksCard(current: currentStreakDays, best: bestStreakDays)
+                    StreaksCard(current: currentStreakDays, best: bestStreakDays, bestRangeText: bestStreakRangeText)
                     if let avg = avgSessionSeconds {
                         AverageSessionCard(seconds: avg)
+                    }
+                    if let longest = longestSessionSeconds, let d = longestSessionDate {
+                        LongestSessionCard(range: range, seconds: longest, date: d)
                     }
                     FocusCard(average: avgFocus)
                     if let first = firstSessionDate {
@@ -154,9 +161,34 @@ struct MeView: View {
     private func reload() {
         sessionStats = (try? StatsHelper.fetchStats(in: ctx, range: range)) ?? .init(count: 0, seconds: 0)
         allSessions = fetchSessions(limit: nil, start: nil, end: nil)
+        // Best streak date range (all-time, Europe/London day keys)
+        if let best = Stats.bestStreakRange(sessions: allSessions) {
+            bestStreakRangeText = formatStreakRange(start: best.start, end: best.end)
+        } else {
+            bestStreakRangeText = nil
+        }
         let (start, end) = StatsHelper.dateBounds(for: range)
         avgFocus = averageFocus(start: start, end: end)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
+        // Longest session in range
+        var longestSecs: Int64 = 0
+        var longestDate: Date? = nil
+        for s in sessionsInRange {
+            let secs64 = (s.value(forKey: "durationSeconds") as? Int64)
+            let secs = secs64 ?? Int64((s.value(forKey: "durationSeconds") as? Int) ?? 0)
+            guard secs > 0 else { continue }
+            if secs > longestSecs {
+                longestSecs = secs
+                longestDate = (s.value(forKey: "timestamp") as? Date)
+            }
+        }
+        if longestSecs > 0, let ld = longestDate {
+            longestSessionSeconds = longestSecs
+            longestSessionDate = ld
+        } else {
+            longestSessionSeconds = nil
+            longestSessionDate = nil
+        }
         self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
         self.totalInRange = totalSessionsCount(in: sessionsInRange)
         // Average session length (range-scoped)
@@ -364,6 +396,25 @@ struct MeView: View {
     }
 }
 
+    private func formatStreakRange(start: Date, end: Date) -> String {
+        let tz = TimeZone(identifier: "Europe/London") ?? .current
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+
+        let currentYear = cal.component(.year, from: Date())
+        func format(_ d: Date) -> String {
+            let y = cal.component(.year, from: d)
+            let df = DateFormatter()
+            df.locale = .current
+            df.timeZone = tz
+            df.dateFormat = (y == currentYear) ? "MMM d" : "MMM d yyyy"
+            return df.string(from: d)
+        }
+
+        return "\(format(start)) – \(format(end))"
+    }
+
+
 // MARK: - Adaptive grid container
 fileprivate struct AdaptiveGrid<Content: View>: View {
     @ViewBuilder var content: () -> Content
@@ -377,19 +428,37 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
 fileprivate struct StatTile: View {
     let title: String
     let value: String
+    let subtitle: String?
+    let isEmphasized: Bool
+
     @Environment(\.colorScheme) private var colorScheme
+
+    init(title: String, value: String, subtitle: String? = nil, isEmphasized: Bool = false) {
+        self.title = title
+        self.value = value
+        self.subtitle = subtitle
+        self.isEmphasized = isEmphasized
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title)
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText)
+
             Text(value)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(Color.primary.opacity(0.75))
+
+            if let s = subtitle?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
+                Text(s)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
-        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .background(Color.secondary.opacity(isEmphasized ? 0.16 : 0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Theme.Colors.stroke(colorScheme).opacity(0.3), lineWidth: 0.5)
@@ -442,17 +511,21 @@ fileprivate struct TimeCard: View {
 }
 
 fileprivate struct StreaksCard: View {
-    let current: Int; let best: Int
+    let current: Int
+    let best: Int
+    let bestRangeText: String?
+    
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Streaks").sectionHeader()
-            HStack {
-                StatTile(title: "Current", value: "\(current) days")
+            HStack(alignment: .top) {
+                StatTile(title: "Current", value: "\(current) days", isEmphasized: current > best)
                 Spacer()
-                StatTile(title: "Best", value: "\(best) days")
+                StatTile(title: "Best", value: "\(best) days", subtitle: bestRangeText, isEmphasized: best > current)
             }
         }
-.cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Streaks: current \(current) days, best \(best) days")
     }
@@ -493,6 +566,41 @@ fileprivate struct AverageSessionCard: View {
         .cardSurface(padding: Theme.Spacing.m)
     }
 }
+
+fileprivate struct LongestSessionCard: View {
+    let range: StatsRange
+    let seconds: Int64
+    let date: Date
+
+    private static let dfNoYear: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = .current
+        df.dateFormat = "EEE d MMM · HH:mm"
+        return df
+    }()
+
+    private static let dfWithYear: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = .current
+        df.dateFormat = "EEE d MMM yyyy · HH:mm"
+        return df
+    }()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Longest session").sectionHeader()
+            Text(StatsHelper.formatDuration(Int(seconds)))
+                .font(.title3.weight(.semibold))
+            Text((range == .total ? Self.dfWithYear : Self.dfNoYear).string(from: date))
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+    }
+}
+
 
 fileprivate struct FirstSessionCard: View {
     let range: StatsRange
