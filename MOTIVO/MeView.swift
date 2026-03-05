@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260305_094600_meview_thread_analytics_v3
+// SCOPE: MeView analytics: add time-by-thread distribution + top thread; rename activity distribution title. No changes outside MeView.
 // CHANGE-ID: 20260106_221700-meview-calmtext-scrollindicators
 // SCOPE: Visual-only: soften key highlight text + hide scroll indicators in MeView. No logic/state changes.
 // CHANGE-ID: 20251015_150332-me-focus-from-notes
@@ -35,6 +37,41 @@ private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
     return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
 }
 
+
+private struct ThreadAnalyticsResult {
+    let title: String
+    let slices: [ActivitySlice]
+    let uniqueCount: Int
+    let top: (name: String, seconds: Int)?
+}
+
+private func threadAnalytics(from sessions: [Session]) -> ThreadAnalyticsResult {
+    var totals: [String: Int] = [:]
+    for s in sessions {
+        let raw = s.value(forKey: "threadLabel") as? String
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty else { continue }
+        let secs = (s.value(forKey: "durationSeconds") as? Int) ?? 0
+        guard secs > 0 else { continue }
+        totals[trimmed, default: 0] += secs
+    }
+
+    guard !totals.isEmpty else { return .init(title: "Time by thread", slices: [], uniqueCount: 0, top: nil) }
+
+    let sorted = totals.sorted { $0.value > $1.value }
+    let uniqueCount = totals.count
+
+    let head = Array(sorted.prefix(4))
+    let tail = sorted.dropFirst(4)
+    let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
+    let otherTotal = tail.reduce(0) { $0 + $1.value }
+    let slices = otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
+
+    let top: (name: String, seconds: Int)? = sorted.first.map { ($0.key, $0.value) }
+
+    return .init(title: "Time by thread", slices: slices, uniqueCount: uniqueCount, top: top)
+}
+
 private func percent(_ part: Int, of total: Int) -> Int {
     guard total > 0 else { return 0 }
     return Int(round((Double(part) / Double(total)) * 100.0))
@@ -53,6 +90,9 @@ struct MeView: View {
     @State private var topInstrument: (name: String, count: Int)? = nil
     @State private var topActivity: (name: String, count: Int)? = nil
     @State private var timeDistributionSlices: [ActivitySlice] = []
+    @State private var threadDistributionSlices: [ActivitySlice] = []
+    @State private var threadUniqueCountInRange: Int = 0
+    @State private var topThread: (name: String, seconds: Int)? = nil
     @State private var totalInRange: Int = 0
     @State private var uniqueInstrumentCount: Int = 0
     @State private var uniqueActivityCount: Int = 0
@@ -66,7 +106,13 @@ struct MeView: View {
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     FocusCard(average: avgFocus)
-                    TimeDistributionCard(slices: timeDistributionSlices)
+                    TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
+                    if threadUniqueCountInRange >= 2 {
+                        TimeDistributionCard(title: "Time by thread", slices: threadDistributionSlices)
+                    }
+                    if topThread != nil {
+                        TopThreadCard(winner: topThread)
+                    }
                     TopWinnerCard(title: "Top instrument", winner: topInstrument, totalCount: totalInRange)
                     if uniqueActivityCount > 1 {
                         TopWinnerCard(title: "Top activity",   winner: topActivity,   totalCount: totalInRange)
@@ -103,6 +149,10 @@ struct MeView: View {
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
         self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
         self.totalInRange = totalSessionsCount(in: sessionsInRange)
+        let threadStats = threadAnalytics(from: sessionsInRange)
+        self.threadDistributionSlices = threadStats.slices
+        self.threadUniqueCountInRange = threadStats.uniqueCount
+        self.topThread = threadStats.top
         // Compute top winners within the current range
         topInstrument = bestInstrument(from: sessionsInRange)
         topActivity   = bestActivity(from: sessionsInRange)
@@ -512,10 +562,56 @@ fileprivate struct TopWinnerCard: View {
     }
 }
 
+
+fileprivate struct TopThreadCard: View {
+    let winner: (name: String, seconds: Int)?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Top thread").sectionHeader()
+            if let w = winner {
+                HStack {
+                    Text(w.name)
+                        .font(.body).bold()
+                        .foregroundStyle(Color.primary.opacity(0.85))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer()
+                    Text(StatsHelper.formatDuration(w.seconds))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                Text("No data in this period.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+.cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if let w = winner {
+            return "Top thread: \(w.name), \(StatsHelper.formatDuration(w.seconds))"
+        } else {
+            return "Top thread: no data"
+        }
+    }
+}
+
 fileprivate struct TimeDistributionCard: View {
     @Environment(\.horizontalSizeClass) private var hSizeClass
 
+    let title: String
     let slices: [ActivitySlice]
+
+    init(title: String = "Time distribution", slices: [ActivitySlice]) {
+        self.title = title
+        self.slices = slices
+    }
+
 
     // rank-based shades (index 0 = biggest slice)
     private let opacities: [Double] = [0.95, 0.75, 0.6, 0.45, 0.3]
@@ -532,7 +628,7 @@ fileprivate struct TimeDistributionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Time distribution").sectionHeader()
+            Text(title).sectionHeader()
 
             if slices.isEmpty {
                 Text("No time logged this period.")
@@ -590,10 +686,10 @@ fileprivate struct TimeDistributionCard: View {
     }
 
     private var a11yText: String {
-        guard !slices.isEmpty else { return "Time distribution by activity: no data this period" }
+        guard !slices.isEmpty else { return "\(title): no data this period" }
         let total = slices.reduce(0) { $0 + $1.seconds }
         let parts = slices.map { "\($0.name) \(percent($0.seconds, of: total)) percent" }
-        return "Time distribution by activity: " + parts.joined(separator: ", ")
+        return "\(title): " + parts.joined(separator: ", ")
     }
 }
 
