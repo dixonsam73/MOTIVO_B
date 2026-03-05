@@ -106,7 +106,7 @@ struct MeView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 rangePickerHeader
                 // Full-width Time card with date range header
-                TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range))
+                TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range, firstSessionDate: firstSessionDate))
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakDays, best: bestStreakDays)
                     if let avg = avgSessionSeconds {
@@ -348,11 +348,19 @@ struct MeView: View {
         }
     }
 
-    private func dateWindowSubtitle(for r: StatsRange) -> String {
+    private func dateWindowSubtitle(for r: StatsRange, firstSessionDate: Date?) -> String? {
         let (startOpt, endOpt) = StatsHelper.dateBounds(for: r)
-        guard let start = startOpt, let end = endOpt else { return "" }
+
+        // Week/Month/Year: show the existing bounded window.
+        if let start = startOpt, let end = endOpt {
+            let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
+            return "\(df.string(from: start)) – \(df.string(from: end.addingTimeInterval(-86400)))"
+        }
+
+        // Total: show first recorded date → today (only if we have at least one session date).
+        guard r == .total, let first = firstSessionDate else { return nil }
         let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
-        return "\(df.string(from: start)) – \(df.string(from: end.addingTimeInterval(-86400)))"
+        return "\(df.string(from: first)) → Today"
     }
 }
 
@@ -412,7 +420,7 @@ fileprivate struct TimeCard: View {
             }
             .pickerStyle(.segmented)
             
-            if let dateRange {
+            if let dateRange, !dateRange.isEmpty {
                 Text(dateRange)
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -478,7 +486,7 @@ fileprivate struct AverageSessionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Average session").sectionHeader()
+            Text("Average session length").sectionHeader()
             Text(StatsHelper.formatDuration(Int(seconds)))
                 .font(.title3.weight(.semibold))
         }
@@ -490,11 +498,19 @@ fileprivate struct FirstSessionCard: View {
     let range: StatsRange
     let date: Date
 
-    private static let df: DateFormatter = {
+    private static let dfNoYear: DateFormatter = {
         let df = DateFormatter()
         df.locale = .current
         df.timeZone = .current
         df.dateFormat = "EEE d MMM · HH:mm"
+        return df
+    }()
+
+    private static let dfWithYear: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = .current
+        df.dateFormat = "EEE d MMM yyyy · HH:mm"
         return df
     }()
 
@@ -503,15 +519,18 @@ fileprivate struct FirstSessionCard: View {
         case .week:  return "First session this week"
         case .month: return "First session this month"
         case .year:  return "First session this year"
-        case .total: return "First recorded session"
+        case .total: return "First logged session"
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text(title).sectionHeader()
-            Text(Self.df.string(from: date))
-                .font(.title3.weight(.semibold))
+            Text((range == .total ? Self.dfWithYear : Self.dfNoYear).string(from: date))
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
         .cardSurface(padding: Theme.Spacing.m)
     }
