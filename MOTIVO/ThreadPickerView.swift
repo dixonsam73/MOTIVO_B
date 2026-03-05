@@ -1,11 +1,10 @@
 //
-// CHANGE-ID: 20260304_081250_Threads_S2_ThreadPickerView_Skeleton
-// CHANGE-ID: 20260304_131900_Threads_S6F_ThreadPickerView_Options_FixIsSelected
-// SCOPE: Add standalone ThreadPickerView (compile-only skeleton; not wired yet).
-// SCOPE: Stage 6F — Display selectable thread options (passed in as recentThreads) with selected indicator.
+// CHANGE-ID: 20260305_071025_TPV_RemoveRedundantDone_SetInline_9b7f9f1a
+// SCOPE: Visual-only — remove redundant top-right Done control (match ILV/ALV pattern) by moving commit action inline next to TextField. No logic/behaviour changes.
 //
-// NOTE: This file intentionally avoids dependencies on Theme/Auth/CoreData so it can compile
-// in isolation for Stage 2. Wiring + recents sourcing happens in later stages.
+// PREVIOUS CHANGE-IDs:
+// - 20260304_081250_Threads_S2_ThreadPickerView_Skeleton
+// - 20260304_131900_Threads_S6F_ThreadPickerView_Options_FixIsSelected
 //
 
 import SwiftUI
@@ -34,64 +33,88 @@ struct ThreadPickerView: View {
     }
 
     var body: some View {
-        NavigationView {
-            List {
-                Section {
-                    TextField("Type a thread name", text: $draftText)
-                        .textInputAutocapitalization(.sentences)
-                        .autocorrectionDisabled(false)
+        NavigationStack {
+            Form {
+                Section(header: Text("Set Thread").sectionHeader()) {
+                    HStack(spacing: Theme.Spacing.m) {
+                        TextField("Type a thread name", text: $draftText)
+                            .font(Theme.Text.body)
+                            .textInputAutocapitalization(.sentences)
+                            .autocorrectionDisabled(false)
+
+                        Button {
+                            let sanitized = sanitize(draftText, maxLength: maxLength)
+                            selectedThread = sanitized
+                            dismiss()
+                        } label: {
+                            Text("Set")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(isEffectivelyEmpty(draftText))
+                    }
                 }
 
                 if !recentThreads.isEmpty {
-                    Section("Threads") {
+                    Section(header: Text("Threads").sectionHeader()) {
                         ForEach(recentThreads, id: \.self) { thread in
                             Button {
                                 applySelection(thread)
                             } label: {
-                                HStack {
+                                HStack(spacing: Theme.Spacing.m) {
                                     Text(thread)
-                                    Spacer()
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(.primary)
+                                    Spacer(minLength: 0)
                                     if isSelected(thread) {
                                         Image(systemName: "checkmark")
                                             .font(.footnote.weight(.semibold))
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(Theme.Colors.secondaryText)
                                     }
                                 }
                             }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
 
                 if selectedThread != nil {
                     Section {
-                        Button(role: .destructive) {
+                        Button {
                             selectedThread = nil
                             dismiss()
                         } label: {
                             Text("Clear thread")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
-            .navigationTitle(title)
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(Theme.Text.pageTitle)
+                        .foregroundStyle(.primary)
+                }
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        let sanitized = sanitize(draftText, maxLength: maxLength)
-                        selectedThread = sanitized
-                        dismiss()
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "chevron.backward")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
                     }
-                    .disabled(isEffectivelyEmpty(draftText))
+                    .accessibilityLabel("Close thread picker")
                 }
-            }
+                            }
             .onAppear {
                 // Initialize the draft text from current selection (if any).
                 draftText = selectedThread ?? ""
             }
+            .appBackground()
         }
     }
 
@@ -104,13 +127,11 @@ struct ThreadPickerView: View {
         sanitize(raw, maxLength: maxLength) == nil
     }
 
-
     private func isSelected(_ thread: String) -> Bool {
         guard let a = sanitize(thread, maxLength: maxLength)?.lowercased() else { return false }
         guard let b = sanitize(selectedThread ?? "", maxLength: maxLength)?.lowercased() else { return false }
         return a == b
     }
-
 
     /// Trims, collapses internal whitespace, enforces max length, and returns nil for empty.
     private func sanitize(_ raw: String, maxLength: Int) -> String? {
