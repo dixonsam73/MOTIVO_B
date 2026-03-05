@@ -801,10 +801,10 @@ fileprivate struct TimeDistributionCard: View {
 
 
     // rank-based shades (index 0 = biggest slice)
-    private let opacities: [Double] = [0.95, 0.75, 0.6, 0.45, 0.3]
+    private let opacities: [Double] = [1.00, 0.62, 0.36, 0.18, 0.08]
 
     private func opacityForIndex(_ i: Int) -> Double {
-        guard i < opacities.count else { return 0.3 }
+        guard i < opacities.count else { return opacities.last ?? 0.12 }
         return opacities[i]
     }
 
