@@ -95,14 +95,14 @@ struct MeView: View {
 
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
-    @State private var topInstrument: (name: String, count: Int)? = nil
-    @State private var topActivity: (name: String, count: Int)? = nil
+    @State private var topInstrumentByTime: (name: String, seconds: Int)? = nil
+    @State private var topActivityByTime: (name: String, seconds: Int)? = nil
     @State private var timeDistributionSlices: [ActivitySlice] = []
     @State private var threadDistributionSlices: [ActivitySlice] = []
+    @State private var instrumentDistributionSlices: [ActivitySlice] = []
     @State private var threadUniqueCountInRange: Int = 0
+    @State private var instrumentUniqueCountInRange: Int = 0
     @State private var topThread: (name: String, seconds: Int)? = nil
-    @State private var totalInRange: Int = 0
-    @State private var uniqueInstrumentCount: Int = 0
     @State private var uniqueActivityCount: Int = 0
 
     var body: some View {
@@ -119,20 +119,27 @@ struct MeView: View {
                     if let longest = longestSessionSeconds, let d = longestSessionDate {
                         LongestSessionCard(range: range, seconds: longest, date: d)
                     }
-                    FocusCard(average: avgFocus)
+                    if avgFocus != nil {
+                        FocusCard(average: avgFocus)
+                    }
                     if let first = firstSessionDate {
                         FirstSessionCard(range: range, date: first)
                     }
-                    TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
+                    if uniqueActivityCount > 1 {
+                        TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
+                        TopTimeWinnerCard(title: "Top activity", winner: topActivityByTime)
+                    }
                     if threadUniqueCountInRange >= 2 {
                         TimeDistributionCard(title: "Time by thread", slices: threadDistributionSlices)
                     }
                     if topThread != nil {
                         TopThreadCard(winner: topThread)
                     }
-                    TopWinnerCard(title: "Top instrument", winner: topInstrument, totalCount: totalInRange)
-                    if uniqueActivityCount > 1 {
-                        TopWinnerCard(title: "Top activity",   winner: topActivity,   totalCount: totalInRange)
+                    if instrumentUniqueCountInRange >= 2 {
+                        TimeDistributionCard(title: "Time by instrument", slices: instrumentDistributionSlices)
+                    }
+                    if topInstrumentByTime != nil {
+                        TopTimeWinnerCard(title: "Top instrument", winner: topInstrumentByTime)
                     }
                 }
             }
@@ -190,7 +197,13 @@ struct MeView: View {
             longestSessionDate = nil
         }
         self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
-        self.totalInRange = totalSessionsCount(in: sessionsInRange)
+        let activityTotals = categoryTotals(from: sessionsInRange) { s in
+            let raw = SessionActivity.name(for: s as NSManagedObject)
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : label
+        }
+        self.uniqueActivityCount = activityTotals.count
+        self.topActivityByTime = topDurationWinner(from: activityTotals)
         // Average session length (range-scoped)
         if sessionStats.count > 0 {
             avgSessionSeconds = Int64(sessionStats.seconds) / Int64(sessionStats.count)
@@ -203,26 +216,13 @@ struct MeView: View {
         self.threadDistributionSlices = threadStats.slices
         self.threadUniqueCountInRange = threadStats.uniqueCount
         self.topThread = threadStats.top
-        // Compute top winners within the current range
-        topInstrument = bestInstrument(from: sessionsInRange)
-        topActivity   = bestActivity(from: sessionsInRange)
 
-        self.uniqueInstrumentCount = {
-            var set = Set<String>()
-            for s in allSessions {
-                if let label = instrumentLabel(for: s) { set.insert(label) }
-            }
-            return set.count
-        }()
-        self.uniqueActivityCount = {
-            var set = Set<String>()
-            for s in allSessions {
-                let raw = SessionActivity.name(for: s as NSManagedObject)
-                let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !label.isEmpty { set.insert(label) }
-            }
-            return set.count
-        }()
+        let instrumentTotals = categoryTotals(from: sessionsInRange) { s in
+            instrumentLabel(for: s)
+        }
+        self.instrumentUniqueCountInRange = instrumentTotals.count
+        self.instrumentDistributionSlices = distributionSlices(from: instrumentTotals)
+        self.topInstrumentByTime = topDurationWinner(from: instrumentTotals)
     }
 
     private func fetchSessions(limit: Int?, start: Date?, end: Date?) -> [Session] {
@@ -300,42 +300,38 @@ struct MeView: View {
 
     private func clamp011(_ v: Double) -> Double { max(0.0, min(11.0, v)) }
 
-    // MARK: - Top winners (instrument / activity)
-    private func bestInstrument(from sessions: [Session]) -> (name: String, count: Int)? {
-        var counts: [String: Int] = [:]
-        var latest: [String: Date] = [:]
+    // MARK: - Time-based category helpers
+    private func categoryTotals(from sessions: [Session], label: (Session) -> String?) -> [String: Int] {
+        var totals: [String: Int] = [:]
         for s in sessions {
-            guard let label = instrumentLabel(for: s) else { continue }
-            counts[label, default: 0] += 1
-            let d = (s.entity.attributesByName["timestamp"] != nil ? (s.value(forKey: "timestamp") as? Date) : nil) ?? .distantPast
-            latest[label] = max(latest[label] ?? .distantPast, d)
+            guard let raw = label(s) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let secs = (s.value(forKey: "durationSeconds") as? Int) ?? Int((s.value(forKey: "durationSeconds") as? Int64) ?? 0)
+            guard secs > 0 else { continue }
+            totals[trimmed, default: 0] += secs
         }
-        return pickWinner(from: counts, latest: latest)
+        return totals
     }
 
-    private func bestActivity(from sessions: [Session]) -> (name: String, count: Int)? {
-        var counts: [String: Int] = [:]
-        var latest: [String: Date] = [:]
-        for s in sessions {
-            let raw = SessionActivity.name(for: s as NSManagedObject)
-            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !label.isEmpty else { continue }
-            counts[label, default: 0] += 1
-            let d = (s.entity.attributesByName["timestamp"] != nil ? (s.value(forKey: "timestamp") as? Date) : nil) ?? .distantPast
-            latest[label] = max(latest[label] ?? .distantPast, d)
-        }
-        return pickWinner(from: counts, latest: latest)
+    private func distributionSlices(from totals: [String: Int]) -> [ActivitySlice] {
+        guard !totals.isEmpty else { return [] }
+        let sorted = totals.sorted { $0.value > $1.value }
+        let head = Array(sorted.prefix(4))
+        let tail = sorted.dropFirst(4)
+        let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
+        let otherTotal = tail.reduce(0) { $0 + $1.value }
+        return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
     }
 
-    private func pickWinner(from counts: [String: Int], latest: [String: Date]) -> (name: String, count: Int)? {
-        guard !counts.isEmpty else { return nil }
-        let sorted = counts.sorted { (lhs, rhs) in
+    private func topDurationWinner(from totals: [String: Int]) -> (name: String, seconds: Int)? {
+        guard !totals.isEmpty else { return nil }
+        let sorted = totals.sorted { lhs, rhs in
             if lhs.value != rhs.value { return lhs.value > rhs.value }
-            if let dl = latest[lhs.key], let dr = latest[rhs.key], dl != dr { return dl > dr }
             return lhs.key.localizedCaseInsensitiveCompare(rhs.key) == .orderedAscending
         }
-        if let top = sorted.first { return (top.key, top.value) }
-        return nil
+        guard let top = sorted.first else { return nil }
+        return (name: top.key, seconds: top.value)
     }
 
     // MARK: Instrument label (safe)
@@ -703,10 +699,9 @@ fileprivate struct FocusDots: View {
     }
 }
 
-fileprivate struct TopWinnerCard: View {
+fileprivate struct TopTimeWinnerCard: View {
     let title: String
-    let winner: (name: String, count: Int)?
-    let totalCount: Int
+    let winner: (name: String, seconds: Int)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -719,11 +714,8 @@ fileprivate struct TopWinnerCard: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer()
-                    Text("\(w.count) sessions").font(.subheadline).foregroundStyle(.secondary)
-                }
-                if totalCount > 0 {
-                    Text("\(Int(round((Double(w.count) / Double(totalCount)) * 100)))% of sessions")
-                        .font(.footnote)
+                    Text(StatsHelper.formatDuration(w.seconds))
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -739,12 +731,7 @@ fileprivate struct TopWinnerCard: View {
 
     private var accessibilityText: String {
         if let w = winner {
-            if totalCount > 0 {
-                let pct = Int(round((Double(w.count) / Double(totalCount)) * 100))
-                return "\(title): \(w.name), \(w.count) sessions, \(pct) percent of sessions"
-            } else {
-                return "\(title): \(w.name), \(w.count) sessions"
-            }
+            return "\(title): \(w.name), \(StatsHelper.formatDuration(w.seconds))"
         } else {
             return "\(title): no data"
         }
