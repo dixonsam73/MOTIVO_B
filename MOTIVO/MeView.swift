@@ -12,6 +12,7 @@
 
 import SwiftUI
 import CoreData
+import UIKit
 
 private let kCardMinHeightCompact: CGFloat = 120
 private let kCardMinHeightRegular: CGFloat = 140
@@ -91,6 +92,9 @@ struct MeView: View {
     @State private var firstSessionDate: Date? = nil
     @State private var longestSessionSeconds: Int64? = nil
     @State private var longestSessionDate: Date? = nil
+    @State private var longestSession: Session? = nil
+    @State private var firstSession: Session? = nil
+    @State private var selectedInsightSession: Session? = nil
     @State private var bestStreakRangeText: String? = nil
 
     @State private var allSessions: [Session] = []
@@ -116,14 +120,26 @@ struct MeView: View {
                     if let avg = avgSessionSeconds {
                         AverageSessionCard(seconds: avg)
                     }
-                    if let longest = longestSessionSeconds, let d = longestSessionDate {
-                        LongestSessionCard(range: range, seconds: longest, date: d)
+                    if let longest = longestSessionSeconds, let d = longestSessionDate, let target = longestSession {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedInsightSession = target
+                        } label: {
+                            LongestSessionCard(range: range, seconds: longest, date: d)
+                        }
+                        .buttonStyle(InsightCardButtonStyle())
                     }
                     if avgFocus != nil {
                         FocusCard(average: avgFocus)
                     }
-                    if let first = firstSessionDate {
-                        FirstSessionCard(range: range, date: first)
+                    if let first = firstSessionDate, let target = firstSession {
+                        Button {
+                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                            selectedInsightSession = target
+                        } label: {
+                            FirstSessionCard(range: range, date: first)
+                        }
+                        .buttonStyle(InsightCardButtonStyle())
                     }
                     if uniqueActivityCount > 1 {
                         TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
@@ -153,6 +169,25 @@ struct MeView: View {
         .onAppear { reload() }
         .onChange(of: range) { _, _ in reload() }
         .appBackground()
+        .background {
+            NavigationLink(
+                isActive: Binding(
+                    get: { selectedInsightSession != nil },
+                    set: { isActive in
+                        if !isActive { selectedInsightSession = nil }
+                    }
+                )
+            ) {
+                if let session = selectedInsightSession {
+                    SessionDetailView(session: session)
+                } else {
+                    EmptyView()
+                }
+            } label: {
+                EmptyView()
+            }
+            .hidden()
+        }
     }
 
     private var rangePickerHeader: some View {
@@ -180,6 +215,7 @@ struct MeView: View {
         // Longest session in range
         var longestSecs: Int64 = 0
         var longestDate: Date? = nil
+        var longestFound: Session? = nil
         for s in sessionsInRange {
             let secs64 = (s.value(forKey: "durationSeconds") as? Int64)
             let secs = secs64 ?? Int64((s.value(forKey: "durationSeconds") as? Int) ?? 0)
@@ -187,14 +223,17 @@ struct MeView: View {
             if secs > longestSecs {
                 longestSecs = secs
                 longestDate = (s.value(forKey: "timestamp") as? Date)
+                longestFound = s
             }
         }
-        if longestSecs > 0, let ld = longestDate {
+        if longestSecs > 0, let ld = longestDate, let ls = longestFound {
             longestSessionSeconds = longestSecs
             longestSessionDate = ld
+            longestSession = ls
         } else {
             longestSessionSeconds = nil
             longestSessionDate = nil
+            longestSession = nil
         }
         self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
         let activityTotals = categoryTotals(from: sessionsInRange) { s in
@@ -211,7 +250,14 @@ struct MeView: View {
             avgSessionSeconds = nil
         }
         // First session in range (earliest timestamp)
-        firstSessionDate = sessionsInRange.compactMap { ($0.value(forKey: "timestamp") as? Date) }.min()
+        let firstPair = sessionsInRange.compactMap { session -> (Session, Date)? in
+            guard let date = session.value(forKey: "timestamp") as? Date else { return nil }
+            return (session, date)
+        }.min { lhs, rhs in
+            lhs.1 < rhs.1
+        }
+        firstSessionDate = firstPair?.1
+        firstSession = firstPair?.0
         let threadStats = threadAnalytics(from: sessionsInRange)
         self.threadDistributionSlices = threadStats.slices
         self.threadUniqueCountInRange = threadStats.uniqueCount
@@ -459,6 +505,14 @@ fileprivate struct StatTile: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .stroke(Theme.Colors.stroke(colorScheme).opacity(0.3), lineWidth: 0.5)
         )
+    }
+}
+
+fileprivate struct InsightCardButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
