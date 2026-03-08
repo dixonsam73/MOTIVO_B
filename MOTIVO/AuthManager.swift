@@ -44,10 +44,15 @@
 // SCOPE: Delete Account v2 final hardening — add guardrails in AuthManager to suppress backend identity/session/directory hydration work during/after LocalFactoryReset when BackendConfig is not configured. Prevents post-reset background tasks from emitting errors or mutating state. No UI changes.
 // SEARCH-TOKEN: 20260303_172000_DeleteAccountV2_FinalHardening_AuthManagerGuards
 
+// CHANGE-ID: 20260308_201400_MultiDeviceBootstrap_AuthManager
+// SCOPE: Multi-device bootstrap hardening — track backend bootstrap state and hydrate canonical display_name/location/instruments from account_directory before setup gating on fresh second-device sign-in. No UI/layout changes.
+// SEARCH-TOKEN: 20260308_201400_MultiDeviceBootstrap_AuthManager
+
 import Foundation
 import AuthenticationServices
 import CryptoKit
 import Combine
+import CoreData
 
 // CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
 // SCOPE: Step 9A — Canonicalise backend user identity lookup (single source for backend principal; DEBUG override key)
@@ -104,10 +109,18 @@ enum Keychain {
 
 @MainActor
 final class AuthManager: NSObject, ObservableObject {
+    enum BackendBootstrapState {
+        case unknown
+        case checking
+        case existingAccount
+        case newAccount
+    }
+
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
     @Published private(set) var backendUserID: String?
     @Published private(set) var isSigningIn: Bool = false
+    @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
     // Profile privacy hydration (fresh install consistency)
     private var directoryHydrationTask: Task<Void, Never>?
@@ -228,6 +241,7 @@ final class AuthManager: NSObject, ObservableObject {
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
         guard lastHydratedDirectoryUserID != bid else { return }
 
+        self.backendBootstrapState = .checking
         directoryHydrationTask?.cancel()
         directoryHydrationTask = Task { [weak self] in
             guard let self else { return }
@@ -259,6 +273,7 @@ final class AuthManager: NSObject, ObservableObject {
             NSLog("[Auth] directory hydration skipped user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
         case .success(let row):
             guard let row else {
+                self.backendBootstrapState = .newAccount
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
                 return
             }
@@ -270,7 +285,17 @@ final class AuthManager: NSObject, ObservableObject {
             // Store handle/account_id (lowercased); empty clears.
             ProfileStore.setAccountID(row.accountID ?? "", for: userID)
 
+            let viewContext = PersistenceController.shared.container.viewContext
+            ProfileStore.hydrateMissingLocalIdentity(
+                displayName: row.displayName,
+                location: row.location,
+                instruments: row.instruments,
+                for: userID,
+                in: viewContext
+            )
+
             lastHydratedDirectoryUserID = userID
+            self.backendBootstrapState = .existingAccount
             NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
                   userID, reason, row.lookupEnabled ? "1" : "0", row.accountID ?? "nil")
         }
@@ -477,6 +502,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         self.displayName = nil
         self.backendUserID = nil
         self.isSigningIn = false
+        self.backendBootstrapState = .unknown
     }
 
     // MARK: - Internal processing

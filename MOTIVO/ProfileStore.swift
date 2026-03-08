@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260308_195800_MultiDeviceBootstrap_ProfileStore
+// SCOPE: Multi-device bootstrap hardening — add best-effort backend-to-local hydration for missing display name, location, and instruments on fresh second-device sign-in. No avatar/UI/logic changes beyond hydration helper.
+// SEARCH-TOKEN: 20260308_195800_MultiDeviceBootstrap_ProfileStore
+
 // CHANGE-ID: 20260120_124800_Phase12C_ProfileStore_PerUserLookup
 // SCOPE: Phase 12C — per-backend-user lookup settings + account_id storage; legacy allowDiscovery_v1 adopted as initial default.
 // SEARCH-TOKEN: 20260120_124800_Phase12C_ProfileStore_PerUserLookup
@@ -7,6 +11,7 @@
 // SEARCH-TOKEN: 20260303_162500_DeleteAccountV2Stage5_ProfileStoreWipe_FIX
 
 import Foundation
+import CoreData
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -99,6 +104,106 @@ struct ProfileStore {
         return avatarDerivedURL(for: userID)
     }
 
+
+
+
+    // MARK: - Multi-Device Bootstrap Hydration
+
+    /// Best-effort hydration of missing local identity fields from canonical backend directory state.
+    /// Fills only missing local values; does not destructively replace existing local data.
+    static func hydrateMissingLocalIdentity(
+        displayName: String?,
+        location: String?,
+        instruments: [String]?,
+        for backendUserID: String?,
+        in moc: NSManagedObjectContext
+    ) {
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+
+        let trimmedDisplayName = displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let trimmedLocation = location?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let canonicalInstruments = canonicalInstrumentNames(from: instruments)
+
+        var didChange = false
+
+        moc.performAndWait {
+            let profile = fetchOrCreateProfile(in: moc)
+
+            if let profile {
+                let localName = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if localName.isEmpty, !trimmedDisplayName.isEmpty {
+                    profile.name = trimmedDisplayName
+                    didChange = true
+                }
+            }
+
+            let localLocation = Self.location(for: bid).trimmingCharacters(in: .whitespacesAndNewlines)
+            if localLocation.isEmpty, !trimmedLocation.isEmpty {
+                Self.setLocation(trimmedLocation, for: bid)
+            }
+
+            if let profile, !canonicalInstruments.isEmpty {
+                let fetch: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+                fetch.predicate = NSPredicate(format: "profile == %@", profile)
+                let existing = (try? moc.fetch(fetch)) ?? []
+                let existingNorms = Set(existing.compactMap { ($0.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }.filter { !$0.isEmpty })
+
+                for name in canonicalInstruments where !existingNorms.contains(name.lowercased()) {
+                    let inst = Instrument(context: moc)
+                    inst.id = UUID()
+                    inst.name = name
+                    inst.profile = profile
+                    didChange = true
+
+                    do {
+                        _ = try PersistenceController.shared.fetchOrCreateUserInstrument(
+                            named: name,
+                            mapTo: inst,
+                            visibleOnProfile: true,
+                            in: moc
+                        )
+                    } catch {
+                        NSLog("[ProfileStore] Multi-device bootstrap mirror failed for instrument %@: %@", name, String(describing: error))
+                    }
+                }
+            }
+
+            if didChange, moc.hasChanges {
+                do {
+                    try moc.save()
+                } catch {
+                    NSLog("[ProfileStore] Multi-device bootstrap save failed: %@", String(describing: error))
+                }
+            }
+        }
+    }
+
+    private static func fetchOrCreateProfile(in moc: NSManagedObjectContext) -> Profile? {
+        let fetch: NSFetchRequest<Profile> = Profile.fetchRequest()
+        fetch.fetchLimit = 1
+        if let existing = try? moc.fetch(fetch).first { return existing }
+
+        let profile = Profile(context: moc)
+        profile.id = UUID()
+        profile.name = ""
+        profile.primaryInstrument = ""
+        return profile
+    }
+
+    private static func canonicalInstrumentNames(from instruments: [String]?) -> [String] {
+        guard let instruments else { return [] }
+        var seen = Set<String>()
+        var out: [String] = []
+        for raw in instruments {
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            out.append(trimmed)
+        }
+        return out
+    }
 
     // MARK: - Delete Account v2 (Local Factory Reset)
 

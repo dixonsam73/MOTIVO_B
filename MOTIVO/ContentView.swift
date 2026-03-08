@@ -969,6 +969,17 @@ Spacer()
         // CHANGE-ID: 20260226_162000_AppSetUpGateFix3_c21b3c
         guard let uid = userID, !uid.isEmpty else { return false }
 
+        // CHANGE-ID: 20260308_202200_MultiDeviceBootstrap_ContentView
+        // SEARCH-TOKEN: 20260308_202200_MultiDeviceBootstrap_ContentView
+        // Existing backend accounts must not be forced into local setup while bootstrap hydration
+        // is resolving or after a canonical row has been confirmed.
+        switch auth.backendBootstrapState {
+        case .unknown, .checking, .existingAccount:
+            return false
+        case .newAccount:
+            break
+        }
+
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
         req.fetchLimit = 1
         let p = (try? viewContext.fetch(req))?.first

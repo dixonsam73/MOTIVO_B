@@ -41,6 +41,10 @@
 // SCOPE: Profile privacy hydration — fetch account_directory self row on sign-in to hydrate local ProfileStore discoveryMode/account_id (fresh install consistency). No UI changes.
 // SEARCH-TOKEN: 20260302_093339_ProfileHydrateDirectory_3b1f
 
+// CHANGE-ID: 20260308_194900_MultiDeviceBootstrap_ADS
+// SCOPE: Multi-device bootstrap hardening foundation — extend owner self-row fetch to include canonical display_name/location/instruments for second-device hydration. No UI changes.
+// SEARCH-TOKEN: 20260308_194900_MultiDeviceBootstrap_ADS
+
 import Foundation
 
 public struct DirectoryAccount: Codable, Identifiable, Hashable {
@@ -65,11 +69,17 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
 
 public struct SelfDirectoryRow: Decodable, Hashable {
     public let accountID: String?
+    public let displayName: String?
+    public let location: String?
+    public let instruments: [String]?
     public let lookupEnabled: Bool
     public let followRequestsEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case accountID = "account_id"
+        case displayName = "display_name"
+        case location = "location"
+        case instruments = "instruments"
         case lookupEnabled = "lookup_enabled"
         case followRequestsEnabled = "follow_requests_enabled"
     }
@@ -118,13 +128,13 @@ public final class AccountDirectoryService {
     private let cache = DirectoryAccountCache()
 
     /// Fetch the caller's own account_directory row via RLS (owner-only).
-    /// Used to hydrate ProfileStore defaults on fresh installs (e.g. lookup_enabled).
+    /// Used to hydrate ProfileStore/Core Data defaults on fresh installs (e.g. lookup_enabled, display_name, location, instruments).
     func fetchSelfRow(userID: String) async -> Result<SelfDirectoryRow?, Error> {
         let trimmed = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .success(nil) }
 
         let query: [URLQueryItem] = [
-            URLQueryItem(name: "select", value: "account_id,lookup_enabled,follow_requests_enabled"),
+            URLQueryItem(name: "select", value: "account_id,display_name,location,instruments,lookup_enabled,follow_requests_enabled"),
             URLQueryItem(name: "user_id", value: "eq.\(trimmed)"),
             URLQueryItem(name: "limit", value: "1")
         ]
