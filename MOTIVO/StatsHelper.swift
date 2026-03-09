@@ -211,12 +211,10 @@ enum StatsHelper {
 
     static func backendActivityDistribution(posts: [BackendPost]) -> [BackendStatsBreakdownEntry] {
         buildDistribution(posts: posts) { post in
-            let detail = normalizedDistributionLabel(post.activityDetail)
-            if let detail { return detail }
-            let label = normalizedDistributionLabel(post.activityLabel)
-            if let label { return label }
             let type = normalizedDistributionLabel(post.activityType)
             if let type { return type }
+            let label = normalizedDistributionLabel(post.activityLabel)
+            if let label { return label }
             return "Unlabelled"
         }
     }
