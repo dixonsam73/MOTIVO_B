@@ -3209,7 +3209,7 @@ private var extraAttachmentCount: Int {
                             DirectoryAvatarCircle(
                                 ownerID: owner,
                                 displayName: (resolvedDirectoryAccount?.displayName ?? (viewerIsOwner ? "You" : "User")),
-                                directoryAvatarKey: (viewerIsOwner ? nil : resolvedDirectoryAccount?.avatarKey)
+                                directoryAvatarKey: (viewerIsOwner ? auth.backendAvatarKey : resolvedDirectoryAccount?.avatarKey)
                             )
                             .frame(width: 32, height: 32)
                             .clipShape(Circle())
@@ -3249,7 +3249,32 @@ private var extraAttachmentCount: Int {
                         }()
                         let loc: String = {
                             if viewerIsOwner {
-                                return ProfileStore.location(for: owner)
+                                let local = ProfileStore.location(for: owner).trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !local.isEmpty { return local }
+
+                                if let acct = resolvedDirectoryAccount,
+                                   let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   !s.isEmpty {
+                                    return s
+                                }
+
+                                if let canonicalOwner = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   !canonicalOwner.isEmpty {
+                                    if let acct = backendFeedStore.directoryAccountsByUserID[canonicalOwner],
+                                       let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       !s.isEmpty {
+                                        return s
+                                    }
+
+                                    let lower = canonicalOwner.lowercased()
+                                    if let acct = backendFeedStore.directoryAccountsByUserID[lower],
+                                       let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                       !s.isEmpty {
+                                        return s
+                                    }
+                                }
+
+                                return ""
                             }
                             if let acct = backendFeedStore.directoryAccountsByUserID[owner],
                                let s = acct.location?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty {
