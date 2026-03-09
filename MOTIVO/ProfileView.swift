@@ -1027,7 +1027,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              primaryFallbackNoticeNeeded = false
          }
          self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
-         self.locationText = ProfileStore.location(for: auth.currentUserID)
+         self.locationText = ProfileStore.location(for: auth.backendUserID)
 
          // Phase 12C: per-backend-user lookup state (per-user; legacy allowDiscovery_v1 adopted as initial default)
          discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
@@ -1124,7 +1124,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          // Do not persist user-presented state when signed out.
          guard auth.currentUserID != nil else { return }
          save()
-         ProfileStore.setLocation(locationText, for: auth.currentUserID)
+         ProfileStore.setLocation(locationText, for: auth.backendUserID)
      }
  
      // MARK: - Primary Activity helpers
@@ -1540,8 +1540,8 @@ private func initials(from string: String) -> String {
                     return
                 }
 
-                    if let oldID = oldValue {
-                        ProfileStore.setLocation(locationText, for: oldID)
+                    if let oldBackendID = auth.backendUserID {
+                        ProfileStore.setLocation(locationText, for: oldBackendID)
                     }
                     // Device-level Profile: keep existing behaviour by saving pending edits
                     // before clearing the view's presented state.
@@ -1559,6 +1559,7 @@ private func initials(from string: String) -> String {
                 } else {
                     discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
                     accountIDText = ProfileStore.accountID(for: auth.backendUserID)
+                    locationText = ProfileStore.location(for: auth.backendUserID)
                 }
             }
              .onChange(of: showActivityManager) { oldValue, newValue in
