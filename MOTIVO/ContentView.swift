@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260309_144500_ContentViewOwnerStatsFallback_5f2a
+// SEARCH-TOKEN: 20260309_144500_ContentViewOwnerStatsFallback_5f2a
 // CHANGE-ID: 20260304_210000_FeedPivot_ThreadPillTap_2f6b
 // SCOPE: ContentView SessionRow thread pill: tap filters feed to that thread and expands filter panel (visual/control only; no filter logic changes)
 // SEARCH-TOKEN: 20260304_210000_FeedPivot_ThreadPillTap_2f6b
@@ -318,6 +320,8 @@ fileprivate struct SessionsRootView: View {
 
     @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
+    @State private var backendOwnerStatsSnapshot: BackendStatsSnapshot? = nil
+    @State private var backendStatsLoading: Bool = false
 
     // Sheets
     @State private var showProfile = false
@@ -437,8 +441,8 @@ fileprivate struct SessionsRootView: View {
                     .pickerStyle(.segmented)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(stats.count) activities")
-                        Text("\(StatsHelper.formatDuration(stats.seconds)) total")
+                        Text("\(displayedStats.count) activities")
+                        Text("\(StatsHelper.formatDuration(displayedStats.seconds)) total")
                     }
                 }
                 .onAppear { refreshStats() }
@@ -1112,21 +1116,84 @@ Spacer()
 
 
 
+    private var displayedStats: SessionStats {
+        backendOwnerStatsSnapshot?.stats ?? stats
+    }
+
     private func refreshStats() {
         // De-populate when signed out to mirror other data fields
         guard userID != nil else {
             stats = .init(count: 0, seconds: 0)
+            backendOwnerStatsSnapshot = nil
+            backendStatsLoading = false
             return
         }
         do {
             guard let uid = effectiveUserID else {
-            stats = .init(count: 0, seconds: 0)
-            return
-        }
-        stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange, ownerUserID: uid)
+                stats = .init(count: 0, seconds: 0)
+                backendOwnerStatsSnapshot = nil
+                backendStatsLoading = false
+                return
+            }
+            stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange, ownerUserID: uid)
+            let localOwnerHasSessions = hasLocalOwnerSessions(for: uid, range: statsRange)
+            if localOwnerHasSessions {
+                backendOwnerStatsSnapshot = nil
+                backendStatsLoading = false
+            } else {
+                Task { await loadBackendOwnerStatsIfNeeded(localOwnerHasSessions: localOwnerHasSessions) }
+            }
         } catch {
             stats = .init(count: 0, seconds: 0)
+            backendOwnerStatsSnapshot = nil
+            backendStatsLoading = false
         }
+    }
+
+    private func hasLocalOwnerSessions(for ownerUserID: String, range: StatsRange) -> Bool {
+        let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Session")
+        var predicates: [NSPredicate] = [NSPredicate(format: "ownerUserID == %@", ownerUserID)]
+        let bounds = StatsHelper.dateBounds(for: range)
+        guard let start = bounds.start, let end = bounds.end else { return false }
+        predicates.append(NSPredicate(format: "timestamp >= %@ AND timestamp < %@", start as NSDate, end as NSDate))
+        request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
+        request.fetchLimit = 1
+        do {
+            return try viewContext.count(for: request) > 0
+        } catch {
+            return false
+        }
+    }
+
+    @MainActor
+    private func loadBackendOwnerStatsIfNeeded(localOwnerHasSessions: Bool) async {
+        guard localOwnerHasSessions == false else {
+            backendOwnerStatsSnapshot = nil
+            backendStatsLoading = false
+            return
+        }
+        guard userID != nil,
+              useBackendFeed,
+              let backendOwnerUserID = effectiveBackendUserID,
+              backendOwnerUserID.isEmpty == false else {
+            backendOwnerStatsSnapshot = nil
+            backendStatsLoading = false
+            return
+        }
+
+        backendStatsLoading = true
+        let result = await BackendEnvironment.shared.publish.fetchAllOwnerPostsForAnalytics(ownerUserID: backendOwnerUserID, pageSize: 500)
+        switch result {
+        case .success(let posts):
+            backendOwnerStatsSnapshot = StatsHelper.buildBackendStatsSnapshot(
+                posts: posts,
+                range: statsRange,
+                ownerUserID: backendOwnerUserID
+            )
+        case .failure:
+            backendOwnerStatsSnapshot = nil
+        }
+        backendStatsLoading = false
     }
 
     // MARK: - Filtering (Scope • Instrument • Activity • Search)

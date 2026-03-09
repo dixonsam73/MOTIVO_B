@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260309_142900_OwnerStatsBackendFetch_protocolfix_e31a
+// SCOPE: Add analytics-only full-history owner fetch to BackendPublishService and both conformers; no feed-store or publish-flow changes.
+// SEARCH-TOKEN: 20260309_142900_OwnerStatsBackendFetch_protocolfix_e31a
+
 
 // CHANGE-ID: 20260222_103500_PublishSkipOversizeWarningRoot_7d9c
 // SCOPE: Post publish warning when oversized attachments are skipped (>50MB) using NotificationCenter; show alert in ContentView root. No publish logic changes.
@@ -254,6 +258,7 @@ public protocol BackendPublishService {
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
+    func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int) async -> Result<[BackendPost], Error>
 }
 
 public protocol BackendProfileService {}
@@ -455,6 +460,15 @@ private struct PostAttachmentsRow: Decodable {
     public func fetchFeed(scope: String) async -> Result<Void, Error> {
         await BackendDiagnostics.shared.simulatedCall("PublishService.fetchFeed", meta: ["scope": scope])
         return .success(())
+    }
+
+    @MainActor
+    public func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int = 500) async -> Result<[BackendPost], Error> {
+        await BackendDiagnostics.shared.simulatedCall(
+            "PublishService.fetchAllOwnerPostsForAnalytics",
+            meta: ["ownerUserID": ownerUserID, "pageSize": String(pageSize)]
+        )
+        return .success([])
     }
 }
 
@@ -1545,6 +1559,72 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
                 BackendFeedStore.shared.endFetchFailure(e)
             }
             return .failure(e)
+        }
+    }
+
+    @MainActor
+    public func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int = 500) async -> Result<[BackendPost], Error> {
+        let normalizedOwnerUserID = ownerUserID.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
+        guard !normalizedOwnerUserID.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 2, userInfo: [NSLocalizedDescriptionKey: "Missing owner user id"]))
+        }
+
+        let clampedPageSize = max(1, min(pageSize, 1000))
+
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+
+        let headers: [String: String] = [
+            "apikey": apiKey,
+            "Accept": "application/json"
+        ]
+
+        var allPosts: [BackendPost] = []
+        var offset = 0
+        let decoder = JSONDecoder()
+        let iso = ISO8601DateFormatter()
+
+        while true {
+            let queryItems: [URLQueryItem] = [
+                URLQueryItem(name: "select", value: "*"),
+                URLQueryItem(name: "owner_user_id", value: "eq.\(normalizedOwnerUserID)"),
+                URLQueryItem(name: "order", value: "created_at.desc"),
+                URLQueryItem(name: "limit", value: String(clampedPageSize)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+
+            let result = await NetworkManager.shared.request(
+                path: "rest/v1/posts",
+                method: "GET",
+                query: queryItems,
+                jsonBody: nil,
+                headers: headers
+            )
+
+            switch result {
+            case .success(let data):
+                do {
+                    let page = try decoder.decode([BackendPost].self, from: data)
+                    allPosts.append(contentsOf: page)
+
+                    if page.count < clampedPageSize {
+                        let sortedPosts = allPosts.sorted { a, b in
+                            let da = a.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
+                            let db = b.createdAt.flatMap { iso.date(from: $0) } ?? Date.distantPast
+                            return da > db
+                        }
+                        return .success(sortedPosts)
+                    }
+
+                    offset += page.count
+                } catch {
+                    return .failure(error)
+                }
+
+            case .failure(let error):
+                return .failure(error)
+            }
         }
     }
 }
