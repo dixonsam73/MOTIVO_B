@@ -326,6 +326,10 @@ fileprivate struct SessionsRootView: View {
     @State private var showAdd = false
     @State private var showPeople = false
 
+    #if canImport(UIKit)
+    @State private var toolbarRemoteAvatar: UIImage? = nil
+    #endif
+
     #if DEBUG
     @State private var isDebugPresented: Bool = false
     @State private var _debugJSONBuffer: String = "{}"
@@ -363,6 +367,14 @@ fileprivate struct SessionsRootView: View {
         let raw = (backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return raw.isEmpty ? nil : raw.lowercased()
     }
+    private var toolbarAvatarKeyNormalized: String {
+        auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var toolbarAvatarCacheKey: String {
+        "avatars|\(toolbarAvatarKeyNormalized)"
+    }
+
 
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
@@ -673,6 +685,22 @@ fileprivate struct SessionsRootView: View {
                                 .clipShape(Circle())
                                 .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
                                 .padding(8)
+                        } else if !toolbarAvatarKeyNormalized.isEmpty, let cached = RemoteAvatarImageCache.get(toolbarAvatarCacheKey) {
+                            Image(uiImage: cached)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                                .padding(8)
+                        } else if !toolbarAvatarKeyNormalized.isEmpty, let toolbarRemoteAvatar {
+                            Image(uiImage: toolbarRemoteAvatar)
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                                .padding(8)
                         } else {
                             // Match initials behavior to identity row when no avatar image is available
                             let initials: String = {
@@ -786,6 +814,18 @@ Spacer()
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
             }
+            #if canImport(UIKit)
+            .task(id: toolbarAvatarKeyNormalized) {
+                guard !toolbarAvatarKeyNormalized.isEmpty else {
+                    toolbarRemoteAvatar = nil
+                    return
+                }
+                if RemoteAvatarImageCache.get(toolbarAvatarCacheKey) != nil { return }
+                if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: toolbarAvatarKeyNormalized) {
+                    toolbarRemoteAvatar = ui
+                }
+            }
+            #endif
 #if DEBUG
 .overlay(alignment: .top) {
     // Invisible hit area over the top toolbar GAP only (between avatar and record/add cluster)
@@ -1857,8 +1897,19 @@ fileprivate struct SessionRow: View {
                         Button(action: { showPeek = true }) {
                             Group {
                                 #if canImport(UIKit)
+                                let ownerAvatarKey = viewerIsOwner ? (auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") : ""
+                                let ownerAvatarCacheKey = "avatars|\(ownerAvatarKey)"
+
                                 if let img = ProfileStore.avatarImage(for: ownerIDNonEmpty) {
                                     Image(uiImage: img)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else if viewerIsOwner, !ownerAvatarKey.isEmpty, let cached = RemoteAvatarImageCache.get(ownerAvatarCacheKey) {
+                                    Image(uiImage: cached)
+                                        .resizable()
+                                        .scaledToFill()
+                                } else if viewerIsOwner, !ownerAvatarKey.isEmpty, let remoteAvatar {
+                                    Image(uiImage: remoteAvatar)
                                         .resizable()
                                         .scaledToFill()
                                 } else {
@@ -1889,6 +1940,16 @@ fileprivate struct SessionRow: View {
                                         Text(initials)
                                             .font(.system(size: 16, weight: .bold))
                                             .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                    .task(id: ownerAvatarKey) {
+                                        guard viewerIsOwner, !ownerAvatarKey.isEmpty else {
+                                            remoteAvatar = nil
+                                            return
+                                        }
+                                        if RemoteAvatarImageCache.get(ownerAvatarCacheKey) != nil { return }
+                                        if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: ownerAvatarKey) {
+                                            remoteAvatar = ui
+                                        }
                                     }
                                 }
                                 #else
@@ -1924,7 +1985,22 @@ fileprivate struct SessionRow: View {
 
                         let loc: String = {
                             if viewerIsOwner {
-                                return ProfileStore.location(for: ownerIDNonEmpty)
+                                let local = ProfileStore.location(for: ownerIDNonEmpty).trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !local.isEmpty { return local }
+
+                                let canonicalOwner = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                                if !canonicalOwner.isEmpty {
+                                    if let acct = BackendFeedStore.shared.directoryAccountsByUserID[canonicalOwner],
+                                       let s = acct.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty {
+                                        return s
+                                    }
+                                    let lower = canonicalOwner.lowercased()
+                                    if let acct = BackendFeedStore.shared.directoryAccountsByUserID[lower],
+                                       let s = acct.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty {
+                                        return s
+                                    }
+                                }
+                                return ""
                             }
                             if let acct = BackendFeedStore.shared.directoryAccountsByUserID[ownerIDNonEmpty],
                                let s = acct.location?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines), !s.isEmpty {
