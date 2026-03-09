@@ -449,10 +449,21 @@ struct BackendSessionDetailView: View {
 
 
     private var locationText: String {
-        // Owner uses local ProfileStore; follower contexts use backend directory value.
+        // Owner should match canonical backend-keyed identity on second devices.
         if viewerIsOwner {
+            let canonicalOwner = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !canonicalOwner.isEmpty {
+                let canonicalLocal = ProfileStore.location(for: canonicalOwner).trimmingCharacters(in: .whitespacesAndNewlines)
+                if !canonicalLocal.isEmpty {
+                    return canonicalLocal
+                }
+            }
+
             let viewer = effectiveViewerUserID ?? ""
-            return ProfileStore.location(for: viewer)
+            let legacyLocal = ProfileStore.location(for: viewer).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !legacyLocal.isEmpty {
+                return legacyLocal
+            }
         }
 
         if let account = directoryAccount,
@@ -465,6 +476,16 @@ struct BackendSessionDetailView: View {
     }
     private var displayName: String {
         if viewerIsOwner {
+            let authName = (auth.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !authName.isEmpty {
+                return authName
+            }
+            if let account = directoryAccount {
+                let accountName = account.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !accountName.isEmpty {
+                    return accountName
+                }
+            }
             return "You"
         }
         if let account = directoryAccount {
