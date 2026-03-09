@@ -3249,6 +3249,12 @@ private var extraAttachmentCount: Int {
                         }()
                         let loc: String = {
                             if viewerIsOwner {
+                                if let canonicalOwner = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                                   !canonicalOwner.isEmpty {
+                                    let canonicalLocal = ProfileStore.location(for: canonicalOwner).trimmingCharacters(in: .whitespacesAndNewlines)
+                                    if !canonicalLocal.isEmpty { return canonicalLocal }
+                                }
+
                                 let local = ProfileStore.location(for: owner).trimmingCharacters(in: .whitespacesAndNewlines)
                                 if !local.isEmpty { return local }
 
