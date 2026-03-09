@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260309_205500_AvatarBootstrapSelfRow_6c1a
+// SCOPE: Multi-device account bootstrap hardening — include account_directory.avatar_key in self-row fetch for owner avatar fallback.
+// SEARCH-TOKEN: 20260309_205500_AvatarBootstrapSelfRow_6c1a
+
 // CHANGE-ID: 20260221_142658_FollowInfraFix_9f2c
 // SCOPE: Follow infra hardening — enforce requests-off (account_directory), fix decline/remove follower delete semantics, add follower revoke swipe.
 // SEARCH-TOKEN: 20260221_142658_FollowInfraFix_9f2c
@@ -71,6 +75,7 @@ public struct SelfDirectoryRow: Decodable, Hashable {
     public let accountID: String?
     public let displayName: String?
     public let location: String?
+    public let avatarKey: String?
     public let instruments: [String]?
     public let lookupEnabled: Bool
     public let followRequestsEnabled: Bool
@@ -79,6 +84,7 @@ public struct SelfDirectoryRow: Decodable, Hashable {
         case accountID = "account_id"
         case displayName = "display_name"
         case location = "location"
+        case avatarKey = "avatar_key"
         case instruments = "instruments"
         case lookupEnabled = "lookup_enabled"
         case followRequestsEnabled = "follow_requests_enabled"
@@ -134,7 +140,7 @@ public final class AccountDirectoryService {
         guard !trimmed.isEmpty else { return .success(nil) }
 
         let query: [URLQueryItem] = [
-            URLQueryItem(name: "select", value: "account_id,display_name,location,instruments,lookup_enabled,follow_requests_enabled"),
+            URLQueryItem(name: "select", value: "account_id,display_name,location,avatar_key,instruments,lookup_enabled,follow_requests_enabled"),
             URLQueryItem(name: "user_id", value: "eq.\(trimmed)"),
             URLQueryItem(name: "limit", value: "1")
         ]

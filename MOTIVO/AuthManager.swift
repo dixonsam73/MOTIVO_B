@@ -119,6 +119,7 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var currentUserID: String?
     @Published private(set) var displayName: String?
     @Published private(set) var backendUserID: String?
+    @Published private(set) var backendAvatarKey: String?
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
@@ -274,6 +275,7 @@ final class AuthManager: NSObject, ObservableObject {
         case .success(let row):
             guard let row else {
                 self.backendBootstrapState = .newAccount
+                self.backendAvatarKey = nil
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
                 return
             }
@@ -284,6 +286,8 @@ final class AuthManager: NSObject, ObservableObject {
 
             // Store handle/account_id (lowercased); empty clears.
             ProfileStore.setAccountID(row.accountID ?? "", for: userID)
+
+            self.backendAvatarKey = row.avatarKey?.trimmingCharacters(in: .whitespacesAndNewlines)
 
             let viewContext = PersistenceController.shared.container.viewContext
             ProfileStore.hydrateMissingLocalIdentity(
@@ -437,6 +441,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
             await MainActor.run {
                 self.backendUserID = supaUserID
+                self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
             }
 
@@ -501,6 +506,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         self.currentUserID = nil
         self.displayName = nil
         self.backendUserID = nil
+        self.backendAvatarKey = nil
         self.isSigningIn = false
         self.backendBootstrapState = .unknown
     }
@@ -564,6 +570,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             UserDefaults.standard.set(backendID, forKey: Self.backendUserDefaultsKey)
             await MainActor.run {
                 self.backendUserID = backendID
+                self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "ensureBackendIdentityIfNeeded")
             }
         }
@@ -610,6 +617,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
             await MainActor.run {
                 self.backendUserID = supaUserID
+                self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "supabaseSignIn")
             }
 

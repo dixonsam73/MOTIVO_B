@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260309_094500_Profile_AvatarBootstrapFallback
+// SCOPE: Owner avatar bootstrap fallback in ProfileView only — prefer local avatar, fall back to remote avatar via existing pipeline when backendAvatarKey exists; avoid adding weight to modalsAndAlerts.
+// SEARCH-TOKEN: 20260309_094500_Profile_AvatarBootstrapFallback
+
 // CHANGE-ID: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
 // SCOPE: UI-only — clear Name/Location/Account ID FocusState when tapping other cards/scrolling in Form; no other UI/logic changes.
 // SEARCH-TOKEN: 20260228_214500_Profile_KeyboardCursorDismiss_FormTap
@@ -182,6 +186,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var avatarSyncErrorMessage: String? = nil
     @State private var showAvatarSyncErrorAlert: Bool = false
     @State private var avatarSyncInFlight: Bool = false
+    @State private var avatarRefreshTask: Task<Void, Never>? = nil
 
 
     // CHANGE-ID: 20260227_114900_DeleteAccount_UIHook
@@ -506,6 +511,11 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  Button { showAvatarEditor = true } label: { avatarChip }
                      .buttonStyle(.plain)
                      .disabled(false)
+                     .task(id: avatarRefreshTrigger) {
+                         await MainActor.run {
+                             refreshAvatarDisplay()
+                         }
+                     }
  
                  TextField("Name", text: $name)
                      .textInputAutocapitalization(.words)
@@ -996,7 +1006,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              onDelete: {
                  // Local clear immediately.
                  ProfileStore.deleteAvatar(for: auth.currentUserID)
-                 avatarImage = nil
+                 avatarRefreshTask?.cancel()
+         avatarRefreshTask = nil
+         avatarImage = nil
                  showAvatarEditor = false
 
                  Task { await clearAvatarFromBackendIfPossible() }
@@ -1026,7 +1038,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              showPrimaryFallbackAlert = true
              primaryFallbackNoticeNeeded = false
          }
-         self.avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
+         refreshAvatarDisplay()
          self.locationText = ProfileStore.location(for: auth.backendUserID)
 
          // Phase 12C: per-backend-user lookup state (per-user; legacy allowDiscovery_v1 adopted as initial default)
@@ -1054,6 +1066,54 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          showAvatarEditor = false
      }
  
+     private var avatarRefreshTrigger: String {
+         let currentUserID = auth.currentUserID ?? "nil"
+         let backendAvatarKey = auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+         return "\(currentUserID)|\(backendAvatarKey)"
+     }
+
+     @MainActor
+     private func refreshAvatarDisplay() {
+         avatarRefreshTask?.cancel()
+         avatarRefreshTask = nil
+
+         let currentUserID = auth.currentUserID
+         if let localAvatar = ProfileStore.avatarImage(for: currentUserID) {
+             avatarImage = localAvatar
+             return
+         }
+
+         let backendAvatarKey = auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+         guard backendAvatarKey.isEmpty == false else {
+             avatarImage = nil
+             return
+         }
+
+         avatarImage = nil
+         avatarRefreshTask = Task {
+             let requestedUserID = currentUserID
+             let requestedAvatarKey = backendAvatarKey
+             let fetchedImage = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: requestedAvatarKey)
+             guard Task.isCancelled == false else { return }
+
+             await MainActor.run {
+                 guard Task.isCancelled == false else { return }
+                 guard auth.currentUserID == requestedUserID else { return }
+
+                 let currentBackendAvatarKey = auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                 guard currentBackendAvatarKey == requestedAvatarKey else { return }
+
+                 if let localAvatar = ProfileStore.avatarImage(for: auth.currentUserID) {
+                     avatarImage = localAvatar
+                 } else {
+                     avatarImage = fetchedImage
+                 }
+
+                 avatarRefreshTask = nil
+             }
+         }
+     }
+
      private func handleActivityManagerChange(_ wasPresented: Bool, _ isPresented: Bool) {
          if wasPresented == true && isPresented == false {
              refreshUserActivities()
