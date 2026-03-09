@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260309_170500_meview_backend_owner_fallback_narrow
+// SCOPE: Add local-first connected-owner backend analytics fallback only when no local sessions exist on this device. Preserve local MeView behavior, SessionDetailView navigation, and thread analytics; backend mode leaves threads empty and longest/first informational only.
+// SEARCH-TOKEN: 20260309_170500_meview_backend_owner_fallback_narrow
 // CHANGE-ID: 20260305_103500_timecard_sessioncount_secondary
 // SCOPE: MeView TimeCard typography: render session count as secondary text; no layout/logic changes.
 // CHANGE-ID: 20260305_094600_meview_thread_analytics_v3
@@ -86,6 +89,7 @@ private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count 
 
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
+    @EnvironmentObject private var auth: AuthManager
     @State private var range: StatsRange = .week
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var avgSessionSeconds: Int64? = nil
@@ -96,6 +100,11 @@ struct MeView: View {
     @State private var firstSession: Session? = nil
     @State private var selectedInsightSession: Session? = nil
     @State private var bestStreakRangeText: String? = nil
+    @State private var currentStreakValue: Int = 0
+    @State private var bestStreakValue: Int = 0
+    @State private var isBackendAnalyticsMode = false
+    @State private var backendAnalyticsLoadKey: String? = nil
+    @State private var backendAnalyticsLoading = false
 
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
@@ -116,30 +125,38 @@ struct MeView: View {
                 // Full-width Time card with date range header
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range, firstSessionDate: firstSessionDate))
                 AdaptiveGrid {
-                    StreaksCard(current: currentStreakDays, best: bestStreakDays, bestRangeText: bestStreakRangeText)
+                    StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
                     if let avg = avgSessionSeconds {
                         AverageSessionCard(seconds: avg)
                     }
-                    if let longest = longestSessionSeconds, let d = longestSessionDate, let target = longestSession {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            selectedInsightSession = target
-                        } label: {
+                    if let longest = longestSessionSeconds, let d = longestSessionDate {
+                        if let target = longestSession {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                selectedInsightSession = target
+                            } label: {
+                                LongestSessionCard(range: range, seconds: longest, date: d)
+                            }
+                            .buttonStyle(InsightCardButtonStyle())
+                        } else {
                             LongestSessionCard(range: range, seconds: longest, date: d)
                         }
-                        .buttonStyle(InsightCardButtonStyle())
                     }
                     if avgFocus != nil {
                         FocusCard(average: avgFocus)
                     }
-                    if let first = firstSessionDate, let target = firstSession {
-                        Button {
-                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                            selectedInsightSession = target
-                        } label: {
+                    if let first = firstSessionDate {
+                        if let target = firstSession {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                selectedInsightSession = target
+                            } label: {
+                                FirstSessionCard(range: range, date: first)
+                            }
+                            .buttonStyle(InsightCardButtonStyle())
+                        } else {
                             FirstSessionCard(range: range, date: first)
                         }
-                        .buttonStyle(InsightCardButtonStyle())
                     }
                     if uniqueActivityCount > 1 {
                         TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
@@ -166,8 +183,9 @@ struct MeView: View {
         .padding(.bottom, Theme.Spacing.xl)
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
-        .onAppear { reload() }
-        .onChange(of: range) { _, _ in reload() }
+        .onAppear { Task { await reload() } }
+        .onChange(of: range) { _, _ in Task { await reload() } }
+        .onChange(of: auth.backendUserID) { _, _ in Task { await reload() } }
         .appBackground()
         .background {
             NavigationLink(
@@ -197,13 +215,44 @@ struct MeView: View {
         }
     }
 
-    private var currentStreakDays: Int { Stats.currentStreakDays(sessions: allSessions) }
-    private var bestStreakDays: Int { Stats.bestStreakDays(sessions: allSessions) }
+    @MainActor
+    private func reload() async {
+        let localStats = (try? StatsHelper.fetchStats(in: ctx, range: range)) ?? .init(count: 0, seconds: 0)
+        let localAllSessions = fetchSessions(limit: nil, start: nil, end: nil)
 
-    private func reload() {
-        sessionStats = (try? StatsHelper.fetchStats(in: ctx, range: range)) ?? .init(count: 0, seconds: 0)
-        allSessions = fetchSessions(limit: nil, start: nil, end: nil)
-        // Best streak date range (all-time, Europe/London day keys)
+        guard localAllSessions.isEmpty,
+              BackendEnvironment.shared.isConnected,
+              let backendOwnerUserID = canonicalBackendOwnerUserID,
+              backendOwnerUserID.isEmpty == false else {
+            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions)
+            return
+        }
+
+        let loadKey = backendOwnerUserID.lowercased() + "|" + range.rawValue
+        if backendAnalyticsLoading, backendAnalyticsLoadKey == loadKey { return }
+        if isBackendAnalyticsMode, backendAnalyticsLoadKey == loadKey { return }
+
+        backendAnalyticsLoading = true
+        defer { backendAnalyticsLoading = false }
+
+        let result = await BackendEnvironment.shared.publish.fetchAllOwnerPostsForAnalytics(ownerUserID: backendOwnerUserID, pageSize: 500)
+        switch result {
+        case .success(let posts):
+            applyBackendAnalytics(posts: posts, ownerUserID: backendOwnerUserID)
+            backendAnalyticsLoadKey = loadKey
+        case .failure:
+            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions)
+        }
+    }
+
+    @MainActor
+    private func applyLocalAnalytics(localStats: SessionStats, allSessions: [Session]) {
+        isBackendAnalyticsMode = false
+        backendAnalyticsLoadKey = nil
+        sessionStats = localStats
+        self.allSessions = allSessions
+        currentStreakValue = Stats.currentStreakDays(sessions: allSessions)
+        bestStreakValue = Stats.bestStreakDays(sessions: allSessions)
         if let best = Stats.bestStreakRange(sessions: allSessions) {
             bestStreakRangeText = formatStreakRange(start: best.start, end: best.end)
         } else {
@@ -212,7 +261,6 @@ struct MeView: View {
         let (start, end) = StatsHelper.dateBounds(for: range)
         avgFocus = averageFocus(start: start, end: end)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
-        // Longest session in range
         var longestSecs: Int64 = 0
         var longestDate: Date? = nil
         var longestFound: Session? = nil
@@ -235,21 +283,15 @@ struct MeView: View {
             longestSessionDate = nil
             longestSession = nil
         }
-        self.timeDistributionSlices = timeDistribution(from: sessionsInRange)
+        timeDistributionSlices = timeDistribution(from: sessionsInRange)
         let activityTotals = categoryTotals(from: sessionsInRange) { s in
             let raw = SessionActivity.name(for: s as NSManagedObject)
             let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return label.isEmpty ? nil : label
         }
-        self.uniqueActivityCount = activityTotals.count
-        self.topActivityByTime = topDurationWinner(from: activityTotals)
-        // Average session length (range-scoped)
-        if sessionStats.count > 0 {
-            avgSessionSeconds = Int64(sessionStats.seconds) / Int64(sessionStats.count)
-        } else {
-            avgSessionSeconds = nil
-        }
-        // First session in range (earliest timestamp)
+        uniqueActivityCount = activityTotals.count
+        topActivityByTime = topDurationWinner(from: activityTotals)
+        avgSessionSeconds = sessionStats.count > 0 ? Int64(sessionStats.seconds) / Int64(sessionStats.count) : nil
         let firstPair = sessionsInRange.compactMap { session -> (Session, Date)? in
             guard let date = session.value(forKey: "timestamp") as? Date else { return nil }
             return (session, date)
@@ -259,16 +301,114 @@ struct MeView: View {
         firstSessionDate = firstPair?.1
         firstSession = firstPair?.0
         let threadStats = threadAnalytics(from: sessionsInRange)
-        self.threadDistributionSlices = threadStats.slices
-        self.threadUniqueCountInRange = threadStats.uniqueCount
-        self.topThread = threadStats.top
-
+        threadDistributionSlices = threadStats.slices
+        threadUniqueCountInRange = threadStats.uniqueCount
+        topThread = threadStats.top
         let instrumentTotals = categoryTotals(from: sessionsInRange) { s in
             instrumentLabel(for: s)
         }
-        self.instrumentUniqueCountInRange = instrumentTotals.count
-        self.instrumentDistributionSlices = distributionSlices(from: instrumentTotals)
-        self.topInstrumentByTime = topDurationWinner(from: instrumentTotals)
+        instrumentUniqueCountInRange = instrumentTotals.count
+        instrumentDistributionSlices = distributionSlices(from: instrumentTotals)
+        topInstrumentByTime = topDurationWinner(from: instrumentTotals)
+    }
+
+    @MainActor
+    private func applyBackendAnalytics(posts: [BackendPost], ownerUserID: String) {
+        isBackendAnalyticsMode = true
+        allSessions = []
+
+        let canonicalOwnerUserID = ownerUserID.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let allOwnerPosts = posts.filter {
+            ($0.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == canonicalOwnerUserID
+        }
+
+        let snapshot = StatsHelper.buildBackendStatsSnapshot(posts: allOwnerPosts, range: range, ownerUserID: canonicalOwnerUserID)
+        sessionStats = snapshot.stats
+        avgSessionSeconds = snapshot.stats.count > 0 ? Int64(snapshot.stats.seconds) / Int64(snapshot.stats.count) : nil
+        avgFocus = snapshot.averageEffort
+
+        if let longest = snapshot.longestPost,
+           let date = StatsHelper.analyticsDate(for: longest) {
+            longestSessionSeconds = Int64(max(0, longest.durationSeconds ?? 0))
+            longestSessionDate = date
+            longestSession = nil
+        } else {
+            longestSessionSeconds = nil
+            longestSessionDate = nil
+            longestSession = nil
+        }
+
+        if let first = snapshot.firstPost,
+           let date = StatsHelper.analyticsDate(for: first) {
+            firstSessionDate = date
+            firstSession = nil
+        } else {
+            firstSessionDate = nil
+            firstSession = nil
+        }
+
+        uniqueActivityCount = snapshot.activityDistribution.count
+        timeDistributionSlices = snapshot.activityDistribution.map { ActivitySlice(name: $0.label, seconds: $0.seconds) }
+        topActivityByTime = snapshot.activityDistribution.first.map { (name: $0.label, seconds: $0.seconds) }
+
+        instrumentUniqueCountInRange = snapshot.instrumentDistribution.count
+        instrumentDistributionSlices = snapshot.instrumentDistribution.map { ActivitySlice(name: $0.label, seconds: $0.seconds) }
+        topInstrumentByTime = snapshot.instrumentDistribution.first.map { (name: $0.label, seconds: $0.seconds) }
+
+        threadDistributionSlices = []
+        threadUniqueCountInRange = 0
+        topThread = nil
+
+        currentStreakValue = StatsHelper.backendCurrentStreakDays(from: snapshot.filteredPosts)
+        bestStreakValue = StatsHelper.backendBestStreakDays(from: snapshot.filteredPosts)
+        if let bestRange = backendBestStreakRange(from: snapshot.filteredPosts.compactMap({ StatsHelper.analyticsDate(for: $0) })) {
+            bestStreakRangeText = formatStreakRange(start: bestRange.start, end: bestRange.end)
+        } else {
+            bestStreakRangeText = nil
+        }
+    }
+
+    private var canonicalBackendOwnerUserID: String? {
+        let raw = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return raw.isEmpty ? nil : raw
+    }
+
+    private func backendBestStreakRange(from dates: [Date]) -> (start: Date, end: Date)? {
+        let tz = TimeZone(identifier: "Europe/London") ?? .current
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = tz
+        let sortedDays = Array(Set(dates.map { cal.startOfDay(for: $0) })).sorted()
+        guard sortedDays.isEmpty == false else { return nil }
+
+        var bestLength = 1
+        var bestStart = sortedDays[0]
+        var bestEnd = sortedDays[0]
+        var runLength = 1
+        var runStart = sortedDays[0]
+        var previous = sortedDays[0]
+
+        for day in sortedDays.dropFirst() {
+            let expectedNext = cal.date(byAdding: .day, value: 1, to: previous)
+            if let expectedNext, cal.isDate(day, inSameDayAs: expectedNext) {
+                runLength += 1
+            } else {
+                if runLength > bestLength {
+                    bestLength = runLength
+                    bestStart = runStart
+                    bestEnd = previous
+                }
+                runLength = 1
+                runStart = day
+            }
+            previous = day
+        }
+
+        if runLength > bestLength {
+            bestStart = runStart
+            bestEnd = previous
+        }
+
+        return (bestStart, bestEnd)
     }
 
     private func fetchSessions(limit: Int?, start: Date?, end: Date?) -> [Session] {
