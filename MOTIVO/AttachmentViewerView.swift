@@ -42,6 +42,10 @@
 // SCOPE: Restore audio playback animation in AttachmentViewerView for remote/signed-URL audio (BSDV path) by driving waveform active state and timer for both local and remote playback; preserve all existing UI, routing, and owner/local behavior.
 // SEARCH-TOKEN: 20260310_000001_AVV_RemoteAudioWaveformParity
 
+// CHANGE-ID: 20260310_140700_AVV_RenameSheet_ThemeParity
+// SCOPE: Visual-only polish — restyle AttachmentViewerView rename sheet to match InstrumentListView theme parity (remove default iOS blue; no logic changes).
+// SEARCH-TOKEN: 20260310_140700_AVV_RenameSheet_ThemeParity
+
 import SwiftUI
 import AVKit
 import AVFoundation
@@ -933,27 +937,14 @@ private func currentURL() -> URL? {
             renameText = ""
         }) {
             NavigationStack {
-                VStack(spacing: Theme.Spacing.m) {
-                    Text("Rename attachment")
-                        .font(.headline)
-                        .padding(.top, Theme.Spacing.l)
+                Form {
+                    Section(header: Text("Attachment Name").sectionHeader()) {
+                        TextField("Name", text: $renameText)
+                            .font(Theme.Text.body)
+                            .textInputAutocapitalization(.words)
+                    }
 
-                    TextField("Name", text: $renameText)
-                        .textFieldStyle(.roundedBorder)
-                        .padding(.horizontal, Theme.Spacing.l)
-
-                    Spacer()
-
-                    HStack(spacing: Theme.Spacing.m) {
-                        Button("Cancel") {
-                            isRenaming = false
-                            renameTargetURL = nil
-                            renameText = ""
-                        }
-                        .buttonStyle(.borderless)
-
-                        Spacer()
-
+                    Section {
                         Button("Save") {
                             guard let target = renameTargetURL else {
                                 isRenaming = false
@@ -991,11 +982,32 @@ private func currentURL() -> URL? {
                             renameTargetURL = nil
                             renameText = ""
                         }
-                        .buttonStyle(.borderedProminent)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.accent)
                     }
-                    .padding(.horizontal, Theme.Spacing.l)
-                    .padding(.bottom, Theme.Spacing.l)
                 }
+                .navigationTitle("Rename Attachment")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .principal) {
+                        Text("Rename Attachment")
+                            .font(Theme.Text.pageTitle)
+                            .foregroundStyle(.primary)
+                    }
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(action: {
+                            isRenaming = false
+                            renameTargetURL = nil
+                            renameText = ""
+                        }) {
+                            Image(systemName: "chevron.backward")
+                                .font(.body.weight(.semibold))
+                                .foregroundStyle(.primary)
+                        }
+                        .accessibilityLabel("Close rename attachment")
+                    }
+                }
+                .appBackground()
             }
         }
 
