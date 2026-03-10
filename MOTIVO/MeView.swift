@@ -210,7 +210,7 @@ struct MeView: View {
 
     private var rangePickerHeader: some View {
         HStack {
-            Text("Dashboard").sectionHeader()
+            Text("Insights").sectionHeader()
             Spacer()
         }
     }

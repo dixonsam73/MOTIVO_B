@@ -429,7 +429,7 @@ fileprivate struct SessionsRootView: View {
                         } label: {
                             Image(systemName: "chart.bar")
                                 .imageScale(.large)
-                                .accessibilityLabel("Open Dashboard")
+                                .accessibilityLabel("Open Insights")
                         }
                         .buttonStyle(.plain)
                     }
