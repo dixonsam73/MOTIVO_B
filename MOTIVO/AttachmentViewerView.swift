@@ -38,6 +38,10 @@
 // CHANGE-ID: 20260114_103700_9E
 // SCOPE: 9E allow audio/video/image playback from signed HTTPS URLs
 
+// CHANGE-ID: 20260310_000001_AVV_RemoteAudioWaveformParity
+// SCOPE: Restore audio playback animation in AttachmentViewerView for remote/signed-URL audio (BSDV path) by driving waveform active state and timer for both local and remote playback; preserve all existing UI, routing, and owner/local behavior.
+// SEARCH-TOKEN: 20260310_000001_AVV_RemoteAudioWaveformParity
+
 import SwiftUI
 import AVKit
 import AVFoundation
@@ -2155,7 +2159,7 @@ private struct AudioPage: View {
 
             AttachmentWaveformView(
                 samples: renderBars(),
-                isPlaying: audioController.isPlaying
+                isPlaying: isPlaybackPlaying
             )
             .frame(height: 60)
             .padding(.horizontal, Theme.Spacing.l)
@@ -2188,7 +2192,7 @@ private struct AudioPage: View {
                             } else {
                                 isScrubbing = false
                                 resetWaveformToStart()
-                                if wasPlayingBeforeScrub && !isRemoteURL {
+                                if wasPlayingBeforeScrub {
                                     startWaveform()
                                 }
                             }
@@ -2250,6 +2254,7 @@ private struct AudioPage: View {
                                 remoteController.toggle(url: url)
                                 audioDuration = playbackDuration
                                 isAnyPlayerActive = true
+                                startWaveform()
                             } else {
                                 // Resume if we already have a prepared player; otherwise start fresh.
                                 if audioController.canResume {
@@ -2396,7 +2401,7 @@ private func jump(by seconds: TimeInterval) {
     setPlaybackTime(target)
 
     resetWaveformToStart()
-    if wasPlaying && !isRemoteURL {
+    if wasPlaying {
         stopWaveform()
         startWaveform()
     }
@@ -2417,9 +2422,16 @@ private func jump(by seconds: TimeInterval) {
     private func startWaveform() {
         stopWaveform()
         waveformTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 30.0, repeats: true) { _ in
-            audioController.sampleLevel()
-            writeWaveformSample(audioController.currentLevel)
-            // Keep scrubber synced during local playback (smooth updates).
+            if isRemoteURL {
+                let phase = playbackCurrentTime
+                let sample = remoteWaveformLevel(at: phase)
+                writeWaveformSample(sample)
+            } else {
+                audioController.sampleLevel()
+                writeWaveformSample(audioController.currentLevel)
+            }
+
+            // Keep scrubber synced during playback (smooth updates).
             if !isScrubbing {
                 let dur = playbackDuration
                 if dur.isFinite && dur > 0 { audioDuration = dur }
@@ -2429,6 +2441,15 @@ private func jump(by seconds: TimeInterval) {
         if let waveformTimer {
             RunLoop.main.add(waveformTimer, forMode: .common)
         }
+    }
+
+    private func remoteWaveformLevel(at phase: TimeInterval) -> Float {
+        let p = max(0, phase)
+        let a = (sin(p * 5.2) + 1) * 0.5
+        let b = (sin(p * 8.7 + 1.1) + 1) * 0.5
+        let c = (sin(p * 13.3 + 2.4) + 1) * 0.5
+        let mixed = (a * 0.5) + (b * 0.3) + (c * 0.2)
+        return Float(max(0.08, min(0.95, mixed)))
     }
 
     private func stopWaveform() {
