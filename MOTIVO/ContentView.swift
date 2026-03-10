@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260310_111500_OnboardingGateReactivity_7c4d
+// SCOPE: Restore AppSetUp presentation reactivity for true new accounts and incomplete local profiles while preserving second-device backend bootstrap hardening. No other UI or logic changes.
+// SEARCH-TOKEN: 20260310_111500_OnboardingGateReactivity_7c4d
 // CHANGE-ID: 20260309_144500_ContentViewOwnerStatsFallback_5f2a
 // SEARCH-TOKEN: 20260309_144500_ContentViewOwnerStatsFallback_5f2a
 // CHANGE-ID: 20260304_210000_FeedPivot_ThreadPillTap_2f6b
@@ -377,6 +380,37 @@ fileprivate struct SessionsRootView: View {
 
     private var toolbarAvatarCacheKey: String {
         "avatars|\(toolbarAvatarKeyNormalized)"
+    }
+
+    private var appSetUpBootstrapStateKey: String {
+        switch auth.backendBootstrapState {
+        case .unknown: return "unknown"
+        case .checking: return "checking"
+        case .existingAccount: return "existingAccount"
+        case .newAccount: return "newAccount"
+        }
+    }
+
+    private var appSetUpCompletenessKey: String {
+        guard auth.isSignedIn else { return "signedOut" }
+        guard BackendConfig.isConfigured else { return "backendNotConfigured" }
+        guard let uid = userID, !uid.isEmpty else { return "missingUserID" }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+
+        guard let profile = (try? viewContext.fetch(req))?.first else {
+            return "uid:\(uid.lowercased())|profile:none"
+        }
+
+        let name = (profile.name ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let instrumentCount = instruments.reduce(into: 0) { count, instrument in
+            if instrument.profile == profile { count += 1 }
+        }
+
+        return "uid:\(uid.lowercased())|profile:\(profile.objectID.uriRepresentation().absoluteString)|name:\(name)|instrumentCount:\(instrumentCount)"
     }
 
 
@@ -949,6 +983,7 @@ Spacer()
             }
             .onChange(of: showProfile) { _, isPresented in
                 guard isPresented == false else { return }
+                evaluateAppSetUpGate()
                 let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
                 Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
             }
@@ -967,6 +1002,12 @@ Spacer()
             }
             .onChange(of: userID) { _, _ in
                 refreshStats()
+                evaluateAppSetUpGate()
+            }
+            .onChange(of: appSetUpBootstrapStateKey) { _, _ in
+                evaluateAppSetUpGate()
+            }
+            .onChange(of: appSetUpCompletenessKey) { _, _ in
                 evaluateAppSetUpGate()
             }
             .task(id: searchText) {
