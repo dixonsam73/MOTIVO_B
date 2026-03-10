@@ -415,7 +415,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      isWelcomeExpanded.toggle()
                  } label: {
                      HStack(spacing: Theme.Spacing.s) {
-                         Text("Welcome!")
+                         Text("About Études")
                              .font(Theme.Text.body)
                                  .foregroundStyle(Theme.Colors.accent)
                          Spacer()
@@ -436,20 +436,35 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      Divider()
                          .padding(.vertical, 8)
 
-                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                     VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+
                          Text("Welcome to Études")
-                             .font(Theme.Text.body)
-                             .fontWeight(.semibold)
+                             .font(Theme.Text.pageTitle)
+
+                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                             Text("Études is a modern practice journal. Capture sessions, ideas, and recordings — and build a lasting archive of your musical process.")
+                                 .font(Theme.Text.body)
+                                 .foregroundStyle(Theme.Colors.secondaryText)
+
+                             Text("Accounts are private by default. Sharing is intentional. There are no public counts, rankings, or popularity metrics.")
+                                 .font(Theme.Text.body)
+                                 .foregroundStyle(Theme.Colors.secondaryText)
+                         }
+                         .padding(.bottom, Theme.Spacing.s)
 
                          VStack(alignment: .leading, spacing: Theme.Spacing.m) {
 
                              // Profile
                              VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                  Text("Profile")
-                                     .font(Theme.Text.body.weight(.semibold))
+                                     .font(Theme.Text.sectionHeader)
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Add your personal details and instruments here. Choose a primary instrument for quicker session setup. Activities work the same way — use presets or add your own, and set a primary for auto-selection. Accounts are private by default. Sessions are shared intentionally, and attachments remain personal unless you choose to include them. Adjust global privacy to control who sees what.")
+                                 Text("Add your instruments and activities. Choose a primary instrument for faster session setup.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Set up default task lists in the Tasks Manager — they’ll appear automatically when you start a session.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -457,10 +472,22 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              // Feed
                              VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                  Text("Feed")
-                                     .font(Theme.Text.body.weight(.semibold))
+                                     .font(Theme.Text.sectionHeader)
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Your activity history appears here. If you follow other musicians, you’ll also see the sessions they’ve chosen to share. Use the Feed Filter to switch between All (you + accounts you follow) or Mine (just you). Use search to find posts by title or content. Tap a session to open full details and view media. Comments are private conversations between you and the author. Replies are not visible to other commenters. There are no public follower counts, like counts, or rankings. The heart icon saves a session privately, and saved sessions can be filtered in the Feed Filter.")
+                                 Text("Your Feed shows your sessions in chronological order. If you follow other musicians, you’ll also see what they’ve chosen to share.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Use the Feed Filter to switch between All (you + people you follow), Mine (just you), Saved (sessions you’ve bookmarked using ❤️ — visible only to you), and your thread filters (your own organisational labels).")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Search finds sessions by activity, instrument, or notes.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Comments are private conversations between you and the author.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
@@ -468,26 +495,37 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                              // Session Timer
                              VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
                                  Text("Session Timer")
-                                     .font(Theme.Text.body.weight(.semibold))
+                                     .font(Theme.Text.sectionHeader)
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Launched from the feed’s record button. Use it to log any of your activities — practice, rehearsal, performance, writing, or recording sessions. Attach photos, record audio or video, and trim recordings before saving. The notes/tasks pad sits beneath the timer — write notes, add tasks, or use task defaults that appear depending on the selected activity. Default task lists are configured in the Tasks Manager here on the Profile page.")
+                                 Text("Start a session using the record button in the Feed. Use the + button to add a session manually if you didn’t log it at the time.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Log practice, rehearsal, performance, writing, or recording. Attach photos, record audio or video, and trim before saving. You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                                     .font(Theme.Text.body)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
+
+                                 Text("Use Threads to group related work — for example, recital prep or a recording project. Threads are personal and visible only to you.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
 
-                             // Stats
+                             // Insights
                              VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Stats")
-                                     .font(Theme.Text.body.weight(.semibold))
+                                 Text("Insights")
+                                     .font(Theme.Text.sectionHeader)
                                      .foregroundStyle(Theme.Colors.accent)
 
-                                 Text("Tap the three bars in the Your Sessions header on the feed to see a detailed breakdown of your activity history.")
+                                 Text("Tap the three bars in the Your Sessions header to view long-term insights and activity trends.")
                                      .font(Theme.Text.body)
                                      .foregroundStyle(Theme.Colors.secondaryText)
                              }
 
-                         
+                             Text("Log your work. Track your progress. Share when you choose.")
+                                 .font(Theme.Text.body)
+                                 .foregroundStyle(.primary)
+                                 .padding(.top, Theme.Spacing.s)
                          }
                          .frame(maxWidth: .infinity, alignment: .leading)
                      }
