@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260310_141900_AESV_AudioRenameReadback
+// SCOPE: Fix AESV audio attachment viewer title readback to use attachment UUIDs instead of URL stems. No other UI/logic changes.
+// SEARCH-TOKEN: 20260310_141900_AESV_AudioRenameReadback
+
 // CHANGE-ID: 20260304_144500_Threads_S6_1_AESV_ThreadSuggestions
 // SCOPE: Threads v1 Stage 6.1 — provide existing local thread suggestions to ThreadPickerView when launched from AESV. No other UI/logic changes.
 // SEARCH-TOKEN: 20260304_144500_Threads_S6_1_AESV_ThreadSuggestions
@@ -449,13 +453,16 @@ struct AddEditSessionView: View {
 
             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
             let persistedTitles = loadPersistedAudioTitles()
-            let audioTitles: [String] = audioURLs.map { u in
-                let stem = u.deletingPathExtension().lastPathComponent
+            let audioTitles: [String] = audioURLs.enumerated().map { index, u in
+                let fallbackStem = u.deletingPathExtension().lastPathComponent
+                guard index < viewerAttachmentIDs.count else { return fallbackStem }
+                let attID = viewerAttachmentIDs[index]
+
                 // Prefer persisted override; then staged map; finally fall back to stem
-                let persisted = (persistedTitles[stem] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let persisted = (persistedTitles[attID.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
                 if !persisted.isEmpty { return persisted }
-                let staged = (namesDict[stem] ?? stem).trimmingCharacters(in: .whitespacesAndNewlines)
-                return staged.isEmpty ? stem : staged
+                let staged = (namesDict[attID.uuidString] ?? fallbackStem).trimmingCharacters(in: .whitespacesAndNewlines)
+                return staged.isEmpty ? fallbackStem : staged
             }
 
 attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, audioTitles: audioTitles, req: req)
@@ -2439,6 +2446,30 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         case .audio:
                                             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
                                             let persistedTitles = loadPersistedAudioTitles()
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            guard let idx = indexInCombined, idx >= 0, idx < req.viewerAttachmentIDs.count else {
+                                                if let persisted = persistedTitles[stem] {
+                                                    let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    return t.isEmpty ? nil : t
+                                                }
+                                                if let raw = namesDict[stem] {
+                                                    let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                    return t.isEmpty ? nil : t
+                                                }
+                                                return nil
+                                            }
+                                            let attID = req.viewerAttachmentIDs[idx]
+                                            if let persisted = persistedTitles[attID.uuidString] {
+                                                let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                return t.isEmpty ? nil : t
+                                            }
+                                            if let raw = namesDict[attID.uuidString] {
+                                                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                return t.isEmpty ? nil : t
+                                            }
                                             if let persisted = persistedTitles[stem] {
                                                 let t = persisted.trimmingCharacters(in: .whitespacesAndNewlines)
                                                 return t.isEmpty ? nil : t
