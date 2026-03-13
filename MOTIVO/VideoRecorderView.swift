@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260313_164500_REVIEW_LETTERBOX_FIX
+// SCOPE: Review-state only — letterboxed playback (.resizeAspect) + scaledToFit for image preview. No recording, writer, orientation, or live preview logic changed.
+// SEARCH-TOKEN: 20260313_164500_REVIEW_LETTERBOX_FIX
+
 // CHANGE-ID: 20251215-VIDREC-ORIENT-008
 // SCOPE: Fix landscape orientation regressions (front preview snap + squashed output) and rear-camera crash on Stop by syncing orientation at writer setup and serializing stop/finish on writerQueue. Preserve cadence-gated start + retimed commit.
 
@@ -60,17 +64,17 @@ public struct VideoRecorderView: View {
             }
 
             if controller.recordingURL != nil && !controller.isShowingLivePreview {
-                if controller.state == .playing {
-                    PlayerPreview(player: controller.exposePlayer())
-                        .ignoresSafeArea()
-                } else if let img = controller.previewImage {
-                    Image(uiImage: img)
-                        .resizable()
-                        .scaledToFill()
-                        .ignoresSafeArea()
-                } else {
-                    // Fallback while thumbnail is generating
-                    Color.black.opacity(0.6).ignoresSafeArea()
+                ZStack {
+                    Color.black.ignoresSafeArea()
+                    if controller.state == .playing {
+                        PlayerPreview(player: controller.exposePlayer(), gravity: .resizeAspect)
+                    } else if let img = controller.previewImage {
+                        Image(uiImage: img)
+                            .resizable()
+                            .scaledToFit()
+                    } else {
+                        Color.black.opacity(0.6)
+                    }
                 }
             }
 
@@ -1919,25 +1923,38 @@ private final class PreviewContainerView: UIView {
 
 private struct PlayerPreview: UIViewRepresentable {
     let player: AVPlayer?
+    let gravity: AVLayerVideoGravity
 
-    func makeUIView(context: Context) -> PlayerContainerView { PlayerContainerView() }
+    init(player: AVPlayer?, gravity: AVLayerVideoGravity = .resizeAspectFill) {
+        self.player = player
+        self.gravity = gravity
+    }
+
+    func makeUIView(context: Context) -> PlayerContainerView {
+        let view = PlayerContainerView()
+        view.videoGravity = gravity
+        return view
+    }
 
     func updateUIView(_ uiView: PlayerContainerView, context: Context) {
         if let l = uiView.layer as? AVPlayerLayer {
             l.player = player
+            uiView.videoGravity = gravity
             uiView.setNeedsLayout()
         }
     }
 }
 
 private final class PlayerContainerView: UIView {
+    var videoGravity: AVLayerVideoGravity = .resizeAspectFill
+
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
     override func layoutSubviews() {
         super.layoutSubviews()
         if let l = self.layer as? AVPlayerLayer {
             l.frame = bounds
-            l.videoGravity = .resizeAspectFill
+            l.videoGravity = videoGravity
         }
     }
 }
