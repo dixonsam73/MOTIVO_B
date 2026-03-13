@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260313_202600_RecorderHygiene_App_7c3e8c3a
+// SCOPE: Recorder hygiene hardening — targeted launch sweep for motivo_rec_*.m4a and motivo_vid_*.mov; remove staging-wide ephemeral cleanup side effect.
+// SEARCH-TOKEN: 20260313_202600_RecorderHygiene_App_7c3e8c3a
+
 // CHANGE-ID: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
 // SCOPE: Delete Account v2 Stage 1 — add LocalFactoryReset scaffold + hook from ProfileView; gate foreground liveness; no wipe yet.
 // SEARCH-TOKEN: 20260303_090700_DeleteAccountV2_Stage1_ResetScaffold_9825aed1
@@ -122,51 +126,42 @@ struct MOTIVOApp: App {
 
     private func cleanupEphemeralMediaIfNeeded() {
         let d = UserDefaults.standard
-        guard d.bool(forKey: ephemeralMediaFlagKey) == true else { return }
+        let didLaunchWithEphemeralFlag = d.bool(forKey: ephemeralMediaFlagKey)
 
         #if DEBUG
-        print("[EphemeralCleanup] Launch cleanup triggered")
+        if didLaunchWithEphemeralFlag {
+            print("[EphemeralCleanup] Launch cleanup triggered")
+        }
         #endif
 
-        // Best-effort: ensure staging area exists so list/remove works
-        do { try StagingStore.bootstrap() } catch { /* ignore */ }
-        // Remove all staged refs and files
-        let refs = StagingStore.list()
-        var removedRefCount = 0
-        if !refs.isEmpty {
-            for ref in refs { StagingStore.remove(ref); removedRefCount += 1 }
-            StagingStore.deleteFiles(for: refs)
+        sweepAbandonedAudioRecorderFilesInTemporaryDirectory()
+        VideoRecorderController.sweepAbandonedCaptureFilesInDocuments()
+
+        if didLaunchWithEphemeralFlag {
+            d.set(false, forKey: ephemeralMediaFlagKey)
             #if DEBUG
-            print("[EphemeralCleanup] StagingStore refs removed: \(removedRefCount)")
+            print("[EphemeralCleanup] Flag reset to false")
             #endif
         }
-        // Remove any temporary surrogate recorder files and posters matching known patterns
+    }
+
+    private func sweepAbandonedAudioRecorderFilesInTemporaryDirectory() {
         let fm = FileManager.default
-        let tmp = FileManager.default.temporaryDirectory
-        // We remove files with our known extensions and naming patterns: <UUID>.m4a, <UUID>.jpg, <UUID>.mov, and <UUID>_poster.jpg
-        if let urls = try? fm.contentsOfDirectory(at: tmp, includingPropertiesForKeys: nil) {
-            var removedTempCount = 0
-            for url in urls {
-                let name = url.lastPathComponent.lowercased()
-                if name.hasSuffix(".m4a") || name.hasSuffix(".jpg") || name.hasSuffix(".mov") {
-                    // Only remove files that look like our surrogates: UUID-based names, optionally with _poster suffix
-                    let base = url.deletingPathExtension().lastPathComponent
-                    let core = base.replacingOccurrences(of: "_poster", with: "")
-                    if UUID(uuidString: core) != nil {
-                        try? fm.removeItem(at: url)
-                        removedTempCount += 1
-                    }
-                }
-            }
-            #if DEBUG
-            print("[EphemeralCleanup] Temp files removed: \(removedTempCount)")
-            #endif
+        let tmp = fm.temporaryDirectory
+
+        guard let urls = try? fm.contentsOfDirectory(
+            at: tmp,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
         }
-        // Reset flag
-        d.set(false, forKey: ephemeralMediaFlagKey)
-        #if DEBUG
-        print("[EphemeralCleanup] Flag reset to false")
-        #endif
+
+        for url in urls {
+            let name = url.lastPathComponent.lowercased()
+            guard name.hasPrefix("motivo_rec_"), url.pathExtension.lowercased() == "m4a" else { continue }
+            try? fm.removeItem(at: url)
+        }
     }
 
     var body: some Scene {

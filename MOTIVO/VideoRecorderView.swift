@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260313_202600_RecorderHygiene_Video_1b9d5e24
+// SCOPE: Recorder hygiene hardening — add targeted launch sweep helper for abandoned Documents/motivo_vid_*.mov capture files.
+// SEARCH-TOKEN: 20260313_202600_RecorderHygiene_Video_1b9d5e24
+
 // CHANGE-ID: 20260313_164500_REVIEW_LETTERBOX_FIX
 // SCOPE: Review-state only — letterboxed playback (.resizeAspect) + scaledToFit for image preview. No recording, writer, orientation, or live preview logic changed.
 // SEARCH-TOKEN: 20260313_164500_REVIEW_LETTERBOX_FIX
@@ -439,6 +443,28 @@ final class VideoRecorderController: NSObject,
     }
 
     // MARK: - Lifecycle hooks
+    private static let abandonedCapturePrefix = "motivo_vid_"
+    private static let abandonedCaptureExtension = "mov"
+
+    static func sweepAbandonedCaptureFilesInDocuments() {
+        let fm = FileManager.default
+        let documentsURL = fm.urls(for: .documentDirectory, in: .userDomainMask)[0]
+
+        guard let urls = try? fm.contentsOfDirectory(
+            at: documentsURL,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        for url in urls {
+            let name = url.lastPathComponent.lowercased()
+            guard name.hasPrefix(abandonedCapturePrefix), url.pathExtension.lowercased() == abandonedCaptureExtension else { continue }
+            try? fm.removeItem(at: url)
+        }
+    }
+
 
     func onAppear() {
         installNotifications()

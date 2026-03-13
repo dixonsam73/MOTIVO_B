@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260313_202600_RecorderHygiene_Audio_4e2af1bd
+// SCOPE: Recorder hygiene hardening — clear ephemeral recorder cleanup flag on delete, terminal error, and clean dismissal with no remaining audio artifact.
+// SEARCH-TOKEN: 20260313_202600_RecorderHygiene_Audio_4e2af1bd
+
 // AudioRecorderView.swift
 // CHANGE-ID: 20260202_000000_ARV_WaveformFirstPlay
 // SCOPE: Fix waveform playback animation starting on first play tap; keep existing UI/logic.
@@ -168,6 +172,7 @@ struct AudioRecorderView: View {
         .onDisappear {
             stopAll()
             stopElapsedTimer()
+            clearEphemeralFlagIfNoRecorderArtifactRemains()
             cleanupWaveform()
             removeObservers()
         }
@@ -382,6 +387,7 @@ struct AudioRecorderView: View {
         errorMessage = nil
         postStopLock = false
         clearWaveform()
+        clearEphemeralFlagIfNoRecorderArtifactRemains()
     }
 
     func togglePlayback() {
@@ -469,6 +475,21 @@ struct AudioRecorderView: View {
         withAnimation {
             errorMessage = message
         }
+        clearEphemeralFlagIfNoRecorderArtifactRemains()
+    }
+
+    private func clearEphemeralFlagIfNoRecorderArtifactRemains() {
+        let fm = FileManager.default
+
+        if let url = recordingURL, fm.fileExists(atPath: url.path) {
+            return
+        }
+
+        recordingURL = nil
+        UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
+        #if DEBUG
+        print("[AudioRecorder] Ephemeral flag reset false (no recorder artifact remains)")
+        #endif
     }
 
     // MARK: - Waveform Helpers (Recording + Playback)
