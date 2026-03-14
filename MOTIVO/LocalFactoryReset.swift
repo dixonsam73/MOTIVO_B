@@ -47,6 +47,15 @@ enum LocalFactoryReset {
             UserDefaults.standard.removePersistentDomain(forName: domain)
         }
 
+        UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.legacyAudioTitlesKey)
+        UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.legacyVideoTitlesKey)
+        for key in UserDefaults.standard.dictionaryRepresentation().keys {
+            if key.hasPrefix(AttachmentTitlePersistenceKeys.audioPrefix) ||
+                key.hasPrefix(AttachmentTitlePersistenceKeys.videoPrefix) {
+                UserDefaults.standard.removeObject(forKey: key)
+            }
+        }
+
         // Re-apply bundled backend config (if present) so AppSetup gating can work immediately without restart.
         BackendConfig.bootstrapFromBundleIfNeededForFactoryReset()
 

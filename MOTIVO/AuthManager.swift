@@ -492,6 +492,17 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
         lastHydratedDirectoryUserID = nil
+
+        let namespaceUserID = AttachmentTitlePersistenceKeys.normalize(
+            BackendEnvironment.shared.isConnected
+                ? Self.canonicalBackendUserID()
+                : (self.currentUserID ?? ((try? PersistenceController.shared.currentUserID)))
+        )
+        if let userID = namespaceUserID {
+            UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.audioNamespacedKey(for: userID))
+            UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.videoNamespacedKey(for: userID))
+        }
+
         Keychain.delete("appleUserID")
         Keychain.delete("displayName")
 

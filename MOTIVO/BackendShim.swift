@@ -945,7 +945,8 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
                     "path": objectPath
                 ]
 
-                if let displayName = item.displayName ?? persistedDisplayNameForAttachment(kind: item.kind, attachmentID: item.id) {
+                let titleNamespaceUserID = AttachmentTitlePersistenceKeys.normalize(owner)
+                if let displayName = item.displayName ?? persistedDisplayNameForAttachment(kind: item.kind, attachmentID: item.id, namespaceUserID: titleNamespaceUserID) {
                     ref["display_name"] = displayName
                 }
 
@@ -994,19 +995,35 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
     /// Returns a user-facing display name for an attachment (audio/video only), or nil.
     /// Hard rule: never return file paths, sandbox URLs, or storage object keys as names.
-    private func persistedDisplayNameForAttachment(kind: String, attachmentID: UUID) -> String? {
+    private func persistedDisplayNameForAttachment(kind: String, attachmentID: UUID, namespaceUserID: String?) -> String? {
         let k = kind.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
-        guard k == "audio" || k == "video" else { return nil }
-
-        let defaultsKey: String
-        if k == "audio" {
-            defaultsKey = "persistedAudioTitles_v1"
-        } else {
-            defaultsKey = "persistedVideoTitles_v1"
+        let titleKind: AttachmentTitlePersistenceKeys.Kind
+        switch k {
+        case "audio":
+            titleKind = .audio
+        case "video":
+            titleKind = .video
+        default:
+            return nil
         }
 
-        guard let dict = UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: String] else {
-            return nil
+        let defaults = UserDefaults.standard
+        let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: titleKind)
+
+        let dict: [String: String]
+        if let userID = namespaceUserID {
+            let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: titleKind, userID: userID)
+            if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
+                dict = namespaced
+            } else if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
+                defaults.set(legacy, forKey: namespacedKey)
+                defaults.removeObject(forKey: legacyKey)
+                dict = legacy
+            } else {
+                dict = [:]
+            }
+        } else {
+            dict = (defaults.dictionary(forKey: legacyKey) as? [String: String]) ?? [:]
         }
 
         let raw = dict[attachmentID.uuidString]

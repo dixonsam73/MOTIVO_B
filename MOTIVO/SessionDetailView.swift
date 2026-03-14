@@ -63,26 +63,50 @@ private func togglePrivacy(id: UUID?, url: URL?) {
     AttachmentPrivacy.toggle(id: id, url: url)
 }
 
-private let persistedAudioTitlesKey = "persistedAudioTitles_v1"
-
-private func loadPersistedAudioTitles() -> [String: String] {
-    (UserDefaults.standard.dictionary(forKey: persistedAudioTitlesKey) as? [String: String]) ?? [:]
+@MainActor
+private func sessionDetailNamespaceUserID(auth: AuthManager) -> String? {
+    if BackendEnvironment.shared.isConnected,
+       let connected = AttachmentTitlePersistenceKeys.normalize(AuthManager.canonicalBackendUserID()) {
+        return connected
+    }
+    if let local = AttachmentTitlePersistenceKeys.normalize(auth.currentUserID) {
+        return local
+    }
+    if let fallback = AttachmentTitlePersistenceKeys.normalize(PersistenceController.shared.currentUserID) {
+        return fallback
+    }
+    return nil
 }
 
-private func persistedAudioTitle(for attachmentID: UUID) -> String? {
-    let raw = loadPersistedAudioTitles()[attachmentID.uuidString] ?? ""
+@MainActor
+private func loadPersistedTitles(kind: AttachmentTitlePersistenceKeys.Kind, auth: AuthManager) -> [String: String] {
+    let defaults = UserDefaults.standard
+    if let userID = sessionDetailNamespaceUserID(auth: auth) {
+        let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
+        if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
+            return namespaced
+        }
+        let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: kind)
+        if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
+            defaults.set(legacy, forKey: namespacedKey)
+            defaults.removeObject(forKey: legacyKey)
+            return legacy
+        }
+        return [:]
+    }
+    return (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: kind)) as? [String: String]) ?? [:]
+}
+
+@MainActor
+private func persistedAudioTitle(for attachmentID: UUID, auth: AuthManager) -> String? {
+    let raw = loadPersistedTitles(kind: .audio, auth: auth)[attachmentID.uuidString] ?? ""
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
 }
 
-private let persistedVideoTitlesKey = "persistedVideoTitles_v1"
-
-private func loadPersistedVideoTitles() -> [String: String] {
-    (UserDefaults.standard.dictionary(forKey: persistedVideoTitlesKey) as? [String: String]) ?? [:]
-}
-
-private func persistedVideoTitle(for attachmentID: UUID) -> String? {
-    let raw = loadPersistedVideoTitles()[attachmentID.uuidString] ?? ""
+@MainActor
+private func persistedVideoTitle(for attachmentID: UUID, auth: AuthManager) -> String? {
+    let raw = loadPersistedTitles(kind: .video, auth: auth)[attachmentID.uuidString] ?? ""
     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
     return trimmed.isEmpty ? nil : trimmed
 }
@@ -360,7 +384,7 @@ return AttachmentViewerView(
                             guard let stored = att.value(forKey: "fileURL") as? String else { return false }
                             return resolveAttachmentURL(from: stored) == url
                         }), let attID = match.value(forKey: "id") as? UUID {
-                            if let persisted = persistedAudioTitle(for: attID) {
+                            if let persisted = persistedAudioTitle(for: attID, auth: auth) {
                                 return persisted
                             }
                         }
@@ -377,7 +401,7 @@ return AttachmentViewerView(
                             let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
                             return storedStem == stem
                         }), let attID = match.value(forKey: "id") as? UUID {
-                            return persistedVideoTitle(for: attID)
+                            return persistedVideoTitle(for: attID, auth: auth)
                         }
                         return nil
                     case .image, .file:
@@ -394,14 +418,16 @@ return AttachmentViewerView(
                         let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
                         return storedStem == stem
                     }), let attID = match.value(forKey: "id") as? UUID {
-                        var map = loadPersistedVideoTitles()
+                        guard let userID = sessionDetailNamespaceUserID(auth: auth) else { return }
+                        let namespacedKey = AttachmentTitlePersistenceKeys.videoNamespacedKey(for: userID)
+                        var map = (UserDefaults.standard.dictionary(forKey: namespacedKey) as? [String: String]) ?? [:]
                         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                         if trimmed.isEmpty {
                             map.removeValue(forKey: attID.uuidString)
                         } else {
                             map[attID.uuidString] = trimmed
                         }
-                        UserDefaults.standard.set(map, forKey: persistedVideoTitlesKey)
+                        UserDefaults.standard.set(map, forKey: namespacedKey)
                         _refreshTick &+= 1
                     }
                 },
@@ -737,7 +763,7 @@ return AttachmentViewerView(
                             let stem = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
                             // Prefer persisted title if available for this attachment ID
                             let id = a.value(forKey: "id") as? UUID
-                            let persisted = id.flatMap { persistedAudioTitle(for: $0) }
+                            let persisted = id.flatMap { persistedAudioTitle(for: $0, auth: auth) }
                             let title: String = {
                                 if let t = persisted, !t.isEmpty { return t }
                                 let trimmedStem = stem.trimmingCharacters(in: .whitespacesAndNewlines)
