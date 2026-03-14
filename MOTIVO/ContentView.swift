@@ -1331,13 +1331,17 @@ Spacer()
             }
         }
 
-        // Search (title or notes)
+        // Search (activity description / notes / local audio-video attachment titles)
         let q = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty {
+            let audioTitles = loadFeedPersistedTitles(kind: .audio)
+            let videoTitles = loadFeedPersistedTitles(kind: .video)
             out = out.filter { s in
-                let t = (s.title ?? "")
-                let n = (s.notes ?? "")
-                return t.localizedCaseInsensitiveContains(q) || n.localizedCaseInsensitiveContains(q)
+                let haystacks: [String] = [
+                    s.title ?? "",
+                    s.notes ?? ""
+                ] + localAttachmentSearchTerms(for: s, audioTitles: audioTitles, videoTitles: videoTitles)
+                return haystacks.contains(where: { $0.localizedCaseInsensitiveContains(q) })
             }
         }
 
@@ -1398,19 +1402,108 @@ Spacer()
         return FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
     }
 
+    // CHANGE-ID: 20260314_081900_FeedSearchNamesAndAttachmentTitles_6f3a
+    // SCOPE: Feed search only — add remote owner display-name matching and attachment title matching (remote display_name + local persisted audio/video titles). No UI or non-search logic changes.
+    // SEARCH-TOKEN: 20260314_081900_FeedSearchNamesAndAttachmentTitles_6f3a
+    @MainActor
+    private func feedSearchNamespaceUserID() -> String? {
+        if BackendEnvironment.shared.isConnected,
+           let connected = AttachmentTitlePersistenceKeys.normalize(AuthManager.canonicalBackendUserID()) {
+            return connected
+        }
+        if let local = AttachmentTitlePersistenceKeys.normalize(auth.currentUserID) {
+            return local
+        }
+        if let fallback = AttachmentTitlePersistenceKeys.normalize(PersistenceController.shared.currentUserID) {
+            return fallback
+        }
+        return nil
+    }
+
+    @MainActor
+    private func loadFeedPersistedTitles(kind: AttachmentTitlePersistenceKeys.Kind) -> [String: String] {
+        let defaults = UserDefaults.standard
+        if let userID = feedSearchNamespaceUserID() {
+            let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
+            if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
+                return namespaced
+            }
+            let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: kind)
+            if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
+                defaults.set(legacy, forKey: namespacedKey)
+                defaults.removeObject(forKey: legacyKey)
+                return legacy
+            }
+            return [:]
+        }
+        return (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: kind)) as? [String: String]) ?? [:]
+    }
+
+    private func localAttachmentSearchTerms(for session: Session, audioTitles: [String: String], videoTitles: [String: String]) -> [String] {
+        let attachments = (session.attachments as? Set<Attachment>) ?? []
+
+        return attachments.compactMap { attachment in
+            let kind = ((attachment.value(forKey: "kind") as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+
+            guard kind == "audio" || kind == "video" else { return nil }
+            guard let attachmentID = attachment.value(forKey: "id") as? UUID else { return nil }
+
+            let persistedRaw: String?
+            switch kind {
+            case "audio":
+                persistedRaw = audioTitles[attachmentID.uuidString]
+            case "video":
+                persistedRaw = videoTitles[attachmentID.uuidString]
+            default:
+                persistedRaw = nil
+            }
+
+            let persisted = (persistedRaw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !persisted.isEmpty { return persisted }
+
+            guard let fileURLString = attachment.value(forKey: "fileURL") as? String else { return nil }
+            let parsed = URL(string: fileURLString)
+            let url = ((parsed?.scheme?.isEmpty == false) ? parsed : nil) ?? URL(fileURLWithPath: fileURLString, isDirectory: false)
+            let stem = url.deletingPathExtension().lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return stem.isEmpty ? nil : stem
+        }
+    }
+
+    private func remoteOwnerDisplayName(for post: BackendPost) -> String {
+        let owner = (post.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty else { return "" }
+        if let acct = BackendFeedStore.shared.directoryAccountsByUserID[owner] {
+            return acct.displayName
+        }
+        let lower = owner.lowercased()
+        if let acct = BackendFeedStore.shared.directoryAccountsByUserID[lower] {
+            return acct.displayName
+        }
+        return ""
+    }
+
     private func remoteMatchesSearch(_ post: BackendPost) -> Bool {
         let q = debouncedQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return true }
 
-        // BackendPost does not currently decode "title". Search is therefore based on
-        // activity fields, instrument label, and notes (if present).
+        let attachmentTitles = BackendSessionViewModel(post: post, currentUserID: (effectiveBackendUserID ?? ""))
+            .attachmentRefs
+            .compactMap { ref in
+                let raw = ref.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                return raw.isEmpty ? nil : raw
+            }
+
         let haystacks: [String] = [
             post.activityLabel ?? "",
             post.activityType ?? "",
             post.activityDetail ?? "",
             post.instrumentLabel ?? "",
-            post.notes ?? ""
-        ]
+            post.notes ?? "",
+            remoteOwnerDisplayName(for: post)
+        ] + attachmentTitles
+
         return haystacks.contains(where: { $0.localizedCaseInsensitiveContains(q) })
     }
 
