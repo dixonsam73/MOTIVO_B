@@ -622,8 +622,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                     .padding(.vertical, Theme.Spacing.s)
                     .frame(minHeight: 44, alignment: .center)
                     .font(Theme.Text.body)
-
-                Divider().padding(.leading, 16)
+                    .overlay(alignment: .bottom) {
+                        Divider()
+                            .padding(.leading, 16)
+                    }
 
                 Menu {
                     // NOTE: this file’s enum is FollowRequestMode { autoApproveContacts=0, manual=1 }.
@@ -650,8 +652,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                 .frame(minHeight: 44, alignment: .center)
                 .font(Theme.Text.body)
                 .tint(.primary)
-
-                Divider().padding(.leading, 16)
+                .overlay(alignment: .bottom) {
+                    Divider()
+                        .padding(.leading, 16)
+                }
 
                 Menu {
                     Button {
@@ -695,8 +699,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
-
-                 Divider().padding(.leading, 16)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
 
                  Button { showActivityManager = true } label: {
                      navigationRow(title: "Activities")
@@ -706,8 +712,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
-
-                 Divider().padding(.leading, 16)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
 
                  Button { showTasksManager = true } label: {
                      navigationRow(title: "Tasks")
@@ -718,13 +726,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
              }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 12)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
-             .padding(.bottom, Theme.Spacing.m)
+             .cardSurface(padding: Theme.Spacing.m)
+             .listRowSeparator(.hidden)
          }
-         .padding(.top, Theme.Spacing.section)
      }
 
      @ViewBuilder
@@ -744,7 +748,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              .padding(.vertical, 12)
              .padding(.top, Theme.Spacing.s)
              .cardSurface()
-             .padding(.bottom, Theme.Spacing.m)
          }
      }
  
@@ -793,7 +796,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      .padding(.top, Theme.Spacing.s)
                      .cardSurface()
                  }
-                 .padding(.bottom, Theme.Spacing.m)
              } else {
                  Section {
                      SignInWithAppleButton(.signIn) { request in
