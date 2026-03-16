@@ -229,7 +229,7 @@ struct TasksManagerView: View {
                 Section(header: Text("Auto-fill for this activity").sectionHeader()) {
                     Toggle(isOn: $autofillEnabled) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("When on, the Tasks pad starts with this list whenever it's empty.")
+                            Text("When on, this list fills the Tasks pad when empty.")
                                 .font(.footnote)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                                 .fixedSize(horizontal: false, vertical: true)

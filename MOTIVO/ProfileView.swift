@@ -254,11 +254,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      Group {
                          profileSection
                          privacySection
-                         instrumentsSection
+                         sessionSetupSection
                      }
                      Group {
-                         activitiesSection
-                             tasksSection
                              appSettingsSection
                              accountSection
                      }
@@ -743,53 +741,39 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
  
      @ViewBuilder
-     private var instrumentsSection: some View {
-         Section(header: Text("Instruments").sectionHeader()) {
+     private var sessionSetupSection: some View {
+         Section(header: Text("Session Setup").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showInstrumentManager = true } label: {
-                     manageRow(title: "Manage")
-                         .foregroundStyle(Theme.Colors.secondaryText)
+                     navigationRow(title: "Instruments")
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
                  .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
- 
+
                  Divider().padding(.leading, 16)
- 
-                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                     // Softer header-style label
-                     Text("Primary Instrument")
-                         .font(.subheadline.weight(.medium))
-                         .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
- 
-                     // Menu directly below, aligned on same rail
-                     Menu {
-                         ForEach(instrumentsArray, id: \.self) { name in
-                             Button {
-                                 primaryInstrumentName = name
-                             } label: {
-                                 let isCurrent = (primaryInstrumentName == name)
-                                 Label(name, systemImage: isCurrent ? "checkmark" : "")
-                             }
-                         }
-                     } label: {
-                         HStack(spacing: 2) {
-                             Text(primaryInstrumentName.isEmpty ? "Select" : primaryInstrumentName)
-                                 .font(Theme.Text.body)
-                                 .foregroundStyle(.primary)
-                             Image(systemName: "chevron.up.chevron.down")
-                                 .font(.caption2)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-                         }
-                         .frame(maxWidth: .infinity, alignment: .leading)
-                     }
-                     .tint(Theme.Colors.accent)
-                     .accessibilityLabel("Primary Instrument")
+
+                 Button { showActivityManager = true } label: {
+                     navigationRow(title: "Activities")
                  }
-                 .padding(.top, Theme.Spacing.s)
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+
+                 Divider().padding(.leading, 16)
+
+                 Button { showTasksManager = true } label: {
+                     navigationRow(title: "Tasks")
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
              }
              .padding(.horizontal, 16)
              .padding(.vertical, 12)
@@ -799,120 +783,13 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          }
          .padding(.top, Theme.Spacing.section)
      }
-     @ViewBuilder
-     private var activitiesSection: some View {
-         Section(header: Text("Activities").sectionHeader()) {
-             VStack(spacing: 0) {
-                 Button { showActivityManager = true } label: {
-                     manageRow(title: "Manage")
-                         .foregroundStyle(Theme.Colors.secondaryText)
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
-                 .frame(minHeight: 44)
-                 .font(Theme.Text.body)
- 
-                 Divider().padding(.leading, 16)
- 
-                 VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                     // Softer header-style label
-                     Text("Primary Activity")
-                         .font(.subheadline.weight(.medium))
-                         .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
- 
-                     // Compute current label for the menu
-                     let currentActivityLabel: String = {
-                         if primaryActivityChoice.hasPrefix("core:") {
-                             if let v = Int(primaryActivityChoice.split(separator: ":").last ?? "0"),
-                                let type = SessionActivityType(rawValue: Int16(v)) {
-                                 return type.label
-                             }
-                         } else if primaryActivityChoice.hasPrefix("custom:") {
-                             return String(primaryActivityChoice.dropFirst("custom:".count))
-                         }
-                         // Fallback
-                         return "Practice"
-                     }()
- 
-                     // Menu directly below, aligned on same rail
-                     Menu {
-                         // Core activities
-                         ForEach(SessionActivityType.allCases) { type in
-                             let tag = "core:\(type.rawValue)"
-                             Button {
-                                 primaryActivityChoice = tag
-                                 writePrimaryActivityRef(tag)
-                             } label: {
-                                 let isCurrent = (primaryActivityChoice == tag)
-                                 Label(type.label, systemImage: isCurrent ? "checkmark" : "")
-                             }
-                         }
- 
-                         // Custom activities
-                         ForEach(userActivities.compactMap { $0.displayName }, id: \.self) { name in
-                             let tag = "custom:\(name)"
-                             Button {
-                                 primaryActivityChoice = tag
-                                 writePrimaryActivityRef(tag)
-                             } label: {
-                                 let isCurrent = (primaryActivityChoice == tag)
-                                 Label(name, systemImage: isCurrent ? "checkmark" : "")
-                             }
-                         }
-                     } label: {
-                         HStack(spacing: 2) {
-                             Text(currentActivityLabel)
-                                 .font(Theme.Text.body)
-                                 .foregroundStyle(.primary)
-                             Image(systemName: "chevron.up.chevron.down")
-                                 .font(.caption2)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-                         }
-                         .frame(maxWidth: .infinity, alignment: .leading)
-                     }
-                     .tint(Theme.Colors.accent)
-                     .accessibilityLabel("Primary Activity")
-                 }
-                 .padding(.top, Theme.Spacing.s)
-                 .frame(minHeight: 44)
-             }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 12)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
-             .padding(.bottom, Theme.Spacing.m)
-         }
-     }
-     
+
      @ViewBuilder
      private var appSettingsSection: some View {
          Section(header: Text("App Settings").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showAppSettings = true } label: {
-                     manageRow(title: "Manage")
-                         .foregroundStyle(Theme.Colors.secondaryText)
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
-                 .frame(minHeight: 44)
-                 .font(Theme.Text.body)
-             }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 12)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
-             .padding(.bottom, Theme.Spacing.m)
-         }
-     }
-@ViewBuilder
-     private var tasksSection: some View {
-         Section(header: Text("Tasks").sectionHeader()) {
-             VStack(spacing: 0) {
-                 Button { showTasksManager = true } label: {
-                     manageRow(title: "Manage")
-                         .foregroundStyle(Theme.Colors.secondaryText)   // ⬅️ add this
+                     navigationRow(title: "App Settings")
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -1159,9 +1036,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          }
      }
  
-     private func manageRow(title: String) -> some View {
+     private func navigationRow(title: String) -> some View {
          HStack {
              Text(title)
+                 .foregroundStyle(.primary)
              Spacer()
              Image(systemName: "chevron.right")
                  .font(.footnote.weight(.semibold))
@@ -1705,8 +1583,9 @@ private func initials(from string: String) -> String {
                      .environment(\.managedObjectContext, ctx)
              }
              .onChange(of: showInstrumentManager) { _, newValue in
-                 // When instrument manager closes, sync instruments to account_directory (debounced).
+                 // When instrument manager closes, rehydrate local ProfileView state before any later save path can write stale values back.
                  if newValue == false {
+                     load()
                      scheduleDirectorySyncDebounced(nanoseconds: 200_000_000)
                  }
              }
