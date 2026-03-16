@@ -613,134 +613,77 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          .listRowSeparator(.hidden)
      }
  
-     @ViewBuilder
-     private var privacySection: some View {
-         Section(header: Text("Privacy & connection").sectionHeader()) {
+    @ViewBuilder
+    private var privacySection: some View {
+        Section(header: Text("Privacy & connection").sectionHeader()) {
+            VStack(spacing: 0) {
+                Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                    .tint(Theme.Colors.accent)
+                    .padding(.vertical, Theme.Spacing.s)
+                    .frame(minHeight: 44, alignment: .center)
+                    .font(Theme.Text.body)
 
-             // 1) Posting defaults card (unchanged behaviour)
-             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                 // Title + control (same family grammar as other cards: title then control/value)
-                 Text("Posting defaults")
-                     .font(.subheadline.weight(.medium))
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+                Divider().padding(.leading, 16)
 
-                 Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                     .tint(Theme.Colors.accent)
+                Menu {
+                    // NOTE: this file’s enum is FollowRequestMode { autoApproveContacts=0, manual=1 }.
+                    // We present spec-truthful labels without changing state shape or adding new keys.
+                    Button {
+                        followRequestModeRaw = FollowRequestMode.manual.rawValue
+                    } label: {
+                        let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
+                        Label("Allow follow requests", systemImage: isCurrent ? "checkmark" : "")
+                    }
 
-                 Text("Makes new sessions default to private when on. You can still choose to publish a session when you save.")
-                     .font(.caption)
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-             }
-             .padding(.vertical, Theme.Spacing.s)
-             .cardSurface(padding: Theme.Spacing.m)
-             .listRowSeparator(.hidden)
+                    Button {
+                        followRequestModeRaw = FollowRequestMode.autoApproveContacts.rawValue
+                    } label: {
+                        let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
+                        Label("Follow requests off", systemImage: isCurrent ? "checkmark" : "")
+                    }
+                } label: {
+                    navigationRow(title: "Allow follow requests")
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .frame(minHeight: 44, alignment: .center)
+                .font(Theme.Text.body)
+                .tint(.primary)
 
-             // 2) Follow Requests card (separate, Instruments/Activities-style grammar)
-             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                 Text("Follow Requests")
-                     .font(.subheadline.weight(.medium))
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+                Divider().padding(.leading, 16)
 
-                 Menu {
-                     // NOTE: this file’s enum is FollowRequestMode { autoApproveContacts=0, manual=1 }.
-                     // We present spec-truthful labels without changing state shape or adding new keys.
-                     Button {
-                         followRequestModeRaw = FollowRequestMode.manual.rawValue
-                     } label: {
-                         let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
-                         Label("Allow follow requests", systemImage: isCurrent ? "checkmark" : "")
-                     }
+                Menu {
+                    Button {
+                        discoveryModeRawPerUser = DiscoveryMode.search.rawValue
+                    } label: {
+                        let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
+                        Label("Searchable by name", systemImage: isCurrent ? "checkmark" : "")
+                    }
 
-                     Button {
-                         followRequestModeRaw = FollowRequestMode.autoApproveContacts.rawValue
-                     } label: {
-                         let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
-                         Label("Follow requests off", systemImage: isCurrent ? "checkmark" : "")
-                     }
-                 } label: {
-                     HStack(spacing: 2) {
-                         Text(
-                             (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
-                             ? "Follow requests off"
-                             : "Allow follow requests"
-                         )
-                         .font(Theme.Text.body)
-                         .foregroundStyle(.primary)
+                    Button {
+                        discoveryModeRawPerUser = DiscoveryMode.none.rawValue
+                    } label: {
+                        let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .none
+                        Label("Hidden from search", systemImage: isCurrent ? "checkmark" : "")
+                    }
 
-                         Image(systemName: "chevron.up.chevron.down")
-                             .font(.caption2)
-                             .foregroundStyle(Theme.Colors.secondaryText)
-                     }
-                     .frame(maxWidth: .infinity, alignment: .leading)
-                 }
-                 .tint(.primary)
+                    // NOTE: DiscoveryMode.contacts exists in this file but is intentionally hidden from UI here.
+                } label: {
+                    navigationRow(title: "Searchable by name")
+                }
+                .buttonStyle(.plain)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isButton)
+                .frame(minHeight: 44, alignment: .center)
+                .font(Theme.Text.body)
+                .tint(.primary)
+            }
+            .cardSurface(padding: Theme.Spacing.m)
+            .listRowSeparator(.hidden)
+        }
+    }
 
-                 Text("Études never auto-approves follows.")
-                     .font(.caption)
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-             }
-             .padding(.vertical, Theme.Spacing.s)
-             .cardSurface(padding: Theme.Spacing.m)
-             .listRowSeparator(.hidden)
-
-             // 3) Lookup card (separate, hide Contacts option from UI)
-             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                 Text("Account visibility")
-                     .font(.subheadline.weight(.medium))
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
-
-                 Menu {
-                     Button {
-                         discoveryModeRawPerUser = DiscoveryMode.search.rawValue
-                     } label: {
-                         let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-                         Label("Searchable by name", systemImage: isCurrent ? "checkmark" : "")
-                     }
-
-                     Button {
-                         discoveryModeRawPerUser = DiscoveryMode.none.rawValue
-                     } label: {
-                         let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .none
-                         Label("Hidden from search", systemImage: isCurrent ? "checkmark" : "")
-                     }
-
-                     // NOTE: DiscoveryMode.contacts exists in this file but is intentionally hidden from UI here.
-                 } label: {
-                     HStack(spacing: 2) {
-                         Text(
-                             (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-                             ? "Searchable by name"
-                             : "Hidden from search"
-                         )
-                         .font(Theme.Text.body)
-                         .foregroundStyle(.primary)
-
-                         Image(systemName: "chevron.up.chevron.down")
-                             .font(.caption2)
-                             .foregroundStyle(Theme.Colors.secondaryText)
-                     }
-                     .frame(maxWidth: .infinity, alignment: .leading)
-                 }
-                 .tint(.primary)
-
-                 Text("There’s no browsing of accounts or follow suggestions — you’re only found through search.")
-                     .font(.caption)
-                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-             }
-             .padding(.vertical, Theme.Spacing.s)
-             .cardSurface(padding: Theme.Spacing.m)
-             .listRowSeparator(.hidden)
-
-             // 4) Philosophy line OUTSIDE the cards (quiet footer)
-             Text("Your account is private by default, and follows are always intentional.")
-                 .font(.caption)
-                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                 .padding(.top, Theme.Spacing.xs)
-         }
-     }
-
- 
-     @ViewBuilder
      private var sessionSetupSection: some View {
          Section(header: Text("Session Setup").sectionHeader()) {
              VStack(spacing: 0) {
