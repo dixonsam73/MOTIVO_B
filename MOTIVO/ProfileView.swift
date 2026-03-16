@@ -1538,9 +1538,6 @@ private func initials(from string: String) -> String {
                     locationText = ProfileStore.location(for: auth.backendUserID)
                 }
             }
-             .onChange(of: showActivityManager) { oldValue, newValue in
-                 handleActivityManagerChange(oldValue, newValue)
-             }
              .onChange(of: primaryActivityRef) { _ in
                  primaryActivityChoice = normalizedPrimaryActivityRef()
              }
@@ -1592,6 +1589,12 @@ private func initials(from string: String) -> String {
              .sheet(isPresented: $showActivityManager) {
                  ActivityListView()
                      .environment(\.managedObjectContext, ctx)
+             }
+             .onChange(of: showActivityManager) { _, newValue in
+                 if newValue == false {
+                     refreshUserActivities()
+                     primaryActivityChoice = normalizedPrimaryActivityRef()
+                 }
              }
              .sheet(isPresented: $showTasksManager) {
                  TasksManagerView(activityRef: normalizedPrimaryActivityRef())

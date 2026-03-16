@@ -13,7 +13,10 @@
 
 // CHANGE-ID: 20260119_203800_IdentityScopeSignOut_Activities
 // CHANGE-ID: 20260228_225000_ActivityList_KeyboardDismiss
-// SCOPE: Correctness/hygiene — Activities Manager renders empty when signed out; list is owner-scoped when signed in
+// CHANGE-ID: 20260316_194800_ActivityPrimarySelectorMove
+// CHANGE-ID: 20260316_195500_ActivityHelperTextParity
+// SCOPE: Add helper text matching InstrumentListView style/placement to the Activities section; no other UI or logic changes.
+// SEARCH-TOKEN: 20260316_195500_ActivityHelperTextParity
 
 import SwiftUI
 import CoreData
@@ -32,24 +35,27 @@ struct ActivityListView: View {
 
     @State private var newActivity: String = ""
 
-    
     @FocusState private var isAddActivityFocused: Bool
-// Primary Activity (AppStorage)
+
+    // Primary Activity (AppStorage)
     // Format: "core:<raw>" or "custom:<name>"
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+
     // One-time notice flag to be consumed by ProfileView
-    @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryFallbackNoticeNeeded: Bool = false
+    @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryActivityFallbackNoticeNeeded: Bool = false
 
     private var isSignedIn: Bool {
         PersistenceController.shared.currentUserID != nil
+    }
+
+    private var coreActivityTypes: [SessionActivityType] {
+        SessionActivityType.allCases
     }
 
     private func scopedActivities() -> [UserActivity] {
         guard let owner = PersistenceController.shared.currentUserID else { return [] }
         return Array(activities).filter { ($0.ownerUserID ?? "") == owner }
     }
-
-
 
     var body: some View {
         NavigationStack {
@@ -65,6 +71,7 @@ struct ActivityListView: View {
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
                             .focused($isAddActivityFocused)
+
                         Button(action: { if isSignedIn { add() } }) {
                             Text("Add")
                                 .font(Theme.Text.body)
@@ -74,16 +81,35 @@ struct ActivityListView: View {
                         .disabled(!isSignedIn || newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
+
                 Section(header: Text("Your Activities").sectionHeader()) {
+                    Text("Tap to set the default activity.")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+
+                    ForEach(coreActivityTypes) { type in
+                        activityRow(
+                            title: type.label,
+                            ref: "core:\(type.rawValue)"
+                        )
+                    }
+
                     let items = scopedActivities()
                     if items.isEmpty {
-                        Text("No custom activities yet.")
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .font(Theme.Text.body)
-                    } else {
-                        ForEach(items, id: \.objectID) { a in
-                            Text(a.displayName ?? "-")
+                        if isSignedIn {
+                            Text("No custom activities yet.")
+                                .foregroundStyle(Theme.Colors.secondaryText)
                                 .font(Theme.Text.body)
+                        }
+                    } else {
+                        ForEach(items, id: \.objectID) { activity in
+                            let name = (activity.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                            if !name.isEmpty {
+                                activityRow(
+                                    title: name,
+                                    ref: "custom:\(name)"
+                                )
+                            }
                         }
                         .onDelete(perform: delete)
                     }
@@ -109,10 +135,36 @@ struct ActivityListView: View {
         }
     }
 
+    @ViewBuilder
+    private func activityRow(title: String, ref: String) -> some View {
+        Button {
+            guard primaryActivityRef != ref else { return }
+            primaryActivityRef = ref
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Text(title)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(.primary)
+
+                Spacer()
+
+                if primaryActivityRef == ref {
+                    Image(systemName: "checkmark")
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
     private func add() {
         guard PersistenceController.shared.currentUserID != nil else { return }
+
         let name = newActivity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
+
         do {
             _ = try PersistenceController.shared.fetchOrCreateUserActivity(named: name, mapTo: 0, in: moc)
             try moc.save()
@@ -125,21 +177,25 @@ struct ActivityListView: View {
 
     private func delete(at offsets: IndexSet) {
         guard isSignedIn else { return }
-        guard isSignedIn else { return }
+
         let items = scopedActivities()
         for i in offsets {
             let activityObj = items[i]
             let name = (activityObj.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
-            // If the deleted item is the current Primary (custom), reset to Practice and set one-time notice
             if !name.isEmpty && primaryActivityRef.caseInsensitiveCompare("custom:\(name)") == .orderedSame {
-                primaryActivityRef = "core:0" // Practice
-                primaryFallbackNoticeNeeded = true
+                primaryActivityRef = "core:0"
+                primaryActivityFallbackNoticeNeeded = true
             }
 
             moc.delete(activityObj)
         }
-        do { try moc.save() } catch { print("Delete activity error: \(error)") }
+
+        do {
+            try moc.save()
+        } catch {
+            print("Delete activity error: \(error)")
+        }
 
         // [ROLLBACK ANCHOR] v7.8 Stage2 — post
     }
