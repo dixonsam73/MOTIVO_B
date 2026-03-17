@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260317_092400_Profile_TimerControlsInline_RemoveAccountCards
+// SCOPE: UI-only — move Show Metronome/Show Drone toggles into Session Setup card; remove Sign out/Delete account cards from Profile; no logic/theme/layout changes beyond relocation.
+// SEARCH-TOKEN: 20260317_092400_Profile_TimerControlsInline_RemoveAccountCards
+
 // CHANGE-ID: 20260309_094500_Profile_AvatarBootstrapFallback
 // SCOPE: Owner avatar bootstrap fallback in ProfileView only — prefer local avatar, fall back to remote avatar via existing pipeline when backendAvatarKey exists; avoid adding weight to modalsAndAlerts.
 // SEARCH-TOKEN: 20260309_094500_Profile_AvatarBootstrapFallback
@@ -163,6 +167,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 
      @AppStorage("appSettings_showWelcomeSection") private var showWelcomeSection: Bool = true
 
+     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
+     @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
+
 @FocusState private var isNameFocused: Bool
 @FocusState private var isLocationFocused: Bool
 @FocusState private var isAccountIDFocused: Bool
@@ -258,7 +265,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                      }
                      Group {
                              appSettingsSection
-                             accountSection
                      }
                         }
                         .background(KeyboardDismissFormTapCatcher(onDismiss: {
@@ -707,6 +713,30 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
                  .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
+
+                 Toggle(isOn: $showMetronomeStrip) {
+                     Text("Show Metronome")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
+
+                 Toggle(isOn: $showDroneStrip) {
+                     Text("Show Drone")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
              }
