@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260317_204900_TasksManager_RestoreActivityHeader
+// SCOPE: TasksManagerView — restore Activity section header to mirror Instrument styling while preserving the current tighter top-page rhythm and all other behavior.
+// SEARCH-TOKEN: 20260317_204900_TasksManager_RestoreActivityHeader
+
+
+
 import SwiftUI
 import CoreData
 #if canImport(UIKit)
@@ -26,6 +32,7 @@ struct TasksManagerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
+    @Environment(\.editMode) private var editMode
 
     // MARK: - State
 
@@ -226,19 +233,13 @@ struct TasksManagerView: View {
                 }
 
                 // Auto-fill toggle
-                Section(header: Text("Auto-fill for this activity").sectionHeader()) {
-                    Toggle(isOn: $autofillEnabled) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("When on, this list fills the Tasks pad when empty.")
-                                .font(.footnote)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .fixedSize(horizontal: false, vertical: true)
+                Section {
+                    Toggle("Pre-fill Tasks Pad", isOn: $autofillEnabled)
+                        .font(Theme.Text.body)
+                        .tint(Theme.Colors.accent)
+                        .onChange(of: autofillEnabled) { _ in
+                            saveToggle()
                         }
-                    }
-                    .tint(Theme.Colors.accent)
-                    .onChange(of: autofillEnabled) { _ in
-                        saveToggle()
-                    }
                 }
 
                 // Add task
@@ -274,6 +275,7 @@ struct TasksManagerView: View {
                                 .font(Theme.Text.body)
                         }
                         .onDelete(perform: delete)
+                        .onMove(perform: move)
                     }
                 }
             }
@@ -293,6 +295,7 @@ struct TasksManagerView: View {
                     Text("Tasks Manager")
                         .font(Theme.Text.pageTitle)
                 }
+
             }
             .onAppear {
                 // Normalize initial ref and load data
@@ -349,6 +352,11 @@ struct TasksManagerView: View {
 
     private func delete(at offsets: IndexSet) {
         items.remove(atOffsets: offsets)
+        saveItems()
+    }
+
+    private func move(from source: IndexSet, to destination: Int) {
+        items.move(fromOffsets: source, toOffset: destination)
         saveItems()
     }
 
