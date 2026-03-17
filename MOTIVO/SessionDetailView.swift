@@ -517,7 +517,7 @@ return AttachmentViewerView(
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
         }
-        .navigationTitle("Session")
+        // Removed .navigationTitle("Session") as per instructions
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
@@ -1580,3 +1580,4 @@ fileprivate struct ShareToFollowerSheet_SDV: View {
         }
     }
 }
+

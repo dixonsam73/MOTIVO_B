@@ -233,7 +233,6 @@ struct BackendSessionDetailView: View {
                 .padding(.top, Theme.Spacing.m)
                 .padding(.bottom, Theme.Spacing.xl)
         }
-        .navigationTitle("Session")
         .onAppear {
             isLikedLocal = FeedInteractionStore.isHearted(model.id)
             Task {
@@ -1130,3 +1129,4 @@ private struct BackendThumbCell: View {
         }
     }
 }
+
