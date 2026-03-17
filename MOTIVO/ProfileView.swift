@@ -627,61 +627,45 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                             .padding(.leading, 16)
                     }
 
-                Menu {
-                    // NOTE: this file’s enum is FollowRequestMode { autoApproveContacts=0, manual=1 }.
-                    // We present spec-truthful labels without changing state shape or adding new keys.
-                    Button {
-                        followRequestModeRaw = FollowRequestMode.manual.rawValue
-                    } label: {
-                        let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
-                        Label("Allow follow requests", systemImage: isCurrent ? "checkmark" : "")
-                    }
-
-                    Button {
-                        followRequestModeRaw = FollowRequestMode.autoApproveContacts.rawValue
-                    } label: {
-                        let isCurrent = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .autoApproveContacts
-                        Label("Follow requests off", systemImage: isCurrent ? "checkmark" : "")
-                    }
-                } label: {
-                    navigationRow(title: "Allow follow requests")
-                }
-                .buttonStyle(.plain)
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
+                Toggle(
+                    "Allow follow requests",
+                    isOn: Binding(
+                        get: {
+                            (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
+                        },
+                        set: { isOn in
+                            followRequestModeRaw = isOn
+                                ? FollowRequestMode.manual.rawValue
+                                : FollowRequestMode.autoApproveContacts.rawValue
+                        }
+                    )
+                )
+                .tint(Theme.Colors.accent)
+                .padding(.vertical, Theme.Spacing.s)
                 .frame(minHeight: 44, alignment: .center)
                 .font(Theme.Text.body)
-                .tint(.primary)
                 .overlay(alignment: .bottom) {
                     Divider()
                         .padding(.leading, 16)
                 }
 
-                Menu {
-                    Button {
-                        discoveryModeRawPerUser = DiscoveryMode.search.rawValue
-                    } label: {
-                        let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-                        Label("Searchable by name", systemImage: isCurrent ? "checkmark" : "")
-                    }
-
-                    Button {
-                        discoveryModeRawPerUser = DiscoveryMode.none.rawValue
-                    } label: {
-                        let isCurrent = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .none
-                        Label("Hidden from search", systemImage: isCurrent ? "checkmark" : "")
-                    }
-
-                    // NOTE: DiscoveryMode.contacts exists in this file but is intentionally hidden from UI here.
-                } label: {
-                    navigationRow(title: "Searchable by name")
-                }
-                .buttonStyle(.plain)
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isButton)
+                Toggle(
+                    "Searchable by name",
+                    isOn: Binding(
+                        get: {
+                            (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
+                        },
+                        set: { isOn in
+                            discoveryModeRawPerUser = isOn
+                                ? DiscoveryMode.search.rawValue
+                                : DiscoveryMode.none.rawValue
+                        }
+                    )
+                )
+                .tint(Theme.Colors.accent)
+                .padding(.vertical, Theme.Spacing.s)
                 .frame(minHeight: 44, alignment: .center)
                 .font(Theme.Text.body)
-                .tint(.primary)
             }
             .cardSurface(padding: Theme.Spacing.m)
             .listRowSeparator(.hidden)
