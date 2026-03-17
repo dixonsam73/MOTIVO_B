@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260317_115600_PeopleView_BackChevronAndInset_Fix
+// SCOPE: PeopleView — align People header inset with card rhythm and replace swipe-only dismissal with explicit back chevron, correctly scoped to PeopleView only. Visual/navigation only.
+// SEARCH-TOKEN: 20260317_115600_PeopleView_BackChevronAndInset_Fix
+
 // CHANGE-ID: 20260216_214800_PeopleView_Responses_NoDuplicateClose
 // SCOPE: PeopleView — Responses: when pushing CommentsView via NavigationLink, suppress CommentsView's modal close X so only the system back chevron appears. UI-only.
 // SEARCH-TOKEN: 20260216_214800_PeopleView_Responses_NoDuplicateClose
@@ -66,6 +70,7 @@ struct PeopleView: View {
 
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
     @EnvironmentObject private var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
 
 
     @State private var searchText: String = ""
@@ -81,8 +86,8 @@ struct PeopleView: View {
             VStack(spacing: Theme.Spacing.l) {
 
                 Text("People")
-                    .font(Theme.Text.sectionHeader)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .sectionHeader()
+                    .padding(.horizontal, Theme.Spacing.l)
                 
                 // Shared with you (quiet, conditional)
                 if !sharedWithYouStore.unreadShares.isEmpty {
@@ -110,7 +115,18 @@ struct PeopleView: View {
         }
         
         .appBackground()
-        .toolbar(.hidden, for: .navigationBar)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                }
+            }
+        }
         .task {
             // In Backend Preview, this keeps requests/following fresh when opening People.
             await followStore.refreshFromBackendIfPossible()
