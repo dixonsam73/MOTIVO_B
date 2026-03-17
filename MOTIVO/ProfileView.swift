@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260317_104800_Profile_AboutRowButtonFix
+// SCOPE: UI-only — make About Études row use the existing button-style navigation pattern to remove duplicate system disclosure chevron; no other UI/logic changes.
+// SEARCH-TOKEN: 20260317_104800_Profile_AboutRowButtonFix
+
+// CHANGE-ID: 20260317_102900_Profile_InlineAboutAndAccountActions
+// SCOPE: UI-only — replace App Settings chevron with inline About Études / Sign out / Delete account rows; remove inline welcome card from Profile; no other UI or logic changes.
 // CHANGE-ID: 20260317_092400_Profile_TimerControlsInline_RemoveAccountCards
 // SCOPE: UI-only — move Show Metronome/Show Drone toggles into Session Setup card; remove Sign out/Delete account cards from Profile; no logic/theme/layout changes beyond relocation.
 // SEARCH-TOKEN: 20260317_092400_Profile_TimerControlsInline_RemoveAccountCards
@@ -163,9 +169,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @State private var name: String = ""
      @State private var primaryInstrumentName: String = ""
      @State private var defaultPrivacy: Bool = false
-     @State private var isWelcomeExpanded: Bool = false
-
-     @AppStorage("appSettings_showWelcomeSection") private var showWelcomeSection: Bool = true
 
      @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
@@ -184,7 +187,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 
      @State private var showActivityManager: Bool = false
      @State private var showTasksManager: Bool = false
-     @State private var showAppSettings: Bool = false
      @State private var profile: Profile?
  
  
@@ -248,6 +250,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     }
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
+     @State private var showAboutEtudes: Bool = false
  
      var body: some View {
          modalsAndAlerts(
@@ -255,9 +258,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 ZStack {
                     if auth.isSignedIn {
                         Form {
-                     if showWelcomeSection {
-                         welcomeSection
-                     }
                      Group {
                          profileSection
                          privacySection
@@ -284,6 +284,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                          Text("Profile").font(Theme.Text.pageTitle)
                      }
                      toolbarContent
+                }
+                .navigationDestination(isPresented: $showAboutEtudes) {
+                    AboutEtudesView()
                 }
                 .appBackground()
             }
@@ -411,142 +414,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
 // MARK: - Sections
 
-     @ViewBuilder
-     private var welcomeSection: some View {
-         Section {
-             VStack(spacing: 0) {
-                 Button {
-                     isWelcomeExpanded.toggle()
-                 } label: {
-                     HStack(spacing: Theme.Spacing.s) {
-                         Text("About Études")
-                             .font(Theme.Text.body)
-                                 .foregroundStyle(Theme.Colors.accent)
-                         Spacer()
-                         Image(systemName: isWelcomeExpanded ? "chevron.up" : "chevron.down")
-                             .font(.footnote.weight(.semibold))
-                             .padding(6)
-                             .background(.ultraThinMaterial, in: Circle())
-                             .foregroundStyle(Theme.Colors.accent)
-                     }
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityLabel(Text("Welcome to Études"))
-                 .accessibilityHint(Text(isWelcomeExpanded ? "Hide welcome information" : "Show welcome information"))
-                 .frame(minHeight: 24)
-
-                 if isWelcomeExpanded {
-                     Divider()
-                         .padding(.vertical, 8)
-
-                     VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-
-                         Text("Welcome to Études")
-                             .font(Theme.Text.pageTitle)
-
-                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                             Text("Études is a modern practice journal. Capture sessions, ideas, and recordings — and build a lasting archive of your musical process.")
-                                 .font(Theme.Text.body)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-
-                             Text("Accounts are private by default. Sharing is intentional. There are no public counts, rankings, or popularity metrics.")
-                                 .font(Theme.Text.body)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-                         }
-                         .padding(.bottom, Theme.Spacing.s)
-
-                         VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-
-                             // Profile
-                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Profile")
-                                     .font(Theme.Text.sectionHeader)
-                                     .foregroundStyle(Theme.Colors.accent)
-
-                                 Text("Add your instruments and activities. Choose a primary instrument for faster session setup.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Set up default task lists in the Tasks Manager — they’ll appear automatically when you start a session.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-                             }
-
-                             // Feed
-                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Feed")
-                                     .font(Theme.Text.sectionHeader)
-                                     .foregroundStyle(Theme.Colors.accent)
-
-                                 Text("Your Feed shows your sessions in chronological order. If you follow other musicians, you’ll also see what they’ve chosen to share.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Use the Feed Filter to switch between All (you + people you follow), Mine (just you), Saved (sessions you’ve bookmarked using ❤️ — visible only to you), and your thread filters (your own organisational labels).")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Search finds sessions by activity, instrument, or notes.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Comments are private conversations between you and the author.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-                             }
-
-                             // Session Timer
-                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Session Timer")
-                                     .font(Theme.Text.sectionHeader)
-                                     .foregroundStyle(Theme.Colors.accent)
-
-                                 Text("Start a session using the record button in the Feed. Use the + button to add a session manually if you didn’t log it at the time.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Log practice, rehearsal, performance, writing, or recording. Attach photos, record audio or video, and trim before saving. You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-
-                                 Text("Use Threads to group related work — for example, recital prep or a recording project. Threads are personal and visible only to you.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-                             }
-
-                             // Insights
-                             VStack(alignment: .leading, spacing: Theme.Spacing.xs) {
-                                 Text("Insights")
-                                     .font(Theme.Text.sectionHeader)
-                                     .foregroundStyle(Theme.Colors.accent)
-
-                                 Text("Tap the three bars in the Your Sessions header to view long-term insights and activity trends.")
-                                     .font(Theme.Text.body)
-                                     .foregroundStyle(Theme.Colors.secondaryText)
-                             }
-
-                             Text("Log your work. Track your progress. Share when you choose.")
-                                 .font(Theme.Text.body)
-                                 .foregroundStyle(.primary)
-                                 .padding(.top, Theme.Spacing.s)
-                         }
-                         .frame(maxWidth: .infinity, alignment: .leading)
-                     }
-                     .frame(maxWidth: .infinity, alignment: .leading)
-                     .transition(.opacity.combined(with: .move(edge: .top)))
-                 }
-             }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 2)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
-         }
-         .padding(.top, Theme.Spacing.section)
-             .listRowBackground(Color.clear)
-     }
-
-     @ViewBuilder
      private var profileSection: some View {
          Section(header: Text("Name").sectionHeader()) {
              HStack(spacing: 12) {
@@ -747,81 +614,52 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
      @ViewBuilder
      private var appSettingsSection: some View {
-         Section(header: Text("App Settings").sectionHeader()) {
+         Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button { showAppSettings = true } label: {
-                     navigationRow(title: "App Settings")
+                 Button { showAboutEtudes = true } label: {
+                     navigationRow(title: "About Études")
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
                  .accessibilityAddTraits(.isButton)
-                 .frame(minHeight: 44)
+                 .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
-             }
-             .padding(.horizontal, 16)
-             .padding(.vertical, 12)
-             .padding(.top, Theme.Spacing.s)
-             .cardSurface()
-         }
-     }
- 
-   
-     private var accountSection: some View {
-         Group {
-             if auth.isSignedIn {
-                 // Sign out (primary) — its own container/card
-                 Section {
-                     VStack(alignment: .leading, spacing: 0) {
-                         VStack(alignment: .leading, spacing: 4) {
-                             Button {
-                                 auth.signOut()
-                             } label: {
-                                 Text("Sign out")
-                                     .font(Theme.Text.body.weight(.semibold))
-                                     .frame(maxWidth: .infinity)
-                                     .frame(height: 52)
-                             }
-                             .buttonStyle(.plain)
-                             .contentShape(Rectangle())
-                         }
-                     }
-                     .padding(.horizontal, 16)
-                     .padding(.vertical, 6)
-                     .padding(.top, Theme.Spacing.s)
-                     .cardSurface()
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
                  }
 
-                 // Delete Account (destructive) — its own container/card, compact
-                 Section {
-                     Button {
-                         deleteAccountConfirmText = ""
-                         showDeleteAccountSheet = true
-                     } label: {
-                         Text("Delete account")
-                             .font(Theme.Text.body.weight(.semibold))
-                             .foregroundStyle(.red)
-                             .frame(maxWidth: .infinity)
-                             .padding(.vertical, 10)
-                     }
-                     .buttonStyle(.plain)
-                     .contentShape(Rectangle())
-                     .padding(.horizontal, 16)
-                     .padding(.vertical, 2)
-                     .padding(.top, Theme.Spacing.s)
-                     .cardSurface()
+                 Button {
+                     auth.signOut()
+                 } label: {
+                     Text("Sign out")
+                         .foregroundStyle(.primary)
+                         .frame(maxWidth: .infinity, alignment: .leading)
+                         .frame(minHeight: 44, alignment: .center)
                  }
-             } else {
-                 Section {
-                     SignInWithAppleButton(.signIn) { request in
-                         auth.configure(request)
-                     } onCompletion: { result in
-                         auth.handle(result)
-                     }
-                     .signInWithAppleButtonStyle(.black)
-                     .frame(height: 44)
-                     .accessibilityLabel(Text("Sign in with Apple"))
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
                  }
+
+                 Button {
+                     deleteAccountConfirmText = ""
+                     showDeleteAccountSheet = true
+                 } label: {
+                     Text("Delete account")
+                         .foregroundStyle(.red)
+                         .frame(maxWidth: .infinity, alignment: .leading)
+                         .frame(minHeight: 44, alignment: .center)
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .font(Theme.Text.body)
              }
+             .cardSurface(padding: Theme.Spacing.m)
+             .listRowSeparator(.hidden)
          }
      }
 
@@ -1557,10 +1395,6 @@ private func initials(from string: String) -> String {
              }
              .sheet(isPresented: $showTasksManager) {
                  TasksManagerView(activityRef: normalizedPrimaryActivityRef())
-                     .environment(\.managedObjectContext, ctx)
-             }
-             .sheet(isPresented: $showAppSettings) {
-                 AppSettingsView()
                      .environment(\.managedObjectContext, ctx)
              }
          )
