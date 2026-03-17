@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260317_104800_Profile_AboutRowButtonFix
-// SCOPE: UI-only — make About Études row use the existing button-style navigation pattern to remove duplicate system disclosure chevron; no other UI/logic changes.
-// SEARCH-TOKEN: 20260317_104800_Profile_AboutRowButtonFix
+// CHANGE-ID: 20260317_110500_Profile_RemoveTopTitle_RenameProfileSection
+// SCOPE: Visual-only — remove custom top Profile toolbar title and rename first section header from Name to Profile; no other UI or logic changes.
+// SEARCH-TOKEN: 20260317_110500_Profile_RemoveTopTitle_RenameProfileSection
 
 // CHANGE-ID: 20260317_102900_Profile_InlineAboutAndAccountActions
 // SCOPE: UI-only — replace App Settings chevron with inline About Études / Sign out / Delete account rows; remove inline welcome card from Profile; no other UI or logic changes.
@@ -280,9 +280,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 .font(.callout)
                 .navigationTitle("")
                 .toolbar {
-                     ToolbarItem(placement: .principal) {
-                         Text("Profile").font(Theme.Text.pageTitle)
-                     }
                      toolbarContent
                 }
                 .navigationDestination(isPresented: $showAboutEtudes) {
@@ -415,7 +412,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 // MARK: - Sections
 
      private var profileSection: some View {
-         Section(header: Text("Name").sectionHeader()) {
+         Section(header: Text("Profile").sectionHeader()) {
              HStack(spacing: 12) {
                  Button { showAvatarEditor = true } label: { avatarChip }
                      .buttonStyle(.plain)
