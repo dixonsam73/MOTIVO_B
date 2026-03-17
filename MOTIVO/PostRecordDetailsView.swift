@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260317_181500_PRDV_AutoDescriptionReplaceOnFocus
+// SCOPE: PostRecordDetailsView — retain content-header parity and make untouched auto description clear on first focus, restoring auto text on blur if left empty. No other UI or logic changes.
+// SEARCH-TOKEN: 20260317_181500_PRDV_AutoDescriptionReplaceOnFocus
+
 
 
 //  PostRecordDetailsView_20251004c.swift
@@ -350,6 +354,7 @@ struct PostRecordDetailsView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                    Text("Session Review").sectionHeader()
 
                     // ---------- Instrument ----------
                     if hasNoInstruments {
@@ -579,9 +584,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             )
             .navigationTitle("")
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Session Review").font(Theme.Text.pageTitle)
-                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         // Intentional discard: purge any currently staged items for this review
@@ -865,6 +867,26 @@ isPrivate: { url in
             }
             .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
             .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
+            .onChange(of: isActivityDetailFocused) { oldValue, newValue in
+                if oldValue == false && newValue == true {
+                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !userEditedActivityDetail,
+                       !trimmed.isEmpty,
+                       activityDetail == lastAutoActivityDetail {
+                        activityDetail = ""
+                    }
+                }
+
+                if oldValue == true && newValue == false {
+                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty {
+                        let autoDesc = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
+                        activityDetail = autoDesc
+                        lastAutoActivityDetail = autoDesc
+                        userEditedActivityDetail = false
+                    }
+                }
+            }
             .onChange(of: activityDetail) { old, new in
                 let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
                 userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)

@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260310_141900_AESV_AudioRenameReadback
-// SCOPE: Fix AESV audio attachment viewer title readback to use attachment UUIDs instead of URL stems. No other UI/logic changes.
-// SEARCH-TOKEN: 20260310_141900_AESV_AudioRenameReadback
+// CHANGE-ID: 20260317_183800_AESV_AutoDescriptionReplaceOnFocus
+// SCOPE: AddEditSessionView — make untouched auto description clear on first focus and restore current auto description on blur if left empty. No other UI or logic changes.
+// SEARCH-TOKEN: 20260317_183800_AESV_AutoDescriptionReplaceOnFocus
 
 // CHANGE-ID: 20260304_144500_Threads_S6_1_AESV_ThreadSuggestions
 // SCOPE: Threads v1 Stage 6.1 — provide existing local thread suggestions to ThreadPickerView when launched from AESV. No other UI/logic changes.
@@ -482,6 +482,32 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
         }
         .onChange(of: timestamp) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
         .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
+            .onChange(of: isActivityDetailFocused) { oldValue, newValue in
+                if oldValue == false && newValue == true {
+                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !userEditedActivityDetail,
+                       !userHasEditedActivityDetail,
+                       !trimmed.isEmpty,
+                       activityDetail == lastAutoActivityDetail {
+                        activityDetail = ""
+                    }
+                }
+
+                if oldValue == true && newValue == false {
+                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if trimmed.isEmpty {
+                        let autoDesc = editorDefaultDescription(
+                            timestamp: timestamp,
+                            activity: activity,
+                            customName: selectedCustomName
+                        )
+                        activityDetail = autoDesc
+                        lastAutoActivityDetail = autoDesc
+                        userEditedActivityDetail = false
+                        userHasEditedActivityDetail = false
+                    }
+                }
+            }
         .onChange(of: activityDetail) { old, new in
             let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
             userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
