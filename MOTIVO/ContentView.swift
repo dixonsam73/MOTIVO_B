@@ -151,6 +151,10 @@ import CoreData
 import Combine
 import CryptoKit
 
+// CHANGE-ID: 20260317_150900_FeedTopTapGapOnly_a1d7
+// SCOPE: Use the existing gap between Feed Filter and feed card as the tap target for animated scroll-to-top; no visual or list-structure changes.
+// SEARCH-TOKEN: 20260317_150900_FeedTopTapGapOnly_a1d7
+
 // CHANGE-ID: 20260304_165600_FeedFilter_ThreadParityMenuSize_7c1a
 // SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260202_215800_BackPopFlashNoState
@@ -538,10 +542,22 @@ fileprivate struct SessionsRootView: View {
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
                 )
-                .padding(.bottom, Theme.Spacing.s)
 // ---------- Sessions List ----------
-                Group {
-                    List {
+                ScrollViewReader { proxy in
+                    let topID = "feed-top-anchor"
+
+                    Rectangle()
+                        .fill(Color.clear)
+                        .frame(height: Theme.Spacing.s)
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            withAnimation {
+                                proxy.scrollTo(topID, anchor: .top)
+                            }
+                        }
+
+                    Group {
+                        List {
                         Section {
                             let localRows: [Session] = filteredSessions
 
@@ -583,8 +599,9 @@ fileprivate struct SessionsRootView: View {
                             if renderFeedItems.isEmpty {
                                 Text("No sessions match your filters yet.")
                                     .foregroundStyle(Theme.Colors.secondaryText)
+                                    .id(topID)
                             } else {
-                                ForEach(renderFeedItems) { item in
+                                ForEach(Array(renderFeedItems.enumerated()), id: \.element.id) { index, item in
                                     switch item.kind {
                                     case .local(let session):
                                         ZStack {
@@ -608,6 +625,7 @@ fileprivate struct SessionsRootView: View {
                                                 .cardSurface()
                                                 .padding(.bottom, Theme.Spacing.section)
                                         }
+                                        .id(index == 0 ? topID : nil)
                                         .buttonStyle(.plain)
                                         .listRowSeparator(.hidden)
                                         .deleteDisabled(false)
@@ -654,6 +672,7 @@ fileprivate struct SessionsRootView: View {
                                             .cardSurface()
                                             .padding(.bottom, Theme.Spacing.section)
                                         }
+                                        .id(index == 0 ? topID : nil)
                                         .buttonStyle(.plain)
                                         .listRowSeparator(.hidden)
                                         .deleteDisabled(true)
@@ -689,22 +708,23 @@ fileprivate struct SessionsRootView: View {
 
                         await performAutoReturnRefreshBundle(scopeKey: scopeKey)
                     }
-                }
+                    }
 
-                .refreshable {
-                    await performUserInitiatedRefreshBundle()
+                    .refreshable {
+                        await performUserInitiatedRefreshBundle()
+                    }
+                    .id(backendModeChangeTick)
+                    .listStyle(.plain)
+                    .listRowSeparator(.hidden)
+                    .scrollContentBackground(.hidden)
+                    .listRowBackground(Color.clear)
+                    .background(Theme.Colors.surface(colorScheme))
+                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                            .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+                    )
                 }
-                .id(backendModeChangeTick)
-                .listStyle(.plain)
-                .listRowSeparator(.hidden)
-                .scrollContentBackground(.hidden)
-                .listRowBackground(Color.clear)
-                .background(Theme.Colors.surface(colorScheme))
-                .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                        .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
-                )
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
