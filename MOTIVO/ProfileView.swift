@@ -1174,21 +1174,33 @@ case .failure(let error):
 
      private var deleteAccountSheet: some View {
          NavigationStack {
-             Form {
-                 Section {
-                     Text("This permanently deletes your account and all backend data (posts, attachments, follows, comments, and your avatar). This can’t be undone.")
-                         .font(Theme.Text.body)
-                         .foregroundStyle(Theme.Colors.secondaryText)
-                 }
+             ScrollView {
+                 VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+                     VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                         Text("This permanently deletes your account and all backend data (posts, attachments, follows, comments, and your avatar). This can’t be undone.")
+                             .font(Theme.Text.body)
+                             .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .cardSurface()
 
-                 Section(header: Text("Type DELETE to confirm").sectionHeader()) {
-                     TextField("DELETE", text: $deleteAccountConfirmText)
-                         .textInputAutocapitalization(.characters)
-                         .autocorrectionDisabled()
-                         .font(Theme.Text.body)
-                 }
+                     VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                         Text("Type DELETE to confirm").sectionHeader()
 
-                 Section {
+                         TextField("DELETE", text: $deleteAccountConfirmText)
+                             .textInputAutocapitalization(.characters)
+                             .autocorrectionDisabled()
+                             .font(Theme.Text.body)
+                             .padding(.vertical, 10)
+                             .padding(.horizontal, 12)
+                             .background(Theme.Colors.surface(colorScheme))
+                             .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous))
+                             .overlay(
+                                 RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                     .strokeBorder(Theme.Colors.stroke(colorScheme), lineWidth: 1)
+                             )
+                     }
+                     .cardSurface()
+
                      Button(role: .destructive) {
                          Task { await performDeleteAccount() }
                      } label: {
@@ -1202,11 +1214,23 @@ case .failure(let error):
                                  .font(Theme.Text.body.weight(.semibold))
                              Spacer()
                          }
+                         .frame(maxWidth: .infinity)
                          .frame(height: 52)
+                         .foregroundStyle(Color.white)
+                         .background(
+                             RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                 .fill(Color.red.opacity(0.48))
+                         )
                      }
+                     .buttonStyle(.plain)
                      .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "DELETE")
+                     .opacity(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "DELETE" ? 0.5 : 1.0)
                  }
+                 .padding(.horizontal, Theme.Spacing.l)
+                 .padding(.vertical, Theme.Spacing.section)
              }
+             .appBackground()
+             .tint(Theme.Colors.accent)
              .navigationTitle("Delete account")
              .navigationBarTitleDisplayMode(.inline)
              .toolbar {
