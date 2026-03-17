@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260317_125300_ProfileCard_InnerCardDividersIcons
+// SCOPE: ProfileView — profile card only: add inner card surface, row dividers, and subtle conditional location/account ID icons while preserving all existing logic and behavior.
+// SEARCH-TOKEN: 20260317_125300_ProfileCard_InnerCardDividersIcons
+
 // CHANGE-ID: 20260317_110500_Profile_RemoveTopTitle_RenameProfileSection
 // SCOPE: Visual-only — remove custom top Profile toolbar title and rename first section header from Name to Profile; no other UI or logic changes.
 // SEARCH-TOKEN: 20260317_110500_Profile_RemoveTopTitle_RenameProfileSection
@@ -413,77 +417,113 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
      private var profileSection: some View {
          Section(header: Text("Profile").sectionHeader()) {
-             HStack(spacing: 12) {
-                 Button { showAvatarEditor = true } label: { avatarChip }
-                     .buttonStyle(.plain)
-                     .disabled(false)
-                     .task(id: avatarRefreshTrigger) {
-                         await MainActor.run {
-                             refreshAvatarDisplay()
-                         }
-                     }
- 
-                 TextField("Name", text: $name)
-                     .textInputAutocapitalization(.words)
-                     .disableAutocorrection(true)
-                     .focused($isNameFocused)
-                     .onSubmit { isNameFocused = false }
-                     .scaleEffect(isNameFocused ? 0.995 : 1)
-                     .overlay(alignment: .bottomLeading) {
-                         Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
-                     }
-                     .animation(.easeInOut(duration: 0.18), value: isNameFocused)
-             }
- 
-             TextField("Location (optional)", text: $locationText)
-                 .textInputAutocapitalization(.words)
-                 .disableAutocorrection(true)
-                 .focused($isLocationFocused)
-                 .onSubmit { isLocationFocused = false }
+             VStack(alignment: .leading, spacing: 4) {
+                 VStack(spacing: 0) {
+                     HStack(spacing: 12) {
+                         Button { showAvatarEditor = true } label: { avatarChip }
+                             .buttonStyle(.plain)
+                             .disabled(false)
+                             .task(id: avatarRefreshTrigger) {
+                                 await MainActor.run {
+                                     refreshAvatarDisplay()
+                                 }
+                             }
 
-             TextField("Account ID : How people find you.", text: $accountIDText)
-                 .textInputAutocapitalization(.never)
-                 .autocorrectionDisabled(true)
-                 .keyboardType(.asciiCapable)
-                 .onChange(of: accountIDText) { _, newValue in
-                     let normalized = normalizeAccountID(newValue)
-                     if normalized != newValue { accountIDText = normalized }
-                     // Clear any prior sync feedback as the user edits.
-                     accountIDSyncMessage = nil
-                     accountIDSyncIsError = false
-                     ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
-                 }
-                 .focused($isAccountIDFocused)
-                 .onChange(of: isAccountIDFocused) { oldValue, newValue in
-                     // Commit-only: on blur, sync once with the latest sanitized state.
-                     // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
-                     if oldValue == true && newValue == false {
-                         if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
-                             return
-                         }
-                         Task { await syncDirectoryFromCurrentState() }
+                         TextField("Name", text: $name)
+                             .textInputAutocapitalization(.words)
+                             .disableAutocorrection(true)
+                             .focused($isNameFocused)
+                             .onSubmit { isNameFocused = false }
+                             .scaleEffect(isNameFocused ? 0.995 : 1)
+                             .overlay(alignment: .bottomLeading) {
+                                 Rectangle().frame(height: 1).opacity(isNameFocused ? 0.15 : 0)
+                             }
+                             .animation(.easeInOut(duration: 0.18), value: isNameFocused)
                      }
-                 }
-                 .onSubmit {
-                     // Commit-only: on Return/Done, sync once.
-                     lastAccountIDSubmitAt = Date()
-                     Task { await syncDirectoryFromCurrentState() }
-                     isAccountIDFocused = false
-                 }
-                 .font(Theme.Text.meta)
-                 .foregroundStyle(Color.primary)
+                     .padding(.vertical, Theme.Spacing.s)
+                     .frame(minHeight: 44, alignment: .center)
+                     .overlay(alignment: .bottom) {
+                         Divider()
+                             .padding(.leading, 16)
+                     }
 
-             if let msg = accountIDSyncMessage {
-                 Text(msg)
-                     .font(Theme.Text.meta)
-                     .foregroundStyle(accountIDSyncIsError ? Color.red : Theme.Colors.secondaryText)
-                     .padding(.top, 2)
+                     HStack(spacing: 10) {
+                         if !locationText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                             Image(systemName: "globe")
+                                 .font(.system(size: 13, weight: .medium))
+                                 .foregroundStyle(Theme.Colors.secondaryText)
+                         }
+
+                         TextField("Location (optional)", text: $locationText)
+                             .textInputAutocapitalization(.words)
+                             .disableAutocorrection(true)
+                             .focused($isLocationFocused)
+                             .onSubmit { isLocationFocused = false }
+                     }
+                     .padding(.vertical, Theme.Spacing.s)
+                     .frame(minHeight: 44, alignment: .center)
+                     .overlay(alignment: .bottom) {
+                         Divider()
+                             .padding(.leading, 16)
+                     }
+
+                     HStack(spacing: 10) {
+                         if !accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                             Text("@")
+                                 .font(Theme.Text.meta)
+                                 .foregroundStyle(Theme.Colors.secondaryText)
+                         }
+
+                         TextField("Account ID : How people find you.", text: $accountIDText)
+                             .textInputAutocapitalization(.never)
+                             .autocorrectionDisabled(true)
+                             .keyboardType(.asciiCapable)
+                             .onChange(of: accountIDText) { _, newValue in
+                                 let normalized = normalizeAccountID(newValue)
+                                 if normalized != newValue { accountIDText = normalized }
+                                 // Clear any prior sync feedback as the user edits.
+                                 accountIDSyncMessage = nil
+                                 accountIDSyncIsError = false
+                                 ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
+                             }
+                             .focused($isAccountIDFocused)
+                             .onChange(of: isAccountIDFocused) { oldValue, newValue in
+                                 // Commit-only: on blur, sync once with the latest sanitized state.
+                                 // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
+                                 if oldValue == true && newValue == false {
+                                     if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
+                                         return
+                                     }
+                                     Task { await syncDirectoryFromCurrentState() }
+                                 }
+                             }
+                             .onSubmit {
+                                 // Commit-only: on Return/Done, sync once.
+                                 lastAccountIDSubmitAt = Date()
+                                 Task { await syncDirectoryFromCurrentState() }
+                                 isAccountIDFocused = false
+                             }
+                             .font(Theme.Text.meta)
+                             .foregroundStyle(Color.primary)
+                     }
+                     .padding(.vertical, Theme.Spacing.s)
+                     .frame(minHeight: 44, alignment: .center)
+                 }
+                 .cardSurface(padding: Theme.Spacing.m)
+
+                 if let msg = accountIDSyncMessage {
+                     Text(msg)
+                         .font(Theme.Text.meta)
+                         .foregroundStyle(accountIDSyncIsError ? Color.red : Theme.Colors.secondaryText)
+                         .padding(.top, 2)
+                 }
              }
          }
          .listRowSeparator(.hidden)
      }
- 
-    @ViewBuilder
+
+
+@ViewBuilder
     private var privacySection: some View {
         Section(header: Text("Privacy & connection").sectionHeader()) {
             VStack(spacing: 0) {
