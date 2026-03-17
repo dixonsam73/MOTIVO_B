@@ -1382,7 +1382,20 @@ fileprivate struct SessionIdentityHeader: View {
     private var isCurrentUser: Bool { ownerUserID == auth.currentUserID }
 
     private var avatarImage: UIImage? { ProfileStore.avatarImage(for: ownerUserID) }
-    private var location: String { ProfileStore.location(for: ownerUserID) }
+    private var location: String {
+        if isCurrentUser {
+            let canonical = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !canonical.isEmpty {
+                let canonicalLocation = ProfileStore.location(for: canonical)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !canonicalLocation.isEmpty {
+                    return canonicalLocation
+                }
+            }
+        }
+
+        return ProfileStore.location(for: ownerUserID)
+    }
 
     private var displayName: String {
         if isCurrentUser {
