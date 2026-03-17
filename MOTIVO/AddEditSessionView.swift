@@ -367,7 +367,7 @@ struct AddEditSessionView: View {
         ScrollView {
                         contentStack
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xl)
         }
         .scrollDismissesKeyboard(.interactively)
@@ -379,10 +379,6 @@ struct AddEditSessionView: View {
         )
         .navigationTitle("")
         .toolbar {
-            ToolbarItem(placement: .principal) {
-                Text(isEdit ? "Edit Session" : "New Session")
-                    .font(Theme.Text.pageTitle)
-            }
             ToolbarItem(placement: .cancellationAction) {
                 Button(action: { cancelAndCleanup_AESV_bestEffort() }) {
                     Text("Cancel")
@@ -512,6 +508,8 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
     @ViewBuilder
     private var contentStack: some View {
 VStack(alignment: .leading, spacing: Theme.Spacing.section) {
+    Text(isEdit ? "Edit Session" : "Add Session").sectionHeader()
+
 
                 // No instruments / Instrument picker
                 if hasNoInstruments {

@@ -464,7 +464,7 @@ private func loadPracticeDefaultsIfNeeded() {
         ScrollView {
             mainContent
         }
-        .navigationTitle("Timer")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
         // Single, unified prefetch path to avoid duplicate first-paint work
