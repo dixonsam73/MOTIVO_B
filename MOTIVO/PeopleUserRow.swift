@@ -11,6 +11,10 @@
 // CHANGE-ID: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
 // SCOPE: Phase 12C — Allow PeopleUserRow to display directory-provided displayName/handle subtitle when available; preserves existing fallbacks.
 // SEARCH-TOKEN: 20260120_113300_Phase12C_PeopleUserRow_DirectoryOverrides
+// CHANGE-ID: 20260318_173000_PeopleUserRow_SubtleVerticalBreathing
+// SCOPE: Visual-only micro-adjustment — add +2pt vertical padding to row content for slightly calmer spacing in Followers/Following cards. No divider, layout, avatar, or logic changes.
+// SEARCH-TOKEN: 20260318_173000_PeopleUserRow_SubtleVerticalBreathing
+
 // CHANGE-ID: 20260121_135214_P13C_AvatarInitials_PeopleUserRow
 // SCOPE: 13C — Replace '?' avatar placeholder with initials derived from display name; no logic changes.
 
@@ -69,7 +73,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
                 trailing()
             }
             .padding(.horizontal, Theme.Spacing.m)
-            .padding(.vertical, Theme.Spacing.s)
+            .padding(.vertical, Theme.Spacing.s + 2)
         }
         .buttonStyle(.plain)
     }
