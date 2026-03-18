@@ -68,6 +68,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
 
                 trailing()
             }
+            .padding(.horizontal, Theme.Spacing.m)
             .padding(.vertical, Theme.Spacing.s)
         }
         .buttonStyle(.plain)

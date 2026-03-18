@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260318_165400_FollowLists_ProfileParity
+// SCOPE: Visual-only parity pass for FollowingListView — replace plain List container with Profile-style section header + grouped card surface; preserve row content, async loading, and navigation behavior.
+// SEARCH-TOKEN: 20260318_165400_FollowLists_ProfileParity
+
 // CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
 // SCOPE: FollowingListView: pass avatar_key into PeopleUserRow so following rows can render remote avatars.
 // SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
@@ -12,44 +16,66 @@ struct FollowingListView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
 
-
     @State private var directory: [String: DirectoryAccount] = [:]
+
     private var userIDs: [String] {
         Array(followStore.following).sorted()
     }
 
     var body: some View {
-        List {
-            if userIDs.isEmpty {
-                Text("You're not following anyone yet.")
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .listRowBackground(Color.clear)
-            } else {
-                ForEach(userIDs, id: \.self) { userID in
-                    let acct = directory[userID]
-                    PeopleUserRow(
-                        userID: userID,
-                        overrideDisplayName: acct?.displayName,
-                        overrideSubtitle: acct?.accountID.map { "@\($0)" },
-                        overrideAvatarKey: acct?.avatarKey
-                    ) {
-                        ProfilePeekView(
-                            ownerID: userID,
-                            directoryDisplayName: acct?.displayName,
-                            directoryAccountID: acct?.accountID,
-                            directoryLocation: acct?.location,
-                            directoryAvatarKey: acct?.avatarKey,
-                            directoryInstruments: acct?.instruments,
-                        )
+        ScrollView {
+            VStack(alignment: .leading, spacing: 32) {
+                Text("Following")
+                    .sectionHeader()
+
+                Group {
+                    if userIDs.isEmpty {
+                        Text("You're not following anyone yet.")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(24)
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(Array(userIDs.enumerated()), id: \.element) { index, userID in
+                                let acct = directory[userID]
+
+                                PeopleUserRow(
+                                    userID: userID,
+                                    overrideDisplayName: acct?.displayName,
+                                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                                    overrideAvatarKey: acct?.avatarKey
+                                ) {
+                                    ProfilePeekView(
+                                        ownerID: userID,
+                                        directoryDisplayName: acct?.displayName,
+                                        directoryAccountID: acct?.accountID,
+                                        directoryLocation: acct?.location,
+                                        directoryAvatarKey: acct?.avatarKey,
+                                        directoryInstruments: acct?.instruments,
+                                    )
+                                }
+
+                                if index < userIDs.count - 1 {
+                                    Divider()
+                                }
+                            }
+                        }
                     }
-                    .listRowBackground(Color.clear)
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .fill(Color.white.opacity(0.6))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26, style: .continuous)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+                )
             }
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .padding(.bottom, 40)
         }
-        .listStyle(.plain)
-        // Remove the default white List canvas so the app background shows through.
-        .scrollContentBackground(.hidden)
         .appBackground()
         .task(id: userIDs) {
             let ids = userIDs
@@ -62,7 +88,7 @@ struct FollowingListView: View {
                 directory = map
             }
         }
-        .navigationTitle("Following")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
