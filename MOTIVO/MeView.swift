@@ -564,16 +564,19 @@ struct MeView: View {
 
     private func dateWindowSubtitle(for r: StatsRange, firstSessionDate: Date?) -> String? {
         let (startOpt, endOpt) = StatsHelper.dateBounds(for: r)
+        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
 
-        // Week/Month/Year: show the existing bounded window.
+        if r == .year, let start = startOpt {
+            return "\(df.string(from: start)) – \(df.string(from: Date()))"
+        }
+
+        // Week/Month: show the existing bounded window.
         if let start = startOpt, let end = endOpt {
-            let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
             return "\(df.string(from: start)) – \(df.string(from: end.addingTimeInterval(-86400)))"
         }
 
         // Total: show first recorded date → today (only if we have at least one session date).
         guard r == .total, let first = firstSessionDate else { return nil }
-        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
         return "\(df.string(from: first)) → Today"
     }
 }
