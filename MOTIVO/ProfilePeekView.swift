@@ -25,6 +25,14 @@
 // SCOPE: Identity data parity — thread backend directory location into ProfilePeekView for non-owner peeks; owner continues to use local ProfileStore.
 // SEARCH-TOKEN: 20260205_065749_LocParity_d2c43ded
 
+// CHANGE-ID: 20260318_181800_ProfilePeek_FollowButtonHeaderGrouping
+// SCOPE: Visual-only ProfilePeekView polish — group non-owner follow action more tightly with identity header to reduce vertical detachment. No logic, owner-view, divider, or content changes.
+// SEARCH-TOKEN: 20260318_181800_ProfilePeek_FollowButtonHeaderGrouping
+
+// CHANGE-ID: 20260318_180200_ProfilePeek_FollowButtonLeadingAlign
+// SCOPE: Visual-only ProfilePeekView polish — left-align non-owner follow action pill to match card content axis. No logic, spacing, divider, or owner-view changes.
+// SEARCH-TOKEN: 20260318_180200_ProfilePeek_FollowButtonLeadingAlign
+
 // CHANGE-ID: 20260221_150200_FollowInfraHardening_RequestsToggle_UX_b5a1
 // SCOPE: Follow infra hardening — surface backend follow-request rejection message as a calm alert (no redesign).
 // SEARCH-TOKEN: 20260221_150200_FollowInfraHardening_TOKEN_b5a1
@@ -125,54 +133,98 @@ struct ProfilePeekView: View {
                 .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: Theme.Spacing.m) {
-                // Header
-                HStack(spacing: Theme.Spacing.m) {
-                    // Avatar
-                    Button(action: {
-                        if isOwner {
-                            revealSelfName.toggle()
+                if isOwner {
+                    // Header
+                    HStack(spacing: Theme.Spacing.m) {
+                        // Avatar
+                        Button(action: {
+                            if isOwner {
+                                revealSelfName.toggle()
+                            }
+                        }) {
+                            ProfileAvatar(ownerID: ownerID,
+                                          displayName: displayName(ownerID),
+                                          directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                          directoryInstruments: nil)
+                                .frame(width: 44, height: 44)
+                                .clipShape(Circle())
                         }
-                    }) {
-                        ProfileAvatar(ownerID: ownerID,
-                                      displayName: displayName(ownerID),
-                                      directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
-                                      directoryInstruments: nil)
-                            .frame(width: 44, height: 44)
-                            .clipShape(Circle())
-                    }
-                    .buttonStyle(.plain)
+                        .buttonStyle(.plain)
 
-                    VStack(alignment: .leading, spacing: 4) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(displayName(ownerID))
-                                .font(.headline)
-                            if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
-                                Text("@\(handle)")
-                                    .font(Theme.Text.meta)
+                        VStack(alignment: .leading, spacing: 4) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(displayName(ownerID))
+                                    .font(.headline)
+                                if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
+                                    Text("@\(handle)")
+                                        .font(Theme.Text.meta)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                            }
+                            let loc: String = {
+                                if isOwner {
+                                    return ProfileStore.location(for: ownerID)
+                                }
+                                let s = (directoryLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                return s
+                            }()
+                            if !loc.isEmpty {
+                                Text(loc)
+                                    .font(.caption)
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
-                        let loc: String = {
-                            if isOwner {
-                                return ProfileStore.location(for: ownerID)
-                            }
-                            let s = (directoryLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                            return s
-                        }()
-                        if !loc.isEmpty {
-                            Text(loc)
-                                .font(.caption)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
+                        Spacer()
                     }
-                    Spacer()
-                }
-                .accessibilityElement(children: .combine)
+                    .accessibilityElement(children: .combine)
+                } else {
+                    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                        HStack(spacing: Theme.Spacing.m) {
+                            // Avatar
+                            Button(action: {
+                                if isOwner {
+                                    revealSelfName.toggle()
+                                }
+                            }) {
+                                ProfileAvatar(ownerID: ownerID,
+                                              displayName: displayName(ownerID),
+                                              directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                              directoryInstruments: nil)
+                                    .frame(width: 44, height: 44)
+                                    .clipShape(Circle())
+                            }
+                            .buttonStyle(.plain)
 
-                // Follow action (Phase 10C) — single calm control, no counts
-                if !isOwner {
-                    followActionRow
-                        .padding(.top, 2)
+                            VStack(alignment: .leading, spacing: 4) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(displayName(ownerID))
+                                        .font(.headline)
+                                    if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines), !handle.isEmpty {
+                                        Text("@\(handle)")
+                                            .font(Theme.Text.meta)
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
+                                }
+                                let loc: String = {
+                                    if isOwner {
+                                        return ProfileStore.location(for: ownerID)
+                                    }
+                                    let s = (directoryLocation ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                                    return s
+                                }()
+                                if !loc.isEmpty {
+                                    Text(loc)
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                            }
+                            Spacer()
+                        }
+                        .accessibilityElement(children: .combine)
+
+                        // Follow action (Phase 10C) — single calm control, no counts
+                        followActionRow
+                    }
                 }
 
                 if isOwner {
@@ -277,7 +329,6 @@ struct ProfilePeekView: View {
     private var followActionRow: some View {
         let state = FollowStore.shared.state(for: ownerID)
         return HStack {
-            Spacer(minLength: 0)
             switch state {
             case .none:
                 Button {
