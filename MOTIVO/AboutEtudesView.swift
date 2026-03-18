@@ -35,9 +35,13 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Use the Feed Filter to switch between All (you + people you follow), Mine (just you), Saved (sessions you’ve bookmarked using ❤️ — visible only to you), and your thread filters (your own organisational labels).")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                    (
+                        Text("Use the Feed Filter to switch between All (you + people you follow), Mine (just you), Saved (sessions you’ve bookmarked using ")
+                        + Text(Image(systemName: "heart"))
+                        + Text(" — visible only to you), and your thread filters (your own organisational labels).")
+                    )
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
 
                     Text("Search finds sessions by activity, instrument, or notes.")
                         .font(Theme.Text.body)
