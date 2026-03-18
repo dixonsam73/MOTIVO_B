@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260318_201500_SessionHeaderExternalize
+// SCOPE: Visual-only refinement — move "Session" label out of SessionMetaCard and render it as an external section header in PracticeTimerView. No logic, card order, or row layout changes.
+// SEARCH-TOKEN: 20260318_201500_SessionHeaderExternalize
+
 // CHANGE-ID: 20260228_223200_ptv_tasks_inst_activity_instrument_sync_fix
 // SCOPE: Fix instrument change in Session sheet to update instrument state before reloading task defaults; no UI/layout changes
 
@@ -957,14 +961,19 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var sessionMetaSection: some View {
-        SessionMetaCard(
-            instruments: instruments,
-            instrument: $instrument,
-            showInstrumentSheet: $showInstrumentSheet,
-            showActivitySheet: $showActivitySheet,
-            currentInstrumentName: currentInstrumentName(),
-            activityLabel: activityDisplayName(for: activityChoice)
-        )
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Session")
+                .sectionHeader()
+
+            SessionMetaCard(
+                instruments: instruments,
+                instrument: $instrument,
+                showInstrumentSheet: $showInstrumentSheet,
+                showActivitySheet: $showActivitySheet,
+                currentInstrumentName: currentInstrumentName(),
+                activityLabel: activityDisplayName(for: activityChoice)
+            )
+        }
     }
 
     @ViewBuilder

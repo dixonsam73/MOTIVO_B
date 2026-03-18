@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260318_201500_SessionHeaderExternalize
+// SCOPE: Visual-only refinement — remove in-card "Session" header from SessionMetaCard so PracticeTimerView can render it as an external section header. No logic or row layout changes.
+
 // SessionMetaCard.swift
 // Extracted from PracticeTimerView selectorsCard (no logic changes).
 
@@ -32,9 +35,6 @@ struct SessionMetaCard: View {
             .cardSurface()
         } else {
             VStack(spacing: Theme.Spacing.m) {
-                Text("Session")
-                    .sectionHeader()
-
                 VStack(spacing: Theme.Spacing.s) {
                     if hasMultipleInstruments {
                         Button {
