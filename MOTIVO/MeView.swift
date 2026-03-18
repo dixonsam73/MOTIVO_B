@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260318_193200_meview_owner_scoped_local_analytics
+// SCOPE: Owner-scope MeView local analytics to the current local user ID while preserving backend fallback when no owner-local sessions exist. No UI/layout changes.
+
 // CHANGE-ID: 20260309_170500_meview_backend_owner_fallback_narrow
 // SCOPE: Add local-first connected-owner backend analytics fallback only when no local sessions exist on this device. Preserve local MeView behavior, SessionDetailView navigation, and thread analytics; backend mode leaves threads empty and longest/first informational only.
 // SEARCH-TOKEN: 20260309_170500_meview_backend_owner_fallback_narrow
@@ -217,14 +220,15 @@ struct MeView: View {
 
     @MainActor
     private func reload() async {
-        let localStats = (try? StatsHelper.fetchStats(in: ctx, range: range)) ?? .init(count: 0, seconds: 0)
-        let localAllSessions = fetchSessions(limit: nil, start: nil, end: nil)
+        let localOwnerUserID = canonicalLocalOwnerUserID
+        let localStats = (try? StatsHelper.fetchStats(in: ctx, range: range, ownerUserID: localOwnerUserID)) ?? .init(count: 0, seconds: 0)
+        let localAllSessions = fetchSessions(limit: nil, start: nil, end: nil, ownerUserID: localOwnerUserID)
 
         guard localAllSessions.isEmpty,
               BackendEnvironment.shared.isConnected,
               let backendOwnerUserID = canonicalBackendOwnerUserID,
               backendOwnerUserID.isEmpty == false else {
-            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions)
+            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions, ownerUserID: localOwnerUserID)
             return
         }
 
@@ -241,12 +245,12 @@ struct MeView: View {
             applyBackendAnalytics(posts: posts, ownerUserID: backendOwnerUserID)
             backendAnalyticsLoadKey = loadKey
         case .failure:
-            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions)
+            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions, ownerUserID: localOwnerUserID)
         }
     }
 
     @MainActor
-    private func applyLocalAnalytics(localStats: SessionStats, allSessions: [Session]) {
+    private func applyLocalAnalytics(localStats: SessionStats, allSessions: [Session], ownerUserID: String?) {
         isBackendAnalyticsMode = false
         backendAnalyticsLoadKey = nil
         sessionStats = localStats
@@ -259,8 +263,8 @@ struct MeView: View {
             bestStreakRangeText = nil
         }
         let (start, end) = StatsHelper.dateBounds(for: range)
-        avgFocus = averageFocus(start: start, end: end)
-        let sessionsInRange = fetchSessions(limit: nil, start: start, end: end)
+        avgFocus = averageFocus(start: start, end: end, ownerUserID: ownerUserID)
+        let sessionsInRange = fetchSessions(limit: nil, start: start, end: end, ownerUserID: ownerUserID)
         var longestSecs: Int64 = 0
         var longestDate: Date? = nil
         var longestFound: Session? = nil
@@ -373,6 +377,25 @@ struct MeView: View {
         return raw.isEmpty ? nil : raw
     }
 
+    private var canonicalLocalOwnerUserID: String? {
+        #if DEBUG
+        if BackendEnvironment.shared.isConnected == false,
+           let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+
+        if let authID = auth.currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !authID.isEmpty {
+            return authID
+        }
+
+        let persisted = (PersistenceController.shared.currentUserID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return persisted.isEmpty ? nil : persisted
+    }
+
     private func backendBestStreakRange(from dates: [Date]) -> (start: Date, end: Date)? {
         let tz = TimeZone(identifier: "Europe/London") ?? .current
         var cal = Calendar(identifier: .gregorian)
@@ -411,9 +434,12 @@ struct MeView: View {
         return (bestStart, bestEnd)
     }
 
-    private func fetchSessions(limit: Int?, start: Date?, end: Date?) -> [Session] {
+    private func fetchSessions(limit: Int?, start: Date?, end: Date?, ownerUserID: String?) -> [Session] {
         let req = NSFetchRequest<Session>(entityName: "Session")
         var preds: [NSPredicate] = []
+        if let ownerUserID, ownerUserID.isEmpty == false {
+            preds.append(NSPredicate(format: "ownerUserID == %@", ownerUserID))
+        }
         if let start, let end { preds.append(NSPredicate(format: "timestamp >= %@ AND timestamp < %@", start as NSDate, end as NSDate)) }
         else if let start { preds.append(NSPredicate(format: "timestamp >= %@", start as NSDate)) }
         else if let end { preds.append(NSPredicate(format: "timestamp < %@", end as NSDate)) }
@@ -424,8 +450,8 @@ struct MeView: View {
     }
 
     // MARK: - Focus (from notes)
-    private func averageFocus(start: Date?, end: Date?) -> Double? {
-        let sessions = fetchSessions(limit: nil, start: start, end: end)
+    private func averageFocus(start: Date?, end: Date?, ownerUserID: String?) -> Double? {
+        let sessions = fetchSessions(limit: nil, start: start, end: end, ownerUserID: ownerUserID)
         guard !sessions.isEmpty else { return nil }
         var total = 0.0
         var count = 0.0
@@ -564,19 +590,16 @@ struct MeView: View {
 
     private func dateWindowSubtitle(for r: StatsRange, firstSessionDate: Date?) -> String? {
         let (startOpt, endOpt) = StatsHelper.dateBounds(for: r)
-        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
 
-        if r == .year, let start = startOpt {
-            return "\(df.string(from: start)) – \(df.string(from: Date()))"
-        }
-
-        // Week/Month: show the existing bounded window.
+        // Week/Month/Year: show the existing bounded window.
         if let start = startOpt, let end = endOpt {
+            let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
             return "\(df.string(from: start)) – \(df.string(from: end.addingTimeInterval(-86400)))"
         }
 
         // Total: show first recorded date → today (only if we have at least one session date).
         guard r == .total, let first = firstSessionDate else { return nil }
+        let df = DateFormatter(); df.dateStyle = .medium; df.timeStyle = .none
         return "\(df.string(from: first)) → Today"
     }
 }

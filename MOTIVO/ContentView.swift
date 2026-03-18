@@ -1215,8 +1215,9 @@ Spacer()
         let request = NSFetchRequest<NSFetchRequestResult>(entityName: "Session")
         var predicates: [NSPredicate] = [NSPredicate(format: "ownerUserID == %@", ownerUserID)]
         let bounds = StatsHelper.dateBounds(for: range)
-        guard let start = bounds.start, let end = bounds.end else { return false }
-        predicates.append(NSPredicate(format: "timestamp >= %@ AND timestamp < %@", start as NSDate, end as NSDate))
+        if let start = bounds.start, let end = bounds.end {
+            predicates.append(NSPredicate(format: "timestamp >= %@ AND timestamp < %@", start as NSDate, end as NSDate))
+        }
         request.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: predicates)
         request.fetchLimit = 1
         do {
