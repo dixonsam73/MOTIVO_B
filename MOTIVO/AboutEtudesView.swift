@@ -75,11 +75,11 @@ struct AboutEtudesView: View {
             .padding(.top, Theme.Spacing.s)
         }
         .appBackground()
-        .navigationTitle("About Études")
+        .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                Text("About Études")
+                Text("")
                     .font(Theme.Text.pageTitle)
                     .foregroundStyle(.primary)
             }

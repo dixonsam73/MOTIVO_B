@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260318_143900_TasksManager_TasksPadCopy
-// SCOPE: Add "Tasks Pad" section header and update toggle label to "Pre-fill tasks in Session Timer". No other UI or logic changes.
-// SEARCH-TOKEN: 20260318_143900_TasksManager_TasksPadCopy
+// CHANGE-ID: 20260318_163500_TasksManager_TasksPadOrder
+// SCOPE: Move the existing "Tasks Pad" section to the top of the Form, above Activity. No other UI or logic changes.
+// SEARCH-TOKEN: 20260318_163500_TasksManager_TasksPadOrder
 
 import SwiftUI
 import CoreData
@@ -128,6 +128,15 @@ struct TasksManagerView: View {
         NavigationStack {
             Form {
 
+                Section(header: Text("Tasks Pad").sectionHeader()) {
+                    Toggle("Pre-fill tasks in Session Timer", isOn: $autofillEnabled)
+                        .font(Theme.Text.body)
+                        .tint(Theme.Colors.accent)
+                        .onChange(of: autofillEnabled) { _ in
+                            saveToggle()
+                        }
+                }
+
                 Section(header: Text("Activity").sectionHeader()) {
                     HStack {
                         Menu {
@@ -184,15 +193,6 @@ struct TasksManagerView: View {
                     }
                 }
 
-                // ✅ UPDATED SECTION
-                Section(header: Text("Tasks Pad").sectionHeader()) {
-                    Toggle("Pre-fill tasks in Session Timer", isOn: $autofillEnabled)
-                        .font(Theme.Text.body)
-                        .tint(Theme.Colors.accent)
-                        .onChange(of: autofillEnabled) { _ in
-                            saveToggle()
-                        }
-                }
 
                 Section(header: Text("Add Task").sectionHeader()) {
                     HStack {
@@ -233,10 +233,7 @@ struct TasksManagerView: View {
                     }
                 }
 
-                ToolbarItem(placement: .principal) {
-                    Text("Tasks Manager")
-                        .font(Theme.Text.pageTitle)
-                }
+               
             }
             .onAppear {
                 selectedActivityRef = normalizedActivityRef(activityRef)

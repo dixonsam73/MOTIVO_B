@@ -118,10 +118,7 @@ struct ActivityListView: View {
             .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Activities")
-                        .font(Theme.Text.pageTitle)
-                }
+                
                 ToolbarItem(placement: .cancellationAction) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.backward")

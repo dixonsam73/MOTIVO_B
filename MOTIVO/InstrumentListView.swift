@@ -89,16 +89,10 @@ struct InstrumentListView: View {
                     .onDelete(perform: delete)
                 }
             }
-            .navigationTitle("Instruments")
+            .navigationTitle("")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .principal) {
-                    Text("Instruments")
-                        .font(Theme.Text.pageTitle)
-                        .foregroundStyle(.primary)
-                }
-
-                ToolbarItem(placement: .cancellationAction) {
+ToolbarItem(placement: .cancellationAction) {
                     Button(action: { dismiss() }) {
                         Image(systemName: "chevron.backward")
                             .font(.body.weight(.semibold))
