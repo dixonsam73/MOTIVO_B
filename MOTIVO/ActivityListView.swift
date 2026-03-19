@@ -67,7 +67,7 @@ struct ActivityListView: View {
                             .font(Theme.Text.body)
                     }
                     HStack {
-                        TextField("e.g., Sight-reading", text: $newActivity)
+                        TextField("e.g., Recital", text: $newActivity)
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.words)
                             .focused($isAddActivityFocused)
