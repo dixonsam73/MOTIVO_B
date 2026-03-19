@@ -146,6 +146,10 @@
 // SCOPE: Feed Filter: keep strict parity; increase selector closed-state size to match prior Picker.menu label
 // SEARCH-TOKEN: 20260304_124300_Threads_S6_ContentView_ThreadOptionsAndRowMeta
 
+// CHANGE-ID: 20260319_103400_ContentView_WeeklyPulseTimeOnly_Refined_4d2e
+// SCOPE: Refine the weekly pulse card to a softer visual treatment with time-only display and more breathing room for the muted streak line. No other UI or logic changes.
+// SEARCH-TOKEN: 20260319_073600_ContentView_WeeklyPulseCard_6f3c
+
 import SwiftUI
 import CoreData
 import Combine
@@ -325,7 +329,6 @@ fileprivate struct SessionsRootView: View {
     @State private var feedNavFreezeTask: Task<Void, Never>? = nil
     @State private var remotePrewarmNonce: Int = 0
 
-    @State private var statsRange: StatsRange = .week
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
     @State private var backendOwnerStatsSnapshot: BackendStatsSnapshot? = nil
     @State private var backendStatsLoading: Bool = false
@@ -456,35 +459,40 @@ fileprivate struct SessionsRootView: View {
             VStack(spacing: Theme.Spacing.l) {
 
                 // ---------- Stats (card) ----------
-                VStack(alignment: .leading, spacing: 8) {
-                    // CHANGE-ID: 20251015_132452-me-entry-icononly
-                    // SCOPE: Add inline icon-only Me dashboard entry in Your Sessions header
-                    HStack {
-                        Text("Your Sessions").sectionHeader()
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text("This week")
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
                         Spacer()
                         NavigationLink {
                             MeView()
                         } label: {
-                            Image(systemName: "chart.bar")
-                                .imageScale(.large)
+                            Image(systemName: "rectangle.stack")
+                                .imageScale(.medium)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
                                 .accessibilityLabel("Open Insights")
                         }
                         .buttonStyle(.plain)
                     }
-                    Picker("", selection: $statsRange) {
-                        ForEach(StatsRange.allCases) { r in
-                            Text(r.label).tag(r)
-                        }
-                    }
-                    .pickerStyle(.segmented)
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("\(displayedStats.count) activities")
-                        Text("\(StatsHelper.formatDuration(displayedStats.seconds)) total")
+                    VStack(alignment: .leading, spacing: 4) {
+                        if displayedStats.count == 0 {
+                            Text("No sessions yet this week")
+                                .font(Theme.Text.body)
+                        } else {
+                            Text(StatsHelper.formatDuration(displayedStats.seconds))
+                                .font(Theme.Text.body)
+                            if displayedCurrentStreak >= 2 {
+                                Text("\(displayedCurrentStreak)-day streak")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                                    .padding(.top, 4)
+                            }
+                        }
                     }
                 }
                 .onAppear { refreshStats() }
-                .onChange(of: statsRange) { _, _ in refreshStats() }
                 .onReceive(
                     NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)
                         .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
@@ -1181,6 +1189,17 @@ Spacer()
         backendOwnerStatsSnapshot?.stats ?? stats
     }
 
+    private var displayedCurrentStreak: Int {
+        if let backendOwnerStatsSnapshot {
+            return backendOwnerStatsSnapshot.currentStreakDays
+        }
+        guard let uid = effectiveUserID else { return 0 }
+        let ownerSessions = sessions.filter {
+            ($0.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == uid
+        }
+        return Stats.currentStreakDays(sessions: ownerSessions)
+    }
+
     private func refreshStats() {
         // De-populate when signed out to mirror other data fields
         guard userID != nil else {
@@ -1196,8 +1215,8 @@ Spacer()
                 backendStatsLoading = false
                 return
             }
-            stats = try StatsHelper.fetchStats(in: viewContext, range: statsRange, ownerUserID: uid)
-            let localOwnerHasSessions = hasLocalOwnerSessions(for: uid, range: statsRange)
+            stats = try StatsHelper.fetchStats(in: viewContext, range: .week, ownerUserID: uid)
+            let localOwnerHasSessions = hasLocalOwnerSessions(for: uid, range: .week)
             if localOwnerHasSessions {
                 backendOwnerStatsSnapshot = nil
                 backendStatsLoading = false
@@ -1249,7 +1268,7 @@ Spacer()
         case .success(let posts):
             backendOwnerStatsSnapshot = StatsHelper.buildBackendStatsSnapshot(
                 posts: posts,
-                range: statsRange,
+                range: .week,
                 ownerUserID: backendOwnerUserID
             )
         case .failure:
