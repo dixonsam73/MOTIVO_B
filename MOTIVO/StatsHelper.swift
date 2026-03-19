@@ -227,21 +227,14 @@ enum StatsHelper {
 
     static func backendCurrentStreakDays(from posts: [BackendPost], now: Date = Date(), cal: Calendar = .current) -> Int {
         let days = distinctPracticeDays(from: posts, cal: cal)
-        guard days.isEmpty == false else { return 0 }
+        guard let mostRecentDay = days.max() else { return 0 }
 
         let today = cal.startOfDay(for: now)
-        let yesterday = cal.date(byAdding: .day, value: -1, to: today) ?? today
-        let anchor: Date
-        if days.contains(today) {
-            anchor = today
-        } else if days.contains(yesterday) {
-            anchor = yesterday
-        } else {
-            return 0
-        }
+        let gap = cal.dateComponents([.day], from: mostRecentDay, to: today).day ?? 0
+        guard gap <= 1 else { return 0 }
 
         var streak = 0
-        var cursor = anchor
+        var cursor = mostRecentDay
         while days.contains(cursor) {
             streak += 1
             guard let previousDay = cal.date(byAdding: .day, value: -1, to: cursor) else { break }

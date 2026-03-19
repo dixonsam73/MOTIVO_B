@@ -31,13 +31,19 @@ enum Stats {
         return secs / 60
     }
 
-    /// Current streak up to *today* (Europe/London). Counts consecutive days with ≥1 session.
+    /// Current streak using end-of-next-day expiry (Europe/London).
+    /// A streak remains alive for the whole calendar day after the most recent practice day,
+    /// and expires only once the gap reaches 2 or more calendar days.
     static func currentStreakDays(sessions: [Session]) -> Int {
         let dayKeys = dayKeySet(sessions: sessions)
-        guard !dayKeys.isEmpty else { return 0 }
+        guard let mostRecentDay = dayKeys.max() else { return 0 }
+
         let todayKey = dayKey(for: Date())
+        let gap = cal.dateComponents([.day], from: mostRecentDay, to: todayKey).day ?? 0
+        guard gap <= 1 else { return 0 }
+
         var streak = 0
-        var cursor = todayKey
+        var cursor = mostRecentDay
         while dayKeys.contains(cursor) {
             streak += 1
             guard let prev = cal.date(byAdding: .day, value: -1, to: cursor) else { break }
@@ -99,7 +105,7 @@ enum Stats {
             bestStart = runStart
             bestEnd = keys.last ?? runStart
         }
-return (days: bestDays, start: bestStart, end: bestEnd)
+        return (days: bestDays, start: bestStart, end: bestEnd)
     }
 
     // MARK: - Helpers
