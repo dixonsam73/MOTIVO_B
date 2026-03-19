@@ -708,7 +708,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     if durationSeconds == 0 {
                         Text("Duration must be greater than 0")
                             .font(.footnote)
-                            .foregroundColor(.red)
+                            .foregroundColor(.red.opacity(0.65))
                     }
                 }
                 .cardSurface()
