@@ -96,6 +96,7 @@ struct PracticeTimerView: View {
     
     // Review sheet
     @State var showReviewSheet = false
+    @State private var showManualAddSheet: Bool = false
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -812,6 +813,9 @@ private func loadPracticeDefaultsIfNeeded() {
         .sheet(isPresented: $showReviewSheet) {
             reviewSheet
         }
+        .sheet(isPresented: $showManualAddSheet) {
+            AddEditSessionView()
+        }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
             if oldValue == true && newValue == false && didSaveFromReview == false {
@@ -962,8 +966,22 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var sessionMetaSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Session")
-                .sectionHeader()
+            HStack(alignment: .firstTextBaseline) {
+                Text("Session")
+                    .sectionHeader()
+
+                Spacer()
+
+                Button {
+                    showManualAddSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                        .imageScale(.medium)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                        .accessibilityLabel("Add Session")
+                }
+                .buttonStyle(.plain)
+            }
 
             SessionMetaCard(
                 instruments: instruments,

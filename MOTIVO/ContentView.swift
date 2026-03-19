@@ -150,6 +150,7 @@
 // SCOPE: Refine the weekly pulse card to a softer visual treatment with time-only display and more breathing room for the muted streak line. No other UI or logic changes.
 // SEARCH-TOKEN: 20260319_073600_ContentView_WeeklyPulseCard_6f3c
 
+// CHANGE-ID: 20260319_111600_ContentView_RecordOnlyToolbar_8a1d
 import SwiftUI
 import CoreData
 import Combine
@@ -842,40 +843,22 @@ fileprivate struct SessionsRootView: View {
                     .buttonStyle(.plain)
                     .accessibilityLabel("People")
 Spacer()
-                    HStack(spacing: TopButtonsUI.spacing) {
-                        Button { showTimer = true } label: {
-                            ZStack {
-                              Circle()
-                                .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                    Button { showTimer = true } label: {
+                        ZStack {
+                          Circle()
+                            .fill(.thinMaterial)
+                            .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                              Image(systemName: "record.circle.fill")
-                                .font(.system(size: TopButtonsUI.iconRecord, weight: .regular))
-                                .foregroundStyle(.red)
-                            }
-                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                            .contentShape(Circle())
-                            .buttonStyle(.plain)
+                          Image(systemName: "record.circle.fill")
+                            .font(.system(size: TopButtonsUI.iconRecord, weight: .regular))
+                            .foregroundStyle(.red.opacity(0.75))
                         }
-                        .accessibilityLabel("Start session timer")
-                        Button { showAdd = true } label: {
-                            ZStack {
-                              Circle()
-                                .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
-
-                              Image(systemName: "plus")
-                                .font(.system(size: TopButtonsUI.iconPlus, weight: .semibold))
-                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                            }
-                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                            .contentShape(Circle())
-                            .buttonStyle(.plain)
-                        }
-                        .accessibilityLabel("Add manual session")
+                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                        .contentShape(Circle())
+                        .buttonStyle(.plain)
                     }
+                    .accessibilityLabel("Start session timer")
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
@@ -894,14 +877,14 @@ Spacer()
             #endif
 #if DEBUG
 .overlay(alignment: .top) {
-    // Invisible hit area over the top toolbar GAP only (between avatar and record/add cluster)
-    // Avatar is 40pt + 8pt padding each side inside the inset; right cluster has two 40pt buttons with spacing TopButtonsUI.spacing.
+    // Invisible hit area over the top toolbar GAP only (between avatar and record button)
+    // Avatar is 40pt + 8pt padding each side inside the inset; right side has one 40pt record button.
     // We place a narrow transparent rectangle centered in the remaining space so it doesn't intercept button taps.
     GeometryReader { geo in
-        // Compute a conservative gap: full width minus left avatar block (~56) and right cluster (~40+spacing+40) and horizontal insets
+        // Compute a conservative gap: full width minus left avatar/search block and the single right-side record button, plus horizontal insets
         let horizontalInset = Theme.Spacing.l
         let leftBlock: CGFloat = (40 + 16) + TopButtonsUI.spacing + 40   // avatar block + spacing + People button
-        let rightBlock: CGFloat = 40 + TopButtonsUI.spacing + 40
+        let rightBlock: CGFloat = 40
         let totalReserved = leftBlock + rightBlock + (horizontalInset * 2)
         let gapWidth = max(0, geo.size.width - totalReserved)
         // Place a centered rect in the remaining space with a modest width to avoid overlap
