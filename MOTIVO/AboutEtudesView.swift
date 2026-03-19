@@ -53,11 +53,11 @@ struct AboutEtudesView: View {
                 }
 
                 aboutSection("Session Timer") {
-                    Text("Start a session using the record button in the Feed. Use the + button to add a session manually if you didn’t log it at the time.")
+                    Text("Start a session using the record button in the Feed.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Log practice, rehearsal, performance, writing, or recording. Attach photos, record audio or video, and trim before saving. You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                    Text("Log practice, rehearsal, performance, writing, or recording. Attach photos, record audio or video, and trim before saving. Use the + button to add a session manually if you didn’t log it at the time. You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
