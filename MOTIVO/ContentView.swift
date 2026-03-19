@@ -479,8 +479,9 @@ fileprivate struct SessionsRootView: View {
 
                     VStack(alignment: .leading, spacing: 4) {
                         if displayedStats.count == 0 {
-                            Text("No sessions yet this week")
+                            Text("0h 0m")
                                 .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                         } else {
                             Text(StatsHelper.formatDuration(displayedStats.seconds))
                                 .font(Theme.Text.body)
