@@ -140,6 +140,7 @@ struct AddEditSessionView: View {
 
     // Editing existing session or creating new
     var session: Session? = nil
+    var onSuccessfulSave: (() -> Void)? = nil
 
     // Form state
     @State private var instruments: [Instrument] = []
@@ -342,8 +343,9 @@ struct AddEditSessionView: View {
         stripFocusTokensFromNotes_edit()
     }
 
-    init(session: Session? = nil) {
+    init(session: Session? = nil, onSuccessfulSave: (() -> Void)? = nil) {
         self.session = session
+        self.onSuccessfulSave = onSuccessfulSave
         // Seed time-related fields on edit so they don’t flash empty
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
@@ -1599,9 +1601,13 @@ private var instrumentPicker: some View {
             )
 
             viewContext.processPendingChanges()
-            dismiss()
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
+            if let onSuccessfulSave {
+                onSuccessfulSave()
+            } else {
+                dismiss()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { dismiss() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { dismiss() }
+            }
         } catch {
             // Delete any files written during this commit attempt by scanning attachments without permanent IDs
             if let set = s.attachments as? Set<Attachment> {

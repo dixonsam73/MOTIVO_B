@@ -814,7 +814,9 @@ private func loadPracticeDefaultsIfNeeded() {
             reviewSheet
         }
         .sheet(isPresented: $showManualAddSheet) {
-            AddEditSessionView()
+            AddEditSessionView(onSuccessfulSave: {
+                isPresented = false
+            })
         }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
