@@ -3333,10 +3333,16 @@ fileprivate struct RemotePostRowTwin: View {
         "\(dayPart(for: timestampDate)) \(activityName)"
     }
 
+    private var recognizedDefaultDescriptions: [String] {
+        let parts = ["Morning", "Afternoon", "Evening", "Late Night"]
+        return parts.map { "\($0) \(activityName)" }
+    }
+
     private var isUsingDefaultDescription: Bool {
         let desc = postDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !desc.isEmpty else { return false }
-        return desc.caseInsensitiveCompare(defaultDescription) == .orderedSame
+        if desc.caseInsensitiveCompare(defaultDescription) == .orderedSame { return true }
+        return recognizedDefaultDescriptions.contains { desc.caseInsensitiveCompare($0) == .orderedSame }
     }
 
     private var feedTitle: String {
