@@ -2239,11 +2239,13 @@ fileprivate struct SessionRow: View {
                             return ""
                         }()
 
-                        HStack(spacing: 6) {
-                            Text(realName).font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(realName)
+                                .font(.subheadline.weight(.semibold))
                             if !loc.isEmpty {
-                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                                Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
+                                Text(loc)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
 
@@ -3520,11 +3522,13 @@ private var extraAttachmentCount: Int {
                         }()
 
 
-                        HStack(spacing: 6) {
-                            Text(realName).font(.subheadline.weight(.semibold))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(realName)
+                                .font(.subheadline.weight(.semibold))
                             if !loc.isEmpty {
-                                Text("•").foregroundStyle(Theme.Colors.secondaryText)
-                                Text(loc).font(.footnote).foregroundStyle(Theme.Colors.secondaryText)
+                                Text(loc)
+                                    .font(.footnote)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
 
