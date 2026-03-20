@@ -1113,7 +1113,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
     // Instrument picker sheet (wheel style)
 private var instrumentPicker: some View {
     NavigationStack {
-        VStack {
+        VStack(spacing: 0) {
             Picker("Instrument", selection: $instrument) {
                 Text("Select instrument…").tag(nil as Instrument?)
                 ForEach(instruments, id: \.self) { inst in
@@ -1121,8 +1121,13 @@ private var instrumentPicker: some View {
                 }
             }
             .pickerStyle(.wheel)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(.top, Theme.Spacing.s)
+        .appBackground()
         .navigationTitle("Instrument")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { showInstrumentPicker = false }
@@ -1138,7 +1143,7 @@ private var instrumentPicker: some View {
 
     private var activityPickerPinned: some View {
         NavigationStack {
-            VStack {
+            VStack(spacing: 0) {
                 let choices = activityChoicesPinned()
                 Picker("", selection: $activityChoice) {
                     ForEach(choices, id: \.self) { choice in
@@ -1147,9 +1152,13 @@ private var instrumentPicker: some View {
                 }
                 .pickerStyle(.wheel)
                 .labelsHidden()
-                Spacer()
+                .frame(maxWidth: .infinity, alignment: .top)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .padding(.top, Theme.Spacing.s)
+            .appBackground()
             .navigationTitle("Activity")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { showActivityPicker = false }
