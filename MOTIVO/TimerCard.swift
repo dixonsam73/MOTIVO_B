@@ -1,14 +1,5 @@
-// CHANGE-ID: 20260320_092900_timer_button_state_fix
-// SCOPE: Keep Reset and Finish coloured in paused state; only grey at true zero/start state.
-//
-//  TimerCard.swift
-//  MOTIVO
-//
-//  Created by Samuel Dixon on 03/12/2025.
-//
-// TimerCard.swift
-// Extracted from PracticeTimerView (start / pause / reset / finish UI).
-// No logic changes; pure UI wrapper around timer controls.
+// CHANGE-ID: 20260320_144800_static_paused_emphasis
+// SCOPE: Keep button visuals intact while making paused state slightly stronger on Start and preserving active Reset/Finish after session start
 
 import SwiftUI
 
@@ -22,6 +13,10 @@ struct TimerCard: View {
 
     private var hasStarted: Bool {
         elapsedLabel != "00:00"
+    }
+
+    private var isPaused: Bool {
+        !isRunning && hasStarted
     }
 
     var body: some View {
@@ -39,8 +34,7 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                // Use primaryAction (original green) instead of accent
-                .background(Theme.Colors.primaryAction.opacity(0.18))
+                .background(Theme.Colors.primaryAction.opacity(isPaused ? 0.10 : 0.18))
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -50,7 +44,7 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background((hasStarted ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)))
+                .background(hasStarted ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12))
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
@@ -60,7 +54,7 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background((hasStarted ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
+                .background(hasStarted ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12))
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
