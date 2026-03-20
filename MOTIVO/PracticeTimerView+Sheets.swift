@@ -13,7 +13,7 @@ extension PracticeTimerView {
     @ViewBuilder
      var instrumentPickerSheet: some View {
             NavigationView {
-                VStack {
+                VStack(spacing: 0) {
                     Picker("Instrument", selection: $instrumentIndex) {
                         ForEach(instruments.indices, id: \.self) { i in
                             Text(instruments[i].name ?? "Instrument").tag(i)
@@ -21,8 +21,13 @@ extension PracticeTimerView {
                     }
                     .pickerStyle(.wheel)
                     .labelsHidden()
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .padding(.top, Theme.Spacing.s)
+                .appBackground()
                 .navigationTitle("Instrument")
+                .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .confirmationAction) {
                         Button("Done") {

@@ -1,11 +1,16 @@
-// CHANGE-ID: 20260318_201500_SessionHeaderExternalize
-// SCOPE: Visual-only refinement — remove in-card "Session" header from SessionMetaCard so PracticeTimerView can render it as an external section header. No logic or row layout changes.
-
-// SessionMetaCard.swift
-// Extracted from PracticeTimerView selectorsCard (no logic changes).
+// CHANGE-ID: 20260320_095800_PressedRowAffordance
+// SCOPE: Affordance-only refinement — add subtle pressed-state feedback to tappable Instrument and Activity rows in SessionMetaCard. No layout, typography, spacing, or logic changes.
 
 import SwiftUI
 import CoreData
+
+private struct SessionMetaRowButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .contentShape(Rectangle())
+            .opacity(configuration.isPressed ? 0.82 : 1.0)
+    }
+}
 
 struct SessionMetaCard: View {
     let instruments: [Instrument]
@@ -47,7 +52,7 @@ struct SessionMetaCard: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(SessionMetaRowButtonStyle())
                     } else if let only = instruments.first {
                         HStack {
                             Text("Instrument")
@@ -70,7 +75,7 @@ struct SessionMetaCard: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(SessionMetaRowButtonStyle())
                 }
             }
             .cardSurface()
