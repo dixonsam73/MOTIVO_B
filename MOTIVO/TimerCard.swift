@@ -1,3 +1,5 @@
+// CHANGE-ID: 20260320_092900_timer_button_state_fix
+// SCOPE: Keep Reset and Finish coloured in paused state; only grey at true zero/start state.
 //
 //  TimerCard.swift
 //  MOTIVO
@@ -17,6 +19,10 @@ struct TimerCard: View {
     let onPause: () -> Void
     let onReset: () -> Void
     let onFinish: () -> Void
+
+    private var hasStarted: Bool {
+        elapsedLabel != "00:00"
+    }
 
     var body: some View {
         VStack(alignment: .center, spacing: Theme.Spacing.s) {
@@ -44,34 +50,22 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background((isRunning ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)))
+                .background((hasStarted ? Color.orange.opacity(0.18) : Color.secondary.opacity(0.12)))
                 .foregroundStyle(.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
-                if isRunning {
-                    Button("Finish") {
-                        onFinish()
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.clear)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                } else {
-                    Button("Finish") {
-                        onFinish()
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(.clear)
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background((isRunning ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
-                    .foregroundStyle(.primary)
-                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                Button("Finish") {
+                    onFinish()
                 }
+                .buttonStyle(.bordered)
+                .tint(.clear)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .background((hasStarted ? Color.red.opacity(0.18) : Color.secondary.opacity(0.12)))
+                .foregroundStyle(.primary)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             .frame(maxWidth: 520)
-                       .frame(maxWidth: .infinity, alignment: .center)
+            .frame(maxWidth: .infinity, alignment: .center)
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .cardSurface()
