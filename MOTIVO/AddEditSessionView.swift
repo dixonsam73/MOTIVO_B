@@ -397,8 +397,14 @@ struct AddEditSessionView: View {
                 .accessibilityIdentifier("button.saveSession")
             }
         }
-        .sheet(isPresented: $showInstrumentPicker) { instrumentPicker }
-        .sheet(isPresented: $showActivityPicker) { activityPickerPinned }
+        .sheet(isPresented: $showInstrumentPicker) {
+            instrumentPicker
+                .presentationDetents([.medium])
+        }
+        .sheet(isPresented: $showActivityPicker) {
+            activityPickerPinned
+                .presentationDetents([.medium])
+        }
         .sheet(isPresented: $showThreadPicker) { ThreadPickerView(selectedThread: $threadLabel, recentThreads: existingThreadOptions) }
         .sheet(isPresented: $showStartPicker) { startPicker }
         .sheet(isPresented: $showDurationPicker) { durationPicker }

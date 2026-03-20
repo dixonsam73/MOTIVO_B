@@ -806,9 +806,11 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .sheet(isPresented: $showInstrumentSheet) {
             instrumentPickerSheet
+                .presentationDetents([.medium])
         }
         .sheet(isPresented: $showActivitySheet) {
             activityPickerSheet
+                .presentationDetents([.medium])
         }
         .sheet(isPresented: $showReviewSheet) {
             reviewSheet

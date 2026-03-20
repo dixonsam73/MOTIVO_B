@@ -1388,6 +1388,7 @@ isPrivate: { url in
                 }
             }
         }
+        .presentationDetents([.medium])
     }
 
     private var startPicker: some View {
