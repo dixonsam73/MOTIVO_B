@@ -67,7 +67,7 @@ struct AboutEtudesView: View {
                 }
 
                 aboutSection("Insights") {
-                    Text("Tap the three bars in the Your Sessions header to view long-term insights and activity trends.")
+                    Text("Tap the stacked rectangles in the This Week header to view long-term insights and activity trends.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
