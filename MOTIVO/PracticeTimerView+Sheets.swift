@@ -10,6 +10,7 @@ import AVKit
 import UIKit
 import Vision
 import VisionKit
+import UniformTypeIdentifiers
 
 extension PracticeTimerView {
 
@@ -466,6 +467,17 @@ private struct TaskImportEditorSheet: View {
 
     @State private var rawText: String
     @State private var draftLines: [EditableImportedTaskLine]
+    @State private var draggedLineID: UUID? = nil
+    @State private var suppressRawTextObserver: Bool = false
+    @FocusState private var focusedDraftLineID: UUID?
+
+    private let dragHandleWidth: CGFloat = 20
+    private let deleteIconWidth: CGFloat = 20
+    private let dragDeleteSpacing: CGFloat = 16
+
+    private var rightControlZoneWidth: CGFloat {
+        dragHandleWidth + dragDeleteSpacing + deleteIconWidth
+    }
 
     init(
         title: String,
@@ -477,9 +489,12 @@ private struct TaskImportEditorSheet: View {
         self.initialRawText = initialRawText
         self.onCancel = onCancel
         self.onConfirm = onConfirm
-        _rawText = State(initialValue: initialRawText)
+
         let parsed = PracticeTimerView.parseImportedTaskLines(from: initialRawText)
         _draftLines = State(initialValue: parsed.map { EditableImportedTaskLine(text: $0) })
+
+        let initialBuffer = parsed.isEmpty ? initialRawText : ""
+        _rawText = State(initialValue: initialBuffer)
     }
 
     private var cleanedDraftLines: [String] {
@@ -490,63 +505,62 @@ private struct TaskImportEditorSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                Section(header: Text("Paste or type").sectionHeader()) {
-                    TextEditor(text: $rawText)
-                        .frame(minHeight: 140)
-                        .font(Theme.Text.body)
-                        .scrollContentBackground(.hidden)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Paste or type")
+                        .sectionHeader()
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button("Review import") {
-                        draftLines = PracticeTimerView.parseImportedTaskLines(from: rawText)
-                            .map { EditableImportedTaskLine(text: $0) }
-                    }
-                    .font(Theme.Text.body)
-                    .foregroundStyle(Theme.Colors.primaryAction)
-                    .buttonStyle(.plain)
-                }
+                    VStack(alignment: .leading, spacing: 0) {
+                        if draftLines.isEmpty == false {
+                            ForEach($draftLines) { $line in
+                                importedTaskRow($line)
+                                    .onDrop(
+                                        of: [UTType.text],
+                                        delegate: ImportedTaskLineDropDelegate(
+                                            targetID: line.id,
+                                            draftLines: $draftLines,
+                                            draggedLineID: $draggedLineID
+                                        )
+                                    )
 
-                Section(header: Text("Review").sectionHeader()) {
-                    if draftLines.isEmpty {
-                        Text("No tasks parsed yet.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    } else {
-                        ForEach($draftLines) { $line in
-                            HStack(spacing: 8) {
-                                Image(systemName: "line.3.horizontal")
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-
-                                TextField("Task", text: $line.text)
-                                    .textFieldStyle(.plain)
-
-                                Button(role: .destructive) {
-                                    draftLines.removeAll { $0.id == line.id }
-                                } label: {
-                                    Image(systemName: "trash")
-                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                if line.id != draftLines.last?.id {
+                                    Divider()
                                 }
-                                .buttonStyle(.plain)
                             }
-                            .padding(.vertical, 1)
                         }
-                        .onMove { indices, newOffset in
-                            draftLines.move(fromOffsets: indices, toOffset: newOffset)
+
+                        if draftLines.isEmpty == false && rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false {
+                            Divider()
+                                .padding(.vertical, 8)
                         }
+
+                        TextEditor(text: $rawText)
+                            .frame(minHeight: draftLines.isEmpty ? 140 : 44)
+                            .font(Theme.Text.body)
+                            .scrollContentBackground(.hidden)
+                            .onChange(of: rawText) { oldValue, newValue in
+                                handleRawTextChanged(oldValue: oldValue, newValue: newValue)
+                            }
                     }
+                    .cardSurface()
                 }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
+            .scrollDismissesKeyboard(.interactively)
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissKeyboard()
+                }
+            )
             .appBackground()
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Cancel") { onCancel() }
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    EditButton()
-                        .disabled(draftLines.isEmpty)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Use for this session") {
@@ -559,6 +573,111 @@ private struct TaskImportEditorSheet: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func importedTaskRow(_ line: Binding<EditableImportedTaskLine>) -> some View {
+        HStack(spacing: 6) {
+            TextField("Task", text: line.text)
+                .textFieldStyle(.plain)
+                .font(Theme.Text.body)
+                .disableAutocorrection(true)
+                .focused($focusedDraftLineID, equals: line.wrappedValue.id)
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: dragDeleteSpacing) {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                    .frame(width: dragHandleWidth, height: 28)
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        dismissKeyboard()
+                        draggedLineID = line.wrappedValue.id
+                        return NSItemProvider(object: NSString(string: line.wrappedValue.id.uuidString))
+                    }
+                    .accessibilityLabel("Reorder task")
+
+                Button(role: .destructive) {
+                    draftLines.removeAll { $0.id == line.wrappedValue.id }
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                        .frame(width: deleteIconWidth, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(width: rightControlZoneWidth, alignment: .trailing)
+        }
+        .padding(.vertical, 10)
+        .contentShape(Rectangle())
+    }
+
+    private func handleRawTextChanged(oldValue: String, newValue: String) {
+        guard suppressRawTextObserver == false else { return }
+        guard newValue.contains("\n") else { return }
+
+        let isLikelyPaste = abs(newValue.count - oldValue.count) > 1
+
+        let committedText: String
+        let remainingText: String
+
+        if isLikelyPaste {
+            committedText = newValue
+            remainingText = ""
+        } else if newValue.hasSuffix("\n") {
+            committedText = newValue
+            remainingText = ""
+        } else {
+            var components = newValue.components(separatedBy: .newlines)
+            remainingText = components.popLast() ?? ""
+            committedText = components.joined(separator: "\n")
+        }
+
+        let parsed = PracticeTimerView.parseImportedTaskLines(from: committedText)
+        guard parsed.isEmpty == false else { return }
+
+        draftLines.append(contentsOf: parsed.map { EditableImportedTaskLine(text: $0) })
+
+        suppressRawTextObserver = true
+        rawText = remainingText
+        suppressRawTextObserver = false
+
+        dismissKeyboard()
+    }
+
+    private func dismissKeyboard() {
+        focusedDraftLineID = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+
+private struct ImportedTaskLineDropDelegate: DropDelegate {
+    let targetID: UUID
+    @Binding var draftLines: [EditableImportedTaskLine]
+    @Binding var draggedLineID: UUID?
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedLineID,
+              draggedLineID != targetID,
+              let from = draftLines.firstIndex(where: { $0.id == draggedLineID }),
+              let to = draftLines.firstIndex(where: { $0.id == targetID })
+        else { return }
+
+        if draftLines[to].id != draggedLineID {
+            let moving = draftLines.remove(at: from)
+            draftLines.insert(moving, at: to)
+        }
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedLineID = nil
+        return true
     }
 }
 
