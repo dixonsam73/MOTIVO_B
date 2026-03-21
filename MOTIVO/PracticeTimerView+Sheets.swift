@@ -513,7 +513,7 @@ private struct TaskImportEditorSheet: View {
 
                         Spacer()
 
-                        Button("Paste") {
+                        Button {
                             guard let pasted = UIPasteboard.general.string,
                                   pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
                             else { return }
@@ -522,8 +522,17 @@ private struct TaskImportEditorSheet: View {
                             rawText = pasted
                             suppressRawTextObserver = false
                             handleRawTextChanged(oldValue: "", newValue: pasted)
+                        } label: {
+                            Text("Paste")
+                                .font(Theme.Text.body.weight(.semibold))
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                        .fill(Color.secondary.opacity(0.12))
+                                )
                         }
-                        .font(Theme.Text.body)
                         .buttonStyle(.plain)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
