@@ -192,16 +192,21 @@ struct PracticeTimerView: View {
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
+    @State var showTaskImportSourceDialog: Bool = false
+    @State var showTaskImportReplaceAppendDialog: Bool = false
+    @State var showTaskImportPasteSheet: Bool = false
+    @State var showTaskImportScanSheet: Bool = false
+    @State var pendingImportedTaskLines: [String] = []
     struct TaskLine: Identifiable {
         let id: UUID = UUID()
         var text: String
         var isDone: Bool = false
     }
-    @State private var taskLines: [TaskLine] = []
-    @State private var autoTaskTexts: [UUID: String] = [:]
+    @State var taskLines: [TaskLine] = []
+    @State var autoTaskTexts: [UUID: String] = [:]
 
     // NEW: track explicit clears so we don't auto-refill
-    @State private var userClearedTasksForCurrentContext: Bool = false
+    @State var userClearedTasksForCurrentContext: Bool = false
     // NEW: remember which activity's defaults we last loaded (for activity-change behaviour)
     @State private var lastDefaultsActivityRef: String? = nil
 
@@ -462,6 +467,8 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+
+
     // MARK: - Cards (split to help the type-checker)
 
     @ViewBuilder
@@ -472,6 +479,34 @@ private func loadPracticeDefaultsIfNeeded() {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
+        .confirmationDialog("Import tasks", isPresented: $showTaskImportSourceDialog, titleVisibility: .visible) {
+            Button("Paste or type") {
+                showTaskImportPasteSheet = true
+            }
+            Button("Scan") {
+                showTaskImportScanSheet = true
+            }
+            Button("Cancel", role: .cancel) { }
+        }
+        .confirmationDialog("Imported tasks", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
+            Button("Replace current tasks") {
+                applyPendingImportedTasks(appending: false)
+            }
+            Button("Append to current tasks") {
+                applyPendingImportedTasks(appending: true)
+            }
+            Button("Cancel", role: .cancel) {
+                pendingImportedTaskLines.removeAll()
+            }
+        } message: {
+            Text("Choose how to apply the imported task list to this session.")
+        }
+        .sheet(isPresented: $showTaskImportPasteSheet) {
+            taskImportPasteSheet
+        }
+        .sheet(isPresented: $showTaskImportScanSheet) {
+            taskImportScanSheet
+        }
         // Single, unified prefetch path to avoid duplicate first-paint work
         .task {
             guard !didPrefetch else { return }
@@ -1081,6 +1116,9 @@ private var tasksPadSection: some View {
             loadPracticeDefaultsIfNeeded()
             loadDefaultTasksIfNeeded()
             persistTasksSnapshot()
+        },
+        onImportTasks: {
+            showTaskImportSourceDialog = true
         }
     )
     .cardSurface()
@@ -1380,6 +1418,7 @@ private var tasksPadSection: some View {
         finalizedStartDate = resolvedStart
         finalizedDuration = total
         pause()
+        persistTasksSnapshot()
         didSaveFromReview = false
         showReviewSheet = true
     }
@@ -1629,7 +1668,7 @@ private var tasksPadSection: some View {
         let isDone: Bool
     }
 
-    private func persistTasksSnapshot() {
+    func persistTasksSnapshot() {
         let d = UserDefaults.standard
         let encoder = JSONEncoder()
         let payload: [SerializedTaskLine] = taskLines.map { SerializedTaskLine(id: $0.id, text: $0.text, isDone: $0.isDone) }

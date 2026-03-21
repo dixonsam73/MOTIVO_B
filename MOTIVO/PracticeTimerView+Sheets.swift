@@ -7,6 +7,9 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+import UIKit
+import Vision
+import VisionKit
 
 extension PracticeTimerView {
 
@@ -353,4 +356,312 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
             }
         }
 
+
+    // MARK: - Task Import Helpers
+
+    @ViewBuilder
+    var taskImportPasteSheet: some View {
+        TaskImportEditorSheet(
+            title: "Import tasks",
+            initialRawText: "",
+            onCancel: {
+                showTaskImportPasteSheet = false
+            },
+            onConfirm: { imported in
+                beginImportedTaskFlow(with: imported)
+                showTaskImportPasteSheet = false
+            }
+        )
+    }
+
+    @ViewBuilder
+    var taskImportScanSheet: some View {
+        TaskImportScanSheet(
+            title: "Scan tasks",
+            onCancel: {
+                showTaskImportScanSheet = false
+            },
+            onConfirm: { imported in
+                beginImportedTaskFlow(with: imported)
+                showTaskImportScanSheet = false
+            }
+        )
+    }
+
+    func beginImportedTaskFlow(with imported: [String]) {
+        let cleaned = imported
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !cleaned.isEmpty else { return }
+
+        pendingImportedTaskLines = cleaned
+
+        let hasExistingTasks = taskLines.contains {
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+
+        if hasExistingTasks {
+            showTaskImportReplaceAppendDialog = true
+        } else {
+            applyPendingImportedTasks(appending: false)
+        }
+    }
+
+    func applyPendingImportedTasks(appending: Bool) {
+        let importedTaskLines = pendingImportedTaskLines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !importedTaskLines.isEmpty else {
+            pendingImportedTaskLines.removeAll()
+            return
+        }
+
+        let mapped = importedTaskLines.map { TaskLine(text: $0, isDone: false) }
+
+        if appending {
+            taskLines.append(contentsOf: mapped)
+        } else {
+            taskLines = mapped
+        }
+
+        autoTaskTexts.removeAll()
+        userClearedTasksForCurrentContext = false
+        persistTasksSnapshot()
+        pendingImportedTaskLines.removeAll()
+    }
+
+    static func parseImportedTaskLines(from rawText: String) -> [String] {
+        rawText
+            .components(separatedBy: .newlines)
+            .map { line in
+                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return "" }
+                return trimmed.replacingOccurrences(
+                    of: #"^\s*(?:[-*•◦▪︎▹►]+|\d+[\.\)]|[A-Za-z][\.\)])\s*"#,
+                    with: "",
+                    options: .regularExpression
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            .filter { !$0.isEmpty }
+    }
 }
+
+private struct EditableImportedTaskLine: Identifiable, Equatable {
+    let id: UUID
+    var text: String
+
+    init(id: UUID = UUID(), text: String) {
+        self.id = id
+        self.text = text
+    }
+}
+
+private struct TaskImportEditorSheet: View {
+    let title: String
+    let initialRawText: String
+    let onCancel: () -> Void
+    let onConfirm: ([String]) -> Void
+
+    @State private var rawText: String
+    @State private var draftLines: [EditableImportedTaskLine]
+
+    init(
+        title: String,
+        initialRawText: String,
+        onCancel: @escaping () -> Void,
+        onConfirm: @escaping ([String]) -> Void
+    ) {
+        self.title = title
+        self.initialRawText = initialRawText
+        self.onCancel = onCancel
+        self.onConfirm = onConfirm
+        _rawText = State(initialValue: initialRawText)
+        let parsed = PracticeTimerView.parseImportedTaskLines(from: initialRawText)
+        _draftLines = State(initialValue: parsed.map { EditableImportedTaskLine(text: $0) })
+    }
+
+    private var cleanedDraftLines: [String] {
+        draftLines
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(header: Text("Paste or type").sectionHeader()) {
+                    TextEditor(text: $rawText)
+                        .frame(minHeight: 140)
+                        .font(Theme.Text.body)
+                        .scrollContentBackground(.hidden)
+
+                    Button("Review import") {
+                        draftLines = PracticeTimerView.parseImportedTaskLines(from: rawText)
+                            .map { EditableImportedTaskLine(text: $0) }
+                    }
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Colors.primaryAction)
+                    .buttonStyle(.plain)
+                }
+
+                Section(header: Text("Review").sectionHeader()) {
+                    if draftLines.isEmpty {
+                        Text("No tasks parsed yet.")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    } else {
+                        ForEach($draftLines) { $line in
+                            HStack(spacing: 8) {
+                                Image(systemName: "line.3.horizontal")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                                TextField("Task", text: $line.text)
+                                    .textFieldStyle(.plain)
+
+                                Button(role: .destructive) {
+                                    draftLines.removeAll { $0.id == line.id }
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 1)
+                        }
+                        .onMove { indices, newOffset in
+                            draftLines.move(fromOffsets: indices, toOffset: newOffset)
+                        }
+                    }
+                }
+            }
+            .appBackground()
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { onCancel() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    EditButton()
+                        .disabled(draftLines.isEmpty)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Use for this session") {
+                        let lines = cleanedDraftLines.isEmpty
+                            ? PracticeTimerView.parseImportedTaskLines(from: rawText)
+                            : cleanedDraftLines
+                        onConfirm(lines)
+                    }
+                    .disabled(cleanedDraftLines.isEmpty && PracticeTimerView.parseImportedTaskLines(from: rawText).isEmpty)
+                }
+            }
+        }
+    }
+}
+
+private struct TaskImportScanSheet: View {
+    let title: String
+    let onCancel: () -> Void
+    let onConfirm: ([String]) -> Void
+
+    @State private var scannedText: String = ""
+    @State private var showScanner: Bool = true
+
+    var body: some View {
+        Group {
+            if showScanner {
+                TaskDocumentScanner(
+                    onCancel: {
+                        onCancel()
+                    },
+                    onRecognizedText: { text in
+                        scannedText = text
+                        showScanner = false
+                    }
+                )
+                .ignoresSafeArea()
+            } else {
+                TaskImportEditorSheet(
+                    title: title,
+                    initialRawText: scannedText,
+                    onCancel: onCancel,
+                    onConfirm: onConfirm
+                )
+            }
+        }
+    }
+}
+
+private struct TaskDocumentScanner: UIViewControllerRepresentable {
+    let onCancel: () -> Void
+    let onRecognizedText: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onCancel: onCancel, onRecognizedText: onRecognizedText)
+    }
+
+    func makeUIViewController(context: Context) -> VNDocumentCameraViewController {
+        let controller = VNDocumentCameraViewController()
+        controller.delegate = context.coordinator
+        return controller
+    }
+
+    func updateUIViewController(_ uiViewController: VNDocumentCameraViewController, context: Context) { }
+
+    final class Coordinator: NSObject, VNDocumentCameraViewControllerDelegate {
+        let onCancel: () -> Void
+        let onRecognizedText: (String) -> Void
+
+        init(onCancel: @escaping () -> Void, onRecognizedText: @escaping (String) -> Void) {
+            self.onCancel = onCancel
+            self.onRecognizedText = onRecognizedText
+        }
+
+        func documentCameraViewControllerDidCancel(_ controller: VNDocumentCameraViewController) {
+            onCancel()
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFailWithError error: Error) {
+            onCancel()
+        }
+
+        func documentCameraViewController(_ controller: VNDocumentCameraViewController, didFinishWith scan: VNDocumentCameraScan) {
+            Task {
+                var chunks: [String] = []
+
+                for pageIndex in 0..<scan.pageCount {
+                    let image = scan.imageOfPage(at: pageIndex)
+                    if let recognized = await recognizeText(in: image), !recognized.isEmpty {
+                        chunks.append(recognized)
+                    }
+                }
+
+                await MainActor.run {
+                    onRecognizedText(chunks.joined(separator: "\n"))
+                }
+            }
+        }
+
+        private func recognizeText(in image: UIImage) async -> String? {
+            guard let cgImage = image.cgImage else { return nil }
+
+            return await withCheckedContinuation { continuation in
+                let request = VNRecognizeTextRequest { request, _ in
+                    let text = (request.results as? [VNRecognizedTextObservation])?
+                        .compactMap { $0.topCandidates(1).first?.string }
+                        .joined(separator: "\n")
+                    continuation.resume(returning: text)
+                }
+                request.recognitionLevel = .accurate
+                request.usesLanguageCorrection = true
+
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                try? handler.perform([request])
+            }
+        }
+    }
+}
+

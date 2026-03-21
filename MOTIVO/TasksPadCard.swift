@@ -20,6 +20,7 @@ struct TasksPadCard: View {
     let onHandleReturn: (UUID) -> Void
     let onPersistSnapshot: () -> Void
     let onExpand: () -> Void
+    let onImportTasks: () -> Void
 
     var body: some View {
         Group {
@@ -40,6 +41,16 @@ struct TasksPadCard: View {
                     .sectionHeader()
 
                 Spacer(minLength: 0)
+
+                Button(action: {
+                    onImportTasks()
+                }) {
+                    Text("Import tasks")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(tasksAccent)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Import tasks")
 
                 // Discrete "Clear all" – wipes pad, no auto-refill
                 Button(action: {
@@ -161,4 +172,3 @@ struct TasksPadCard: View {
         .padding(.vertical, 8)
     }
 }
-
