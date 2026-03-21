@@ -69,7 +69,7 @@ extension PracticeTimerView {
                 instrument: instrument,
                 activityTypeRaw: activity.rawValue,
                 activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
-                notesPrefill: composeCompletedTasksNotesString(),
+                notesPrefill: nil,
                 prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                 prefillAttachmentNames: audioTitles,
                 onSaved: {

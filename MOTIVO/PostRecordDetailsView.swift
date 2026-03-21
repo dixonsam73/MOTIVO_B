@@ -82,6 +82,14 @@ private struct AttachmentViewerRequest: Identifiable {
     let audioURLs: [URL]
 }
 
+private struct PersistedTaskLine_PRDV_Stage1: Decodable {
+    let id: UUID
+    let text: String
+    let isDone: Bool
+}
+
+
+
 
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
@@ -128,6 +136,8 @@ struct PostRecordDetailsView: View {
     @State private var initialAutoTitle = ""
     
     @State private var areNotesPrivate: Bool = false
+    @State private var includeTasksInNotes: Bool = false
+    @State private var injectedCompletedTasksBlock: String? = nil
 
 
     @FocusState private var isActivityDetailFocused: Bool
@@ -168,6 +178,7 @@ struct PostRecordDetailsView: View {
     private let sessionIDKey = "PracticeTimer.currentSessionID"
     private let lastSeenSessionIDKey = "PostRecordDetailsView.lastSeenSessionID"
     private let sessionStartTimestampKey = "PracticeTimer.currentSessionStartTimestamp"
+    private let timerTaskLinesKey = "PracticeTimer.taskLines"
 
     private func currentSessionID() -> String? {
         UserDefaults.standard.string(forKey: sessionIDKey)
@@ -556,6 +567,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                                 .font(.footnote)
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
+                        Toggle("Include tasks in notes", isOn: $includeTasksInNotes)
+                            .font(Theme.Text.body)
                         TextEditor(text: $notes)
                             .focused($isNotesFocused)
                             .frame(minHeight: 120)
@@ -618,6 +631,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             }
             .onAppear {
                 loadDraftIsPublicIfNeeded()
+            }
+            .onChange(of: includeTasksInNotes) { _ in
+                syncCompletedTasksIntoVisibleNotes()
             }
             .onChange(of: isPublic) { _ in
                 persistDraftIsPublic()
@@ -1514,6 +1530,54 @@ isPrivate: { url in
         }
     }
 
+    private func completedTasksNotesStringForCurrentSession() -> String? {
+        guard let data = UserDefaults.standard.data(forKey: timerTaskLinesKey),
+              let decoded = try? JSONDecoder().decode([PersistedTaskLine_PRDV_Stage1].self, from: data) else {
+            return nil
+        }
+
+        let trimmedCompleted = decoded
+            .filter { $0.isDone }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        guard !trimmedCompleted.isEmpty else { return nil }
+        return trimmedCompleted.map { "• \($0)" }.joined(separator: "\n")
+    }
+
+    private func notesIncludingCompletedTasksIfNeeded() -> String {
+        notes.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func syncCompletedTasksIntoVisibleNotes() {
+        let previousBlock = injectedCompletedTasksBlock?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let previousBlock, !previousBlock.isEmpty {
+            let suffixWithSpacing = "\n\n" + previousBlock
+            let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedNotes == previousBlock {
+                notes = ""
+            } else if notes.hasSuffix(suffixWithSpacing) {
+                notes.removeLast(suffixWithSpacing.count)
+            }
+            injectedCompletedTasksBlock = nil
+        }
+
+        guard includeTasksInNotes, let completedTasks = completedTasksNotesStringForCurrentSession() else {
+            return
+        }
+
+        let trimmedCompleted = completedTasks.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedCompleted.isEmpty else { return }
+
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmedNotes.isEmpty {
+            notes = trimmedCompleted
+        } else {
+            notes += "\n\n" + trimmedCompleted
+        }
+        injectedCompletedTasksBlock = trimmedCompleted
+    }
+
     private func preselectFocusFromNotesIfNeeded() {
         guard selectedDotIndex == nil, !notes.isEmpty else { return }
 
@@ -1583,7 +1647,7 @@ isPrivate: { url in
         if s.entity.attributesByName.keys.contains("areNotesPrivate") {
             s.setValue(areNotesPrivate, forKey: "areNotesPrivate")
         }
-        s.notes = notes
+        s.notes = notesIncludingCompletedTasksIfNeeded()
 
         s.setValue(activityDetail.trimmingCharacters(in: .whitespacesAndNewlines), forKey: "activityDetail")
         if s.entity.attributesByName.keys.contains("threadLabel") {
