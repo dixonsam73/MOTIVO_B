@@ -405,6 +405,7 @@ private func loadPracticeDefaultsIfNeeded() {
         autoTaskTexts.removeAll()
         userClearedTasksForCurrentContext = false
         lastDefaultsActivityRef = nil
+        showTasksPad = false
         persistTasksSnapshot()
     }
 
