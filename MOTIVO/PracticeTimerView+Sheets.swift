@@ -507,9 +507,26 @@ private struct TaskImportEditorSheet: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Paste or type")
-                        .sectionHeader()
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                    HStack(alignment: .center, spacing: 12) {
+                        Text("Add tasks")
+                            .sectionHeader()
+
+                        Spacer()
+
+                        Button("Paste") {
+                            guard let pasted = UIPasteboard.general.string,
+                                  pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+                            else { return }
+
+                            suppressRawTextObserver = true
+                            rawText = pasted
+                            suppressRawTextObserver = false
+                            handleRawTextChanged(oldValue: "", newValue: pasted)
+                        }
+                        .font(Theme.Text.body)
+                        .buttonStyle(.plain)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     VStack(alignment: .leading, spacing: 0) {
                         if draftLines.isEmpty == false {
