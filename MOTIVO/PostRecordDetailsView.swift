@@ -540,6 +540,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         Text("Share with followers").sectionHeader()
                         Toggle("On", isOn: $isPublic)
                             .font(Theme.Text.body)
+                            .tint(Theme.Colors.accent)
                     }
                     .cardSurface()
 
@@ -569,6 +570,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         }
                         Toggle("Include tasks in notes", isOn: $includeTasksInNotes)
                             .font(Theme.Text.body)
+                            .tint(Theme.Colors.accent)
                         TextEditor(text: $notes)
                             .focused($isNotesFocused)
                             .frame(minHeight: 120)
