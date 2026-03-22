@@ -480,15 +480,6 @@ private func loadPracticeDefaultsIfNeeded() {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
-        .confirmationDialog("Import tasks", isPresented: $showTaskImportSourceDialog, titleVisibility: .visible) {
-            Button("Paste or type") {
-                showTaskImportPasteSheet = true
-            }
-            Button("Scan") {
-                showTaskImportScanSheet = true
-            }
-            Button("Cancel", role: .cancel) { }
-        }
         .confirmationDialog("Imported tasks", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
             Button("Replace current tasks") {
                 applyPendingImportedTasks(appending: false)
@@ -1119,7 +1110,7 @@ private var tasksPadSection: some View {
             persistTasksSnapshot()
         },
         onImportTasks: {
-            showTaskImportSourceDialog = true
+            showTaskImportPasteSheet = true
         }
     )
     .cardSurface()

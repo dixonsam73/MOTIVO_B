@@ -362,13 +362,11 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
 
     @ViewBuilder
     var taskImportPasteSheet: some View {
-        TaskImportEditorSheet(
-            title: "Import tasks",
-            initialRawText: "",
-            onCancel: {
+        TaskImportSourceSheet(
+            onClose: {
                 showTaskImportPasteSheet = false
             },
-            onConfirm: { imported in
+            onConfirmImportedLines: { imported in
                 beginImportedTaskFlow(with: imported)
                 showTaskImportPasteSheet = false
             }
@@ -446,6 +444,256 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 ).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .filter { !$0.isEmpty }
+    }
+}
+
+private struct GlobalSavedTaskSet: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var items: [String]
+}
+
+private enum TaskImportSourceOption: String, Identifiable, CaseIterable {
+    case loadSavedSet
+    case pasteOrType
+    case scan
+
+    var id: String { rawValue }
+}
+
+private struct TaskImportSourceSheet: View {
+    let onClose: () -> Void
+    let onConfirmImportedLines: ([String]) -> Void
+
+    @State private var savedTaskSets: [GlobalSavedTaskSet] = []
+    @State private var activeOption: TaskImportSourceOption? = nil
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Import tasks")
+                        .sectionHeader()
+
+                    VStack(spacing: 12) {
+                        importOptionButton(
+                            title: "Paste or type"
+                        ) {
+                            activeOption = .pasteOrType
+                        }
+
+                        importOptionButton(
+                            title: "Scan"
+                        ) {
+                            activeOption = .scan
+                        }
+
+                        importOptionButton(
+                            title: "Load saved set",
+                            isEnabled: savedTaskSets.isEmpty == false
+                        ) {
+                            activeOption = .loadSavedSet
+                        }
+                    }
+                    .cardSurface()
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .appBackground()
+           
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { onClose() }
+                }
+            }
+            .onAppear {
+                savedTaskSets = loadAllSavedTaskSets()
+            }
+            .sheet(item: $activeOption) { option in
+                switch option {
+                case .loadSavedSet:
+                    TaskImportSavedSetPickerSheet(
+                        savedTaskSets: savedTaskSets,
+                        onCancel: {
+                            activeOption = nil
+                        },
+                        onSelect: { selectedSet in
+                            activeOption = nil
+                            onConfirmImportedLines(selectedSet.items)
+                        }
+                    )
+                case .pasteOrType:
+                    TaskImportEditorSheet(
+                        title: "Import tasks",
+                        initialRawText: "",
+                        onCancel: {
+                            activeOption = nil
+                        },
+                        onConfirm: { imported in
+                            activeOption = nil
+                            onConfirmImportedLines(imported)
+                        }
+                    )
+                case .scan:
+                    TaskImportScanSheet(
+                        title: "Scan tasks",
+                        onCancel: {
+                            activeOption = nil
+                        },
+                        onConfirm: { imported in
+                            activeOption = nil
+                            onConfirmImportedLines(imported)
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func importOptionButton(
+        title: String,
+        isEnabled: Bool = true,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(Theme.Text.body.weight(.semibold))
+                .foregroundStyle(isEnabled ? .primary : Theme.Colors.secondaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 18)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                        .fill(Color.secondary.opacity(0.12))
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isEnabled == false)
+        .opacity(isEnabled ? 1.0 : 0.6)
+    }
+
+    private func loadAllSavedTaskSets() -> [GlobalSavedTaskSet] {
+        let defaults = UserDefaults.standard
+        let decoder = JSONDecoder()
+
+        var mergedByID: [UUID: GlobalSavedTaskSet] = [:]
+
+        for (key, value) in defaults.dictionaryRepresentation() {
+            guard key.hasSuffix("::saved_sets_v1") else { continue }
+
+            let data: Data?
+            if let directData = defaults.data(forKey: key) {
+                data = directData
+            } else if let valueData = value as? Data {
+                data = valueData
+            } else {
+                data = nil
+            }
+
+            guard let data,
+                  let decoded = try? decoder.decode([GlobalSavedTaskSet].self, from: data) else { continue }
+
+            for set in decoded {
+                let cleanedItems = set.items
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                guard cleanedItems.isEmpty == false else { continue }
+
+                let cleanedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard cleanedName.isEmpty == false else { continue }
+
+                mergedByID[set.id] = GlobalSavedTaskSet(
+                    id: set.id,
+                    name: cleanedName,
+                    items: cleanedItems
+                )
+            }
+        }
+
+        return mergedByID.values.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+}
+
+private struct TaskImportSavedSetPickerSheet: View {
+    let savedTaskSets: [GlobalSavedTaskSet]
+    let onCancel: () -> Void
+    let onSelect: (GlobalSavedTaskSet) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Saved task sets")
+                        .sectionHeader()
+
+                    if savedTaskSets.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("No saved task sets yet.")
+                                .font(Theme.Text.body.weight(.semibold))
+                                .foregroundStyle(.primary)
+
+                            Text("Save a task set in Tasks Manager to load it here.")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 14)
+                        .cardSurface()
+                    } else {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(savedTaskSets) { taskSet in
+                                Button {
+                                    onSelect(taskSet)
+                                } label: {
+                                    HStack(spacing: 12) {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(taskSet.name)
+                                                .font(Theme.Text.body.weight(.semibold))
+                                                .foregroundStyle(.primary)
+
+                                            Text("\(taskSet.items.count) \(taskSet.items.count == 1 ? "task" : "tasks")")
+                                                .font(Theme.Text.meta)
+                                                .foregroundStyle(Theme.Colors.secondaryText)
+                                        }
+
+                                        Spacer(minLength: 12)
+
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                    }
+                                    .padding(.vertical, 14)
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+
+                                if taskSet.id != savedTaskSets.last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .cardSurface()
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .appBackground()
+            .navigationTitle("Load saved set")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { onCancel() }
+                }
+            }
+        }
     }
 }
 
