@@ -60,7 +60,7 @@ struct TasksManagerView: View {
     @State private var selectedTaskSetID: UUID? = nil
     @State private var savedTaskSets: [SavedTaskSet] = []
     @State private var draftTaskSetName: String = ""
-    @State private var showTaskImportSourceDialog: Bool = false
+    @State private var showTaskImportLauncher: Bool = false
     @State private var showTaskImportPasteSheet: Bool = false
     @State private var showTaskImportScanSheet: Bool = false
     @State private var showSaveCurrentTaskSetPrompt: Bool = false
@@ -305,7 +305,7 @@ struct TasksManagerView: View {
                 }
 
                 Section {
-                    Button(action: { showTaskImportSourceDialog = true }) {
+                    Button(action: { showTaskImportLauncher = true }) {
                         Text("Import tasks")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.accent)
@@ -347,8 +347,7 @@ struct TasksManagerView: View {
                 }
             }
             .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+                        .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
@@ -359,23 +358,34 @@ struct TasksManagerView: View {
                     }
                 }
             }
-            .confirmationDialog("Import tasks", isPresented: $showTaskImportSourceDialog, titleVisibility: .visible) {
-                Button("Paste or type") {
-                    pastedImportText = ""
-                    importDraftItems = []
-                    importDraftLines = []
-                    importDraftTaskSetName = defaultImportedTaskSetName(from: [])
-                    showTaskImportPasteSheet = true
-                }
-                Button("Scan") {
-                    importDraftItems = []
-                    importDraftLines = []
-                    importDraftTaskSetName = defaultImportedTaskSetName(from: [])
-                    showTaskImportScanSheet = true
-                }
-                Button("Cancel", role: .cancel) { }
+            
+            .fullScreenCover(isPresented: $showTaskImportLauncher) {
+                TasksManagerImportLauncherSheet(
+                    onCancel: {
+                        showTaskImportLauncher = false
+                    },
+                    onPasteOrType: {
+                        pastedImportText = ""
+                        importDraftItems = []
+                        importDraftLines = []
+                        importDraftTaskSetName = defaultImportedTaskSetName(from: [])
+                        showTaskImportLauncher = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            showTaskImportPasteSheet = true
+                        }
+                    },
+                    onScan: {
+                        importDraftItems = []
+                        importDraftLines = []
+                        importDraftTaskSetName = defaultImportedTaskSetName(from: [])
+                        showTaskImportLauncher = false
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            showTaskImportScanSheet = true
+                        }
+                    }
+                )
             }
-            .sheet(isPresented: $showTaskImportPasteSheet) {
+.sheet(isPresented: $showTaskImportPasteSheet) {
                 NavigationStack {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 12) {
@@ -461,8 +471,7 @@ struct TasksManagerView: View {
                     .scrollDismissesKeyboard(.interactively)
                     .simultaneousGesture(TapGesture().onEnded { dismissImportedTaskKeyboard() })
                     .navigationTitle("")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
+                                        .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Cancel") {
                                 showTaskImportPasteSheet = false
@@ -555,8 +564,7 @@ struct TasksManagerView: View {
                         }
                     }
                     .navigationTitle("")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
+                                        .toolbar {
                         ToolbarItem(placement: .cancellationAction) {
                             Button("Done") {
                                 showDefaultTaskSetSheet = false
@@ -898,6 +906,81 @@ struct TasksManagerView: View {
     }
 }
 
+
+private struct TasksManagerImportLauncherSheet: View {
+    let onCancel: () -> Void
+    let onPasteOrType: () -> Void
+    let onScan: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .center, spacing: 12) {
+                Button("Cancel") {
+                    onCancel()
+                }
+                .font(Theme.Text.body.weight(.medium))
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 18)
+                .frame(height: 56)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Color.white.opacity(0.72))
+                )
+                .buttonStyle(.plain)
+
+                Spacer()
+
+                Spacer()
+
+                Color.clear
+                    .frame(width: 92, height: 56)
+            }
+
+            Text("Import tasks")
+                .sectionHeader()
+                .padding(.horizontal, 16)
+                .padding(.bottom, 18)
+
+            VStack(spacing: 12) {
+                Button(action: onPasteOrType) {
+                    Text("Paste or type")
+                        .font(Theme.Text.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                .fill(Color.secondary.opacity(0.12))
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                Button(action: onScan) {
+                    Text("Scan")
+                        .font(Theme.Text.body.weight(.semibold))
+                        .foregroundStyle(.primary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+                                .fill(Color.secondary.opacity(0.12))
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .cardSurface()
+            .padding(.horizontal, 16)
+
+            Spacer(minLength: 0)
+        }
+        .appBackground()
+    }
+}
+
+
 #if canImport(VisionKit) && canImport(UIKit)
 private struct TasksManagerImportScanSheet: UIViewControllerRepresentable {
     let onRecognizedText: (String) -> Void
@@ -984,8 +1067,7 @@ private struct TasksManagerImportScanSheet: View {
                 }
             }
             .navigationTitle("")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
+                        .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Close") {
                         onRecognizedText("")
@@ -998,3 +1080,4 @@ private struct TasksManagerImportScanSheet: View {
     }
 }
 #endif
+
