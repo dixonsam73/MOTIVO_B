@@ -27,6 +27,9 @@ struct TasksPadCard: View {
     private var rightControlZoneWidth: CGFloat {
         dragHandleWidth + dragDeleteSpacing + deleteIconWidth
     }
+    private var hasAnyTaskLines: Bool {
+        !taskLines.isEmpty
+    }
 
     var body: some View {
         Group {
@@ -77,23 +80,25 @@ struct TasksPadCard: View {
                 }
             }
 
-            HStack(alignment: .center, spacing: 12) {
-                Spacer(minLength: 0)
+            if hasAnyTaskLines {
+                HStack(alignment: .center, spacing: 12) {
+                    Spacer(minLength: 0)
 
-                Button(action: {
-                    onClearAll()
-                }) {
-                    Text("Clear set")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
+                    Button(action: {
+                        onClearAll()
+                    }) {
+                        Text("Clear set")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear task set")
+                    .frame(width: rightControlZoneWidth + 96, alignment: .trailing)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear task set")
-                .frame(width: rightControlZoneWidth + 96, alignment: .trailing)
+                .padding(.top, 0)
             }
-            .padding(.top, 0)
 
             HStack(alignment: .center, spacing: 12) {
                 Button(action: { onAddEmptyLine() }) {
