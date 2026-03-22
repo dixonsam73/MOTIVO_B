@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
+// SCOPE: Rename feed scope labels All→Feed and Mine→Journal, reorder segmented control to Journal then Feed, and default ContentView scope to Journal. No other UI or logic changes.
+// SEARCH-TOKEN: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
 // CHANGE-ID: 20260310_111500_OnboardingGateReactivity_7c4d
 // SCOPE: Restore AppSetUp presentation reactivity for true new accounts and incomplete local profiles while preserving second-device backend bootstrap hardening. No other UI or logic changes.
 // SEARCH-TOKEN: 20260310_111500_OnboardingGateReactivity_7c4d
@@ -204,8 +207,8 @@ fileprivate func from(_ code: Int16?) -> ActivityType {
 }
 
 fileprivate enum FeedScope: String, CaseIterable, Identifiable {
-    case all = "All"
-    case mine = "Mine"
+    case mine = "Journal"
+    case all = "Feed"
     var id: String { rawValue }
 }
 
@@ -319,7 +322,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedThread: String? = nil
-    @State private var selectedScope: FeedScope = .all
+    @State private var selectedScope: FeedScope = .mine
     @State private var searchText: String = ""
     @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
     @State private var debouncedQuery: String = ""
