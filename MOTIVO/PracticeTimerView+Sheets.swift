@@ -367,7 +367,7 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 showTaskImportPasteSheet = false
             },
             onConfirmImportedLines: { imported in
-                beginImportedTaskFlow(with: imported)
+                stagedImportedTaskLinesAfterPasteDismiss = imported
                 showTaskImportPasteSheet = false
             }
         )

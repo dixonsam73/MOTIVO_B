@@ -197,6 +197,7 @@ struct PracticeTimerView: View {
     @State var showTaskImportPasteSheet: Bool = false
     @State var showTaskImportScanSheet: Bool = false
     @State var pendingImportedTaskLines: [String] = []
+    @State var stagedImportedTaskLinesAfterPasteDismiss: [String] = []
     struct TaskLine: Identifiable {
         let id: UUID = UUID()
         var text: String
@@ -493,7 +494,12 @@ private func loadPracticeDefaultsIfNeeded() {
         } message: {
             Text("Choose how to apply the imported task list to this session.")
         }
-        .sheet(isPresented: $showTaskImportPasteSheet) {
+        .sheet(isPresented: $showTaskImportPasteSheet, onDismiss: {
+            guard !stagedImportedTaskLinesAfterPasteDismiss.isEmpty else { return }
+            let imported = stagedImportedTaskLinesAfterPasteDismiss
+            stagedImportedTaskLinesAfterPasteDismiss.removeAll()
+            beginImportedTaskFlow(with: imported)
+        }) {
             taskImportPasteSheet
         }
         .sheet(isPresented: $showTaskImportScanSheet) {
