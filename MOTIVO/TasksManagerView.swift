@@ -123,6 +123,7 @@ struct TasksManagerView: View {
     private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
     private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
     private var taskSetsKey: String { tasksKey + "::saved_sets_v1" }
+    private var globalTaskSetsKey: String { "practiceTasks_saved_sets_v2::" + ownerScope }
     private var defaultTaskSetIDKey: String { tasksKey + "::default_set_id_v1" }
 
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
@@ -285,7 +286,7 @@ struct TasksManagerView: View {
                         }
 
                     HStack {
-                        Text("Pre-fill task set")
+                        Text("Default task set")
                             .font(Theme.Text.body)
                         Spacer()
                         Button {
@@ -302,31 +303,34 @@ struct TasksManagerView: View {
                         }
                         .buttonStyle(.plain)
                     }
+                }
 
+                Section {
                     Button(action: { showTaskImportLauncher = true }) {
-                        Text("Import task set")
+                        Text("Import tasks")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.accent)
                     }
+
+                    if canSaveCurrentAsTaskSet {
+                        Button(action: saveCurrentItemsAsTaskSet) {
+                            Text("Save current list as task set")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
+                        }
+                    }
                 }
 
-                Section(header: Text("Tasks").sectionHeader()) {
-                    ForEach(items.indices, id: \.self) { index in
-                        Text(items[index])
-                            .font(Theme.Text.body)
-                    }
-                    .onDelete(perform: delete)
-                    .onMove(perform: move)
-
+                Section(header: Text("Add Task").sectionHeader()) {
                     HStack {
-                        TextField("+ Add task", text: $newItemText)
+                        TextField("Add task", text: $newItemText)
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.sentences)
                             .submitLabel(.done)
 
                         if !newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Button(action: addItem) {
-                                Text("+ Add task")
+                                Text("Add")
                                     .font(Theme.Text.body)
                                     .foregroundStyle(Theme.Colors.accent)
                             }
@@ -334,14 +338,13 @@ struct TasksManagerView: View {
                     }
                 }
 
-                if canSaveCurrentAsTaskSet {
-                    Section {
-                        Button(action: saveCurrentItemsAsTaskSet) {
-                            Text("Save as new task set")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.accent)
-                        }
+                Section(header: Text("Your Tasks").sectionHeader()) {
+                    ForEach(items.indices, id: \.self) { index in
+                        Text(items[index])
+                            .font(Theme.Text.body)
                     }
+                    .onDelete(perform: delete)
+                    .onMove(perform: move)
                 }
             }
             .navigationTitle("")
@@ -676,17 +679,76 @@ struct TasksManagerView: View {
     }
 
     private func loadSavedTaskSets() -> [SavedTaskSet] {
-        guard let data = UserDefaults.standard.data(forKey: taskSetsKey),
-              let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) else {
-            return []
+        let defaults = UserDefaults.standard
+        var merged: [SavedTaskSet] = []
+        var seenIDs = Set<UUID>()
+        var seenContentSignatures = Set<String>()
+
+        func merge(_ sets: [SavedTaskSet]) {
+            for set in sets {
+                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedItems = set.items
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                let contentSignature = trimmedName.lowercased() + "||" + normalizedItems.joined(separator: "\u{241E}").lowercased()
+
+                if seenIDs.contains(set.id) || seenContentSignatures.contains(contentSignature) {
+                    continue
+                }
+
+                seenIDs.insert(set.id)
+                seenContentSignatures.insert(contentSignature)
+                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: normalizedItems) : trimmedName, items: normalizedItems))
+            }
         }
-        return decoded
+
+        if let data = defaults.data(forKey: globalTaskSetsKey),
+           let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
+            merge(decoded)
+        }
+
+        let legacyKeys = legacyTaskSetKeysForMigration()
+        for key in legacyKeys {
+            guard let data = defaults.data(forKey: key),
+                  let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) else { continue }
+            merge(decoded)
+        }
+
+        if let data = try? JSONEncoder().encode(merged) {
+            defaults.set(data, forKey: globalTaskSetsKey)
+        }
+
+        return merged
     }
 
     private func saveSavedTaskSets() {
         if let data = try? JSONEncoder().encode(savedTaskSets) {
-            UserDefaults.standard.set(data, forKey: taskSetsKey)
+            UserDefaults.standard.set(data, forKey: globalTaskSetsKey)
         }
+    }
+
+    private func legacyTaskSetKeysForMigration() -> [String] {
+        var keys = Set<String>()
+
+        let activityRefs = allActivityRefs
+        let instrumentSuffixes: [String]
+        if shouldShowInstrumentSelector {
+            let ids = instrumentsForProfile.compactMap(\.id)
+            instrumentSuffixes = ids.isEmpty ? [""] : ids.map { "::inst:" + $0.uuidString }
+        } else {
+            instrumentSuffixes = [""]
+        }
+
+        for activityRef in activityRefs {
+            let normalizedRef = normalizedActivityRef(activityRef)
+            for instrumentSuffix in instrumentSuffixes {
+                let scopedTasksKey = "practiceTasks_v1::" + ownerScope + "::" + normalizedRef + instrumentSuffix
+                keys.insert(scopedTasksKey + "::saved_sets_v1")
+            }
+        }
+
+        keys.insert(taskSetsKey)
+        return Array(keys)
     }
 
     private func selectTaskSet(_ id: UUID) {
