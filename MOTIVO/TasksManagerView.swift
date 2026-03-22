@@ -285,7 +285,7 @@ struct TasksManagerView: View {
                         }
 
                     HStack {
-                        Text("Default task set")
+                        Text("Pre-fill task set")
                             .font(Theme.Text.body)
                         Spacer()
                         Button {
@@ -302,34 +302,31 @@ struct TasksManagerView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                }
 
-                Section {
                     Button(action: { showTaskImportLauncher = true }) {
-                        Text("Import tasks")
+                        Text("Import task set")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.accent)
                     }
-
-                    if canSaveCurrentAsTaskSet {
-                        Button(action: saveCurrentItemsAsTaskSet) {
-                            Text("Save current list as task set")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.accent)
-                        }
-                    }
                 }
 
-                Section(header: Text("Add Task").sectionHeader()) {
+                Section(header: Text("Tasks").sectionHeader()) {
+                    ForEach(items.indices, id: \.self) { index in
+                        Text(items[index])
+                            .font(Theme.Text.body)
+                    }
+                    .onDelete(perform: delete)
+                    .onMove(perform: move)
+
                     HStack {
-                        TextField("Add task", text: $newItemText)
+                        TextField("+ Add task", text: $newItemText)
                             .font(Theme.Text.body)
                             .textInputAutocapitalization(.sentences)
                             .submitLabel(.done)
 
                         if !newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                             Button(action: addItem) {
-                                Text("Add")
+                                Text("+ Add task")
                                     .font(Theme.Text.body)
                                     .foregroundStyle(Theme.Colors.accent)
                             }
@@ -337,13 +334,14 @@ struct TasksManagerView: View {
                     }
                 }
 
-                Section(header: Text("Your Tasks").sectionHeader()) {
-                    ForEach(items.indices, id: \.self) { index in
-                        Text(items[index])
-                            .font(Theme.Text.body)
+                if canSaveCurrentAsTaskSet {
+                    Section {
+                        Button(action: saveCurrentItemsAsTaskSet) {
+                            Text("Save as new task set")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
+                        }
                     }
-                    .onDelete(perform: delete)
-                    .onMove(perform: move)
                 }
             }
             .navigationTitle("")
