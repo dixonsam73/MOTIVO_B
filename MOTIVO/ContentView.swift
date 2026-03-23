@@ -1,6 +1,9 @@
-// CHANGE-ID: 20260323_081500_ContentView_JournalModeRedesign_c4a1
-// SCOPE: Journal mode only — group owner entries by Monday→Sunday weeks, consolidate local row metadata beneath title, add notes preview, and keep only Save in row actions. Feed/All, remote rows, filters, navigation, and detail behavior unchanged.
-// SEARCH-TOKEN: 20260323_081500_ContentView_JournalModeRedesign_c4a1
+// CHANGE-ID: 20260323_093800_ContentView_JournalFinalRefine_a91d
+// SCOPE: Journal mode only — remove grouped outer section container feel, render quieter ambient week headers on canvas, and increase section/card breathing room. Feed/All, card styling, logic, filters, navigation, and remote rows unchanged.
+// SEARCH-TOKEN: 20260323_093800_ContentView_JournalFinalRefine_a91d
+// CHANGE-ID: 20260323_084700_ContentView_JournalModeRefine_b7d2
+// SCOPE: Journal mode only — final visual refinement pass for grouped owner feed: anchor headers closer to first card, enforce single-line metadata truncation, separate metadata and notes, soften attachment indicator, and normalize card vertical rhythm. Feed/All, remote rows, filters, navigation, and behavior unchanged.
+// SEARCH-TOKEN: 20260323_084700_ContentView_JournalModeRefine_b7d2
 // CHANGE-ID: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
 // SCOPE: Rename feed scope labels All→Feed and Mine→Journal, reorder segmented control to Journal then Feed, and default ContentView scope to Journal. No other UI or logic changes.
 // SEARCH-TOKEN: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
@@ -621,52 +624,58 @@ fileprivate struct SessionsRootView: View {
                                         .id(topID)
                                 } else {
                                     ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
-                                        Section {
-                                            ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
-                                                ZStack {
-                                                    NavigationLink(
-                                                        destination: SessionDetailView(session: session),
-                                                        isActive: Binding(
-                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                            set: { active in if !active { pushSessionID = nil } }
-                                                        )
-                                                    ) { EmptyView() }
-                                                    .opacity(0)
-
-                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
-                                                        .contentShape(Rectangle())
-                                                        .onTapGesture {
-                                                            feedNavFreezeTask?.cancel()
-                                                            isFeedNavFrozen = true
-                                                            frozenFeedItems = renderFeedItems
-                                                            pushSessionID = (session.value(forKey: "id") as? UUID)
-                                                        }
-                                                        .cardSurface()
-                                                        .padding(.bottom, Theme.Spacing.section)
-                                                }
-                                                .id(sectionIndex == 0 && rowIndex == 0 ? topID : nil)
-                                                .buttonStyle(.plain)
-                                                .listRowSeparator(.hidden)
-                                                .deleteDisabled(false)
-                                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                                    Button {
-                                                        if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
-                                                            deleteSessions(at: IndexSet(integer: localIndex))
-                                                        }
-                                                    } label: {
-                                                        Label("Delete", systemImage: "trash")
-                                                    }
-                                                    .tint(.red)
-                                                }
-                                            }
-                                        } header: {
+                                        HStack {
                                             Text(section.title)
-                                                .font(Theme.Text.meta.weight(.semibold))
-                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                                .font(Theme.Text.meta)
+                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.54))
                                                 .textCase(nil)
-                                                .padding(.top, sectionIndex == 0 ? 0 : Theme.Spacing.m)
+                                            Spacer(minLength: 0)
                                         }
-                                        .listSectionSeparator(.hidden, edges: .all)
+                                        .padding(.top, sectionIndex == 0 ? 8 : Theme.Spacing.xl + 2)
+                                        .padding(.bottom, 4)
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+
+                                        ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
+                                            ZStack {
+                                                NavigationLink(
+                                                    destination: SessionDetailView(session: session),
+                                                    isActive: Binding(
+                                                        get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                        set: { active in if !active { pushSessionID = nil } }
+                                                    )
+                                                ) { EmptyView() }
+                                                .opacity(0)
+
+                                                SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
+                                                    .contentShape(Rectangle())
+                                                    .onTapGesture {
+                                                        feedNavFreezeTask?.cancel()
+                                                        isFeedNavFrozen = true
+                                                        frozenFeedItems = renderFeedItems
+                                                        pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                    }
+                                                    .cardSurface()
+                                                    .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
+                                            }
+                                            .id(sectionIndex == 0 && rowIndex == 0 ? topID : nil)
+                                            .buttonStyle(.plain)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                            .deleteDisabled(false)
+                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                Button {
+                                                    if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
+                                                        deleteSessions(at: IndexSet(integer: localIndex))
+                                                    }
+                                                } label: {
+                                                    Label("Delete", systemImage: "trash")
+                                                }
+                                                .tint(.red)
+                                            }
+                                        }
                                     }
                                 }
                             } else if renderFeedItems.isEmpty {
@@ -788,11 +797,22 @@ fileprivate struct SessionsRootView: View {
                     .listRowSeparator(.hidden)
                     .scrollContentBackground(.hidden)
                     .listRowBackground(Color.clear)
-                    .background(Theme.Colors.surface(colorScheme))
-                    .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
+                    .background(selectedScope == .mine ? Color.clear : Theme.Colors.surface(colorScheme))
+                    .clipShape(
+                        RoundedRectangle(
+                            cornerRadius: selectedScope == .mine ? 0 : Theme.Radius.card,
+                            style: .continuous
+                        )
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-                            .stroke(Theme.Colors.cardStroke(colorScheme), lineWidth: 1)
+                        RoundedRectangle(
+                            cornerRadius: selectedScope == .mine ? 0 : Theme.Radius.card,
+                            style: .continuous
+                        )
+                            .stroke(
+                                Theme.Colors.cardStroke(colorScheme).opacity(selectedScope == .mine ? 0 : 1),
+                                lineWidth: 1
+                            )
                     )
                 }
             }
@@ -2207,7 +2227,25 @@ fileprivate struct SessionRow: View {
 
     private var notesPreviewText: String? {
         let trimmed = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+        guard !trimmed.isEmpty else { return nil }
+
+        let bulletChars = CharacterSet(charactersIn: "•◦▪▫●○■□-–—*·")
+        let normalizedLines = trimmed
+            .components(separatedBy: .newlines)
+            .map { line -> String in
+                var value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                while let scalar = value.unicodeScalars.first, bulletChars.contains(scalar) {
+                    value = String(value.unicodeScalars.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                return value
+            }
+            .filter { !$0.isEmpty }
+
+        let flattened = normalizedLines.joined(separator: " ")
+            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return flattened.isEmpty ? nil : flattened
     }
 
     private var accessibilitySummary: String {
@@ -2498,10 +2536,10 @@ fileprivate struct SessionRow: View {
                     if !metaLine.isEmpty {
                         Text(metaLine)
                             .font(.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .lineLimit(2)
-                            .padding(.top, 1)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                            .padding(.top, 2)
                             .accessibilityLabel("Session metadata")
                             .accessibilityIdentifier("row.subtitle")
                     }
@@ -2509,9 +2547,9 @@ fileprivate struct SessionRow: View {
                     if let notesPreviewText {
                         Text(notesPreviewText)
                             .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
                             .lineLimit(2)
-                            .padding(.top, 2)
+                            .padding(.top, metaLine.isEmpty ? 4 : 6)
                             .accessibilityLabel("Notes preview")
                             .accessibilityIdentifier("row.notesPreview")
                     }
@@ -2572,24 +2610,26 @@ fileprivate struct SessionRow: View {
                     if viewerIsOwner || !isPrivate(fav) {
                         HStack(alignment: .center, spacing: 8) {
                             SingleAttachmentPreview(attachment: fav)
+                                .scaleEffect(scope == .mine ? 0.92 : 1.0, anchor: .leading)
+                                .opacity(scope == .mine ? 0.96 : 1.0)
                             Spacer()
                         }
-                        .padding(.top, 2)
+                        .padding(.top, scope == .mine ? 5 : 2)
                     }
                     // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
                     if let sid = sessionUUID {
                         interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
-                            .padding(.top, 6)
+                            .padding(.top, scope == .mine ? 7 : 6)
                     }
                 }
                 // Fallback: if there is no thumbnail, place the interaction row below the subtitle
                 else if let sid = sessionUUID {
                     interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
-                        .padding(.top, 6)
+                        .padding(.top, scope == .mine ? 7 : 6)
                 }
             }
         }
-        .padding(.vertical, !attachments.isEmpty ? 10 : 6)
+        .padding(.vertical, scope == .mine ? (!attachments.isEmpty ? 9 : 7) : (!attachments.isEmpty ? 10 : 6))
         .id(_refreshTick)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
@@ -2730,22 +2770,22 @@ fileprivate struct SessionRow: View {
             Spacer(minLength: 0)
 
             if attachmentCount > 0 {
-                HStack(spacing: 6) {
+                HStack(spacing: 5) {
                     Image(systemName: "paperclip")
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .foregroundStyle(scope == .mine ? Theme.Colors.secondaryText.opacity(0.56) : Theme.Colors.secondaryText)
                     Text("\(attachmentCount)")
-                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .foregroundStyle(scope == .mine ? Theme.Colors.secondaryText.opacity(0.62) : Theme.Colors.secondaryText)
                 }
-                .font(.caption2)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.thinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
-                .padding(6)
+                .font(scope == .mine ? .system(size: 10, weight: .medium) : .caption2)
+                .padding(.horizontal, scope == .mine ? 5 : 6)
+                .padding(.vertical, scope == .mine ? 2 : 3)
+                .background(scope == .mine ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.thinMaterial), in: Capsule())
+                .overlay(Capsule().stroke(Color.secondary.opacity(scope == .mine ? 0.08 : 0.12), lineWidth: 0.5))
+                .padding(scope == .mine ? 4 : 6)
                 .accessibilityLabel("\(attachmentCount) attachments")
             }
         }
-        .padding(.top, -2)
+        .padding(.top, scope == .mine ? -1 : -2)
         .font(.subheadline)
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $isShareSheetPresented) {
