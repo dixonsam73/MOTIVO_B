@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260323_081500_ContentView_JournalModeRedesign_c4a1
+// SCOPE: Journal mode only — group owner entries by Monday→Sunday weeks, consolidate local row metadata beneath title, add notes preview, and keep only Save in row actions. Feed/All, remote rows, filters, navigation, and detail behavior unchanged.
+// SEARCH-TOKEN: 20260323_081500_ContentView_JournalModeRedesign_c4a1
 // CHANGE-ID: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
 // SCOPE: Rename feed scope labels All→Feed and Mine→Journal, reorder segmented control to Journal then Feed, and default ContentView scope to Journal. No other UI or logic changes.
 // SEARCH-TOKEN: 20260322_121500_ContentView_FeedScopeLabelsAndDefault_3e7b
@@ -609,7 +612,64 @@ fileprivate struct SessionsRootView: View {
 
                             let renderFeedItems: [FeedRowItem] = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
 
-                            if renderFeedItems.isEmpty {
+                            if selectedScope == .mine {
+                                let journalSections = journalWeekSections
+
+                                if journalSections.isEmpty {
+                                    Text("No sessions match your filters yet.")
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .id(topID)
+                                } else {
+                                    ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
+                                        Section {
+                                            ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
+                                                ZStack {
+                                                    NavigationLink(
+                                                        destination: SessionDetailView(session: session),
+                                                        isActive: Binding(
+                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                            set: { active in if !active { pushSessionID = nil } }
+                                                        )
+                                                    ) { EmptyView() }
+                                                    .opacity(0)
+
+                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
+                                                        .contentShape(Rectangle())
+                                                        .onTapGesture {
+                                                            feedNavFreezeTask?.cancel()
+                                                            isFeedNavFrozen = true
+                                                            frozenFeedItems = renderFeedItems
+                                                            pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                        }
+                                                        .cardSurface()
+                                                        .padding(.bottom, Theme.Spacing.section)
+                                                }
+                                                .id(sectionIndex == 0 && rowIndex == 0 ? topID : nil)
+                                                .buttonStyle(.plain)
+                                                .listRowSeparator(.hidden)
+                                                .deleteDisabled(false)
+                                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                    Button {
+                                                        if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
+                                                            deleteSessions(at: IndexSet(integer: localIndex))
+                                                        }
+                                                    } label: {
+                                                        Label("Delete", systemImage: "trash")
+                                                    }
+                                                    .tint(.red)
+                                                }
+                                            }
+                                        } header: {
+                                            Text(section.title)
+                                                .font(Theme.Text.meta.weight(.semibold))
+                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                                                .textCase(nil)
+                                                .padding(.top, sectionIndex == 0 ? 0 : Theme.Spacing.m)
+                                        }
+                                        .listSectionSeparator(.hidden, edges: .all)
+                                    }
+                                }
+                            } else if renderFeedItems.isEmpty {
                                 Text("No sessions match your filters yet.")
                                     .foregroundStyle(Theme.Colors.secondaryText)
                                     .id(topID)
@@ -630,11 +690,11 @@ fileprivate struct SessionsRootView: View {
                                             SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
                                                 .contentShape(Rectangle())
                                                 .onTapGesture {
-                                                feedNavFreezeTask?.cancel()
-                                                isFeedNavFrozen = true
-                                                frozenFeedItems = renderFeedItems
-                                                pushSessionID = (session.value(forKey: "id") as? UUID)
-                                            }
+                                                    feedNavFreezeTask?.cancel()
+                                                    isFeedNavFrozen = true
+                                                    frozenFeedItems = renderFeedItems
+                                                    pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                }
                                                 .cardSurface()
                                                 .padding(.bottom, Theme.Spacing.section)
                                         }
@@ -652,7 +712,6 @@ fileprivate struct SessionsRootView: View {
                                             }
                                             .tint(.red)
                                         }
-                                        
 
                                     case .remote(let post):
                                         ZStack {
@@ -677,11 +736,11 @@ fileprivate struct SessionsRootView: View {
                                             )
                                             .contentShape(Rectangle())
                                             .onTapGesture {
-                                            feedNavFreezeTask?.cancel()
-                                            isFeedNavFrozen = true
-                                            frozenFeedItems = renderFeedItems
-                                            pushRemotePostID = post.id
-                                        }
+                                                feedNavFreezeTask?.cancel()
+                                                isFeedNavFrozen = true
+                                                frozenFeedItems = renderFeedItems
+                                                pushRemotePostID = post.id
+                                            }
                                             .cardSurface()
                                             .padding(.bottom, Theme.Spacing.section)
                                         }
@@ -691,9 +750,7 @@ fileprivate struct SessionsRootView: View {
                                         .deleteDisabled(true)
                                     }
                                 }
-                                
-                            }
-                        }
+                            }                        }
                         .listSectionSeparator(.hidden, edges: .all)
                     }
                     .task(id: selectedScope) {
@@ -1714,6 +1771,99 @@ Spacer()
     }
 
 
+    private struct JournalWeekSection: Identifiable {
+        let id: String
+        let title: String
+        let sessions: [Session]
+    }
+
+    private var journalGroupingCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = .current
+        calendar.firstWeekday = 2
+        calendar.minimumDaysInFirstWeek = 4
+        return calendar
+    }
+
+    private func journalWeekStart(for date: Date) -> Date {
+        let calendar = journalGroupingCalendar
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
+    private func journalDate(for session: Session) -> Date {
+        (session.value(forKey: "timestamp") as? Date) ?? Date.distantPast
+    }
+
+    private func journalWeekHeaderTitle(for weekStart: Date) -> String {
+        let calendar = journalGroupingCalendar
+        let thisWeekStart = journalWeekStart(for: Date())
+        let lastWeekStart = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeekStart) ?? thisWeekStart
+
+        if calendar.isDate(weekStart, inSameDayAs: thisWeekStart) {
+            return "This Week"
+        }
+        if calendar.isDate(weekStart, inSameDayAs: lastWeekStart) {
+            return "Last Week"
+        }
+
+        let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
+        return journalWeekDateRangeText(start: weekStart, end: weekEnd)
+    }
+
+    private func journalWeekDateRangeText(start: Date, end: Date) -> String {
+        let calendar = journalGroupingCalendar
+
+        let startDay = calendar.component(.day, from: start)
+        let endDay = calendar.component(.day, from: end)
+        let startMonth = Self.journalMonthFormatter.string(from: start)
+        let endMonth = Self.journalMonthFormatter.string(from: end)
+        let startYear = calendar.component(.year, from: start)
+        let endYear = calendar.component(.year, from: end)
+
+        if calendar.isDate(start, equalTo: end, toGranularity: .year),
+           calendar.isDate(start, equalTo: end, toGranularity: .month) {
+            return "\(startDay)–\(endDay) \(startMonth) \(startYear)"
+        }
+
+        if startYear == endYear {
+            return "\(startDay) \(startMonth) – \(endDay) \(endMonth) \(startYear)"
+        }
+
+        return "\(startDay) \(startMonth) \(startYear) – \(endDay) \(endMonth) \(endYear)"
+    }
+
+    private var journalWeekSections: [JournalWeekSection] {
+        let sortedSessions = filteredSessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+        guard !sortedSessions.isEmpty else { return [] }
+
+        let grouped = Dictionary(grouping: sortedSessions) { journalWeekStart(for: journalDate(for: $0)) }
+
+        return grouped.keys
+            .sorted(by: >)
+            .compactMap { weekStart in
+                guard let sessions = grouped[weekStart], !sessions.isEmpty else { return nil }
+                return JournalWeekSection(
+                    id: Self.journalWeekIDFormatter.string(from: weekStart),
+                    title: journalWeekHeaderTitle(for: weekStart),
+                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+                )
+            }
+    }
+
+    private static let journalMonthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = "MMMM"
+        return f
+    }()
+
+    private static let journalWeekIDFormatter: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withFullDate]
+        return f
+    }()
+
     // MARK: - Debounce
 
     private func setUpDebounce() {
@@ -1990,12 +2140,8 @@ fileprivate struct SessionRow: View {
     }
 
     private var dateTimeLine: String? {
-        // Expect last two parts to be time then date; produce 'DATE at TIME'
-        let parts = subtitleParts
-        guard parts.count >= 2 else { return nil }
-        let time = parts[parts.count - 2]
-        let date = parts[parts.count - 1]
-        return "\(date) at \(time)"
+        guard let date = session.value(forKey: "timestamp") as? Date else { return nil }
+        return "\(Self.sessionRowDateFormatter.string(from: date)) at \(Self.sessionRowTimeFormatter.string(from: date))"
     }
 
     private var instrumentActivityLine: String {
@@ -2008,18 +2154,91 @@ fileprivate struct SessionRow: View {
         }
     }
 
+    private var journalThreadLabel: String? {
+        ThreadLabelSanitizer.sanitize(session.threadLabel ?? "", maxLength: 32)
+    }
+
+    private var journalDateText: String? {
+        guard let date = session.value(forKey: "timestamp") as? Date else { return nil }
+        return Self.sessionRowDateFormatter.string(from: date)
+    }
+
+    private var journalTimeText: String? {
+        guard let date = session.value(forKey: "timestamp") as? Date else { return nil }
+        return Self.sessionRowTimeFormatter.string(from: date)
+    }
+
+    private var journalDurationText: String? {
+        let attrs = session.entity.attributesByName
+        let seconds: Int?
+        if attrs["durationSeconds"] != nil, let n = session.value(forKey: "durationSeconds") as? NSNumber {
+            seconds = n.intValue
+        } else if attrs["durationMinutes"] != nil, let n = session.value(forKey: "durationMinutes") as? NSNumber {
+            seconds = n.intValue * 60
+        } else if attrs["duration"] != nil, let n = session.value(forKey: "duration") as? NSNumber {
+            seconds = n.intValue * 60
+        } else if attrs["lengthMinutes"] != nil, let n = session.value(forKey: "lengthMinutes") as? NSNumber {
+            seconds = n.intValue * 60
+        } else {
+            seconds = nil
+        }
+
+        guard let seconds, seconds > 0 else { return nil }
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        if hours > 0 {
+            return minutes > 0 ? "\(hours)h \(minutes)m" : "\(hours)h"
+        }
+        return "\(minutes)m"
+    }
+
+    private var journalMetadataLine: String {
+        [
+            journalThreadLabel,
+            instrumentActivityLine.isEmpty ? nil : instrumentActivityLine,
+            journalDateText,
+            journalTimeText,
+            journalDurationText
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
+    private var notesPreviewText: String? {
+        let trimmed = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private var accessibilitySummary: String {
         var parts: [String] = []
         parts.append(feedTitle)
-        let meta = instrumentActivityLine
+        let meta = (scope == .mine) ? journalMetadataLine : instrumentActivityLine
         if !meta.isEmpty {
             parts.append(meta)
         }
-        if let dt = dateTimeLine {
+        if scope != .mine, let dt = dateTimeLine {
             parts.append(dt)
+        }
+        if scope == .mine, let notesPreviewText {
+            parts.append(notesPreviewText)
         }
         return parts.joined(separator: ". ")
     }
+
+    private static let sessionRowDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.setLocalizedDateFormatFromTemplate("d MMMM yyyy")
+        return f
+    }()
+
+    private static let sessionRowTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.setLocalizedDateFormatFromTemplate("j:mm")
+        return f
+    }()
 
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
@@ -2257,7 +2476,7 @@ fileprivate struct SessionRow: View {
                     .padding(.bottom, 2) // minimal spacing to title
                 }
 
-                if let dt = dateTimeLine {
+                if scope != .mine, let dt = dateTimeLine {
                     Text(dt)
                         .font(.caption2)
                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -2273,53 +2492,78 @@ fileprivate struct SessionRow: View {
                     .lineLimit(2)
                     .accessibilityIdentifier("row.title")
 
-                // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
-                let metaLine = instrumentActivityLine
-                let thread = ThreadLabelSanitizer.sanitize(session.threadLabel ?? "", maxLength: 32)
+                if scope == .mine {
+                    let metaLine = journalMetadataLine
 
-                if let thread, !thread.isEmpty {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Button {
-                            if selectedThread == thread {
-                                selectedThread = nil
-                            } else {
-                                selectedThread = thread
-                            }
-                        } label: {
-                            Text(thread)
-                                .font(Theme.Text.body)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(
-                                    selectedThread == thread
-                                    ? Color(uiColor: .systemGray2)
-                                    : Color(uiColor: .tertiarySystemFill)
-                                )
-                                .clipShape(Capsule())
-                        }
-                        .buttonStyle(.plain)
-
-                        if !metaLine.isEmpty {
-                            Text("·")
-                                .font(Theme.Text.body)
-
-                            Text(metaLine)
-                                .font(Theme.Text.body)
-                                .lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                    if !metaLine.isEmpty {
+                        Text(metaLine)
+                            .font(.caption)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(2)
+                            .padding(.top, 1)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("Session metadata")
+                            .accessibilityIdentifier("row.subtitle")
                     }
-                    .padding(.top, 3)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Instrument and activity")
-                    .accessibilityIdentifier("row.subtitle")
-                } else if !metaLine.isEmpty {
-                    Text(metaLine)
-                        .font(Theme.Text.body)
-                        .lineLimit(2)
+
+                    if let notesPreviewText {
+                        Text(notesPreviewText)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.95))
+                            .lineLimit(2)
+                            .padding(.top, 2)
+                            .accessibilityLabel("Notes preview")
+                            .accessibilityIdentifier("row.notesPreview")
+                    }
+                } else {
+                    // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
+                    let metaLine = instrumentActivityLine
+                    let thread = journalThreadLabel
+
+                    if let thread, !thread.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Button {
+                                if selectedThread == thread {
+                                    selectedThread = nil
+                                } else {
+                                    selectedThread = thread
+                                }
+                            } label: {
+                                Text(thread)
+                                    .font(Theme.Text.body)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(
+                                        selectedThread == thread
+                                        ? Color(uiColor: .systemGray2)
+                                        : Color(uiColor: .tertiarySystemFill)
+                                    )
+                                    .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+
+                            if !metaLine.isEmpty {
+                                Text("·")
+                                    .font(Theme.Text.body)
+
+                                Text(metaLine)
+                                    .font(Theme.Text.body)
+                                    .lineLimit(2)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
                         .padding(.top, 3)
+                        .accessibilityElement(children: .combine)
                         .accessibilityLabel("Instrument and activity")
                         .accessibilityIdentifier("row.subtitle")
+                    } else if !metaLine.isEmpty {
+                        Text(metaLine)
+                            .font(Theme.Text.body)
+                            .lineLimit(2)
+                            .padding(.top, 3)
+                            .accessibilityLabel("Instrument and activity")
+                            .accessibilityIdentifier("row.subtitle")
+                    }
                 }
 
                 // Single favorite attachment preview (only one allowed/displayed)
@@ -2442,43 +2686,45 @@ fileprivate struct SessionRow: View {
             .buttonStyle(.plain)
             .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
 
-            // Comment (opens comments sheet)
-            Button(action: {
-                // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
-                if sessionIDForComments != nil {
-                    if viewerIsOwner {
-                        isCommentsPresented = true
-                    } else if let owner = session.ownerUserID, FollowStore.shared.isFollowing(owner) {
-                        isCommentsPresented = true
-                    } else {
-                        // Fail closed: do nothing.
-                    }
-                }
-            }) {
-                HStack(spacing: 6) {
-                    Image(systemName: hasComments ? "text.bubble" : "bubble.right")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-                .font(.system(size: 18, weight: .semibold))
-
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Comments")
-
-            // Share (owner-only)
-            if viewerIsOwner {
+            if scope != .mine {
+                // Comment (opens comments sheet)
                 Button(action: {
-                    isShareSheetPresented = true
+                    // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
+                    if sessionIDForComments != nil {
+                        if viewerIsOwner {
+                            isCommentsPresented = true
+                        } else if let owner = session.ownerUserID, FollowStore.shared.isFollowing(owner) {
+                            isCommentsPresented = true
+                        } else {
+                            // Fail closed: do nothing.
+                        }
+                    }
                 }) {
                     HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.up")
+                        Image(systemName: hasComments ? "text.bubble" : "bubble.right")
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
-                    .contentShape(Rectangle())
                     .font(.system(size: 18, weight: .semibold))
+
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("Share")
+                .accessibilityLabel("Comments")
+
+                // Share (owner-only)
+                if viewerIsOwner {
+                    Button(action: {
+                        isShareSheetPresented = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "square.and.arrow.up")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .contentShape(Rectangle())
+                        .font(.system(size: 18, weight: .semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Share")
+                }
             }
 
             Spacer(minLength: 0)
