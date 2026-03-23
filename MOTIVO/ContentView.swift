@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260323_151500_ContentView_FeedJournalAlignmentPass_f4c2
+// SCOPE: Final Feed + Journal alignment pass in ContentView only — journal scroll-to-top anchors to first header, feed top spacing aligned, journal thread pill matches feed, feed cards slightly lightened, feed identity block tightened, attachment badge unified, and edge alignment preserved. No data/filter/backend/navigation changes.
+// SEARCH-TOKEN: 20260323_151500_ContentView_FeedJournalAlignmentPass_f4c2
 // CHANGE-ID: 20260323_093800_ContentView_JournalFinalRefine_a91d
 // SCOPE: Journal mode only — remove grouped outer section container feel, render quieter ambient week headers on canvas, and increase section/card breathing room. Feed/All, card styling, logic, filters, navigation, and remote rows unchanged.
 // SEARCH-TOKEN: 20260323_093800_ContentView_JournalFinalRefine_a91d
@@ -181,6 +184,13 @@ fileprivate enum BackendDetailPopGate {
 private let FEED_IMAGE_VIDEO_THUMB: CGFloat = 88
 private let FEED_AUDIO_THUMB: CGFloat = 56
 private let FEED_THUMB_CORNER: CGFloat = 10
+
+private enum FeedJournalAlignmentUI {
+    static let firstContentTopGap: CGFloat = 6
+    static let attachmentBadgeIconOpacity: CGFloat = 0.68
+    static let attachmentBadgeTextOpacity: CGFloat = 0.72
+    static let attachmentBadgeStrokeOpacity: CGFloat = 0.10
+}
 
 // MARK: - Top buttons UI constants (visual only)
 private enum TopButtonsUI {
@@ -627,15 +637,16 @@ fileprivate struct SessionsRootView: View {
                                         HStack {
                                             Text(section.title)
                                                 .font(Theme.Text.meta)
-                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.54))
+                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.62))
                                                 .textCase(nil)
                                             Spacer(minLength: 0)
                                         }
-                                        .padding(.top, sectionIndex == 0 ? 8 : Theme.Spacing.xl + 2)
+                                        .padding(.top, sectionIndex == 0 ? FeedJournalAlignmentUI.firstContentTopGap : Theme.Spacing.xl + 2)
                                         .padding(.bottom, 4)
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
                                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                        .id(sectionIndex == 0 ? topID : nil)
 
                                         ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
                                             ZStack {
@@ -659,8 +670,7 @@ fileprivate struct SessionsRootView: View {
                                                     .cardSurface()
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
                                             }
-                                            .id(sectionIndex == 0 && rowIndex == 0 ? topID : nil)
-                                            .buttonStyle(.plain)
+                                                                                        .buttonStyle(.plain)
                                             .listRowSeparator(.hidden)
                                             .listRowBackground(Color.clear)
                                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -705,6 +715,13 @@ fileprivate struct SessionsRootView: View {
                                                     pushSessionID = (session.value(forKey: "id") as? UUID)
                                                 }
                                                 .cardSurface()
+                                                .overlay {
+                                                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                                        .fill(Theme.Colors.surface(colorScheme).opacity(0.035))
+                                                        .opacity(selectedScope == .all ? 1 : 0)
+                                                        .allowsHitTesting(false)
+                                                }
+                                                .padding(.top, index == 0 ? FeedJournalAlignmentUI.firstContentTopGap : 0)
                                                 .padding(.bottom, Theme.Spacing.section)
                                         }
                                         .id(index == 0 ? topID : nil)
@@ -753,6 +770,13 @@ fileprivate struct SessionsRootView: View {
                                                 pushRemotePostID = post.id
                                             }
                                             .cardSurface()
+                                            .overlay {
+                                                RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                                                    .fill(Theme.Colors.surface(colorScheme).opacity(0.035))
+                                                    .opacity(selectedScope == .all ? 1 : 0)
+                                                    .allowsHitTesting(false)
+                                            }
+                                            .padding(.top, index == 0 ? FeedJournalAlignmentUI.firstContentTopGap : 0)
                                             .padding(.bottom, Theme.Spacing.section)
                                         }
                                         .id(index == 0 ? topID : nil)
@@ -2106,6 +2130,46 @@ fileprivate struct StatsBannerView: View {
 
 // MARK: - Row (shows derived title and subtitle)
 
+fileprivate struct ThreadMetaPill: View {
+    let title: String
+    let isSelected: Bool
+    var font: Font = Theme.Text.body
+    var verticalPadding: CGFloat = 2
+
+    var body: some View {
+        Text(title)
+            .font(font)
+            .padding(.horizontal, 8)
+            .padding(.vertical, verticalPadding)
+            .background(
+                isSelected
+                ? Color(uiColor: .systemGray2)
+                : Color(uiColor: .tertiarySystemFill)
+            )
+            .clipShape(Capsule())
+    }
+}
+
+fileprivate struct AttachmentCountBadge: View {
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "paperclip")
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(FeedJournalAlignmentUI.attachmentBadgeIconOpacity))
+            Text("\(count)")
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(FeedJournalAlignmentUI.attachmentBadgeTextOpacity))
+        }
+        .font(.caption2.weight(.medium))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(.thinMaterial, in: Capsule())
+        .overlay(Capsule().stroke(Color.secondary.opacity(FeedJournalAlignmentUI.attachmentBadgeStrokeOpacity), lineWidth: 0.5))
+        .padding(6)
+        .accessibilityLabel("\(count) attachments")
+    }
+}
+
 fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
     let scope: FeedScope
@@ -2202,6 +2266,18 @@ fileprivate struct SessionRow: View {
     private var journalMetadataLine: String {
         [
             journalThreadLabel,
+            instrumentActivityLine.isEmpty ? nil : instrumentActivityLine,
+            journalDateText,
+            journalTimeText,
+            journalDurationText
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
+    private var journalMetadataTailLine: String {
+        [
             instrumentActivityLine.isEmpty ? nil : instrumentActivityLine,
             journalDateText,
             journalTimeText,
@@ -2498,7 +2574,7 @@ fileprivate struct SessionRow: View {
 
                         Spacer(minLength: 0)
                     }
-                    .padding(.bottom, 2) // minimal spacing to title
+                    .padding(.bottom, 0) // tighter feed identity-to-title spacing
                 }
 
                 if scope != .mine, let dt = dateTimeLine {
@@ -2506,7 +2582,7 @@ fileprivate struct SessionRow: View {
                         .font(.caption2)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
-                        .padding(.bottom, 2)
+                        .padding(.bottom, 1)
                         .accessibilityLabel("Date and time")
                         .accessibilityIdentifier("row.datetime")
                 }
@@ -2519,8 +2595,35 @@ fileprivate struct SessionRow: View {
 
                 if scope == .mine {
                     let metaLine = journalMetadataLine
+                    let thread = journalThreadLabel
+                    let tailLine = journalMetadataTailLine
 
-                    if !metaLine.isEmpty {
+                    if let thread, !thread.isEmpty {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Button {
+                                if selectedThread == thread {
+                                    selectedThread = nil
+                                } else {
+                                    selectedThread = thread
+                                }
+                            } label: {
+                                ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption, verticalPadding: 1)
+                            }
+                            .buttonStyle(.plain)
+
+                            if !tailLine.isEmpty {
+                                Text("· \(tailLine)")
+                                    .font(.caption)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        .padding(.top, 2)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel("Session metadata")
+                        .accessibilityIdentifier("row.subtitle")
+                    } else if !metaLine.isEmpty {
                         Text(metaLine)
                             .font(.caption)
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
@@ -2546,7 +2649,7 @@ fileprivate struct SessionRow: View {
                     let thread = journalThreadLabel
 
                     if let thread, !thread.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
                             Button {
                                 if selectedThread == thread {
                                     selectedThread = nil
@@ -2554,16 +2657,7 @@ fileprivate struct SessionRow: View {
                                     selectedThread = thread
                                 }
                             } label: {
-                                Text(thread)
-                                    .font(Theme.Text.body)
-                                    .padding(.horizontal, 8)
-                                    .padding(.vertical, 2)
-                                    .background(
-                                        selectedThread == thread
-                                        ? Color(uiColor: .systemGray2)
-                                        : Color(uiColor: .tertiarySystemFill)
-                                    )
-                                    .clipShape(Capsule())
+                                ThreadMetaPill(title: thread, isSelected: selectedThread == thread)
                             }
                             .buttonStyle(.plain)
 
@@ -2757,19 +2851,7 @@ fileprivate struct SessionRow: View {
             Spacer(minLength: 0)
 
             if attachmentCount > 0 {
-                HStack(spacing: 5) {
-                    Image(systemName: "paperclip")
-                        .foregroundStyle(scope == .mine ? Theme.Colors.secondaryText.opacity(0.56) : Theme.Colors.secondaryText)
-                    Text("\(attachmentCount)")
-                        .foregroundStyle(scope == .mine ? Theme.Colors.secondaryText.opacity(0.62) : Theme.Colors.secondaryText)
-                }
-                .font(scope == .mine ? .system(size: 10, weight: .medium) : .caption2)
-                .padding(.horizontal, scope == .mine ? 5 : 6)
-                .padding(.vertical, scope == .mine ? 2 : 3)
-                .background(scope == .mine ? AnyShapeStyle(Color.clear) : AnyShapeStyle(.thinMaterial), in: Capsule())
-                .overlay(Capsule().stroke(Color.secondary.opacity(scope == .mine ? 0.08 : 0.12), lineWidth: 0.5))
-                .padding(scope == .mine ? 4 : 6)
-                .accessibilityLabel("\(attachmentCount) attachments")
+                AttachmentCountBadge(count: attachmentCount)
             }
         }
         .padding(.top, scope == .mine ? -1 : -2)
@@ -3816,7 +3898,7 @@ private var extraAttachmentCount: Int {
 
                         Spacer(minLength: 0)
                     }
-                    .padding(.bottom, 2)
+                    .padding(.bottom, 0)
                 }
 
                 if let dt = dateTimeLine {
@@ -3824,7 +3906,7 @@ private var extraAttachmentCount: Int {
                         .font(.caption2)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
-                        .padding(.bottom, 2)
+                        .padding(.bottom, 1)
                         .accessibilityLabel("Date and time")
                         .accessibilityIdentifier("row.datetime")
                 }
@@ -4021,19 +4103,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
             Spacer(minLength: 0)
 
             if attachmentCount > 0 {
-                HStack(spacing: 6) {
-                    Image(systemName: "paperclip")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    Text("\(attachmentCount)")
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-                .font(.caption2)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.thinMaterial, in: Capsule())
-                .overlay(Capsule().stroke(Color.secondary.opacity(0.12), lineWidth: 0.5))
-                .padding(6)
-                .accessibilityLabel("\(attachmentCount) attachments")
+                AttachmentCountBadge(count: attachmentCount)
             }
         }
         .padding(.top, -2)
