@@ -710,6 +710,8 @@ fileprivate struct SessionsRootView: View {
                                         .id(index == 0 ? topID : nil)
                                         .buttonStyle(.plain)
                                         .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                         .deleteDisabled(false)
                                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                                             Button {
@@ -756,6 +758,8 @@ fileprivate struct SessionsRootView: View {
                                         .id(index == 0 ? topID : nil)
                                         .buttonStyle(.plain)
                                         .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                         .deleteDisabled(true)
                                     }
                                 }
@@ -797,23 +801,6 @@ fileprivate struct SessionsRootView: View {
                     .listRowSeparator(.hidden)
                     .scrollContentBackground(.hidden)
                     .listRowBackground(Color.clear)
-                    .background(selectedScope == .mine ? Color.clear : Theme.Colors.surface(colorScheme))
-                    .clipShape(
-                        RoundedRectangle(
-                            cornerRadius: selectedScope == .mine ? 0 : Theme.Radius.card,
-                            style: .continuous
-                        )
-                    )
-                    .overlay(
-                        RoundedRectangle(
-                            cornerRadius: selectedScope == .mine ? 0 : Theme.Radius.card,
-                            style: .continuous
-                        )
-                            .stroke(
-                                Theme.Colors.cardStroke(colorScheme).opacity(selectedScope == .mine ? 0 : 1),
-                                lineWidth: 1
-                            )
-                    )
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
