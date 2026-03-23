@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
+// SCOPE: Journal mode only — add Week/Month/Year time-lens control, period summary label + total, and time-windowed owner dataset switching while preserving Feed summary, MeView button, current Journal Week rendering, and existing filter semantics. No backend/model/storage/sync changes.
+// SEARCH-TOKEN: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
 // CHANGE-ID: 20260323_151500_ContentView_FeedJournalAlignmentPass_f4c2
 // SCOPE: Final Feed + Journal alignment pass in ContentView only — journal scroll-to-top anchors to first header, feed top spacing aligned, journal thread pill matches feed, feed cards slightly lightened, feed identity block tightened, attachment badge unified, and edge alignment preserved. No data/filter/backend/navigation changes.
 // SEARCH-TOKEN: 20260323_151500_ContentView_FeedJournalAlignmentPass_f4c2
@@ -228,6 +231,13 @@ fileprivate enum FeedScope: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 }
 
+fileprivate enum JournalTimeLens: String, CaseIterable, Identifiable {
+    case week = "Week"
+    case month = "Month"
+    case year = "Year"
+    var id: String { rawValue }
+}
+
 // Unified feed rows for ContentView List rendering (Local Core Data sessions + Remote backend posts).
 fileprivate struct FeedRowItem: Identifiable {
     enum Kind {
@@ -339,6 +349,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedThread: String? = nil
     @State private var selectedScope: FeedScope = .mine
+    @State private var selectedJournalLens: JournalTimeLens = .week
     @State private var searchText: String = ""
     @AppStorage("feedSavedOnly_v1") private var savedOnly: Bool = false
     @State private var debouncedQuery: String = ""
@@ -471,6 +482,112 @@ fileprivate struct SessionsRootView: View {
     ) private var userActivities: FetchedResults<UserActivity>
 
     // UI state
+
+
+    private var summaryTotalTextColor: Color {
+        if selectedScope == .all {
+            return displayedStats.count == 0
+                ? Theme.Colors.secondaryText.opacity(0.7)
+                : Color.primary
+        }
+        return journalSelectedPeriodSessions.isEmpty
+            ? Theme.Colors.secondaryText.opacity(0.7)
+            : Color.primary
+    }
+
+    @ViewBuilder
+    private var summaryHeaderContent: some View {
+        if selectedScope == .all {
+            Text("This week")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+        } else {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                ForEach(JournalTimeLens.allCases) { lens in
+                    Button {
+                        selectedJournalLens = lens
+                    } label: {
+                        Text(lens.rawValue)
+                            .font(Theme.Text.meta.weight(selectedJournalLens == lens ? .semibold : .regular))
+                            .foregroundStyle(
+                                selectedJournalLens == lens
+                                ? Color.primary
+                                : Theme.Colors.secondaryText.opacity(0.78)
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var summaryBodyContent: some View {
+        if selectedScope == .all {
+            if displayedStats.count == 0 {
+                Text("0h 0m")
+                    .font(Theme.Text.body)
+                    .foregroundStyle(summaryTotalTextColor)
+            } else {
+                Text(StatsHelper.formatDuration(displayedStats.seconds))
+                    .font(Theme.Text.body)
+                    .foregroundStyle(summaryTotalTextColor)
+
+                if displayedCurrentStreak >= 2 {
+                    Text("\(displayedCurrentStreak)-day streak")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                        .padding(.top, 4)
+                }
+            }
+        } else {
+            Text(journalSelectedPeriodLabel)
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+
+            Text(StatsHelper.formatDuration(journalSelectedPeriodTotalSeconds))
+                .font(Theme.Text.body)
+                .foregroundStyle(summaryTotalTextColor)
+        }
+    }
+
+    private var meViewButton: some View {
+        NavigationLink {
+            MeView()
+        } label: {
+            Image(systemName: "rectangle.stack")
+                .imageScale(.medium)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+                .accessibilityLabel("Open Insights")
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var summaryCard: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                summaryHeaderContent
+
+                Spacer()
+
+                meViewButton
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                summaryBodyContent
+            }
+        }
+        .onAppear { refreshStats() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)
+                .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
+        ) { note in
+            guard notificationTouchesSessions(note) else { return }
+            refreshStats()
+        }
+        .cardSurface()
+        .padding(.bottom, Theme.Spacing.s)
+    }
    
 
 
@@ -479,50 +596,7 @@ fileprivate struct SessionsRootView: View {
             VStack(spacing: Theme.Spacing.l) {
 
                 // ---------- Stats (card) ----------
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("This week")
-                            .font(Theme.Text.meta)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
-                        Spacer()
-                        NavigationLink {
-                            MeView()
-                        } label: {
-                            Image(systemName: "rectangle.stack")
-                                .imageScale(.medium)
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
-                                .accessibilityLabel("Open Insights")
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    VStack(alignment: .leading, spacing: 4) {
-                        if displayedStats.count == 0 {
-                            Text("0h 0m")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                        } else {
-                            Text(StatsHelper.formatDuration(displayedStats.seconds))
-                                .font(Theme.Text.body)
-                            if displayedCurrentStreak >= 2 {
-                                Text("\(displayedCurrentStreak)-day streak")
-                                    .font(Theme.Text.meta)
-                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                                    .padding(.top, 4)
-                            }
-                        }
-                    }
-                }
-                .onAppear { refreshStats() }
-                .onReceive(
-                    NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange, object: viewContext)
-                        .debounce(for: .milliseconds(150), scheduler: RunLoop.main)
-                ) { note in
-                    guard notificationTouchesSessions(note) else { return }
-                    refreshStats()
-                }
-                .cardSurface()
-                .padding(.bottom, Theme.Spacing.s)
+                summaryCard
 
                 // ---------- Filters (utility strip) ----------
                 VStack(alignment: .leading, spacing: 6) {
@@ -588,7 +662,7 @@ fileprivate struct SessionsRootView: View {
                     Group {
                         List {
                         Section {
-                            let localRows: [Session] = filteredSessions
+                            let localRows: [Session] = (selectedScope == .mine) ? journalSelectedPeriodSessions : filteredSessions
 
                             // Connected-mode remote posts (do not materialize into Core Data)
                             let remotePostsRaw: [BackendPost] = {
@@ -626,7 +700,7 @@ fileprivate struct SessionsRootView: View {
                             let renderFeedItems: [FeedRowItem] = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
 
                             if selectedScope == .mine {
-                                let journalSections = journalWeekSections
+                                let journalSections = journalWeekSections(sessions: localRows)
 
                                 if journalSections.isEmpty {
                                     Text("No sessions match your filters yet.")
@@ -1864,8 +1938,57 @@ Spacer()
         return "\(startDay) \(startMonth) \(startYear) – \(endDay) \(endMonth) \(endYear)"
     }
 
-    private var journalWeekSections: [JournalWeekSection] {
-        let sortedSessions = filteredSessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+    private var journalSelectedPeriodSessions: [Session] {
+        let baseSessions = filteredSessions
+        guard selectedScope == .mine else { return baseSessions }
+
+        let calendar = journalGroupingCalendar
+        let now = Date()
+        let periodStart: Date
+
+        switch selectedJournalLens {
+        case .week:
+            periodStart = journalWeekStart(for: now)
+        case .month:
+            let comps = calendar.dateComponents([.year, .month], from: now)
+            periodStart = calendar.date(from: comps) ?? calendar.startOfDay(for: now)
+        case .year:
+            let comps = calendar.dateComponents([.year], from: now)
+            periodStart = calendar.date(from: comps) ?? calendar.startOfDay(for: now)
+        }
+
+        let periodEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
+
+        return baseSessions.filter { session in
+            let date = journalDate(for: session)
+            return date >= periodStart && date < periodEnd
+        }
+    }
+
+    private var journalSelectedPeriodTotalSeconds: Int {
+        journalSelectedPeriodSessions.reduce(0) { partial, session in
+            partial + Int(session.durationSeconds)
+        }
+    }
+
+    private var journalSelectedPeriodLabel: String {
+        let calendar = journalGroupingCalendar
+        let now = Date()
+
+        switch selectedJournalLens {
+        case .week:
+            let start = journalWeekStart(for: now)
+            let end = calendar.date(byAdding: .day, value: 6, to: start) ?? start
+            return journalWeekDateRangeText(start: start, end: end)
+        case .month:
+            return Self.journalMonthYearFormatter.string(from: now)
+        case .year:
+            return Self.journalYearFormatter.string(from: now)
+        }
+    }
+
+    private func journalWeekSections(sessions: [Session]) -> [JournalWeekSection] {
+        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
         guard !sortedSessions.isEmpty else { return [] }
 
         let grouped = Dictionary(grouping: sortedSessions) { journalWeekStart(for: journalDate(for: $0)) }
@@ -1892,6 +2015,20 @@ Spacer()
     private static let journalWeekIDFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withFullDate]
+        return f
+    }()
+
+    private static let journalMonthYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = "MMMM yyyy"
+        return f
+    }()
+
+    private static let journalYearFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = .current
+        f.dateFormat = "yyyy"
         return f
     }()
 
