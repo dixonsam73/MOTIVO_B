@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
+// SCOPE: Journal mode only — convert Week/Month/Year from current-period filtering to full archive grouping after existing filters, keep navigation unchanged, scale density by lens (Week full, Month reduced, Year compact), and preserve Feed/MeView/filter/backend behavior. No backend/model/storage/sync changes.
+// SEARCH-TOKEN: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
 // CHANGE-ID: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
 // SCOPE: Journal mode only — add Week/Month/Year time-lens control, period summary label + total, and time-windowed owner dataset switching while preserving Feed summary, MeView button, current Journal Week rendering, and existing filter semantics. No backend/model/storage/sync changes.
 // SEARCH-TOKEN: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
@@ -490,7 +493,7 @@ fileprivate struct SessionsRootView: View {
                 ? Theme.Colors.secondaryText.opacity(0.7)
                 : Color.primary
         }
-        return journalSelectedPeriodSessions.isEmpty
+        return journalCurrentPeriodSessions.isEmpty
             ? Theme.Colors.secondaryText.opacity(0.7)
             : Color.primary
     }
@@ -541,11 +544,11 @@ fileprivate struct SessionsRootView: View {
                 }
             }
         } else {
-            Text(journalSelectedPeriodLabel)
+            Text(journalCurrentPeriodSummaryLabel)
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
 
-            Text(StatsHelper.formatDuration(journalSelectedPeriodTotalSeconds))
+            Text(StatsHelper.formatDuration(journalCurrentPeriodTotalSeconds))
                 .font(Theme.Text.body)
                 .foregroundStyle(summaryTotalTextColor)
         }
@@ -662,7 +665,7 @@ fileprivate struct SessionsRootView: View {
                     Group {
                         List {
                         Section {
-                            let localRows: [Session] = (selectedScope == .mine) ? journalSelectedPeriodSessions : filteredSessions
+                            let localRows: [Session] = (selectedScope == .mine) ? journalArchiveSessions : filteredSessions
 
                             // Connected-mode remote posts (do not materialize into Core Data)
                             let remotePostsRaw: [BackendPost] = {
@@ -700,40 +703,114 @@ fileprivate struct SessionsRootView: View {
                             let renderFeedItems: [FeedRowItem] = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
 
                             if selectedScope == .mine {
-                                let journalSections = journalWeekSections(sessions: localRows)
+                                switch selectedJournalLens {
+                                case .week:
+                                    let journalSections = journalWeekSections(sessions: localRows)
 
-                                if journalSections.isEmpty {
-                                    Text("No sessions match your filters yet.")
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                        .id(topID)
-                                } else {
-                                    ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
-                                        HStack {
-                                            Text(section.title)
-                                                .font(Theme.Text.meta)
-                                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.62))
-                                                .textCase(nil)
-                                            Spacer(minLength: 0)
+                                    if journalSections.isEmpty {
+                                        Text("No sessions match your filters yet.")
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                            .id(topID)
+                                    } else {
+                                        ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
+                                            HStack {
+                                                Text(section.title)
+                                                    .font(Theme.Text.meta)
+                                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(selectedJournalLens == .year ? 0.56 : 0.60))
+                                                    .textCase(nil)
+                                                Spacer(minLength: 0)
+                                            }
+                                            .padding(.top, sectionIndex == 0 ? FeedJournalAlignmentUI.firstContentTopGap : Theme.Spacing.xl + 2)
+                                            .padding(.bottom, 4)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                            .id(sectionIndex == 0 ? topID : nil)
+
+                                            ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
+                                                ZStack {
+                                                    NavigationLink(
+                                                        destination: SessionDetailView(session: session),
+                                                        isActive: Binding(
+                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                            set: { active in if !active { pushSessionID = nil } }
+                                                        )
+                                                    ) { EmptyView() }
+                                                    .opacity(0)
+
+                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
+                                                        .contentShape(Rectangle())
+                                                        .onTapGesture {
+                                                            feedNavFreezeTask?.cancel()
+                                                            isFeedNavFrozen = true
+                                                            frozenFeedItems = renderFeedItems
+                                                            pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                        }
+                                                        .cardSurface()
+                                                        .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
+                                                }
+                                                                                            .buttonStyle(.plain)
+                                                .listRowSeparator(.hidden)
+                                                .listRowBackground(Color.clear)
+                                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                                .deleteDisabled(false)
+                                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                    Button {
+                                                        if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
+                                                            deleteSessions(at: IndexSet(integer: localIndex))
+                                                        }
+                                                    } label: {
+                                                        Label("Delete", systemImage: "trash")
+                                                    }
+                                                    .tint(.red)
+                                                }
+                                            }
                                         }
-                                        .padding(.top, sectionIndex == 0 ? FeedJournalAlignmentUI.firstContentTopGap : Theme.Spacing.xl + 2)
-                                        .padding(.bottom, 4)
-                                        .listRowSeparator(.hidden)
-                                        .listRowBackground(Color.clear)
-                                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                        .id(sectionIndex == 0 ? topID : nil)
+                                    }
 
-                                        ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
-                                            ZStack {
-                                                NavigationLink(
-                                                    destination: SessionDetailView(session: session),
-                                                    isActive: Binding(
-                                                        get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                        set: { active in if !active { pushSessionID = nil } }
+                                case .month, .year:
+                                    let journalSections = selectedJournalLens == .month
+                                        ? journalMonthSections(sessions: localRows)
+                                        : journalYearSections(sessions: localRows)
+
+                                    if journalSections.isEmpty {
+                                        Text("No sessions match your filters yet.")
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                            .id(topID)
+                                    } else {
+                                        ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
+                                            HStack {
+                                                Text(section.title)
+                                                    .font(Theme.Text.meta)
+                                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(selectedJournalLens == .year ? 0.54 : 0.58))
+                                                    .textCase(nil)
+                                                Spacer(minLength: 0)
+                                            }
+                                            .padding(.top, sectionIndex == 0 ? FeedJournalAlignmentUI.firstContentTopGap : Theme.Spacing.xl + 2)
+                                            .padding(.bottom, 4)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                            .id(sectionIndex == 0 ? topID : nil)
+
+                                            ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
+                                                ZStack {
+                                                    NavigationLink(
+                                                        destination: SessionDetailView(session: session),
+                                                        isActive: Binding(
+                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
+                                                            set: { active in if !active { pushSessionID = nil } }
+                                                        )
+                                                    ) { EmptyView() }
+                                                    .opacity(0)
+
+                                                    SessionRow(
+                                                        session: session,
+                                                        scope: selectedScope,
+                                                        selectedThread: $selectedThread,
+                                                        filtersExpanded: $filtersExpanded,
+                                                        journalStyle: selectedJournalLens == .month ? .monthCompact : .yearCompact
                                                     )
-                                                ) { EmptyView() }
-                                                .opacity(0)
-
-                                                SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
                                                     .contentShape(Rectangle())
                                                     .onTapGesture {
                                                         feedNavFreezeTask?.cancel()
@@ -741,23 +818,24 @@ fileprivate struct SessionsRootView: View {
                                                         frozenFeedItems = renderFeedItems
                                                         pushSessionID = (session.value(forKey: "id") as? UUID)
                                                     }
-                                                    .cardSurface()
-                                                    .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
-                                            }
-                                                                                        .buttonStyle(.plain)
-                                            .listRowSeparator(.hidden)
-                                            .listRowBackground(Color.clear)
-                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                            .deleteDisabled(false)
-                                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                                                Button {
-                                                    if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
-                                                        deleteSessions(at: IndexSet(integer: localIndex))
-                                                    }
-                                                } label: {
-                                                    Label("Delete", systemImage: "trash")
+                                                    .modifier(JournalArchiveRowContainerModifier(lens: selectedJournalLens))
+                                                    .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : (selectedJournalLens == .year ? 4 : Theme.Spacing.s + 2))
                                                 }
-                                                .tint(.red)
+                                                .buttonStyle(.plain)
+                                                .listRowSeparator(.hidden)
+                                                .listRowBackground(Color.clear)
+                                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                                .deleteDisabled(false)
+                                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                                    Button {
+                                                        if let localIndex = localRows.firstIndex(where: { $0.objectID == session.objectID }) {
+                                                            deleteSessions(at: IndexSet(integer: localIndex))
+                                                        }
+                                                    } label: {
+                                                        Label("Delete", systemImage: "trash")
+                                                    }
+                                                    .tint(.red)
+                                                }
                                             }
                                         }
                                     }
@@ -1876,7 +1954,7 @@ Spacer()
     }
 
 
-    private struct JournalWeekSection: Identifiable {
+    private struct JournalSection: Identifiable {
         let id: String
         let title: String
         let sessions: [Session]
@@ -1900,18 +1978,20 @@ Spacer()
         (session.value(forKey: "timestamp") as? Date) ?? Date.distantPast
     }
 
+    private func journalMonthStart(for date: Date) -> Date {
+        let calendar = journalGroupingCalendar
+        let components = calendar.dateComponents([.year, .month], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
+    private func journalYearStart(for date: Date) -> Date {
+        let calendar = journalGroupingCalendar
+        let components = calendar.dateComponents([.year], from: date)
+        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+    }
+
     private func journalWeekHeaderTitle(for weekStart: Date) -> String {
         let calendar = journalGroupingCalendar
-        let thisWeekStart = journalWeekStart(for: Date())
-        let lastWeekStart = calendar.date(byAdding: .weekOfYear, value: -1, to: thisWeekStart) ?? thisWeekStart
-
-        if calendar.isDate(weekStart, inSameDayAs: thisWeekStart) {
-            return "This Week"
-        }
-        if calendar.isDate(weekStart, inSameDayAs: lastWeekStart) {
-            return "Last Week"
-        }
-
         let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
         return journalWeekDateRangeText(start: weekStart, end: weekEnd)
     }
@@ -1938,48 +2018,53 @@ Spacer()
         return "\(startDay) \(startMonth) \(startYear) – \(endDay) \(endMonth) \(endYear)"
     }
 
-    private var journalSelectedPeriodSessions: [Session] {
+    private func journalMonthWeekRangeText(start: Date, end: Date) -> String {
+        let calendar = journalGroupingCalendar
+        let startDay = calendar.component(.day, from: start)
+        let endDay = calendar.component(.day, from: end)
+        let month = Self.journalMonthFormatter.string(from: start)
+        return "\(startDay)–\(endDay) \(month)"
+    }
+
+    private var journalArchiveSessions: [Session] {
         let baseSessions = filteredSessions
         guard selectedScope == .mine else { return baseSessions }
+        return baseSessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+    }
 
+    private var journalCurrentPeriodSessions: [Session] {
         let calendar = journalGroupingCalendar
         let now = Date()
-        let periodStart: Date
 
-        switch selectedJournalLens {
-        case .week:
-            periodStart = journalWeekStart(for: now)
-        case .month:
-            let comps = calendar.dateComponents([.year, .month], from: now)
-            periodStart = calendar.date(from: comps) ?? calendar.startOfDay(for: now)
-        case .year:
-            let comps = calendar.dateComponents([.year], from: now)
-            periodStart = calendar.date(from: comps) ?? calendar.startOfDay(for: now)
-        }
-
-        let periodEnd = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) ?? now
-
-        return baseSessions.filter { session in
+        return journalArchiveSessions.filter { session in
             let date = journalDate(for: session)
-            return date >= periodStart && date < periodEnd
+            switch selectedJournalLens {
+            case .week:
+                let nowComponents = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: now)
+                let sessionComponents = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
+                return nowComponents.yearForWeekOfYear == sessionComponents.yearForWeekOfYear
+                    && nowComponents.weekOfYear == sessionComponents.weekOfYear
+            case .month:
+                return calendar.isDate(date, equalTo: now, toGranularity: .month)
+                    && calendar.isDate(date, equalTo: now, toGranularity: .year)
+            case .year:
+                return calendar.isDate(date, equalTo: now, toGranularity: .year)
+            }
         }
     }
 
-    private var journalSelectedPeriodTotalSeconds: Int {
-        journalSelectedPeriodSessions.reduce(0) { partial, session in
+    private var journalCurrentPeriodTotalSeconds: Int {
+        journalCurrentPeriodSessions.reduce(0) { partial, session in
             partial + Int(session.durationSeconds)
         }
     }
 
-    private var journalSelectedPeriodLabel: String {
-        let calendar = journalGroupingCalendar
+    private var journalCurrentPeriodSummaryLabel: String {
         let now = Date()
 
         switch selectedJournalLens {
         case .week:
-            let start = journalWeekStart(for: now)
-            let end = calendar.date(byAdding: .day, value: 6, to: start) ?? start
-            return journalWeekDateRangeText(start: start, end: end)
+            return "This week"
         case .month:
             return Self.journalMonthYearFormatter.string(from: now)
         case .year:
@@ -1987,7 +2072,7 @@ Spacer()
         }
     }
 
-    private func journalWeekSections(sessions: [Session]) -> [JournalWeekSection] {
+    private func journalWeekSections(sessions: [Session]) -> [JournalSection] {
         let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
         guard !sortedSessions.isEmpty else { return [] }
 
@@ -1997,9 +2082,49 @@ Spacer()
             .sorted(by: >)
             .compactMap { weekStart in
                 guard let sessions = grouped[weekStart], !sessions.isEmpty else { return nil }
-                return JournalWeekSection(
+                return JournalSection(
                     id: Self.journalWeekIDFormatter.string(from: weekStart),
                     title: journalWeekHeaderTitle(for: weekStart),
+                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+                )
+            }
+    }
+
+    private func journalMonthSections(sessions: [Session]) -> [JournalSection] {
+        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+        guard !sortedSessions.isEmpty else { return [] }
+
+        let grouped = Dictionary(grouping: sortedSessions) { session in
+            journalMonthStart(for: journalDate(for: session))
+        }
+
+        return grouped.keys
+            .sorted(by: >)
+            .compactMap { monthStart in
+                guard let sessions = grouped[monthStart], !sessions.isEmpty else { return nil }
+                return JournalSection(
+                    id: "month-\(Self.journalWeekIDFormatter.string(from: monthStart))",
+                    title: Self.journalMonthYearFormatter.string(from: monthStart),
+                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+                )
+            }
+    }
+
+    private func journalYearSections(sessions: [Session]) -> [JournalSection] {
+        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+        guard !sortedSessions.isEmpty else { return [] }
+
+        let grouped = Dictionary(grouping: sortedSessions) { session in
+            journalMonthStart(for: journalDate(for: session))
+        }
+
+        return grouped.keys
+            .sorted(by: >)
+            .compactMap { monthStart in
+                guard let sessions = grouped[monthStart], !sessions.isEmpty else { return nil }
+                return JournalSection(
+                    id: "year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
+                    title: Self.journalMonthYearFormatter.string(from: monthStart),
                     sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
                 )
             }
@@ -2307,9 +2432,41 @@ fileprivate struct AttachmentCountBadge: View {
     }
 }
 
+fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
+    let lens: JournalTimeLens
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        switch lens {
+        case .week:
+            content.cardSurface()
+        case .month:
+            content.cardSurface()
+        case .year:
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.primary.opacity(0.018))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.primary.opacity(0.04), lineWidth: 0.5)
+                )
+        }
+    }
+}
+
 fileprivate struct SessionRow: View {
+    fileprivate enum JournalStyle {
+        case standard
+        case monthCompact
+        case yearCompact
+    }
+
     @ObservedObject var session: Session
     let scope: FeedScope
+    let journalStyle: JournalStyle
 
     @Binding var selectedThread: String?
     @Binding var filtersExpanded: Bool
@@ -2335,6 +2492,20 @@ fileprivate struct SessionRow: View {
     @State private var commentCountLocal: Int = 0
     @ObservedObject private var commentsStore = CommentsStore.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
+
+    init(
+        session: Session,
+        scope: FeedScope,
+        selectedThread: Binding<String?>,
+        filtersExpanded: Binding<Bool>,
+        journalStyle: JournalStyle = .standard
+    ) {
+        self._session = ObservedObject(initialValue: session)
+        self.scope = scope
+        self.journalStyle = journalStyle
+        self._selectedThread = selectedThread
+        self._filtersExpanded = filtersExpanded
+    }
 
     private var feedTitle: String { SessionActivity.feedTitle(for: session) }
     private var feedSubtitle: String { SessionActivity.feedSubtitle(for: session) }
@@ -2458,10 +2629,30 @@ fileprivate struct SessionRow: View {
         if scope != .mine, let dt = dateTimeLine {
             parts.append(dt)
         }
-        if scope == .mine, let notesPreviewText {
+        if scope == .mine, journalStyle == .standard, let notesPreviewText {
             parts.append(notesPreviewText)
         }
         return parts.joined(separator: ". ")
+    }
+
+    private var isMonthCompactJournalRow: Bool {
+        scope == .mine && journalStyle == .monthCompact
+    }
+
+    private var isYearCompactJournalRow: Bool {
+        scope == .mine && journalStyle == .yearCompact
+    }
+
+    private var isCompactJournalRow: Bool {
+        isMonthCompactJournalRow || isYearCompactJournalRow
+    }
+
+    private var showsJournalNotesPreview: Bool {
+        scope == .mine && journalStyle == .standard
+    }
+
+    private var showsJournalAttachmentPreview: Bool {
+        scope != .mine || journalStyle == .standard
     }
 
     private static let sessionRowDateFormatter: DateFormatter = {
@@ -2572,7 +2763,7 @@ fileprivate struct SessionRow: View {
 
     var body: some View {
         ZStack(alignment: .bottomTrailing) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: isYearCompactJournalRow ? 2 : (isMonthCompactJournalRow ? 3 : 6)) {
                 // Identity header
                 if scope != .mine,
                    let ownerIDNonEmpty = (session.ownerUserID ?? (viewerIsOwner ? viewerUserID : nil)),
@@ -2726,7 +2917,7 @@ fileprivate struct SessionRow: View {
 
                 // Title only (paperclip removed)
                 Text(feedTitle)
-                    .font(.headline)
+                    .font(isYearCompactJournalRow ? .subheadline.weight(.semibold) : (isMonthCompactJournalRow ? .subheadline.weight(.medium) : .headline))
                     .lineLimit(2)
                     .accessibilityIdentifier("row.title")
 
@@ -2756,7 +2947,7 @@ fileprivate struct SessionRow: View {
                                     .truncationMode(.tail)
                             }
                         }
-                        .padding(.top, 2)
+                        .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
                         .accessibilityElement(children: .combine)
                         .accessibilityLabel("Session metadata")
                         .accessibilityIdentifier("row.subtitle")
@@ -2766,12 +2957,12 @@ fileprivate struct SessionRow: View {
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .padding(.top, 2)
+                            .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
                             .accessibilityLabel("Session metadata")
                             .accessibilityIdentifier("row.subtitle")
                     }
 
-                    if let notesPreviewText {
+                    if showsJournalNotesPreview, let notesPreviewText {
                         Text(notesPreviewText)
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
@@ -2822,8 +3013,7 @@ fileprivate struct SessionRow: View {
                     }
                 }
 
-                // Single favorite attachment preview (only one allowed/displayed)
-                if let fav = favoriteAttachment {
+                if showsJournalAttachmentPreview, let fav = favoriteAttachment {
                     // If viewer isn't the owner, hide preview when favorite is private
                     if viewerIsOwner || !isPrivate(fav) {
                         HStack(alignment: .center, spacing: 8) {
@@ -2832,22 +3022,27 @@ fileprivate struct SessionRow: View {
                                 .opacity(scope == .mine ? 0.96 : 1.0)
                             Spacer()
                         }
-                        .padding(.top, scope == .mine ? 5 : 2)
+                        .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 3 : 5) : 2)
                     }
                     // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
                     if let sid = sessionUUID {
                         interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
-                            .padding(.top, scope == .mine ? 7 : 6)
+                            .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 4 : 7) : 6)
                     }
                 }
                 // Fallback: if there is no thumbnail, place the interaction row below the subtitle
-                else if let sid = sessionUUID {
+                else if !isYearCompactJournalRow, let sid = sessionUUID {
                     interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
-                        .padding(.top, scope == .mine ? 7 : 6)
+                        .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 4 : 7) : 6)
                 }
             }
         }
-        .padding(.vertical, scope == .mine ? (!attachments.isEmpty ? 9 : 7) : (!attachments.isEmpty ? 10 : 6))
+                .padding(.horizontal, isYearCompactJournalRow ? 12 : 0)
+        .padding(.vertical,
+            isYearCompactJournalRow ? 1 :
+            (isMonthCompactJournalRow ? 3 :
+                (scope == .mine ? (!attachments.isEmpty ? 9 : 7) : (!attachments.isEmpty ? 10 : 6)))
+        )
         .id(_refreshTick)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilitySummary)
