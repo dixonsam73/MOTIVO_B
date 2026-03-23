@@ -775,7 +775,7 @@ struct BackendSessionDetailView: View {
                 HStack(spacing: 8) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(isLikedLocal ? Color.red : Theme.Colors.secondaryText)
+                        .foregroundStyle(isLikedLocal ? Color.red.opacity(0.75) : Theme.Colors.secondaryText)
                 }
                 .frame(maxWidth: .infinity)
                 .contentShape(Rectangle())

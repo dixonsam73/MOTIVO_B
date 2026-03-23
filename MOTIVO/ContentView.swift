@@ -583,7 +583,7 @@ fileprivate struct SessionsRootView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
-    }
+      }
 
     @ViewBuilder
     private var journalSummaryBaselineContent: some View {
@@ -3175,7 +3175,7 @@ fileprivate struct SessionRow: View {
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: isSavedLocal ? "heart.fill" : "heart")
-                        .foregroundStyle(isSavedLocal ? Color.red : Theme.Colors.secondaryText)
+                        .foregroundStyle(isSavedLocal ? Color.red.opacity(0.75) : Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
             }
@@ -4450,7 +4450,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: isSavedLocal ? "heart.fill" : "heart")
-                        .foregroundStyle(isSavedLocal ? Color.red : Theme.Colors.secondaryText)
+                        .foregroundStyle(isSavedLocal ? Color.red.opacity(0.75) : Theme.Colors.secondaryText)
                 }
                 .font(.system(size: 18, weight: .semibold))
             }
