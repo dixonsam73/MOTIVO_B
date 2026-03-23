@@ -169,6 +169,15 @@
 // SEARCH-TOKEN: 20260319_073600_ContentView_WeeklyPulseCard_6f3c
 
 // CHANGE-ID: 20260319_111600_ContentView_RecordOnlyToolbar_8a1d
+// CHANGE-ID: 20260323_161800_ContentView_SummaryHeightNormalization_6b2c
+// SCOPE: Normalize the top summary card outer height across Journal and Feed so the permanent mode selector remains visually anchored during mode switches. No logic, filter, navigation, or content rendering changes.
+// SEARCH-TOKEN: 20260323_161800_ContentView_SummaryHeightNormalization_6b2c
+// CHANGE-ID: 20260323_160900_ContentView_ModeSelectorHierarchyCorrection_4a7f
+// SCOPE: Reposition the Journal/Feed mode selector out of the Feed Filter card and place it directly below the summary card as a permanent primary mode switch. No filter logic, Feed/Journal behavior, navigation, or other UI changes.
+// SEARCH-TOKEN: 20260323_160900_ContentView_ModeSelectorHierarchyCorrection_4a7f
+// CHANGE-ID: 20260323_162900_ContentView_ModeSelectorSoftening_5d1a
+// SCOPE: Soften the permanent Journal/Feed mode selector styling and tighten its spacing to the summary card without changing selector logic, layout structure, filters, or behavior.
+// SEARCH-TOKEN: 20260323_162900_ContentView_ModeSelectorSoftening_5d1a
 import SwiftUI
 import CoreData
 import Combine
@@ -566,10 +575,26 @@ fileprivate struct SessionsRootView: View {
         .buttonStyle(.plain)
     }
 
-    private var summaryCard: some View {
+    private var modeSelectorControl: some View {
+        Picker("Mode", selection: $selectedScope) {
+            ForEach(FeedScope.allCases) { scope in
+                Text(scope.rawValue).tag(scope)
+            }
+        }
+        .pickerStyle(.segmented)
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var journalSummaryBaselineContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                summaryHeaderContent
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    ForEach(JournalTimeLens.allCases) { lens in
+                        Text(lens.rawValue)
+                            .font(Theme.Text.meta.weight(selectedJournalLens == lens ? .semibold : .regular))
+                    }
+                }
 
                 Spacer()
 
@@ -577,7 +602,34 @@ fileprivate struct SessionsRootView: View {
             }
 
             VStack(alignment: .leading, spacing: 4) {
-                summaryBodyContent
+                Text(journalCurrentPeriodSummaryLabel)
+                    .font(Theme.Text.meta)
+                Text(StatsHelper.formatDuration(journalCurrentPeriodTotalSeconds))
+                    .font(Theme.Text.body)
+            }
+        }
+        .hidden()
+        .accessibilityHidden(true)
+    }
+
+    private var summaryCard: some View {
+        ZStack(alignment: .topLeading) {
+            if selectedScope == .all {
+                journalSummaryBaselineContent
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    summaryHeaderContent
+
+                    Spacer()
+
+                    meViewButton
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    summaryBodyContent
+                }
             }
         }
         .onAppear { refreshStats() }
@@ -600,6 +652,8 @@ fileprivate struct SessionsRootView: View {
 
                 // ---------- Stats (card) ----------
                 summaryCard
+
+                modeSelectorControl
 
                 // ---------- Filters (utility strip) ----------
                 VStack(alignment: .leading, spacing: 6) {
@@ -631,7 +685,6 @@ fileprivate struct SessionsRootView: View {
                             .filter { !$0.isEmpty },
                         selectedInstrument: $selectedInstrument,
                         selectedActivity: $selectedActivity,
-                        selectedScope: $selectedScope,
                         searchText: $searchText,
                         savedOnly: $savedOnly,
                         selectedThread: $selectedThread,
@@ -2205,7 +2258,6 @@ fileprivate struct FilterBar: View {
     let customNames: [String]
     @Binding var selectedInstrument: Instrument?
     @Binding var selectedActivity: ActivityFilter
-    @Binding var selectedScope: FeedScope
     @Binding var searchText: String
     @Binding var savedOnly: Bool
     @Binding var selectedThread: String?
@@ -2218,15 +2270,6 @@ fileprivate struct FilterBar: View {
             // This view only renders contents when expanded (logic unchanged)
             if filtersExpanded {
                 VStack(alignment: .leading, spacing: 20) {
-
-                    // Scope
-                    Picker("Scope", selection: $selectedScope) {
-                        ForEach(FeedScope.allCases) { s in
-                            Text(s.rawValue).tag(s)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .controlSize(.small)
 
                     // Search
                     TextField("Search", text: $searchText)
