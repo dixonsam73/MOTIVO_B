@@ -179,6 +179,24 @@
 // SCOPE: Soften the permanent Journal/Feed mode selector styling and tighten its spacing to the summary card without changing selector logic, layout structure, filters, or behavior.
 // SEARCH-TOKEN: 20260323_162900_ContentView_ModeSelectorSoftening_5d1a
 import SwiftUI
+
+#if DEBUG
+private struct TopToolbarPeopleFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+
+private struct TopToolbarTimerFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        let next = nextValue()
+        if next != .zero { value = next }
+    }
+}
+#endif
 import CoreData
 import Combine
 import CryptoKit
@@ -390,6 +408,8 @@ fileprivate struct SessionsRootView: View {
     #if DEBUG
     @State private var isDebugPresented: Bool = false
     @State private var _debugJSONBuffer: String = "{}"
+    @State private var topToolbarPeopleFrame: CGRect = .zero
+    @State private var topToolbarTimerFrame: CGRect = .zero
     #endif
 
     // Debounce
@@ -660,7 +680,7 @@ fileprivate struct SessionsRootView: View {
                     // Header toggles expansion; visually demoted (utility row)
                     Button { withAnimation { filtersExpanded.toggle() } } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("Feed Filter")
+                            Text("Filter")
                                 .font(Theme.Text.meta.weight(.semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -1139,7 +1159,18 @@ fileprivate struct SessionsRootView: View {
                         .contentShape(Rectangle())
                     .buttonStyle(.plain)
                     .accessibilityLabel("People")
-Spacer()
+                    #if DEBUG
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(
+                                    key: TopToolbarPeopleFramePreferenceKey.self,
+                                    value: proxy.frame(in: .named("TopToolbarRow"))
+                                )
+                        }
+                    )
+                    #endif
+                    Spacer()
                     Button { showTimer = true } label: {
                         ZStack {
                           Circle()
@@ -1156,7 +1187,23 @@ Spacer()
                         .buttonStyle(.plain)
                     }
                     .accessibilityLabel("Start session timer")
+                    #if DEBUG
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear
+                                .preference(
+                                    key: TopToolbarTimerFramePreferenceKey.self,
+                                    value: proxy.frame(in: .named("TopToolbarRow"))
+                                )
+                        }
+                    )
+                    #endif
                 }
+                .coordinateSpace(name: "TopToolbarRow")
+                #if DEBUG
+                .onPreferenceChange(TopToolbarPeopleFramePreferenceKey.self) { topToolbarPeopleFrame = $0 }
+                .onPreferenceChange(TopToolbarTimerFramePreferenceKey.self) { topToolbarTimerFrame = $0 }
+                #endif
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
             }
@@ -1173,35 +1220,21 @@ Spacer()
             }
             #endif
 #if DEBUG
-.overlay(alignment: .top) {
-    // Invisible hit area over the top toolbar GAP only (between avatar and record button)
-    // Avatar is 40pt + 8pt padding each side inside the inset; right side has one 40pt record button.
-    // We place a narrow transparent rectangle centered in the remaining space so it doesn't intercept button taps.
-    GeometryReader { geo in
-        // Compute a conservative gap: full width minus left avatar/search block and the single right-side record button, plus horizontal insets
-        let horizontalInset = Theme.Spacing.l
-        let leftBlock: CGFloat = (40 + 16) + TopButtonsUI.spacing + 40   // avatar block + spacing + People button
-        let rightBlock: CGFloat = 40
-        let totalReserved = leftBlock + rightBlock + (horizontalInset * 2)
-        let gapWidth = max(0, geo.size.width - totalReserved)
-        // Place a centered rect in the remaining space with a modest width to avoid overlap
-        let rectWidth = max(0, gapWidth - 16) // leave small margins from buttons
-        let height: CGFloat = 56 // tall enough to be easy to hit, but within the inset area
+.overlay(alignment: .topLeading) {
+    let gapStart = topToolbarPeopleFrame.maxX
+    let gapEnd = topToolbarTimerFrame.minX
+    let gapWidth = max(0, gapEnd - gapStart)
 
-        ZStack {
-            Color.clear
-                .frame(width: rectWidth, height: height)
-                .contentShape(Rectangle())
-                .onLongPressGesture(minimumDuration: 0.6) {
-                    isDebugPresented = true
-                }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-        .padding(.top, Theme.Spacing.m) // align with the inset's top padding
-        .padding(.horizontal, horizontalInset)
+    if gapWidth > 0 {
+        Color.clear
+            .frame(width: gapWidth, height: max(topToolbarPeopleFrame.height, topToolbarTimerFrame.height))
+            .contentShape(Rectangle())
+            .onLongPressGesture(minimumDuration: 0.6) {
+                isDebugPresented = true
+            }
+            .offset(x: gapStart, y: Theme.Spacing.m)
+            .accessibilityHidden(true)
     }
-    .allowsHitTesting(true)
-    .accessibilityHidden(true)
 }
 #endif
 
