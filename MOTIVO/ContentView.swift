@@ -679,10 +679,11 @@ fileprivate struct SessionsRootView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     // Header toggles expansion; visually demoted (utility row)
                     Button { withAnimation { filtersExpanded.toggle() } } label: {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Text("Filter")
-                                .font(Theme.Text.meta.weight(.semibold))
+                        HStack(alignment: .center, spacing: 8) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 15, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
+                                .padding(.leading, 3)
 
                             Spacer(minLength: 0)
 
@@ -690,7 +691,7 @@ fileprivate struct SessionsRootView: View {
                                 .font(.caption.weight(.semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                                 .imageScale(.small)
-                                .padding(.top, 1)
+                                
                         }
                         .padding(.top, 1) // optical centering in collapsed pill
                         .contentShape(Rectangle())
@@ -1140,8 +1141,8 @@ fileprivate struct SessionsRootView: View {
                                 .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                 .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                            Image(systemName: "magnifyingglass")
-                                .font(.system(size: 20, weight: .regular))
+                            Image(systemName: "person.2")
+                                .font(.system(size: 19, weight: .regular))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
