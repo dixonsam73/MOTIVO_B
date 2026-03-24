@@ -1048,6 +1048,11 @@ fileprivate struct SessionsRootView: View {
 
                         await performAutoReturnRefreshBundle(scopeKey: scopeKey)
                     }
+                    .onChange(of: selectedScope) { _ in
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(topID, anchor: .top)
+                        }
+                    }
                     }
 
                     .refreshable {
