@@ -72,6 +72,7 @@ struct PracticeTimerView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject var appRoute: AppRouteStore
 
     // Presented as a sheet from ContentView, or as the app's home/root screen.
     @Binding var isPresented: Bool
@@ -678,7 +679,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 Spacer()
 
                 Button {
-                    showContentView = true
+                    appRoute.route = .content
                 } label: {
                     ZStack {
                         Circle()
@@ -977,8 +978,10 @@ private func loadPracticeDefaultsIfNeeded() {
         .sheet(isPresented: $showProfile) {
             ProfileView(onClose: { showProfile = false })
         }
-        .fullScreenCover(isPresented: $showContentView) {
-            ContentView()
+        .onChange(of: showContentView) { _, newValue in
+            guard isHomePresentation, newValue else { return }
+            showContentView = false
+            appRoute.route = .content
         }
         .onAppear {
             evaluateAppSetUpGate()
@@ -1131,7 +1134,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 if isHomePresentation {
                     showManualAddSheet = false
                     DispatchQueue.main.async {
-                        showContentView = true
+                        appRoute.route = .content
                     }
                 } else {
                     isPresented = false

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260324_144300_ptv_sheets_root_route_reviewsave
+// SCOPE: Root-route handoff only — review save in home presentation now switches AppRoute directly to .content instead of triggering modal ContentView presentation. No UI/layout or sheet architecture changes.
+// SEARCH-TOKEN: 20260324_144300_ptv_sheets_root_route_reviewsave
+
 // CHANGE-ID: 20260217_104417_ad416700
 // SCOPE: PTV Audio Recorder card width contract — remove ARV self-card chrome; wrap in PTV cardSurface
 
@@ -93,7 +97,7 @@ extension PracticeTimerView {
                     UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
                     if isHomePresentation {
                         DispatchQueue.main.async {
-                            showContentView = true
+                            appRoute.route = .content
                         }
                     } else {
                         isPresented = false

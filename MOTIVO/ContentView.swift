@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260324_172900_ContentView_RecordButtonReturnsToTimer_9d3a
-// SCOPE: ContentView only — preserve the existing top-right record button visually, remove obsolete timer-sheet routing, and make the button dismiss back to PracticeTimerView when ContentView is presented from the timer home. No other UI, filters, debug-launch, profile, people, or feed/journal behavior changes.
-// SEARCH-TOKEN: 20260324_172900_ContentView_RecordButtonReturnsToTimer_9d3a
+// CHANGE-ID: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
+// SCOPE: ContentView only — preserve the existing top-right record button visually, replace dismiss-based timer return with root-route switching, and leave all feed/journal/people/debug/filter behavior unchanged. No other UI or logic changes.
+// SEARCH-TOKEN: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
 
 // CHANGE-ID: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
 // SCOPE: Journal mode only — convert Week/Month/Year from current-period filtering to full archive grouping after existing filters, keep navigation unchanged, scale density by lens (Week full, Month reduced, Year compact), and preserve Feed/MeView/filter/backend behavior. No backend/model/storage/sync changes.
@@ -361,8 +361,8 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appRoute: AppRouteStore
 
     @State private var showPublishSkipOversizeAlert = false
     @State private var publishSkipOversizeMessage = ""
@@ -1203,7 +1203,7 @@ fileprivate struct SessionsRootView: View {
                         #endif
                     }
                     Spacer()
-                    Button { dismiss() } label: {
+                    Button { appRoute.route = .timer } label: {
                         ZStack {
                           Circle()
                             .fill(.thinMaterial)

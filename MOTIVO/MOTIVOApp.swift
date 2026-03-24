@@ -26,6 +26,15 @@ import SwiftUI
 import CoreData
 import Foundation
 
+enum AppRoute {
+    case timer
+    case content
+}
+
+final class AppRouteStore: ObservableObject {
+    @Published var route: AppRoute = .timer
+}
+
 // CHANGE-ID: 20251203_BackendIdentityHandshakeStep5
 // SCOPE: Step 5 — Inject LocalStubIdentityService into AuthManager (no behaviour/UI changes)
 
@@ -52,6 +61,7 @@ struct MOTIVOApp: App {
     let persistenceController = PersistenceController.shared
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
+    @StateObject private var appRoute = AppRouteStore()
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -170,12 +180,20 @@ struct MOTIVOApp: App {
 
     var body: some Scene {
         WindowGroup {
-            PracticeTimerView(
-                isPresented: .constant(false),
-                presentationMode: .home
-            )
+            Group {
+                switch appRoute.route {
+                case .timer:
+                    PracticeTimerView(
+                        isPresented: .constant(false),
+                        presentationMode: .home
+                    )
+                case .content:
+                    ContentView()
+                }
+            }
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
+                .environmentObject(appRoute)
                 .onAppear {
                     // Phase 14.2.2: Session liveness — refresh Supabase session on launch to prevent zombie auth.
                     Task {
@@ -222,6 +240,6 @@ struct MOTIVOApp: App {
                         }
                     }
                 }
-                }
         }
     }
+}
