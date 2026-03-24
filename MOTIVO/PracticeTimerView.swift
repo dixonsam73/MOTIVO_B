@@ -687,7 +687,7 @@ private func loadPracticeDefaultsIfNeeded() {
                             .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark : PracticeTimerTopButtonsUI.fillOpacityLight)
                             .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                        Image(systemName: "books.vertical")
+                        Image(systemName: "list.bullet.rectangle")
                             .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary, weight: .regular))
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
@@ -1291,10 +1291,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var sessionMetaSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Session")
-                    .sectionHeader()
-
+            HStack {
                 Spacer()
 
                 Button {
