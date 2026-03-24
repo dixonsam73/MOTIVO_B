@@ -1131,46 +1131,62 @@ fileprivate struct SessionsRootView: View {
                     }
                     .accessibilityLabel("Open profile")
                     // People (search / follows)
-                    Button {
-                        showPeople = true
-                    } label: {
-                    ZStack(alignment: .topTrailing) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                    if selectedScope == .all {
+                        Button {
+                            showPeople = true
+                        } label: {
+                            ZStack(alignment: .topTrailing) {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                            Image(systemName: "person.2")
-                                .font(.system(size: 19, weight: .regular))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                        .contentShape(Circle())
+                                    Image(systemName: "person.2")
+                                        .font(.system(size: 19, weight: .regular))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                                .contentShape(Circle())
 
-                        // Subtle "+" indicator for incoming follow requests (outside the pill)
-                        if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread {
-                            Text("+")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .offset(x: 8, y: -8)
+                                // Subtle "+" indicator for incoming follow requests (outside the pill)
+                                if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread {
+                                    Text("+")
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .offset(x: 8, y: -8)
+                                }
+                            }
                         }
-                    }
-                    }
                         .contentShape(Rectangle())
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("People")
-                    #if DEBUG
-                    .background(
-                        GeometryReader { proxy in
-                            Color.clear
-                                .preference(
-                                    key: TopToolbarPeopleFramePreferenceKey.self,
-                                    value: proxy.frame(in: .named("TopToolbarRow"))
-                                )
-                        }
-                    )
-                    #endif
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("People")
+                        #if DEBUG
+                        .background(
+                            GeometryReader { proxy in
+                                Color.clear
+                                    .preference(
+                                        key: TopToolbarPeopleFramePreferenceKey.self,
+                                        value: proxy.frame(in: .named("TopToolbarRow"))
+                                    )
+                            }
+                        )
+                        #endif
+                    } else {
+                        Spacer()
+                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+                        #if DEBUG
+                            .background(
+                                GeometryReader { proxy in
+                                    Color.clear
+                                        .preference(
+                                            key: TopToolbarPeopleFramePreferenceKey.self,
+                                            value: proxy.frame(in: .named("TopToolbarRow"))
+                                        )
+                                }
+                            )
+                        #endif
+                    }
                     Spacer()
                     Button { showTimer = true } label: {
                         ZStack {
