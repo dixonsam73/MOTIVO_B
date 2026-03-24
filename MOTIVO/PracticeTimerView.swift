@@ -23,6 +23,10 @@
 // CHANGE-ID: 20251227_150000-ptv-videoTitles
 // SCOPE: Add staged videoTitles map persistence + hydration (metadata only) for AttachmentViewer rename
 
+// CHANGE-ID: 20260324_162700_ptv_home_root_shell
+// SCOPE: Add root/home-capable presentation path for PracticeTimerView with Journal-parity top controls; preserve timer/session logic and keep existing sheet path intact until app root is switched.
+// SEARCH-TOKEN: 20260324_162700_ptv_home_root_shell
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -50,13 +54,33 @@ private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neu
 
 // SessionActivityType moved to SessionActivityType.swift
 
+private enum PracticeTimerTopButtonsUI {
+    static let size: CGFloat = 40
+    static let iconPrimary: CGFloat = 19
+    static let spacing: CGFloat = Theme.Spacing.l
+    static let fillOpacityLight: CGFloat = 0.96
+    static let fillOpacityDark: CGFloat = 0.88
+}
+
 struct PracticeTimerView: View {
+    enum PresentationMode {
+        case sheet
+        case home
+    }
+
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var auth: AuthManager
 
-    // Presented as a sheet from ContentView
+    // Presented as a sheet from ContentView, or as the app's home/root screen.
     @Binding var isPresented: Bool
+    let presentationMode: PresentationMode
+
+    @FetchRequest(
+        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
+        animation: .default
+    ) private var allInstruments: FetchedResults<Instrument>
 
     // Instruments (profile)
     @State var instruments: [Instrument] = []
@@ -189,6 +213,19 @@ struct PracticeTimerView: View {
     // Ephemeral media flag key added as per instructions
     let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
     let currentSessionIDKey = "PracticeTimer.currentSessionID"
+
+    @State private var showProfile: Bool = false
+    @State private var showAppSetUp: Bool = false
+    @State private var showContentView: Bool = false
+    #if canImport(UIKit)
+    @State private var toolbarRemoteAvatar: UIImage? = nil
+    #endif
+
+    init(isPresented: Binding<Bool>, presentationMode: PresentationMode = .sheet) {
+        self._isPresented = isPresented
+        self.presentationMode = presentationMode
+    }
+
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
@@ -463,7 +500,208 @@ private func loadPracticeDefaultsIfNeeded() {
         autoTaskTexts.removeAll()
         persistTasksSnapshot()
     }
-        var body: some View {
+    
+    private var isHomePresentation: Bool {
+        presentationMode == .home
+    }
+
+    private var toolbarAvatarKeyNormalized: String {
+        auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var toolbarAvatarCacheKey: String {
+        "avatars|\(toolbarAvatarKeyNormalized)"
+    }
+
+    private var appSetUpBootstrapStateKey: String {
+        switch auth.backendBootstrapState {
+        case .unknown: return "unknown"
+        case .checking: return "checking"
+        case .existingAccount: return "existingAccount"
+        case .newAccount: return "newAccount"
+        }
+    }
+
+    private var appSetUpCompletenessKey: String {
+        guard auth.isSignedIn else { return "signedOut" }
+        guard BackendConfig.isConfigured else { return "backendNotConfigured" }
+        guard let uid = auth.currentUserID, !uid.isEmpty else { return "missingUserID" }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+
+        guard let profile = try? viewContext.fetch(req).first else {
+            return "missingProfile|\(uid)"
+        }
+
+        let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
+        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
+
+        if !hasName { return "missingName|\(uid)" }
+        if !hasInstrument { return "missingInstrument|\(uid)" }
+        return "complete|\(uid)"
+    }
+
+    private func requiresAppSetUpNow() -> Bool {
+        guard auth.isSignedIn else { return false }
+        guard BackendConfig.isConfigured else { return false }
+
+        switch auth.backendBootstrapState {
+        case .unknown, .checking:
+            return false
+        case .newAccount:
+            return true
+        case .existingAccount:
+            break
+        }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+
+        guard let profile = try? viewContext.fetch(req).first else {
+            return true
+        }
+
+        let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
+        if !hasName { return true }
+
+        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
+        return !hasInstrument
+    }
+
+    private func evaluateAppSetUpGate() {
+        guard isHomePresentation else { return }
+
+        guard auth.isSignedIn else {
+            if showAppSetUp { showAppSetUp = false }
+            return
+        }
+
+        guard BackendConfig.isConfigured else {
+            if showAppSetUp { showAppSetUp = false }
+            return
+        }
+
+        let shouldShow = requiresAppSetUpNow()
+        if shouldShow != showAppSetUp {
+            showAppSetUp = shouldShow
+        }
+    }
+
+    private func handleProfileTap() {
+        if requiresAppSetUpNow() {
+            showAppSetUp = true
+            showProfile = false
+        } else {
+            showProfile = true
+            showAppSetUp = false
+        }
+    }
+
+    @ViewBuilder
+    private var homeTopBar: some View {
+        if isHomePresentation {
+            HStack(spacing: PracticeTimerTopButtonsUI.spacing) {
+                Button {
+                    handleProfileTap()
+                } label: {
+                    #if canImport(UIKit)
+                    if let userID = auth.currentUserID, let uiImage = ProfileStore.avatarImage(for: userID) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                            .padding(8)
+                    } else if !toolbarAvatarKeyNormalized.isEmpty, let cached = RemoteAvatarImageCache.get(toolbarAvatarCacheKey) {
+                        Image(uiImage: cached)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                            .padding(8)
+                    } else if !toolbarAvatarKeyNormalized.isEmpty, let toolbarRemoteAvatar {
+                        Image(uiImage: toolbarRemoteAvatar)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                            .padding(8)
+                    } else {
+                        let initials: String = {
+                            let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+                            req.fetchLimit = 1
+                            if let profile = try? viewContext.fetch(req).first,
+                               let name = profile.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+                               !name.isEmpty {
+                                let words = name
+                                    .components(separatedBy: .whitespacesAndNewlines)
+                                    .filter { !$0.isEmpty }
+                                if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
+                                let first = words.first?.first.map { String($0).uppercased() } ?? ""
+                                let last = words.last?.first.map { String($0).uppercased() } ?? ""
+                                let combo = first + last
+                                return combo.isEmpty ? "?" : combo
+                            }
+                            return "?"
+                        }()
+
+                        ZStack {
+                            Circle().fill(.thinMaterial)
+                            Text(initials)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                        .clipShape(Circle())
+                        .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                        .padding(8)
+                    }
+                    #else
+                    ZStack {
+                        Circle()
+                            .fill(.thinMaterial)
+                            .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark : PracticeTimerTopButtonsUI.fillOpacityLight)
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+                        Image(systemName: "person.fill")
+                            .font(.system(size: 22, weight: .regular))
+                            .foregroundStyle(colorScheme == .dark ? .white : .primary)
+                    }
+                    .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                    #endif
+                }
+                .accessibilityLabel("Open profile")
+
+                Spacer()
+
+                Button {
+                    showContentView = true
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(.thinMaterial)
+                            .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark : PracticeTimerTopButtonsUI.fillOpacityLight)
+                            .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+
+                        Image(systemName: "books.vertical")
+                            .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary, weight: .regular))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                    .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                    .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open Journal and Feed")
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+        }
+    }
+
+    var body: some View {
         NavigationStack {
             mainScrollView
         }
@@ -668,6 +906,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 // Ensure any leaked/debounced title edits are committed before hydration
                 commitAllAudioTitleBuffersAndPersist()
 
+                evaluateAppSetUpGate()
                 hydrateTimerFromStorage()
                 startTicker()
                 // Reconcile with StagingStore on resume to repopulate UI if needed
@@ -713,9 +952,47 @@ private func loadPracticeDefaultsIfNeeded() {
                 audioTitleEditingBuffer.removeValue(forKey: fid)
             }
         }
+        .safeAreaInset(edge: .top) {
+            homeTopBar
+        }
+        #if canImport(UIKit)
+        .task(id: toolbarAvatarKeyNormalized) {
+            guard isHomePresentation else { return }
+            guard !toolbarAvatarKeyNormalized.isEmpty else {
+                toolbarRemoteAvatar = nil
+                return
+            }
+            if RemoteAvatarImageCache.get(toolbarAvatarCacheKey) != nil { return }
+            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: toolbarAvatarKeyNormalized) {
+                toolbarRemoteAvatar = ui
+            }
+        }
+        #endif
+        .fullScreenCover(isPresented: $showAppSetUp) {
+            AppSetUpView(onComplete: {
+                showAppSetUp = false
+            })
+            .interactiveDismissDisabled(true)
+        }
+        .sheet(isPresented: $showProfile) {
+            ProfileView(onClose: { showProfile = false })
+        }
+        .fullScreenCover(isPresented: $showContentView) {
+            ContentView()
+        }
+        .onAppear {
+            evaluateAppSetUpGate()
+        }
+        .onChange(of: appSetUpBootstrapStateKey) { _, _ in
+            evaluateAppSetUpGate()
+        }
+        .onChange(of: appSetUpCompletenessKey) { _, _ in
+            evaluateAppSetUpGate()
+        }
         .toolbar {
-            ToolbarItem(placement: .cancellationAction) {
-                Button("Quit") {
+            if !isHomePresentation {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Quit") {
                     #if DEBUG
                     StorageInspector.logSandboxUsage(tag: "Before Quit")
                     #endif
@@ -834,6 +1111,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     print("[EphemeralCleanup] Quit cleanup flag reset to false")
                     #endif
                     isPresented = false
+                    }
                 }
             }
         }
@@ -850,7 +1128,9 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .sheet(isPresented: $showManualAddSheet) {
             AddEditSessionView(onSuccessfulSave: {
-                isPresented = false
+                if !isHomePresentation {
+                    isPresented = false
+                }
             })
         }
         .onChange(of: showReviewSheet) { oldValue, newValue in

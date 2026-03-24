@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260324_172900_ContentView_RecordButtonReturnsToTimer_9d3a
+// SCOPE: ContentView only — preserve the existing top-right record button visually, remove obsolete timer-sheet routing, and make the button dismiss back to PracticeTimerView when ContentView is presented from the timer home. No other UI, filters, debug-launch, profile, people, or feed/journal behavior changes.
+// SEARCH-TOKEN: 20260324_172900_ContentView_RecordButtonReturnsToTimer_9d3a
+
 // CHANGE-ID: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
 // SCOPE: Journal mode only — convert Week/Month/Year from current-period filtering to full archive grouping after existing filters, keep navigation unchanged, scale density by lens (Week full, Month reduced, Year compact), and preserve Feed/MeView/filter/backend behavior. No backend/model/storage/sync changes.
 // SEARCH-TOKEN: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
@@ -357,7 +361,7 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var auth: AuthManager
 
     @State private var showPublishSkipOversizeAlert = false
@@ -397,8 +401,7 @@ fileprivate struct SessionsRootView: View {
     // Sheets
     @State private var showProfile = false
     @State private var showAppSetUp = false
-    @State private var showTimer = false
-    @State private var showAdd = false
+        @State private var showAdd = false
     @State private var showPeople = false
 
     #if canImport(UIKit)
@@ -1200,7 +1203,7 @@ fileprivate struct SessionsRootView: View {
                         #endif
                     }
                     Spacer()
-                    Button { showTimer = true } label: {
+                    Button { dismiss() } label: {
                         ZStack {
                           Circle()
                             .fill(.thinMaterial)
@@ -1313,9 +1316,6 @@ fileprivate struct SessionsRootView: View {
                             .interactiveDismissDisabled(true)
                         }
                         
-.sheet(isPresented: $showTimer) {
-                PracticeTimerView(isPresented: $showTimer)
-            }
             .sheet(isPresented: $showAdd) {
                 AddEditSessionView()
             }
@@ -1341,11 +1341,6 @@ fileprivate struct SessionsRootView: View {
             
             // Auto refresh notifications when returning to the feed from modal sheets (timer/add/profile/people).
             // This covers the common “navigate away and come back” flow because these destinations are presented as sheets.
-            .onChange(of: showTimer) { _, isPresented in
-                guard isPresented == false else { return }
-                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
-            }
             .onChange(of: showAdd) { _, isPresented in
                 guard isPresented == false else { return }
                 let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"

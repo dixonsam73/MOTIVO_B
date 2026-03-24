@@ -43,6 +43,10 @@ import Foundation
 // SEARCH-TOKEN: 20260127_130352_AppAuthLiveness_LaunchForeground
 // SCOPE: Step 7 — Apply BackendConfig at app launch so NetworkManager.baseURL/authToken are configured before backend services select simulated vs HTTP
 
+// CHANGE-ID: 20260324_171200_app_root_to_practicetimer
+// SCOPE: Visible root routing only — launch to PracticeTimerView in home mode while preserving all backend/bootstrap/liveness behavior.
+// SEARCH-TOKEN: 20260324_171200_app_root_to_practicetimer
+
 @main
 struct MOTIVOApp: App {
     let persistenceController = PersistenceController.shared
@@ -166,7 +170,10 @@ struct MOTIVOApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            PracticeTimerView(
+                isPresented: .constant(false),
+                presentationMode: .home
+            )
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
                 .onAppear {
