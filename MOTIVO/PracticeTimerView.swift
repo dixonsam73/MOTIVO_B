@@ -594,7 +594,7 @@ private func loadPracticeDefaultsIfNeeded() {
             showAppSetUp = true
             showProfile = false
         } else {
-            showProfile = true
+            appRoute.isProfilePresented = true
             showAppSetUp = false
         }
     }

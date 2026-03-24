@@ -291,6 +291,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 }
                 .appBackground()
             }
+                .navigationBarBackButtonHidden(true)
          )
      }
  

@@ -1075,7 +1075,7 @@ fileprivate struct SessionsRootView: View {
             
             .safeAreaInset(edge: .top) {
                 HStack(spacing: TopButtonsUI.spacing) {
-                    Button { showProfile = true } label: {
+                    Button { appRoute.isProfilePresented = true } label: {
                         #if canImport(UIKit)
                         if let uiImage = ProfileStore.avatarImage(for: userID) {
                             Image(uiImage: uiImage)
@@ -1318,9 +1318,6 @@ fileprivate struct SessionsRootView: View {
                         
             .sheet(isPresented: $showAdd) {
                 AddEditSessionView()
-            }
-            .sheet(isPresented: $showProfile) {
-                ProfileView(onClose: { showProfile = false })
             }
             .sheet(isPresented: $showPeople) {
                 NavigationStack {

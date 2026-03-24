@@ -33,6 +33,7 @@ enum AppRoute {
 
 final class AppRouteStore: ObservableObject {
     @Published var route: AppRoute = .timer
+    @Published var isProfilePresented: Bool = false
 }
 
 // CHANGE-ID: 20251203_BackendIdentityHandshakeStep5
@@ -180,15 +181,25 @@ struct MOTIVOApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                switch appRoute.route {
-                case .timer:
-                    PracticeTimerView(
-                        isPresented: .constant(false),
-                        presentationMode: .home
-                    )
-                case .content:
-                    ContentView()
+            ZStack {
+                Group {
+                    switch appRoute.route {
+                    case .timer:
+                        PracticeTimerView(
+                            isPresented: .constant(false),
+                            presentationMode: .home
+                        )
+                    case .content:
+                        ContentView()
+                    }
+                }
+
+                if appRoute.isProfilePresented {
+                    ProfileView(onClose: {
+                        appRoute.isProfilePresented = false
+                    })
+                    .zIndex(1)
+                    .transition(.identity)
                 }
             }
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
