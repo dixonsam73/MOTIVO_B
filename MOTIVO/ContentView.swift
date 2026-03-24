@@ -2259,9 +2259,9 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func journalYearSurfaceWidthFraction(for session: Session, maxDuration: Int) -> CGFloat {
-        guard maxDuration > 0 else { return 0.20 }
-        let raw = CGFloat(journalDurationSeconds(for: session)) / CGFloat(maxDuration)
-        let scaled = sqrt(max(0, raw))
+        guard maxDuration > 0 else { return 0.05 }
+        let raw = max(0, CGFloat(journalDurationSeconds(for: session)) / CGFloat(maxDuration))
+        let scaled = pow(raw, 0.75)
         return scaled
     }
 
@@ -2576,7 +2576,7 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
                 .frame(minHeight: 58, alignment: .leading)
                 .background(alignment: .leading) {
                     GeometryReader { proxy in
-                        let clampedFraction = min(max(yearWidthFraction, 0.20), 0.90)
+                        let clampedFraction = min(max(yearWidthFraction, 0.05), 0.94)
                         let width = max(0, proxy.size.width * clampedFraction)
 
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
