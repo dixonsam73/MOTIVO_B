@@ -3093,7 +3093,8 @@ fileprivate struct SessionRow: View {
                 // Title only (paperclip removed)
                 Text(feedTitle)
                     .font(isYearCompactJournalRow ? .subheadline.weight(.semibold) : (isMonthCompactJournalRow ? .subheadline.weight(.medium) : .headline))
-                    .lineLimit(2)
+                    .lineLimit(isYearCompactJournalRow ? 1 : 2)
+                    .truncationMode(.tail)
                     .accessibilityIdentifier("row.title")
 
                 if scope == .mine {
