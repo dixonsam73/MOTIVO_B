@@ -189,8 +189,8 @@ struct SessionDetailView: View {
     // Forces view refresh when attachments of this session change
     @State private var _refreshTick: Int = 0
 
-    // Added state for local interaction counts and liked state
-    @State private var isLikedLocal: Bool = false
+    // Added state for local saved interaction state
+    @State private var isSavedLocal: Bool = false
 
 
     private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
@@ -622,10 +622,10 @@ return AttachmentViewerView(
             _refreshTick &+= 1
         }
         .appBackground()
-        // Added task to hydrate local interaction state on sessionUUID change
+        // Added task to hydrate local saved state on sessionUUID change
         .task(id: sessionUUID) {
             if let sid = sessionUUID {
-                isLikedLocal = FeedInteractionStore.isLiked(sid)
+                isSavedLocal = FeedInteractionStore.isSaved(sid, viewerUserID: effectiveViewerUserID ?? "unknown")
              
             }
         }
@@ -1136,13 +1136,13 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                let newState = FeedInteractionStore.toggleHeart(sessionID)
-                isLikedLocal = newState
+                let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: effectiveViewerUserID ?? "unknown")
+                isSavedLocal = newState
             }) {
                 HStack(spacing: 8) {
-                    Image(systemName: isLikedLocal ? "heart.fill" : "heart")
+                    Image(systemName: isSavedLocal ? "heart.fill" : "heart")
                         .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(isLikedLocal ? Color.red.opacity(0.75) :  Theme.Colors.secondaryText)
+                        .foregroundStyle(isSavedLocal ? Color.red.opacity(0.75) :  Theme.Colors.secondaryText)
                     
                 }
                 .frame(maxWidth: .infinity)

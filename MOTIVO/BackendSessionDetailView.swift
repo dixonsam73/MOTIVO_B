@@ -234,7 +234,7 @@ struct BackendSessionDetailView: View {
                 .padding(.bottom, Theme.Spacing.xl)
         }
         .onAppear {
-            isLikedLocal = FeedInteractionStore.isHearted(model.id)
+            isLikedLocal = FeedInteractionStore.isSaved(model.id, viewerUserID: effectiveViewerUserID ?? "unknown")
             Task {
                 await loadThumbURLsIfNeeded()
                 await loadDirectoryAccountIfNeeded()
@@ -769,7 +769,7 @@ struct BackendSessionDetailView: View {
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
-                let newState = FeedInteractionStore.toggleHeart(model.id)
+                let newState = FeedInteractionStore.toggleSaved(model.id, viewerUserID: effectiveViewerUserID ?? "unknown")
                 isLikedLocal = newState
             }) {
                 HStack(spacing: 8) {
