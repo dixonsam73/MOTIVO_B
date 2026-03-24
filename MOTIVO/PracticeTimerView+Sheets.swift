@@ -91,7 +91,13 @@ extension PracticeTimerView {
                     UserDefaults.standard.set(false, forKey: sessionActiveKey)
                     UserDefaults.standard.set(false, forKey: ephemeralMediaFlagKey)
                     UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
-                    isPresented = false
+                    if isHomePresentation {
+                        DispatchQueue.main.async {
+                            showContentView = true
+                        }
+                    } else {
+                        isPresented = false
+                    }
                 },
                 onCancel: { didCancelFromReview = true }
             )

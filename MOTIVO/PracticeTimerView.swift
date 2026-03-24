@@ -216,7 +216,7 @@ struct PracticeTimerView: View {
 
     @State private var showProfile: Bool = false
     @State private var showAppSetUp: Bool = false
-    @State private var showContentView: Bool = false
+    @State var showContentView: Bool = false
     #if canImport(UIKit)
     @State private var toolbarRemoteAvatar: UIImage? = nil
     #endif
@@ -501,7 +501,7 @@ private func loadPracticeDefaultsIfNeeded() {
         persistTasksSnapshot()
     }
     
-    private var isHomePresentation: Bool {
+    var isHomePresentation: Bool {
         presentationMode == .home
     }
 
@@ -1128,7 +1128,12 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .sheet(isPresented: $showManualAddSheet) {
             AddEditSessionView(onSuccessfulSave: {
-                if !isHomePresentation {
+                if isHomePresentation {
+                    showManualAddSheet = false
+                    DispatchQueue.main.async {
+                        showContentView = true
+                    }
+                } else {
                     isPresented = false
                 }
             })
