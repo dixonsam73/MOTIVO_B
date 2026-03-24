@@ -2733,6 +2733,39 @@ fileprivate struct SessionRow: View {
         .joined(separator: " · ")
     }
 
+    private var yearCompactInstrumentOnlyLine: String {
+        subtitleParts.first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
+    private var yearCompactMetadataLine: String {
+        let instrumentText = yearCompactInstrumentOnlyLine.isEmpty ? nil : yearCompactInstrumentOnlyLine
+        let fallbackInstrumentActivityText = instrumentActivityLine.isEmpty ? nil : instrumentActivityLine
+
+        return [
+            journalThreadLabel,
+            journalThreadLabel == nil ? fallbackInstrumentActivityText : instrumentText,
+            journalDateText,
+            journalDurationText
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
+    private var yearCompactMetadataTailLine: String {
+        let instrumentText = yearCompactInstrumentOnlyLine.isEmpty ? nil : yearCompactInstrumentOnlyLine
+        let fallbackInstrumentActivityText = instrumentActivityLine.isEmpty ? nil : instrumentActivityLine
+
+        return [
+            journalThreadLabel == nil ? fallbackInstrumentActivityText : instrumentText,
+            journalDateText,
+            journalDurationText
+        ]
+        .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+        .joined(separator: " · ")
+    }
+
     private var notesPreviewText: String? {
         let trimmed = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -2759,7 +2792,12 @@ fileprivate struct SessionRow: View {
     private var accessibilitySummary: String {
         var parts: [String] = []
         parts.append(feedTitle)
-        let meta = (scope == .mine) ? journalMetadataLine : instrumentActivityLine
+        let meta: String
+        if scope == .mine {
+            meta = isYearCompactJournalRow ? yearCompactMetadataLine : journalMetadataLine
+        } else {
+            meta = instrumentActivityLine
+        }
         if !meta.isEmpty {
             parts.append(meta)
         }
@@ -3059,9 +3097,9 @@ fileprivate struct SessionRow: View {
                     .accessibilityIdentifier("row.title")
 
                 if scope == .mine {
-                    let metaLine = journalMetadataLine
+                    let metaLine = isYearCompactJournalRow ? yearCompactMetadataLine : journalMetadataLine
                     let thread = journalThreadLabel
-                    let tailLine = journalMetadataTailLine
+                    let tailLine = isYearCompactJournalRow ? yearCompactMetadataTailLine : journalMetadataTailLine
 
                     if let thread, !thread.isEmpty {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
