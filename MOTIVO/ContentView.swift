@@ -892,7 +892,14 @@ fileprivate struct SessionsRootView: View {
                                                         frozenFeedItems = renderFeedItems
                                                         pushSessionID = (session.value(forKey: "id") as? UUID)
                                                     }
-                                                    .modifier(JournalArchiveRowContainerModifier(lens: selectedJournalLens))
+                                                    .modifier(
+                                                        JournalArchiveRowContainerModifier(
+                                                            lens: selectedJournalLens,
+                                                            yearWidthFraction: selectedJournalLens == .year
+                                                                ? journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows))
+                                                                : 1.0
+                                                        )
+                                                    )
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : (selectedJournalLens == .year ? 4 : Theme.Spacing.s + 2))
                                                 }
                                                 .buttonStyle(.plain)
@@ -2233,6 +2240,31 @@ fileprivate struct SessionsRootView: View {
             }
     }
 
+    private func journalDurationSeconds(for session: Session) -> Int {
+        let attrs = session.entity.attributesByName
+        if attrs["durationSeconds"] != nil, let n = session.value(forKey: "durationSeconds") as? NSNumber {
+            return max(0, n.intValue)
+        } else if attrs["durationMinutes"] != nil, let n = session.value(forKey: "durationMinutes") as? NSNumber {
+            return max(0, n.intValue * 60)
+        } else if attrs["duration"] != nil, let n = session.value(forKey: "duration") as? NSNumber {
+            return max(0, n.intValue * 60)
+        } else if attrs["lengthMinutes"] != nil, let n = session.value(forKey: "lengthMinutes") as? NSNumber {
+            return max(0, n.intValue * 60)
+        }
+        return 0
+    }
+
+    private func journalYearMaxDuration(for sessions: [Session]) -> Int {
+        max(sessions.map(journalDurationSeconds(for:)).max() ?? 0, 1)
+    }
+
+    private func journalYearSurfaceWidthFraction(for session: Session, maxDuration: Int) -> CGFloat {
+        guard maxDuration > 0 else { return 0.20 }
+        let raw = CGFloat(journalDurationSeconds(for: session)) / CGFloat(maxDuration)
+        let scaled = sqrt(max(0, raw))
+        return scaled
+    }
+
     private static let journalMonthFormatter: DateFormatter = {
         let f = DateFormatter()
         f.locale = .current
@@ -2527,6 +2559,9 @@ fileprivate struct AttachmentCountBadge: View {
 
 fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
     let lens: JournalTimeLens
+    let yearWidthFraction: CGFloat
+
+    @Environment(\.colorScheme) private var colorScheme
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -2538,14 +2573,23 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
         case .year:
             content
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .fill(Color.primary.opacity(0.018))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
-                        .stroke(Color.primary.opacity(0.04), lineWidth: 0.5)
-                )
+                .frame(minHeight: 58, alignment: .leading)
+                .background(alignment: .leading) {
+                    GeometryReader { proxy in
+                        let clampedFraction = min(max(yearWidthFraction, 0.20), 0.90)
+                        let width = max(0, proxy.size.width * clampedFraction)
+
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055))
+                            .frame(width: width, height: 58, alignment: .leading)
+                            .overlay(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .stroke(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05), lineWidth: 0.5)
+                                    .frame(width: width, height: 58, alignment: .leading)
+                            }
+                    }
+                    .allowsHitTesting(false)
+                }
         }
     }
 }
