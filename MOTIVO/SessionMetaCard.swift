@@ -61,7 +61,11 @@ struct SessionMetaCard: View {
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
                         .onAppear {
-                            instrument = only
+                            DispatchQueue.main.async {
+                                if instrument == nil {
+                                    instrument = only
+                                }
+                            }
                         }
                     }
 
