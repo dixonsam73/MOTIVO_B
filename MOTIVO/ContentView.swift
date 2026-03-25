@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260325_214500_ContentView_YearCalendarOverviewCompaction_a9d1
-// SCOPE: Phase 2 Year monthly overview — replace Year journal rendering only with a fixed 12-month calendar-year aggregation while preserving Week, Phase 1 Month, Feed, filters, routing, and Theme behavior unchanged. No backend/model/schema changes.
+// CHANGE-ID: 20260325_223000_ContentView_YearCalendarSpacingMicroPass_8d2a
+// SCOPE: Phase 2B Year journal correction pass — refine Year-only month-aggregate row rendering to borrow Month’s existing bar/spacing language more directly, with tighter compression and clearer bar visibility. Preserve Week, Month, Feed, filters, routing, Theme, and aggregation behavior unchanged.
 // SEARCH-TOKEN: 20260325_214500_ContentView_YearCalendarOverviewCompaction_a9d1
 
 // CHANGE-ID: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
@@ -7,8 +7,8 @@
 // SEARCH-TOKEN: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
 
 // CHANGE-ID: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
-// SCOPE: Phase 2 Year monthly overview — preserve Week/Month/Feed; compact Year into a 12-row calendar-year trace with month-level scaling and subtle density emphasis. No backend/model/storage/sync/navigation/filter changes.
-// SEARCH-TOKEN: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
+// SCOPE: Phase 2B micro-pass — Year journal mode only. Tighten first-row/top spacing and inter-row vertical rhythm so all 12 months fit more cleanly while preserving the existing Year bars, aggregation, and hidden Year filter behavior. Week/Month/Feed/routing/search/backend/schema/Theme unchanged.
+// SEARCH-TOKEN: 20260325_223000_ContentView_YearCalendarSpacingMicroPass_8d2a
 // CHANGE-ID: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
 // SCOPE: Journal mode only — add Week/Month/Year time-lens control, period summary label + total, and time-windowed owner dataset switching while preserving Feed summary, MeView button, current Journal Week rendering, and existing filter semantics. No backend/model/storage/sync changes.
 // SEARCH-TOKEN: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
@@ -933,13 +933,16 @@ fileprivate struct SessionsRootView: View {
                                             .foregroundStyle(Theme.Colors.secondaryText)
                                             .id(topID)
                                     } else {
-                                        ForEach(Array(yearRows.enumerated()), id: \.element.id) { rowIndex, row in
-                                            JournalYearMonthRow(row: row, isFirst: rowIndex == 0)
-                                                .listRowSeparator(.hidden)
-                                                .listRowBackground(Color.clear)
-                                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                                .id(rowIndex == 0 ? topID : nil)
+                                        VStack(spacing: 8) {
+                                            ForEach(Array(yearRows.enumerated()), id: \.element.id) { rowIndex, row in
+                                                JournalYearMonthRow(row: row, isFirst: rowIndex == 0)
+                                            }
                                         }
+                                        .padding(.top, 6)
+                                        .listRowSeparator(.hidden)
+                                        .listRowBackground(Color.clear)
+                                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                        .id(topID)
                                     }
                                 }
                             } else if renderFeedItems.isEmpty {
@@ -2233,7 +2236,9 @@ fileprivate struct SessionsRootView: View {
             calendar.component(.year, from: journalDate(for: session)) == currentYear
         }
 
-        let monthStarts: [Date] = (1...12).compactMap { month in
+        let currentMonth = calendar.component(.month, from: now)
+
+        let monthStarts: [Date] = (1...currentMonth).compactMap { month in
             calendar.date(from: DateComponents(year: currentYear, month: month, day: 1))
         }
 
@@ -2596,113 +2601,86 @@ fileprivate struct JournalYearMonthRow: View {
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private let rowCornerRadius: CGFloat = 12
-    private let activeRowHeight: CGFloat = 42
-    private let quietRowHeight: CGFloat = 20
+    private let rowCornerRadius: CGFloat = 10
+    private let activeRowHeight: CGFloat = 33
+    private let quietRowHeight: CGFloat = 13
 
     private var rowHeight: CGFloat {
         row.hasSessions ? activeRowHeight : quietRowHeight
     }
 
-    private var trackFill: Color {
-        let baseOpacity: Double = colorScheme == .dark ? 0.22 : 0.12
-        let densityLift: Double = colorScheme == .dark ? 0.18 : 0.12
-        return Theme.Colors.surface(colorScheme)
-            .opacity(baseOpacity + densityLift * Double(row.densityFraction))
+    private var activeBarFill: Color {
+        let baseOpacity: Double = colorScheme == .dark ? 0.17 : 0.03
+        let densityLift: Double = colorScheme == .dark ? 0.12 : 0.28
+        return Color.primary.opacity(baseOpacity + densityLift * Double(row.densityFraction))
     }
 
-    private var trackStroke: Color {
-        let baseOpacity: Double = colorScheme == .dark ? 0.28 : 0.12
-        let densityLift: Double = colorScheme == .dark ? 0.12 : 0.08
-        return Theme.Colors.stroke(colorScheme)
-            .opacity(baseOpacity + densityLift * Double(row.densityFraction))
+    private var activeBarStroke: Color {
+        let baseOpacity: Double = colorScheme == .dark ? 0.14 : 0.025
+        let densityLift: Double = colorScheme == .dark ? 0.08 : 0.18
+        return Color.primary.opacity(baseOpacity + densityLift * Double(row.densityFraction))
     }
 
-    private var quietTrackFill: Color {
-        Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.05 : 0.02)
-    }
-
-    private var quietTrackStroke: Color {
-        Theme.Colors.stroke(colorScheme).opacity(colorScheme == .dark ? 0.12 : 0.05)
+    private var quietTextOpacity: Double {
+        row.isFutureMonth ? 0.40 : 0.54
     }
 
     private var primaryTextOpacity: Double {
-        row.hasSessions ? 0.98 : (row.isFutureMonth ? 0.48 : 0.62)
+        row.hasSessions ? 0.97 : quietTextOpacity
     }
 
     private var secondaryTextOpacity: Double {
-        row.isFutureMonth ? 0.40 : 0.58
+        row.isFutureMonth ? 0.34 : 0.50
     }
 
     var body: some View {
         ZStack(alignment: .leading) {
-            GeometryReader { proxy in
-                let totalWidth = max(0, proxy.size.width)
-                let fillWidth = max(0, totalWidth * row.widthFraction)
+            if row.hasSessions {
+                GeometryReader { proxy in
+                    let totalWidth = max(0, proxy.size.width)
+                    let clampedFraction = min(max(row.widthFraction, 0.08), 1.0)
+                    let fillWidth = max(0, totalWidth * clampedFraction)
 
-                ZStack(alignment: .leading) {
-                    if row.hasSessions {
-                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                            .fill(quietTrackFill)
-                            .frame(width: totalWidth, height: rowHeight)
-
-                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                            .stroke(quietTrackStroke, lineWidth: 0.5)
-                            .frame(width: totalWidth, height: rowHeight)
-
-                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                            .fill(trackFill)
-                            .frame(width: fillWidth, height: rowHeight)
-
-                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                            .stroke(trackStroke, lineWidth: 0.6)
-                            .frame(width: fillWidth, height: rowHeight)
-                    }
+                    RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                        .fill(activeBarFill)
+                        .frame(width: fillWidth, height: rowHeight)
+                        .overlay(alignment: .leading) {
+                            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                                .stroke(activeBarStroke, lineWidth: 0.5)
+                                .frame(width: fillWidth, height: rowHeight)
+                        }
                 }
+                .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
 
             if row.hasSessions {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(row.monthLabel)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
-                            .lineLimit(1)
-
-                        Text("·")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
-
-                        Text(row.totalDurationText)
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color.primary.opacity(0.94))
-                            .lineLimit(1)
-
-                        Spacer(minLength: 0)
-                    }
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(row.primaryText)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
+                        .lineLimit(1)
 
                     if let secondary = row.secondaryText {
                         Text(secondary)
                             .font(.caption2)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(secondaryTextOpacity))
+                            .foregroundStyle(Color.primary.opacity(colorScheme == .dark ? 0.72 : 0.62))
                             .lineLimit(1)
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 2)
             } else {
                 Text(row.monthLabel)
-                    .font(.subheadline.weight(.medium))
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
                     .lineLimit(1)
-                    .padding(.horizontal, 2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 2)
             }
         }
         .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .leading)
-        .padding(.top, isFirst ? 2 : 0)
-        .padding(.bottom, row.hasSessions ? 4 : 3)
+        .padding(.top, isFirst ? -2 : 0)
+        .padding(.bottom, 0)
     }
 }
 
