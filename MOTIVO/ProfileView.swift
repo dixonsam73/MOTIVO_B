@@ -1403,6 +1403,16 @@ private func initials(from string: String) -> String {
              .onChange(of: name) { _, _ in
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
              }
+             .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: ctx)) { _ in
+                 guard auth.currentUserID != nil else { return }
+                 guard showInstrumentManager == false,
+                       showActivityManager == false,
+                       showTasksManager == false,
+                       showDeleteAccountSheet == false,
+                       showAvatarEditor == false,
+                       showPhotoPicker == false else { return }
+                 load()
+             }
              .onChange(of: locationText) { _, _ in
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
              }

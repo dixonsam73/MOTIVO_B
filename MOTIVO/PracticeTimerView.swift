@@ -799,23 +799,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 resetTasksForNewSessionContext()
             }
 
-            instruments = fetchInstruments()
-            if instrument == nil {
-                if let primaryName = fetchPrimaryInstrumentName(),
-                   let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
-                    instrument = match
-                    if let idx = instruments.firstIndex(of: match) { instrumentIndex = idx }
-                } else if hasOneInstrument {
-                    instrument = instruments.first
-                    instrumentIndex = 0
-                } else if hasMultipleInstruments {
-                    instrumentIndex = 0 // safe default
-                    instrument = instruments.first
-                }
-            } else if let current = instrument,
-                      let idx = instruments.firstIndex(of: current) {
-                instrumentIndex = idx
-            }
+            refreshInstrumentSelectionFromStore()
 
             loadUserActivities()
             applyPrimaryActivityRef()
@@ -971,6 +955,7 @@ private func loadPracticeDefaultsIfNeeded() {
         #endif
         .fullScreenCover(isPresented: $showAppSetUp) {
             AppSetUpView(onComplete: {
+                refreshInstrumentSelectionFromStore()
                 showAppSetUp = false
             })
             .interactiveDismissDisabled(true)
@@ -1601,6 +1586,32 @@ private var tasksPadSection: some View {
             return (name?.isEmpty == false) ? name : nil
         }
         return nil
+    }
+
+    private func refreshInstrumentSelectionFromStore() {
+        instruments = fetchInstruments()
+
+        if let primaryName = fetchPrimaryInstrumentName(),
+           let match = instruments.first(where: { ($0.name ?? "").caseInsensitiveCompare(primaryName) == .orderedSame }) {
+            instrument = match
+            if let idx = instruments.firstIndex(of: match) { instrumentIndex = idx }
+            return
+        }
+
+        if let current = instrument,
+           let idx = instruments.firstIndex(of: current) {
+            instrument = current
+            instrumentIndex = idx
+            return
+        }
+
+        if instruments.isEmpty {
+            instrument = nil
+            instrumentIndex = 0
+        } else {
+            instrumentIndex = 0
+            instrument = instruments.first
+        }
     }
 
     // MARK: - Background-safe timer controls
