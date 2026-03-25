@@ -93,7 +93,7 @@ private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count 
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
-    @State private var range: StatsRange = .week
+    @State private var range: StatsRange = .total
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var avgSessionSeconds: Int64? = nil
     @State private var firstSessionDate: Date? = nil
