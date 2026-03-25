@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260318_161600_AboutEtudes_OverviewHeaderTrim
-// SCOPE: AboutEtudesView — replace large in-content title with smaller Overview section header and remove final closing sentence card. No other UI, copy, or logic changes.
-// SEARCH-TOKEN: 20260318_161600_AboutEtudes_OverviewHeaderTrim
+// CHANGE-ID: 20260325_074500_AboutEtudes_HeartIconRestore
+// SCOPE: AboutEtudesView — restore heart icon inline in Filter sentence using original formatting. No other UI or copy changes.
+// SEARCH-TOKEN: 20260325_074500_AboutEtudes_HeartIconRestore
 
 import SwiftUI
 
@@ -25,35 +25,13 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Set up default task lists in the Tasks Manager — they’ll appear automatically when you start a session.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                }
-
-                aboutSection("Feed") {
-                    Text("Your Feed shows your sessions in chronological order. If you follow other musicians, you’ll also see what they’ve chosen to share.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    (
-                        Text("Use the Feed Filter to switch between All (you + people you follow), Mine (just you), Saved (sessions you’ve bookmarked using ")
-                        + Text(Image(systemName: "heart"))
-                        + Text(" — visible only to you), and your thread filters (your own organisational labels).")
-                    )
-                    .font(Theme.Text.body)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Search finds sessions by activity, instrument, or notes.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Comments are private conversations between you and the author.")
+                    Text("Set up default task lists in the Tasks Manager — they’ll appear automatically when you start a session. Import tasks by pasting text or scanning.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
 
                 aboutSection("Session Timer") {
-                    Text("Start a session using the record button in the Feed.")
+                    Text("The Session Timer is the home of the app. Start a session from here, or access your Journal and Feed.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -62,6 +40,32 @@ struct AboutEtudesView: View {
                         .foregroundStyle(Theme.Colors.secondaryText)
 
                     Text("Use Threads to group related work — for example, recital prep or a recording project. Threads are personal and visible only to you.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+
+                aboutSection("Journal & Feed") {
+                    Text("Your Journal is a private, time-based archive of all your sessions, organised by week, month, or year.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll see what they’ve chosen to share.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    (
+                        Text("Use the Filter to narrow what you see by instrument, activity, saved sessions (")
+                        + Text(Image(systemName: "heart"))
+                        + Text("), search, and your thread filters.")
+                    )
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Search helps you quickly find what you’re looking for in your sessions and Feed.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Comments are private conversations between you and the author.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
@@ -111,3 +115,4 @@ struct AboutEtudesView: View {
         .cardSurface(padding: Theme.Spacing.m)
     }
 }
+
