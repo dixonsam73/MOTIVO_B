@@ -548,11 +548,9 @@ private func loadPracticeDefaultsIfNeeded() {
         guard BackendConfig.isConfigured else { return false }
 
         switch auth.backendBootstrapState {
-        case .unknown, .checking:
+        case .unknown, .checking, .existingAccount:
             return false
         case .newAccount:
-            return true
-        case .existingAccount:
             break
         }
 
@@ -590,13 +588,8 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private func handleProfileTap() {
-        if requiresAppSetUpNow() {
-            showAppSetUp = true
-            showProfile = false
-        } else {
-            appRoute.isProfilePresented = true
-            showAppSetUp = false
-        }
+        appRoute.isProfilePresented = true
+        showAppSetUp = false
     }
 
     @ViewBuilder
