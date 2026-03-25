@@ -708,7 +708,13 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var mainScrollView: some View {
         ScrollView {
-            mainContent
+            VStack(spacing: 0) {
+                if isHomePresentation {
+                    homeTopBar
+                }
+
+                mainContent
+            }
         }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
@@ -930,9 +936,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 audioTitleEditingBuffer.removeValue(forKey: fid)
             }
         }
-        .safeAreaInset(edge: .top) {
-            homeTopBar
-        }
+       
         #if canImport(UIKit)
         .task(id: toolbarAvatarKeyNormalized) {
             guard isHomePresentation else { return }
