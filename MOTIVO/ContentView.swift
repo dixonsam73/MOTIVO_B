@@ -845,9 +845,8 @@ fileprivate struct SessionsRootView: View {
                                     }
 
                                 case .month, .year:
-                                    let journalSections = selectedJournalLens == .month
-                                        ? journalMonthSections(sessions: localRows)
-                                        : journalYearSections(sessions: localRows)
+                                    let journalSections = journalYearSections(sessions: localRows)
+                                    let usesYearArchivePresentation = true
 
                                     if journalSections.isEmpty {
                                         Text("No sessions match your filters yet.")
@@ -858,7 +857,7 @@ fileprivate struct SessionsRootView: View {
                                             HStack {
                                                 Text(section.title)
                                                     .font(Theme.Text.meta)
-                                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(selectedJournalLens == .year ? 0.54 : 0.58))
+                                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.54))
                                                     .textCase(nil)
                                                 Spacer(minLength: 0)
                                             }
@@ -885,7 +884,7 @@ fileprivate struct SessionsRootView: View {
                                                         scope: selectedScope,
                                                         selectedThread: $selectedThread,
                                                         filtersExpanded: $filtersExpanded,
-                                                        journalStyle: selectedJournalLens == .month ? .monthCompact : .yearCompact
+                                                        journalStyle: .yearCompact
                                                     )
                                                     .contentShape(Rectangle())
                                                     .onTapGesture {
@@ -896,13 +895,11 @@ fileprivate struct SessionsRootView: View {
                                                     }
                                                     .modifier(
                                                         JournalArchiveRowContainerModifier(
-                                                            lens: selectedJournalLens,
-                                                            yearWidthFraction: selectedJournalLens == .year
-                                                                ? journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows))
-                                                                : 1.0
+                                                            lens: usesYearArchivePresentation ? .year : selectedJournalLens,
+                                                            yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows))
                                                         )
                                                     )
-                                                    .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : (selectedJournalLens == .year ? 4 : Theme.Spacing.s + 2))
+                                                    .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : 4)
                                                 }
                                                 .buttonStyle(.plain)
                                                 .listRowSeparator(.hidden)
