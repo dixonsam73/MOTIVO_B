@@ -1,9 +1,13 @@
+// CHANGE-ID: 20260325_214500_ContentView_YearCalendarOverviewCompaction_a9d1
+// SCOPE: Phase 2 Year monthly overview — replace Year journal rendering only with a fixed 12-month calendar-year aggregation while preserving Week, Phase 1 Month, Feed, filters, routing, and Theme behavior unchanged. No backend/model/schema changes.
+// SEARCH-TOKEN: 20260325_214500_ContentView_YearCalendarOverviewCompaction_a9d1
+
 // CHANGE-ID: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
 // SCOPE: ContentView only — preserve the existing top-right record button visually, replace dismiss-based timer return with root-route switching, and leave all feed/journal/people/debug/filter behavior unchanged. No other UI or logic changes.
 // SEARCH-TOKEN: 20260324_145100_ContentView_RootRouteRecordButton_6ab4
 
 // CHANGE-ID: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
-// SCOPE: Journal mode only — convert Week/Month/Year from current-period filtering to full archive grouping after existing filters, keep navigation unchanged, scale density by lens (Week full, Month reduced, Year compact), and preserve Feed/MeView/filter/backend behavior. No backend/model/storage/sync changes.
+// SCOPE: Phase 2 Year monthly overview — preserve Week/Month/Feed; compact Year into a 12-row calendar-year trace with month-level scaling and subtle density emphasis. No backend/model/storage/sync/navigation/filter changes.
 // SEARCH-TOKEN: 20260323_155800_ContentView_JournalArchiveCorrectionDensityScaling_1B1_c8d4
 // CHANGE-ID: 20260323_153900_ContentView_JournalTimeLensPhase1A_b61e
 // SCOPE: Journal mode only — add Week/Month/Year time-lens control, period summary label + total, and time-windowed owner dataset switching while preserving Feed summary, MeView button, current Journal Week rendering, and existing filter semantics. No backend/model/storage/sync changes.
@@ -678,52 +682,53 @@ fileprivate struct SessionsRootView: View {
                 modeSelectorControl
 
                 // ---------- Filters (utility strip) ----------
-                VStack(alignment: .leading, spacing: 6) {
-                    // Header toggles expansion; visually demoted (utility row)
-                    Button { withAnimation { filtersExpanded.toggle() } } label: {
-                        HStack(alignment: .center, spacing: 8) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 15, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .padding(.leading, 3)
+                if !(selectedScope == .mine && selectedJournalLens == .year) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        // Header toggles expansion; visually demoted (utility row)
+                        Button { withAnimation { filtersExpanded.toggle() } } label: {
+                            HStack(alignment: .center, spacing: 8) {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .padding(.leading, 3)
 
-                            Spacer(minLength: 0)
+                                Spacer(minLength: 0)
 
-                            Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .imageScale(.small)
-                                
+                                Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                    .imageScale(.small)
+                            }
+                            .padding(.top, 1) // optical centering in collapsed pill
+                            .contentShape(Rectangle())
                         }
-                        .padding(.top, 1) // optical centering in collapsed pill
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
+                        .buttonStyle(.plain)
 
-                    FilterBar(
-                        filtersExpanded: $filtersExpanded,
-                        instruments: Array(instruments),
-                        customNames: userActivities
-                            .map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-                            .filter { !$0.isEmpty },
-                        selectedInstrument: $selectedInstrument,
-                        selectedActivity: $selectedActivity,
-                        searchText: $searchText,
-                        savedOnly: $savedOnly,
-                        selectedThread: $selectedThread,
-                        threadOptions: existingThreadOptions
+                        FilterBar(
+                            filtersExpanded: $filtersExpanded,
+                            instruments: Array(instruments),
+                            customNames: userActivities
+                                .map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                                .filter { !$0.isEmpty },
+                            selectedInstrument: $selectedInstrument,
+                            selectedActivity: $selectedActivity,
+                            searchText: $searchText,
+                            savedOnly: $savedOnly,
+                            selectedThread: $selectedThread,
+                            threadOptions: existingThreadOptions
+                        )
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .fill(Theme.Colors.surface(colorScheme).opacity(0.55))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
                     )
                 }
-                .padding(.vertical, 8)
-                .padding(.horizontal, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Theme.Colors.surface(colorScheme).opacity(0.55))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
-                )
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"
@@ -844,7 +849,7 @@ fileprivate struct SessionsRootView: View {
                                         }
                                     }
 
-                                case .month, .year:
+                                case .month:
                                     let journalSections = journalYearSections(sessions: localRows)
                                     let usesYearArchivePresentation = true
 
@@ -917,6 +922,23 @@ fileprivate struct SessionsRootView: View {
                                                     .tint(.red)
                                                 }
                                             }
+                                        }
+                                    }
+
+                                case .year:
+                                    let yearRows = journalCalendarYearRows(sessions: localRows)
+
+                                    if yearRows.isEmpty {
+                                        Text("No sessions match your filters yet.")
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                            .id(topID)
+                                    } else {
+                                        ForEach(Array(yearRows.enumerated()), id: \.element.id) { rowIndex, row in
+                                            JournalYearMonthRow(row: row, isFirst: rowIndex == 0)
+                                                .listRowSeparator(.hidden)
+                                                .listRowBackground(Color.clear)
+                                                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+                                                .id(rowIndex == 0 ? topID : nil)
                                         }
                                     }
                                 }
@@ -2000,6 +2022,34 @@ fileprivate struct SessionsRootView: View {
         let sessions: [Session]
     }
 
+    fileprivate struct JournalYearMonthRowModel: Identifiable {
+        let id: String
+        let monthStart: Date
+        let monthLabel: String
+        let totalSeconds: Int
+        let sessionCount: Int
+        let topInstrument: String?
+        let widthFraction: CGFloat
+        let densityFraction: CGFloat
+        let isFutureMonth: Bool
+
+        var hasSessions: Bool { sessionCount > 0 }
+        var totalDurationText: String { StatsHelper.formatDuration(totalSeconds) }
+        var sessionCountText: String { sessionCount == 1 ? "1 session" : "\(sessionCount) sessions" }
+
+        var primaryText: String {
+            hasSessions ? "\(monthLabel) · \(totalDurationText)" : monthLabel
+        }
+
+        var secondaryText: String? {
+            guard hasSessions else { return nil }
+            if let topInstrument, !topInstrument.isEmpty {
+                return "\(sessionCountText) · \(topInstrument)"
+            }
+            return sessionCountText
+        }
+    }
+
     private var journalGroupingCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.locale = .current
@@ -2168,6 +2218,99 @@ fileprivate struct SessionsRootView: View {
                     sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
                 )
             }
+    }
+
+    private func journalCalendarYearRows(sessions: [Session]) -> [JournalYearMonthRowModel] {
+        let calendar = journalGroupingCalendar
+        let now = Date()
+        let currentYear = calendar.component(.year, from: now)
+
+        guard let yearStart = calendar.date(from: DateComponents(year: currentYear, month: 1, day: 1)) else {
+            return []
+        }
+
+        let yearSessions = sessions.filter { session in
+            calendar.component(.year, from: journalDate(for: session)) == currentYear
+        }
+
+        let monthStarts: [Date] = (1...12).compactMap { month in
+            calendar.date(from: DateComponents(year: currentYear, month: month, day: 1))
+        }
+
+        let grouped = Dictionary(grouping: yearSessions) { session in
+            journalMonthStart(for: journalDate(for: session))
+        }
+
+        let maxTotalSeconds = max(
+            monthStarts.map { monthStart in
+                grouped[monthStart, default: []].reduce(0) { $0 + journalDurationSeconds(for: $1) }
+            }.max() ?? 0,
+            1
+        )
+
+        let maxSessionCount = max(
+            monthStarts.map { grouped[$0, default: []].count }.max() ?? 0,
+            1
+        )
+
+        return monthStarts.map { monthStart in
+            let monthSessions = grouped[monthStart, default: []]
+                .sorted { journalDate(for: $0) > journalDate(for: $1) }
+
+            let totalSeconds = monthSessions.reduce(0) { $0 + journalDurationSeconds(for: $1) }
+            let sessionCount = monthSessions.count
+            let topInstrument = journalYearTopInstrument(for: monthSessions)
+
+            let rawWidthFraction = CGFloat(totalSeconds) / CGFloat(maxTotalSeconds)
+            let widthFraction: CGFloat = totalSeconds > 0 ? min(max(rawWidthFraction, 0.08), 1.0) : 0.0
+
+            let rawDensityFraction = CGFloat(sessionCount) / CGFloat(maxSessionCount)
+            let densityFraction: CGFloat = sessionCount > 0 ? min(max(rawDensityFraction, 0.24), 1.0) : 0.0
+
+            return JournalYearMonthRowModel(
+                id: "calendar-year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
+                monthStart: monthStart,
+                monthLabel: Self.journalMonthFormatter.string(from: monthStart),
+                totalSeconds: totalSeconds,
+                sessionCount: sessionCount,
+                topInstrument: topInstrument,
+                widthFraction: widthFraction,
+                densityFraction: densityFraction,
+                isFutureMonth: monthStart > yearStart && monthStart > journalMonthStart(for: now)
+            )
+        }
+    }
+
+    private func journalYearTopInstrument(for sessions: [Session]) -> String? {
+        let labels = sessions.compactMap { session -> String? in
+            let directLabel = ((session.value(forKey: "userInstrumentLabel") as? String) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !directLabel.isEmpty { return directLabel }
+
+            let relationshipLabel = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return relationshipLabel.isEmpty ? nil : relationshipLabel
+        }
+
+        guard !labels.isEmpty else { return nil }
+
+        let counts = labels.reduce(into: [String: Int]()) { partial, label in
+            partial[label, default: 0] += 1
+        }
+
+        let sorted = counts.sorted {
+            if $0.value == $1.value {
+                return $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
+            }
+            return $0.value > $1.value
+        }
+
+        guard let top = sorted.first else { return nil }
+        if sorted.count == 1 { return top.key }
+
+        let second = sorted[1]
+        let total = labels.count
+        let topIsMeaningful = top.value >= 2 && top.value > second.value && (CGFloat(top.value) / CGFloat(max(total, 1))) >= 0.5
+        return topIsMeaningful ? top.key : nil
     }
 
     private func journalDurationSeconds(for session: Session) -> Int {
@@ -2446,6 +2589,122 @@ fileprivate struct StatsBannerView: View {
 }
 
 // MARK: - Row (shows derived title and subtitle)
+
+fileprivate struct JournalYearMonthRow: View {
+    let row: SessionsRootView.JournalYearMonthRowModel
+    let isFirst: Bool
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private let rowCornerRadius: CGFloat = 12
+    private let activeRowHeight: CGFloat = 42
+    private let quietRowHeight: CGFloat = 20
+
+    private var rowHeight: CGFloat {
+        row.hasSessions ? activeRowHeight : quietRowHeight
+    }
+
+    private var trackFill: Color {
+        let baseOpacity: Double = colorScheme == .dark ? 0.22 : 0.12
+        let densityLift: Double = colorScheme == .dark ? 0.18 : 0.12
+        return Theme.Colors.surface(colorScheme)
+            .opacity(baseOpacity + densityLift * Double(row.densityFraction))
+    }
+
+    private var trackStroke: Color {
+        let baseOpacity: Double = colorScheme == .dark ? 0.28 : 0.12
+        let densityLift: Double = colorScheme == .dark ? 0.12 : 0.08
+        return Theme.Colors.stroke(colorScheme)
+            .opacity(baseOpacity + densityLift * Double(row.densityFraction))
+    }
+
+    private var quietTrackFill: Color {
+        Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.05 : 0.02)
+    }
+
+    private var quietTrackStroke: Color {
+        Theme.Colors.stroke(colorScheme).opacity(colorScheme == .dark ? 0.12 : 0.05)
+    }
+
+    private var primaryTextOpacity: Double {
+        row.hasSessions ? 0.98 : (row.isFutureMonth ? 0.48 : 0.62)
+    }
+
+    private var secondaryTextOpacity: Double {
+        row.isFutureMonth ? 0.40 : 0.58
+    }
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            GeometryReader { proxy in
+                let totalWidth = max(0, proxy.size.width)
+                let fillWidth = max(0, totalWidth * row.widthFraction)
+
+                ZStack(alignment: .leading) {
+                    if row.hasSessions {
+                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                            .fill(quietTrackFill)
+                            .frame(width: totalWidth, height: rowHeight)
+
+                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                            .stroke(quietTrackStroke, lineWidth: 0.5)
+                            .frame(width: totalWidth, height: rowHeight)
+
+                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                            .fill(trackFill)
+                            .frame(width: fillWidth, height: rowHeight)
+
+                        RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
+                            .stroke(trackStroke, lineWidth: 0.6)
+                            .frame(width: fillWidth, height: rowHeight)
+                    }
+                }
+            }
+            .allowsHitTesting(false)
+
+            if row.hasSessions {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(row.monthLabel)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
+                            .lineLimit(1)
+
+                        Text("·")
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+
+                        Text(row.totalDurationText)
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color.primary.opacity(0.94))
+                            .lineLimit(1)
+
+                        Spacer(minLength: 0)
+                    }
+
+                    if let secondary = row.secondaryText {
+                        Text(secondary)
+                            .font(.caption2)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(secondaryTextOpacity))
+                            .lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+            } else {
+                Text(row.monthLabel)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
+                    .lineLimit(1)
+                    .padding(.horizontal, 2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .leading)
+        .padding(.top, isFirst ? 2 : 0)
+        .padding(.bottom, row.hasSessions ? 4 : 3)
+    }
+}
 
 fileprivate struct ThreadMetaPill: View {
     let title: String
