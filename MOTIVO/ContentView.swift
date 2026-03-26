@@ -954,6 +954,7 @@ fileprivate struct SessionsRootView: View {
                                                 }
                                             }
                                         }
+                                        .padding(.bottom, Theme.Spacing.xxl)
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
                                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
@@ -2245,9 +2246,11 @@ fileprivate struct SessionsRootView: View {
         let currentMonthStart = journalMonthStart(for: now)
         let currentYear = calendar.component(.year, from: now)
 
-        let earliestSessionYear = sessions
-            .map { calendar.component(.year, from: journalDate(for: $0)) }
-            .min() ?? currentYear
+        let earliestSessionDate = sessions
+            .map { journalDate(for: $0) }
+            .min() ?? now
+        let earliestSessionYear = calendar.component(.year, from: earliestSessionDate)
+        let earliestSessionMonth = calendar.component(.month, from: earliestSessionDate)
 
         guard earliestSessionYear <= currentYear else { return [] }
 
@@ -2256,7 +2259,14 @@ fileprivate struct SessionsRootView: View {
         }
 
         let allMonthStarts: [Date] = stride(from: currentYear, through: earliestSessionYear, by: -1).flatMap { year in
-            stride(from: 12, through: 1, by: -1).compactMap { month in
+            let months = stride(from: 12, through: 1, by: -1).filter { month in
+                if year == earliestSessionYear {
+                    return month >= earliestSessionMonth
+                }
+                return true
+            }
+
+            return months.compactMap { month in
                 calendar.date(from: DateComponents(year: year, month: month, day: 1))
             }
         }
@@ -2771,8 +2781,21 @@ fileprivate struct JournalYearMonthRow: View {
                 .padding(.bottom, showsMetadata ? 2 : 7)
 
             if let metadata = row.metadataText, row.hasSessions {
-                Text(metadata)
-                    .font(.caption2)
+                let metadataParts = metadata.components(separatedBy: " • ")
+                let primaryTime = metadataParts.first ?? metadata
+                let secondaryMetadata = metadataParts.dropFirst().joined(separator: " • ")
+
+                Group {
+                    if secondaryMetadata.isEmpty {
+                        Text(primaryTime)
+                            .font(.caption2.weight(.semibold))
+                    } else {
+                        Text(primaryTime)
+                            .font(.caption2.weight(.semibold))
+                        + Text(" • \(secondaryMetadata)")
+                            .font(.caption2)
+                    }
+                }
                     .foregroundStyle(Color.primary.opacity(metadataOpacity))
                     .lineLimit(1)
                     .padding(.bottom, 9)
