@@ -46,6 +46,9 @@
 //  Scope 2 + Stage 2: Wheel pickers + Primary pinned-first in Activity sheet.
 //  v7.8 DesignLite: visual polish only (cards/background/spacing).
 //
+// CHANGE-ID: 20260326_132900_stage2b
+// SCOPE: Keep weekly pulse persistent across idle/running/paused to remove start-time layout shift
+
 import SwiftUI
 import Combine
 import CoreData
@@ -674,16 +677,12 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 .accessibilityLabel("Open profile")
 
-                if shouldShowWeeklyPulse {
-                    Text(weeklyPulseLine)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .lineLimit(1)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, Theme.Spacing.xs)
-                } else {
-                    Spacer(minLength: 0)
-                }
+                Text(weeklyPulseLine)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, Theme.Spacing.xs)
 
                 Button {
                     appRoute.route = .content
@@ -1485,10 +1484,6 @@ private var tasksPadSection: some View {
    
 
     // MARK: - Helpers for wheel UI
-
-    private var shouldShowWeeklyPulse: Bool {
-        !isRunning && elapsedSeconds == 0
-    }
 
     private var weeklyPulseLine: String {
         "This week · \(formattedWeeklyDuration(secondsThisWeek()))"
