@@ -682,8 +682,7 @@ fileprivate struct SessionsRootView: View {
                 modeSelectorControl
 
                 // ---------- Filters (utility strip) ----------
-                if !(selectedScope == .mine && selectedJournalLens == .year) {
-                    VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
                         // Header toggles expansion; visually demoted (utility row)
                         Button { withAnimation { filtersExpanded.toggle() } } label: {
                             HStack(alignment: .center, spacing: 8) {
@@ -728,7 +727,6 @@ fileprivate struct SessionsRootView: View {
                         RoundedRectangle(cornerRadius: 14, style: .continuous)
                             .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
                     )
-                }
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"
@@ -926,23 +924,47 @@ fileprivate struct SessionsRootView: View {
                                     }
 
                                 case .year:
-                                    let yearRows = journalCalendarYearRows(sessions: localRows)
+                                    let yearSections = journalCalendarYearSections(sessions: localRows)
+                                    let currentMonthAnchorID = journalCurrentMonthAnchorID(in: yearSections)
 
-                                    if yearRows.isEmpty {
+                                    if yearSections.isEmpty {
                                         Text("No sessions match your filters yet.")
                                             .foregroundStyle(Theme.Colors.secondaryText)
                                             .id(topID)
                                     } else {
-                                        VStack(spacing: 8) {
-                                            ForEach(Array(yearRows.enumerated()), id: \.element.id) { rowIndex, row in
-                                                JournalYearMonthRow(row: row, isFirst: rowIndex == 0)
+                                        VStack(alignment: .leading, spacing: Theme.Spacing.l + 6) {
+                                            ForEach(Array(yearSections.enumerated()), id: \.element.id) { sectionIndex, section in
+                                                VStack(alignment: .leading, spacing: Theme.Spacing.s + 6) {
+                                                    HStack {
+                                                        Text(String(section.year))
+                                                            .font(.caption.weight(.medium))
+                                                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.48))
+                                                            .textCase(nil)
+                                                        Spacer(minLength: 0)
+                                                    }
+                                                    .padding(.top, sectionIndex == 0 ? FeedJournalAlignmentUI.firstContentTopGap : Theme.Spacing.xxl + 4)
+                                                    .padding(.bottom, 6)
+
+                                                    VStack(alignment: .leading, spacing: 0) {
+                                                        ForEach(Array(section.rows.enumerated()), id: \.element.id) { rowIndex, row in
+                                                            JournalYearMonthRow(row: row, isFirstInYear: rowIndex == 0)
+                                                                .id(row.id)
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
-                                        .padding(.top, 6)
                                         .listRowSeparator(.hidden)
                                         .listRowBackground(Color.clear)
                                         .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
                                         .id(topID)
+                                        .task(id: currentMonthAnchorID ?? "journal-year-no-anchor") {
+                                            guard selectedScope == .mine, selectedJournalLens == .year else { return }
+                                            let targetID = currentMonthAnchorID ?? topID
+                                            DispatchQueue.main.async {
+                                                proxy.scrollTo(targetID, anchor: .top)
+                                            }
+                                        }
                                     }
                                 }
                             } else if renderFeedItems.isEmpty {
@@ -2028,29 +2050,23 @@ fileprivate struct SessionsRootView: View {
     fileprivate struct JournalYearMonthRowModel: Identifiable {
         let id: String
         let monthStart: Date
+        let year: Int
         let monthLabel: String
         let totalSeconds: Int
         let sessionCount: Int
-        let topInstrument: String?
+        let metadataText: String?
         let widthFraction: CGFloat
         let densityFraction: CGFloat
         let isFutureMonth: Bool
+        let isCurrentMonth: Bool
 
         var hasSessions: Bool { sessionCount > 0 }
-        var totalDurationText: String { StatsHelper.formatDuration(totalSeconds) }
-        var sessionCountText: String { sessionCount == 1 ? "1 session" : "\(sessionCount) sessions" }
+    }
 
-        var primaryText: String {
-            hasSessions ? "\(monthLabel) · \(totalDurationText)" : monthLabel
-        }
-
-        var secondaryText: String? {
-            guard hasSessions else { return nil }
-            if let topInstrument, !topInstrument.isEmpty {
-                return "\(sessionCountText) · \(topInstrument)"
-            }
-            return sessionCountText
-        }
+    fileprivate struct JournalYearSectionModel: Identifiable {
+        let id: String
+        let year: Int
+        let rows: [JournalYearMonthRowModel]
     }
 
     private var journalGroupingCalendar: Calendar {
@@ -2223,48 +2239,51 @@ fileprivate struct SessionsRootView: View {
             }
     }
 
-    private func journalCalendarYearRows(sessions: [Session]) -> [JournalYearMonthRowModel] {
+    private func journalCalendarYearSections(sessions: [Session]) -> [JournalYearSectionModel] {
         let calendar = journalGroupingCalendar
         let now = Date()
+        let currentMonthStart = journalMonthStart(for: now)
         let currentYear = calendar.component(.year, from: now)
 
-        guard let yearStart = calendar.date(from: DateComponents(year: currentYear, month: 1, day: 1)) else {
-            return []
-        }
+        let earliestSessionYear = sessions
+            .map { calendar.component(.year, from: journalDate(for: $0)) }
+            .min() ?? currentYear
 
-        let yearSessions = sessions.filter { session in
-            calendar.component(.year, from: journalDate(for: session)) == currentYear
-        }
+        guard earliestSessionYear <= currentYear else { return [] }
 
-        let currentMonth = calendar.component(.month, from: now)
-
-        let monthStarts: [Date] = (1...currentMonth).compactMap { month in
-            calendar.date(from: DateComponents(year: currentYear, month: month, day: 1))
-        }
-
-        let grouped = Dictionary(grouping: yearSessions) { session in
+        let grouped = Dictionary(grouping: sessions) { session in
             journalMonthStart(for: journalDate(for: session))
         }
 
+        let allMonthStarts: [Date] = stride(from: currentYear, through: earliestSessionYear, by: -1).flatMap { year in
+            stride(from: 12, through: 1, by: -1).compactMap { month in
+                calendar.date(from: DateComponents(year: year, month: month, day: 1))
+            }
+        }
+
         let maxTotalSeconds = max(
-            monthStarts.map { monthStart in
+            allMonthStarts.map { monthStart in
                 grouped[monthStart, default: []].reduce(0) { $0 + journalDurationSeconds(for: $1) }
             }.max() ?? 0,
             1
         )
 
         let maxSessionCount = max(
-            monthStarts.map { grouped[$0, default: []].count }.max() ?? 0,
+            allMonthStarts.map { grouped[$0, default: []].count }.max() ?? 0,
             1
         )
 
-        return monthStarts.map { monthStart in
+        let rows: [JournalYearMonthRowModel] = allMonthStarts.map { monthStart in
             let monthSessions = grouped[monthStart, default: []]
                 .sorted { journalDate(for: $0) > journalDate(for: $1) }
 
             let totalSeconds = monthSessions.reduce(0) { $0 + journalDurationSeconds(for: $1) }
             let sessionCount = monthSessions.count
-            let topInstrument = journalYearTopInstrument(for: monthSessions)
+            let metadataText = journalYearMetadataText(
+                for: monthSessions,
+                totalSeconds: totalSeconds,
+                sessionCount: sessionCount
+            )
 
             let rawWidthFraction = CGFloat(totalSeconds) / CGFloat(maxTotalSeconds)
             let widthFraction: CGFloat = totalSeconds > 0 ? min(max(rawWidthFraction, 0.08), 1.0) : 0.0
@@ -2275,47 +2294,149 @@ fileprivate struct SessionsRootView: View {
             return JournalYearMonthRowModel(
                 id: "calendar-year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
                 monthStart: monthStart,
+                year: calendar.component(.year, from: monthStart),
                 monthLabel: Self.journalMonthFormatter.string(from: monthStart),
                 totalSeconds: totalSeconds,
                 sessionCount: sessionCount,
-                topInstrument: topInstrument,
+                metadataText: metadataText,
                 widthFraction: widthFraction,
                 densityFraction: densityFraction,
-                isFutureMonth: monthStart > yearStart && monthStart > journalMonthStart(for: now)
+                isFutureMonth: calendar.component(.year, from: monthStart) == currentYear && monthStart > currentMonthStart,
+                isCurrentMonth: calendar.isDate(monthStart, equalTo: currentMonthStart, toGranularity: .month)
             )
         }
+
+        let sections = Dictionary(grouping: rows) { $0.year }
+
+        return sections.keys
+            .sorted(by: >)
+            .compactMap { year in
+                guard let rows = sections[year], !rows.isEmpty else { return nil }
+                return JournalYearSectionModel(
+                    id: "calendar-year-section-\(year)",
+                    year: year,
+                    rows: rows
+                )
+            }
     }
 
-    private func journalYearTopInstrument(for sessions: [Session]) -> String? {
-        let labels = sessions.compactMap { session -> String? in
-            let directLabel = ((session.value(forKey: "userInstrumentLabel") as? String) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !directLabel.isEmpty { return directLabel }
+    private func journalCurrentMonthAnchorID(in sections: [JournalYearSectionModel]) -> String? {
+        sections
+            .flatMap { $0.rows }
+            .first(where: { $0.isCurrentMonth })?
+            .id
+    }
 
-            let relationshipLabel = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return relationshipLabel.isEmpty ? nil : relationshipLabel
+    private struct JournalYearFacetSummary {
+        let label: String
+        let seconds: Int
+        let distinctCount: Int
+    }
+
+    private func journalYearMetadataText(
+        for sessions: [Session],
+        totalSeconds: Int,
+        sessionCount: Int
+    ) -> String? {
+        guard sessionCount > 0, totalSeconds > 0 else { return nil }
+
+        var parts: [String] = [
+            StatsHelper.formatDuration(totalSeconds),
+            sessionCount == 1 ? "1 session" : "\(sessionCount) sessions"
+        ]
+
+        if let instrument = journalYearDominantInstrument(for: sessions, totalSeconds: totalSeconds) {
+            parts.append("\(instrument.label) \(StatsHelper.formatDuration(instrument.seconds))")
         }
 
-        guard !labels.isEmpty else { return nil }
-
-        let counts = labels.reduce(into: [String: Int]()) { partial, label in
-            partial[label, default: 0] += 1
+        if let activity = journalYearDominantActivity(for: sessions, totalSeconds: totalSeconds) {
+            parts.append("\(activity.label) \(StatsHelper.formatDuration(activity.seconds))")
         }
 
-        let sorted = counts.sorted {
+        return parts.joined(separator: " • ")
+    }
+
+    private func journalYearDominantInstrument(
+        for sessions: [Session],
+        totalSeconds: Int
+    ) -> JournalYearFacetSummary? {
+        journalYearDominantFacet(
+            for: sessions,
+            totalSeconds: totalSeconds,
+            label: journalYearInstrumentLabel(for:)
+        )
+    }
+
+    private func journalYearDominantActivity(
+        for sessions: [Session],
+        totalSeconds: Int
+    ) -> JournalYearFacetSummary? {
+        journalYearDominantFacet(
+            for: sessions,
+            totalSeconds: totalSeconds,
+            label: journalYearActivityLabel(for:)
+        )
+    }
+
+    private func journalYearDominantFacet(
+        for sessions: [Session],
+        totalSeconds: Int,
+        label: (Session) -> String?
+    ) -> JournalYearFacetSummary? {
+        let totals = sessions.reduce(into: [String: Int]()) { partial, session in
+            guard let rawLabel = label(session) else { return }
+            let trimmed = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            partial[trimmed, default: 0] += journalDurationSeconds(for: session)
+        }
+
+        let sorted = totals.sorted {
             if $0.value == $1.value {
                 return $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
             }
             return $0.value > $1.value
         }
 
-        guard let top = sorted.first else { return nil }
-        if sorted.count == 1 { return top.key }
+        guard let top = sorted.first, top.value > 0 else { return nil }
+
+        let distinctCount = sorted.count
+        guard distinctCount > 1 else { return nil }
+        guard top.value < totalSeconds else { return nil }
 
         let second = sorted[1]
-        let total = labels.count
-        let topIsMeaningful = top.value >= 2 && top.value > second.value && (CGFloat(top.value) / CGFloat(max(total, 1))) >= 0.5
-        return topIsMeaningful ? top.key : nil
+        let share = Double(top.value) / Double(max(totalSeconds, 1))
+        let leadSeconds = top.value - second.value
+        let leadIsMeaningful = top.value > second.value && share >= 0.5 && leadSeconds >= 1800
+
+        guard leadIsMeaningful else { return nil }
+        return JournalYearFacetSummary(label: top.key, seconds: top.value, distinctCount: distinctCount)
+    }
+
+    private func journalYearInstrumentLabel(for session: Session) -> String? {
+        let directLabel = ((session.value(forKey: "userInstrumentLabel") as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !directLabel.isEmpty { return directLabel }
+
+        let relationshipLabel = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return relationshipLabel.isEmpty ? nil : relationshipLabel
+    }
+
+    private func journalYearActivityLabel(for session: Session) -> String? {
+        let directLabel = ((session.value(forKey: "userActivityLabel") as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if !directLabel.isEmpty { return directLabel }
+
+        if let code = session.value(forKey: "activityType") as? Int16 {
+            return from(code).label
+        }
+
+        return nil
+    }
+
+    private func journalYearLabelsMatch(_ lhs: String, _ rhs: String?) -> Bool {
+        guard let rhs else { return false }
+        return lhs.trimmingCharacters(in: .whitespacesAndNewlines)
+            .localizedCaseInsensitiveCompare(rhs.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
     }
 
     private func journalDurationSeconds(for session: Session) -> Int {
@@ -2597,90 +2718,94 @@ fileprivate struct StatsBannerView: View {
 
 fileprivate struct JournalYearMonthRow: View {
     let row: SessionsRootView.JournalYearMonthRowModel
-    let isFirst: Bool
+    let isFirstInYear: Bool
 
     @Environment(\.colorScheme) private var colorScheme
 
-    private let rowCornerRadius: CGFloat = 10
-    private let activeRowHeight: CGFloat = 33
-    private let quietRowHeight: CGFloat = 13
-
-    private var rowHeight: CGFloat {
-        row.hasSessions ? activeRowHeight : quietRowHeight
-    }
+    private let barCornerRadius: CGFloat = 8
+    private let activeBarHeight: CGFloat = 4
+    private let quietBarHeight: CGFloat = 1.5
 
     private var activeBarFill: Color {
-        let baseOpacity: Double = colorScheme == .dark ? 0.17 : 0.03
-        let densityLift: Double = colorScheme == .dark ? 0.12 : 0.28
+        let baseOpacity: Double = colorScheme == .dark ? 0.105 : 0.03
+        let densityLift: Double = colorScheme == .dark ? 0.045 : 0.055
         return Color.primary.opacity(baseOpacity + densityLift * Double(row.densityFraction))
     }
 
     private var activeBarStroke: Color {
-        let baseOpacity: Double = colorScheme == .dark ? 0.14 : 0.025
-        let densityLift: Double = colorScheme == .dark ? 0.08 : 0.18
+        let baseOpacity: Double = colorScheme == .dark ? 0.065 : 0.012
+        let densityLift: Double = colorScheme == .dark ? 0.02 : 0.026
         return Color.primary.opacity(baseOpacity + densityLift * Double(row.densityFraction))
     }
 
     private var quietTextOpacity: Double {
-        row.isFutureMonth ? 0.40 : 0.54
+        row.isFutureMonth ? 0.28 : 0.42
     }
 
-    private var primaryTextOpacity: Double {
-        row.hasSessions ? 0.97 : quietTextOpacity
+    private var metadataOpacity: Double {
+        row.isFutureMonth ? 0.2 : 0.4
     }
 
-    private var secondaryTextOpacity: Double {
-        row.isFutureMonth ? 0.34 : 0.50
+    private var quietBarOpacity: Double {
+        row.isFutureMonth ? 0.016 : 0.028
+    }
+
+    private var showsMetadata: Bool {
+        row.hasSessions && row.metadataText != nil
+    }
+
+    private var rowTopPadding: CGFloat {
+        isFirstInYear ? 2 : 8
+    }
+
+    private var rowBottomPadding: CGFloat {
+        row.hasSessions ? 12 : 11
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            if row.hasSessions {
-                GeometryReader { proxy in
-                    let totalWidth = max(0, proxy.size.width)
-                    let clampedFraction = min(max(row.widthFraction, 0.08), 1.0)
-                    let fillWidth = max(0, totalWidth * clampedFraction)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(row.monthLabel)
+                .font(.caption.weight(row.hasSessions ? .semibold : .medium))
+                .foregroundStyle(Color.primary.opacity(row.hasSessions ? 0.96 : quietTextOpacity))
+                .lineLimit(1)
+                .padding(.bottom, showsMetadata ? 2 : 7)
 
-                    RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                        .fill(activeBarFill)
-                        .frame(width: fillWidth, height: rowHeight)
-                        .overlay(alignment: .leading) {
-                            RoundedRectangle(cornerRadius: rowCornerRadius, style: .continuous)
-                                .stroke(activeBarStroke, lineWidth: 0.5)
-                                .frame(width: fillWidth, height: rowHeight)
-                        }
-                }
-                .allowsHitTesting(false)
+            if let metadata = row.metadataText, row.hasSessions {
+                Text(metadata)
+                    .font(.caption2)
+                    .foregroundStyle(Color.primary.opacity(metadataOpacity))
+                    .lineLimit(1)
+                    .padding(.bottom, 9)
             }
 
-            if row.hasSessions {
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(row.primaryText)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
-                        .lineLimit(1)
+            GeometryReader { proxy in
+                let totalWidth = max(0, proxy.size.width)
+                let clampedFraction = min(max(row.widthFraction, 0.08), 1.0)
+                let fillWidth = row.hasSessions ? max(0, totalWidth * clampedFraction) : 0
 
-                    if let secondary = row.secondaryText {
-                        Text(secondary)
-                            .font(.caption2)
-                            .foregroundStyle(Color.primary.opacity(colorScheme == .dark ? 0.72 : 0.62))
-                            .lineLimit(1)
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
+                        .fill(Color.primary.opacity(quietBarOpacity))
+                        .frame(width: totalWidth, height: quietBarHeight)
+
+                    if row.hasSessions {
+                        RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
+                            .fill(activeBarFill)
+                            .frame(width: fillWidth, height: activeBarHeight)
+                            .overlay(alignment: .leading) {
+                                RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
+                                    .stroke(activeBarStroke, lineWidth: 0.45)
+                                    .frame(width: fillWidth, height: activeBarHeight)
+                            }
                     }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 2)
-            } else {
-                Text(row.monthLabel)
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(Color.primary.opacity(primaryTextOpacity))
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 2)
             }
+            .frame(height: row.hasSessions ? activeBarHeight : quietBarHeight)
+            .allowsHitTesting(false)
         }
-        .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight, alignment: .leading)
-        .padding(.top, isFirst ? -2 : 0)
-        .padding(.bottom, 0)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, rowTopPadding)
+        .padding(.bottom, rowBottomPadding)
     }
 }
 
