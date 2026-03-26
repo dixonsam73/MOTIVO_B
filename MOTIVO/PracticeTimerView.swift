@@ -27,6 +27,10 @@
 // SCOPE: Add root/home-capable presentation path for PracticeTimerView with Journal-parity top controls; preserve timer/session logic and keep existing sheet path intact until app root is switched.
 // SEARCH-TOKEN: 20260324_162700_ptv_home_root_shell
 
+// CHANGE-ID: 20260326_130900_ptv_stage15b_top_zone_micro
+// SCOPE: Stage 1.5B visual-only top-zone micro refinement — tighten header-to-setup and setup-to-tools spacing, and soften the pianokeys trigger contrast/shadow without changing size, alignment, or behavior. No timer/task/engine/backend logic changes.
+// SEARCH-TOKEN: 20260326_130900_ptv_stage15b_top_zone_micro
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -104,6 +108,7 @@ struct PracticeTimerView: View {
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
     @State var showActivitySheet: Bool = false
+    @State private var showSessionMetaSetup: Bool = false
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -595,7 +600,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var homeTopBar: some View {
         if isHomePresentation {
-            HStack(spacing: PracticeTimerTopButtonsUI.spacing) {
+            HStack(alignment: .center, spacing: Theme.Spacing.m) {
                 Button {
                     handleProfileTap()
                 } label: {
@@ -669,7 +674,16 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 .accessibilityLabel("Open profile")
 
-                Spacer()
+                if shouldShowWeeklyPulse {
+                    Text(weeklyPulseLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, Theme.Spacing.xs)
+                } else {
+                    Spacer(minLength: 0)
+                }
 
                 Button {
                     appRoute.route = .content
@@ -691,7 +705,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 .accessibilityLabel("Open Journal and Feed")
             }
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.m)
+            .padding(.top, Theme.Spacing.s)
         }
     }
 
@@ -1266,36 +1280,50 @@ private func loadPracticeDefaultsIfNeeded() {
             attachmentsSection
         }
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.top, Theme.Spacing.m)
+        .padding(.top, Theme.Spacing.s)
         .padding(.bottom, Theme.Spacing.xl)
     }
 
     @ViewBuilder
     private var sessionMetaSection: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack {
-                Spacer()
-
-                Button {
-                    showManualAddSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                        .imageScale(.medium)
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                        .accessibilityLabel("Add Session")
+        VStack(alignment: .center, spacing: Theme.Spacing.xs + 2) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    showSessionMetaSetup.toggle()
                 }
-                .buttonStyle(.plain)
-            }
+            } label: {
+                ZStack {
+                    Circle()
+                        .fill(.thinMaterial)
+                        .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark * 0.94 : PracticeTimerTopButtonsUI.fillOpacityLight * 0.92)
+                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 2, y: 1)
 
-            SessionMetaCard(
-                instruments: instruments,
-                instrument: $instrument,
-                showInstrumentSheet: $showInstrumentSheet,
-                showActivitySheet: $showActivitySheet,
-                currentInstrumentName: currentInstrumentName(),
-                activityLabel: activityDisplayName(for: activityChoice)
-            )
+                    Image(systemName: "pianokeys")
+                        .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary + 2, weight: .regular))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                }
+                .frame(width: PracticeTimerTopButtonsUI.size + 8, height: PracticeTimerTopButtonsUI.size + 8)
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .accessibilityLabel(showSessionMetaSetup ? "Hide session setup" : "Show session setup")
+            .padding(.bottom, 2)
+
+            if showSessionMetaSetup {
+                SessionMetaCard(
+                    instruments: instruments,
+                    instrument: $instrument,
+                    showInstrumentSheet: $showInstrumentSheet,
+                    showActivitySheet: $showActivitySheet,
+                    currentInstrumentName: currentInstrumentName(),
+                    activityLabel: activityDisplayName(for: activityChoice)
+                )
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
+        .frame(maxWidth: .infinity)
+        .padding(.bottom, Theme.Spacing.xs)
     }
 
     @ViewBuilder
@@ -1457,6 +1485,14 @@ private var tasksPadSection: some View {
    
 
     // MARK: - Helpers for wheel UI
+
+    private var shouldShowWeeklyPulse: Bool {
+        !isRunning && elapsedSeconds == 0
+    }
+
+    private var weeklyPulseLine: String {
+        "This week · \(formattedWeeklyDuration(secondsThisWeek()))"
+    }
 
     private func currentInstrumentName() -> String {
         if let inst = instrument { return inst.name ?? "Instrument" }
@@ -1743,6 +1779,29 @@ private var tasksPadSection: some View {
         } else {
             return base
         }
+    }
+
+    private func secondsThisWeek() -> Int {
+        let calendar = Calendar.current
+        guard let interval = calendar.dateInterval(of: .weekOfYear, for: Date()) else { return 0 }
+
+        let req: NSFetchRequest<Session> = Session.fetchRequest()
+        req.predicate = NSPredicate(format: "timestamp >= %@ AND timestamp < %@", interval.start as NSDate, interval.end as NSDate)
+
+        let sessions = (try? viewContext.fetch(req)) ?? []
+        return sessions.reduce(0) { partial, session in
+            partial + Int(session.durationSeconds)
+        }
+    }
+
+    private func formattedWeeklyDuration(_ seconds: Int) -> String {
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+
+        if hours > 0 {
+            return "\(hours)h \(minutes)m"
+        }
+        return "\(minutes)m"
     }
 
     private func formattedElapsed(_ secs: Int) -> String {
