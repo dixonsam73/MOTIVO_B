@@ -1,6 +1,8 @@
 // MetronomeControlStripCard.swift
 // Companion control strip for MetronomeEngine.
 // UI parity with DroneControlStripCard: start/stop, BPM wheel, accent-every-N, volume overlay.
+// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
+// SCOPE: Visual-only — align compact metronome trigger to the canonical MediaRecorderRowCard circular button system while preserving active-state feedback and live pulse animation.
 
 import SwiftUI
 
@@ -311,27 +313,21 @@ struct MetronomeCompactTrigger: View {
 
     var body: some View {
         Button(action: toggleMetronome) {
-            ZStack {
-                Circle()
-                    .fill(.thinMaterial)
-                    .overlay {
-                        if metronomeIsOn {
-                            Circle()
-                                .fill(Theme.Colors.primaryAction.opacity(0.18))
-                        }
-                    }
-
-                MetronomeIcon(
-                    isOn: metronomeIsOn,
-                    swingRight: metronomeSwingRight,
-                    color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon
-                )
-                .frame(width: 22, height: 22)
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(Circle())
+            MetronomeIcon(
+                isOn: metronomeIsOn,
+                swingRight: metronomeSwingRight,
+                color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon
+            )
+            .frame(width: 24, height: 24)
+            .frame(width: 48, height: 48)
+            .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .background(
+            Capsule(style: .continuous)
+                .fill(metronomeIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
+        )
+        .clipShape(Capsule(style: .continuous))
         .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
         .accessibilityHint("Toggles the metronome using the current settings.")
         .onAppear {

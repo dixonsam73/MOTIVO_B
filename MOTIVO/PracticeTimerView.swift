@@ -27,9 +27,9 @@
 // SCOPE: Add root/home-capable presentation path for PracticeTimerView with Journal-parity top controls; preserve timer/session logic and keep existing sheet path intact until app root is switched.
 // SEARCH-TOKEN: 20260324_162700_ptv_home_root_shell
 
-// CHANGE-ID: 20260326_141800_stage3a_compact_tool_triggers
-// SCOPE: Stage 3A — replace always-visible drone/metronome strips on the timer surface with compact live-state icon triggers. Short tap toggles each utility on/off using existing settings. No timer/task/routing/backend changes.
-// SEARCH-TOKEN: 20260326_141800_stage3a_compact_tool_triggers
+// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
+// SCOPE: Visual-only — align compact instrument/drone/metronome controls to the canonical MediaRecorderRowCard circular button system. Preserve compact tool active-state feedback and metronome pulse animation.
+// SEARCH-TOKEN: 20260326_143900_stage3a_media_button_parity
 
 //////
 //  PracticeTimerView.swift
@@ -1290,20 +1290,14 @@ private func loadPracticeDefaultsIfNeeded() {
                     showSessionMetaSetup.toggle()
                 }
             } label: {
-                ZStack {
-                    Circle()
-                        .fill(.thinMaterial)
-                        .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark * 0.94 : PracticeTimerTopButtonsUI.fillOpacityLight * 0.92)
-                        .shadow(color: .black.opacity(colorScheme == .dark ? 0.22 : 0.08), radius: 2, y: 1)
-
-                    Image(systemName: "pianokeys")
-                        .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary + 2, weight: .regular))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
-                }
-                .frame(width: PracticeTimerTopButtonsUI.size + 8, height: PracticeTimerTopButtonsUI.size + 8)
-                .contentShape(Circle())
+                Image(systemName: "pianokeys")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.bordered)
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel(showSessionMetaSetup ? "Hide session setup" : "Show session setup")
             .padding(.bottom, 2)

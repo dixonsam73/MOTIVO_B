@@ -2,9 +2,8 @@
 // Extracted from PracticeTimerView as part of refactor step 1.
 // Visual + interaction wrapper for the drone/tuning strip.
 // No logic changes; all state and engine references come from PracticeTimerView.
-// CHANGE-ID: 20251204-DroneVolumeInlinePopover-B2
-// SCOPE: Refine inline volume slider overlay — smaller glass panel, endpoint markers,
-//         and auto-dismiss on interaction end.
+// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
+// SCOPE: Visual-only — align compact drone trigger to the canonical MediaRecorderRowCard circular button system while preserving live active-state feedback.
 
 import SwiftUI
 
@@ -177,25 +176,19 @@ struct DroneCompactTrigger: View {
 
     var body: some View {
         Button(action: toggleDrone) {
-            ZStack {
-                Circle()
-                    .fill(.thinMaterial)
-                    .overlay {
-                        if droneIsOn {
-                            Circle()
-                                .fill(Theme.Colors.primaryAction.opacity(0.18))
-                        }
-                    }
-
-                Image(systemName: "tuningfork")
-                    .symbolRenderingMode(.monochrome)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(droneIsOn ? Theme.Colors.primaryAction : recorderIcon)
-            }
-            .frame(width: 44, height: 44)
-            .clipShape(Circle())
+            Image(systemName: "tuningfork")
+                .symbolRenderingMode(.monochrome)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(droneIsOn ? Theme.Colors.primaryAction : recorderIcon)
+                .frame(width: 48, height: 48)
+                .contentShape(Circle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.bordered)
+        .background(
+            Capsule(style: .continuous)
+                .fill(droneIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
+        )
+        .clipShape(Capsule(style: .continuous))
         .accessibilityLabel(droneIsOn ? "Stop drone" : "Start drone")
         .accessibilityHint("Toggles the tuning tone using the current settings.")
     }
