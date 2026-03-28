@@ -7,7 +7,6 @@
 import SwiftUI
 
 struct MetronomeControlStripCard: View {
-    var onClose: (() -> Void)? = nil
     @Binding var metronomeIsOn: Bool
     @Binding var metronomeBPM: Int          // e.g. 20–400
     @Binding var metronomeAccentEvery: Int  // 0 = off, 1…N = accent every N beats
@@ -217,23 +216,6 @@ struct MetronomeControlStripCard: View {
         }
         .onDisappear {
             metronomeEngine.onBeat = nil
-        }
-        .overlay(alignment: .topTrailing) {
-            if let onClose {
-                Button {
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide metronome controls")
-                .padding(.top, 2)
-                .padding(.trailing, 2)
-            }
         }
     }
 

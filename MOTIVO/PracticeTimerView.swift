@@ -1364,11 +1364,6 @@ private func loadPracticeDefaultsIfNeeded() {
 
             if showDroneStrip && showDroneControlsExpanded {
                 DroneControlStripCard(
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showDroneControlsExpanded = false
-                        }
-                    },
                     droneIsOn: $droneIsOn,
                     droneVolume: $droneVolume,
                     droneNoteIndex: $droneNoteIndex,
@@ -1386,11 +1381,6 @@ private func loadPracticeDefaultsIfNeeded() {
 
             if showMetronomeStrip && showMetronomeControlsExpanded {
                 MetronomeControlStripCard(
-                    onClose: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showMetronomeControlsExpanded = false
-                        }
-                    },
                     metronomeIsOn: $metronomeIsOn,
                     metronomeBPM: $metronomeBPM,
                     metronomeAccentEvery: $metronomeAccentEvery,

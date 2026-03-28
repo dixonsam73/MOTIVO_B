@@ -2,13 +2,12 @@
 // Extracted from PracticeTimerView as part of refactor step 1.
 // Visual + interaction wrapper for the drone/tuning strip.
 // No logic changes; all state and engine references come from PracticeTimerView.
-// CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
-// SCOPE: Stage 3B — preserve compact short-tap drone toggle while adding long-press inline reveal support and a subtle close affordance for the full controls.
+// CHANGE-ID: 20260328_034900_stage3b_remove_close
+// SCOPE: Stage 3B refinement — remove explicit close affordance so long press on the compact trigger is the sole reveal/dismiss mechanism.
 
 import SwiftUI
 
 struct DroneControlStripCard: View {
-    var onClose: (() -> Void)? = nil
     @Binding var droneIsOn: Bool
     @Binding var droneVolume: Double
     @Binding var droneNoteIndex: Int
@@ -160,23 +159,6 @@ struct DroneControlStripCard: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
-        }
-        .overlay(alignment: .topTrailing) {
-            if let onClose {
-                Button {
-                    onClose()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
-                        .frame(width: 20, height: 20)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide drone controls")
-                .padding(.top, 2)
-                .padding(.trailing, 2)
-            }
         }
     }
 }
