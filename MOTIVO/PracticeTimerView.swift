@@ -1268,7 +1268,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var mainContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
             sessionMetaSection
             compactToolsSection
             timerSection
@@ -1421,7 +1421,6 @@ private func loadPracticeDefaultsIfNeeded() {
             stopAttachmentPlayback: stopAttachmentPlayback,
             ensureCameraAuthorized: ensureCameraAuthorized
         )
-        .cardSurface()
     }
 
 @ViewBuilder
