@@ -2,12 +2,13 @@
 // Extracted from PracticeTimerView as part of refactor step 1.
 // Visual + interaction wrapper for the drone/tuning strip.
 // No logic changes; all state and engine references come from PracticeTimerView.
-// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
-// SCOPE: Visual-only — align compact drone trigger to the canonical MediaRecorderRowCard circular button system while preserving live active-state feedback.
+// CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
+// SCOPE: Stage 3B — preserve compact short-tap drone toggle while adding long-press inline reveal support and a subtle close affordance for the full controls.
 
 import SwiftUI
 
 struct DroneControlStripCard: View {
+    var onClose: (() -> Void)? = nil
     @Binding var droneIsOn: Bool
     @Binding var droneVolume: Double
     @Binding var droneNoteIndex: Int
@@ -160,6 +161,23 @@ struct DroneControlStripCard: View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
         }
+        .overlay(alignment: .topTrailing) {
+            if let onClose {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide drone controls")
+                .padding(.top, 2)
+                .padding(.trailing, 2)
+            }
+        }
     }
 }
 
@@ -169,13 +187,15 @@ struct DroneCompactTrigger: View {
     @Binding var droneVolume: Double
     @Binding var droneNoteIndex: Int
     @Binding var droneFreq: Int
-
     let droneNotes: [String]
     let droneEngine: DroneEngine
     let recorderIcon: Color
+    var onRevealControls: (() -> Void)? = nil
+
+    @State private var suppressNextTap = false
 
     var body: some View {
-        Button(action: toggleDrone) {
+        Button(action: handleTap) {
             Image(systemName: "tuningfork")
                 .symbolRenderingMode(.monochrome)
                 .font(.system(size: 22, weight: .semibold))
@@ -189,8 +209,23 @@ struct DroneCompactTrigger: View {
                 .fill(droneIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
         )
         .clipShape(Capsule(style: .continuous))
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    suppressNextTap = true
+                    onRevealControls?()
+                }
+        )
         .accessibilityLabel(droneIsOn ? "Stop drone" : "Start drone")
-        .accessibilityHint("Toggles the tuning tone using the current settings.")
+        .accessibilityHint("Tap to toggle the tuning tone. Long press to show controls.")
+    }
+
+    private func handleTap() {
+        if suppressNextTap {
+            suppressNextTap = false
+            return
+        }
+        toggleDrone()
     }
 
     private func toggleDrone() {

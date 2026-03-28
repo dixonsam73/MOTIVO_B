@@ -1,12 +1,13 @@
 // MetronomeControlStripCard.swift
 // Companion control strip for MetronomeEngine.
 // UI parity with DroneControlStripCard: start/stop, BPM wheel, accent-every-N, volume overlay.
-// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
-// SCOPE: Visual-only — align compact metronome trigger to the canonical MediaRecorderRowCard circular button system while preserving active-state feedback and live pulse animation.
+// CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
+// SCOPE: Stage 3B — preserve compact short-tap metronome toggle and live pulse feedback while adding long-press inline reveal support and a subtle close affordance for the full controls.
 
 import SwiftUI
 
 struct MetronomeControlStripCard: View {
+    var onClose: (() -> Void)? = nil
     @Binding var metronomeIsOn: Bool
     @Binding var metronomeBPM: Int          // e.g. 20–400
     @Binding var metronomeAccentEvery: Int  // 0 = off, 1…N = accent every N beats
@@ -217,6 +218,23 @@ struct MetronomeControlStripCard: View {
         .onDisappear {
             metronomeEngine.onBeat = nil
         }
+        .overlay(alignment: .topTrailing) {
+            if let onClose {
+                Button {
+                    onClose()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
+                        .frame(width: 20, height: 20)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide metronome controls")
+                .padding(.top, 2)
+                .padding(.trailing, 2)
+            }
+        }
     }
 
     // MARK: - Actions
@@ -308,11 +326,13 @@ struct MetronomeCompactTrigger: View {
 
     let metronomeEngine: MetronomeEngine
     let recorderIcon: Color
+    var onRevealControls: (() -> Void)? = nil
 
     @State private var metronomeSwingRight: Bool = false
+    @State private var suppressNextTap = false
 
     var body: some View {
-        Button(action: toggleMetronome) {
+        Button(action: handleTap) {
             MetronomeIcon(
                 isOn: metronomeIsOn,
                 swingRight: metronomeSwingRight,
@@ -328,8 +348,15 @@ struct MetronomeCompactTrigger: View {
                 .fill(metronomeIsOn ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
         )
         .clipShape(Capsule(style: .continuous))
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.45)
+                .onEnded { _ in
+                    suppressNextTap = true
+                    onRevealControls?()
+                }
+        )
         .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
-        .accessibilityHint("Toggles the metronome using the current settings.")
+        .accessibilityHint("Tap to toggle the metronome. Long press to show controls.")
         .onAppear {
             metronomeIsOn = metronomeEngine.isRunning
             metronomeEngine.onBeat = { _ in
@@ -349,6 +376,14 @@ struct MetronomeCompactTrigger: View {
         .onDisappear {
             metronomeEngine.onBeat = nil
         }
+    }
+
+    private func handleTap() {
+        if suppressNextTap {
+            suppressNextTap = false
+            return
+        }
+        toggleMetronome()
     }
 
     private func toggleMetronome() {

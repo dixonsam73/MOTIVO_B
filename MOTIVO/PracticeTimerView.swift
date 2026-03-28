@@ -27,9 +27,9 @@
 // SCOPE: Add root/home-capable presentation path for PracticeTimerView with Journal-parity top controls; preserve timer/session logic and keep existing sheet path intact until app root is switched.
 // SEARCH-TOKEN: 20260324_162700_ptv_home_root_shell
 
-// CHANGE-ID: 20260326_143900_stage3a_media_button_parity
+// CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
 // SCOPE: Visual-only — align compact instrument/drone/metronome controls to the canonical MediaRecorderRowCard circular button system. Preserve compact tool active-state feedback and metronome pulse animation.
-// SEARCH-TOKEN: 20260326_143900_stage3a_media_button_parity
+// SEARCH-TOKEN: 20260326_145800_stage3b_longpress_reveal
 
 //////
 //  PracticeTimerView.swift
@@ -112,6 +112,8 @@ struct PracticeTimerView: View {
     @State var showInstrumentSheet: Bool = false
     @State var showActivitySheet: Bool = false
     @State private var showSessionMetaSetup: Bool = false
+    @State private var showDroneControlsExpanded: Bool = false
+    @State private var showMetronomeControlsExpanded: Bool = false
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -1320,33 +1322,87 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var compactToolsSection: some View {
-        if showDroneStrip || showMetronomeStrip {
-            HStack(spacing: Theme.Spacing.m) {
-                if showDroneStrip {
-                    DroneCompactTrigger(
-                        droneIsOn: $droneIsOn,
-                        droneVolume: $droneVolume,
-                        droneNoteIndex: $droneNoteIndex,
-                        droneFreq: $droneFreq,
-                        droneNotes: droneNotes,
-                        droneEngine: audioServices.droneEngine,
-                        recorderIcon: recorderIcon
-                    )
-                }
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            if showDroneStrip || showMetronomeStrip {
+                HStack(spacing: Theme.Spacing.m) {
+                    if showDroneStrip {
+                        DroneCompactTrigger(
+                            droneIsOn: $droneIsOn,
+                            droneVolume: $droneVolume,
+                            droneNoteIndex: $droneNoteIndex,
+                            droneFreq: $droneFreq,
+                            droneNotes: droneNotes,
+                            droneEngine: audioServices.droneEngine,
+                            recorderIcon: recorderIcon,
+                            onRevealControls: {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showDroneControlsExpanded.toggle()
+                                }
+                            }
+                        )
+                    }
 
-                if showMetronomeStrip {
-                    MetronomeCompactTrigger(
-                        metronomeIsOn: $metronomeIsOn,
-                        metronomeBPM: $metronomeBPM,
-                        metronomeAccentEvery: $metronomeAccentEvery,
-                        metronomeVolume: $metronomeVolume,
-                        metronomeEngine: audioServices.metronomeEngine,
-                        recorderIcon: recorderIcon
-                    )
+                    if showMetronomeStrip {
+                        MetronomeCompactTrigger(
+                            metronomeIsOn: $metronomeIsOn,
+                            metronomeBPM: $metronomeBPM,
+                            metronomeAccentEvery: $metronomeAccentEvery,
+                            metronomeVolume: $metronomeVolume,
+                            metronomeEngine: audioServices.metronomeEngine,
+                            recorderIcon: recorderIcon,
+                            onRevealControls: {
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    showMetronomeControlsExpanded.toggle()
+                                }
+                            }
+                        )
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.bottom, Theme.Spacing.xs)
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.bottom, Theme.Spacing.xs)
+
+            if showDroneStrip && showDroneControlsExpanded {
+                DroneControlStripCard(
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showDroneControlsExpanded = false
+                        }
+                    },
+                    droneIsOn: $droneIsOn,
+                    droneVolume: $droneVolume,
+                    droneNoteIndex: $droneNoteIndex,
+                    droneFreq: $droneFreq,
+                    showDroneVolumePopover: $showDroneVolumePopover,
+                    droneNotes: droneNotes,
+                    droneEngine: audioServices.droneEngine,
+                    recorderIcon: recorderIcon
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .cardSurfaceNonClipping(padding: Theme.Spacing.m)
+                .zIndex(5)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if showMetronomeStrip && showMetronomeControlsExpanded {
+                MetronomeControlStripCard(
+                    onClose: {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showMetronomeControlsExpanded = false
+                        }
+                    },
+                    metronomeIsOn: $metronomeIsOn,
+                    metronomeBPM: $metronomeBPM,
+                    metronomeAccentEvery: $metronomeAccentEvery,
+                    metronomeVolume: $metronomeVolume,
+                    metronomeEngine: audioServices.metronomeEngine,
+                    recorderIcon: recorderIcon
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .cardSurfaceNonClipping(padding: Theme.Spacing.m)
+                .zIndex(5)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
     }
 
