@@ -308,6 +308,7 @@ struct MetronomeCompactTrigger: View {
 
     let metronomeEngine: MetronomeEngine
     let recorderIcon: Color
+    let shouldAnimateCompactIcon: Bool
     var onRevealControls: (() -> Void)? = nil
 
     @State private var metronomeSwingRight: Bool = false
@@ -341,22 +342,18 @@ struct MetronomeCompactTrigger: View {
         .accessibilityHint("Tap to toggle the metronome. Long press to show controls.")
         .onAppear {
             metronomeIsOn = metronomeEngine.isRunning
-            metronomeEngine.onBeat = { _ in
-                let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
-                let response = max(0.12, min(beatDuration * 0.55, 0.35))
-                withAnimation(
-                    .spring(
-                        response: response,
-                        dampingFraction: 0.72,
-                        blendDuration: 0.1
-                    )
-                ) {
-                    metronomeSwingRight.toggle()
-                }
-            }
+            updateCompactBeatHandler()
+        }
+        .onChange(of: shouldAnimateCompactIcon) { _ in
+            updateCompactBeatHandler()
+        }
+        .onChange(of: metronomeIsOn) { _ in
+            updateCompactBeatHandler()
         }
         .onDisappear {
-            metronomeEngine.onBeat = nil
+            if shouldAnimateCompactIcon {
+                metronomeEngine.onBeat = nil
+            }
         }
     }
 
@@ -381,6 +378,31 @@ struct MetronomeCompactTrigger: View {
                 volume: metronomeVolume
             )
             metronomeIsOn = true
+        }
+
+        updateCompactBeatHandler()
+    }
+
+    private func updateCompactBeatHandler() {
+        metronomeIsOn = metronomeEngine.isRunning
+
+        guard shouldAnimateCompactIcon, metronomeIsOn else {
+            metronomeEngine.onBeat = nil
+            return
+        }
+
+        metronomeEngine.onBeat = { _ in
+            let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
+            let response = max(0.12, min(beatDuration * 0.55, 0.35))
+            withAnimation(
+                .spring(
+                    response: response,
+                    dampingFraction: 0.72,
+                    blendDuration: 0.1
+                )
+            ) {
+                metronomeSwingRight.toggle()
+            }
         }
     }
 }

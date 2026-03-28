@@ -1350,6 +1350,7 @@ private func loadPracticeDefaultsIfNeeded() {
                             metronomeVolume: $metronomeVolume,
                             metronomeEngine: audioServices.metronomeEngine,
                             recorderIcon: recorderIcon,
+                            shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
                             onRevealControls: {
                                 withAnimation(.easeInOut(duration: 0.18)) {
                                     showMetronomeControlsExpanded.toggle()
