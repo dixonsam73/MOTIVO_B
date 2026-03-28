@@ -1,3 +1,8 @@
+// CHANGE-ID: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
+// SCOPE: Visual-only — align audio recorder trigger with established neutral / warm-open / green-live state language, including green trigger while actively recording; no logic or layout changes.
+// SEARCH-TOKEN: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
+
+
 // CHANGE-ID: 20260104_103646-mrrc-densityDemoteA
 // SCOPE: Visual-only — slightly reduce MediaRecorderRowCard vertical density to demote it vs TimerCard (Option A)
 
@@ -19,10 +24,35 @@ struct MediaRecorderRowCard: View {
     @Binding var showVideoRecorder: Bool
     @Binding var droneIsOn: Bool
 
+    @State private var isAudioRecorderRecording = false
+
     let recorderIcon: Color
     let droneEngine: DroneEngine
     let stopAttachmentPlayback: () -> Void
     let ensureCameraAuthorized: (@escaping () -> Void) -> Void
+
+    private let tasksAccent = Color(red: 0.66, green: 0.58, blue: 0.46)
+    private let tasksAccentIcon = Color(red: 0.44, green: 0.37, blue: 0.29)
+
+    private var audioTriggerIconColor: Color {
+        if showAudioRecorder && isAudioRecorderRecording {
+            return Theme.Colors.primaryAction
+        }
+        if showAudioRecorder {
+            return tasksAccentIcon
+        }
+        return recorderIcon
+    }
+
+    private var audioTriggerFillColor: Color {
+        if showAudioRecorder && isAudioRecorderRecording {
+            return Theme.Colors.primaryAction.opacity(0.18)
+        }
+        if showAudioRecorder {
+            return tasksAccent.opacity(0.26)
+        }
+        return .clear
+    }
 
     var body: some View {
         VStack(spacing: Theme.Spacing.s) {
@@ -39,7 +69,7 @@ struct MediaRecorderRowCard: View {
                     Image(systemName: "mic.fill")
                         .symbolRenderingMode(.monochrome)
                         .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(recorderIcon)
+                                                .foregroundStyle(audioTriggerIconColor)
                         .frame(width: 48, height: 48)
                         .contentShape(Circle())
                 }
@@ -47,7 +77,7 @@ struct MediaRecorderRowCard: View {
                 .background(
                     // Always-present overlay sized to the same rect as the button; only fill color changes
                     Capsule(style: .continuous)
-                        .fill(showAudioRecorder ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
+                        .fill(audioTriggerFillColor)
                 )
                 .clipShape(Capsule(style: .continuous))
                 .animation(.none, value: showAudioRecorder)
@@ -144,6 +174,15 @@ struct MediaRecorderRowCard: View {
                 .accessibilityHint("Opens the video recorder for this session.")
             }
             .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name("etudesAudioRecorderRecordingStateDidChange"))) { notification in
+            guard let isRecording = notification.object as? Bool else { return }
+            isAudioRecorderRecording = isRecording
+        }
+        .onChange(of: showAudioRecorder) { isShown in
+            if !isShown {
+                isAudioRecorderRecording = false
+            }
         }
     }
 }

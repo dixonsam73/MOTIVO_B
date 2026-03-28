@@ -31,6 +31,10 @@
 // SCOPE: Visual-only — align compact instrument/drone/metronome controls to the canonical MediaRecorderRowCard circular button system. Preserve compact tool active-state feedback and metronome pulse animation.
 // SEARCH-TOKEN: 20260326_145800_stage3b_longpress_reveal
 
+// CHANGE-ID: 20260328_021100_stage5_warm_open_fill_refine
+// SCOPE: Visual-only — refine warm open-state so the button fill carries state more clearly and icon contrast is slightly stronger; no logic/layout changes.
+// SEARCH-TOKEN: 20260328_021100_stage5_warm_open_fill_refine
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -58,7 +62,7 @@ import Darwin
 
 private let recorderIcon = Color(red: 0.44, green: 0.50, blue: 0.57) // slate blue-grey ~ #6F7F91
 private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neutral  ~ #A88B73
-
+private let tasksAccentIcon = Color(red: 0.44, green: 0.37, blue: 0.29) // darker warm neutral for icon contrast in open state\n
 // SessionActivityType moved to SessionActivityType.swift
 
 private enum PracticeTimerTopButtonsUI {
@@ -1295,11 +1299,16 @@ private func loadPracticeDefaultsIfNeeded() {
                 Image(systemName: "pianokeys")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .foregroundStyle(showSessionMetaSetup ? tasksAccentIcon : Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }
             .buttonStyle(.bordered)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(showSessionMetaSetup ? tasksAccent.opacity(0.26) : Color.clear)
+            )
+            .clipShape(Capsule(style: .continuous))
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel(showSessionMetaSetup ? "Hide session setup" : "Show session setup")
             .padding(.bottom, 2)
@@ -1440,11 +1449,16 @@ private var bottomActionSection: some View {
                 Image(systemName: "checklist")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .foregroundStyle(showTasksPad ? tasksAccentIcon : Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }
             .buttonStyle(.bordered)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
+            )
+            .clipShape(Capsule(style: .continuous))
             .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
 
             Button {

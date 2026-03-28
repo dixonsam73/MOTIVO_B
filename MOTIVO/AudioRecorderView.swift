@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
+// SCOPE: Visual-state support only — publish audio recorder active-recording state so the external trigger can map warm-open vs green-live without changing recorder logic or UI.
+// SEARCH-TOKEN: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
+
 // CHANGE-ID: 20260313_202600_RecorderHygiene_Audio_4e2af1bd
 // SCOPE: Recorder hygiene hardening — clear ephemeral recorder cleanup flag on delete, terminal error, and clean dismissal with no remaining audio artifact.
 // SEARCH-TOKEN: 20260313_202600_RecorderHygiene_Audio_4e2af1bd
@@ -12,6 +16,13 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+
+private func postAudioRecorderRecordingState(_ isRecording: Bool) {
+    NotificationCenter.default.post(
+        name: Notification.Name("etudesAudioRecorderRecordingStateDidChange"),
+        object: isRecording
+    )
+}
 
 /// A lightweight, self-contained audio recorder view using AVAudioRecorder.
 /// Stores audio files in the app's temporary directory and returns the saved URL via `onSave`.
@@ -175,9 +186,13 @@ struct AudioRecorderView: View {
             clearEphemeralFlagIfNoRecorderArtifactRemains()
             cleanupWaveform()
             removeObservers()
+            postAudioRecorderRecordingState(false)
         }
         .onChange(of: scenePhase) { newPhase in
             handleScenePhaseChange(newPhase)
+        }
+        .onChange(of: state) { newState in
+            postAudioRecorderRecordingState(newState == .recording)
         }
     }
 
@@ -822,4 +837,5 @@ struct AudioRecorderView_Previews: PreviewProvider {
         .previewLayout(.sizeThatFits)
     }
 }
+
 
