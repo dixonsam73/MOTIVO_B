@@ -1276,7 +1276,7 @@ private func loadPracticeDefaultsIfNeeded() {
             if showAudioRecorder {
                 audioRecorderPanel
             }
-            tasksPadSection
+            bottomActionSection
             attachmentsSection
         }
         .padding(.horizontal, Theme.Spacing.l)
@@ -1424,29 +1424,68 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
 @ViewBuilder
-private var tasksPadSection: some View {
-    TasksPadCard(
-        showTasksPad: $showTasksPad,
-        taskLines: $taskLines,
-        autoTaskTexts: $autoTaskTexts,
-        focusedTaskID: $focusedTaskID,
-        tasksAccent: tasksAccent,
-        onToggleDone: { id in toggleDone(id) },
-        onDeleteLine: { id in deleteLine(id) },
-        onClearAll: { clearAllTasks() },
-        onAddEmptyLine: { addEmptyTaskLine() },
-        onHandleReturn: { id in handleTaskReturn(for: id) },
-        onPersistSnapshot: { persistTasksSnapshot() },
-        onExpand: {
-            loadPracticeDefaultsIfNeeded()
-            loadDefaultTasksIfNeeded()
-            persistTasksSnapshot()
-        },
-        onImportTasks: {
-            showTaskImportPasteSheet = true
+private var bottomActionSection: some View {
+    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        HStack(spacing: Theme.Spacing.m) {
+            Button {
+                if showTasksPad {
+                    showTasksPad = false
+                } else {
+                    showTasksPad = true
+                    loadPracticeDefaultsIfNeeded()
+                    loadDefaultTasksIfNeeded()
+                    persistTasksSnapshot()
+                }
+            } label: {
+                Image(systemName: "checklist")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
+
+            Button {
+                showManualAddSheet = true
+            } label: {
+                Image(systemName: "plus")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .frame(width: 48, height: 48)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.bordered)
+            .accessibilityLabel("Add session manually")
         }
-    )
-    .cardSurface()
+        .frame(maxWidth: .infinity, alignment: .center)
+
+        if showTasksPad {
+            TasksPadCard(
+                showTasksPad: $showTasksPad,
+                taskLines: $taskLines,
+                autoTaskTexts: $autoTaskTexts,
+                focusedTaskID: $focusedTaskID,
+                tasksAccent: tasksAccent,
+                onToggleDone: { id in toggleDone(id) },
+                onDeleteLine: { id in deleteLine(id) },
+                onClearAll: { clearAllTasks() },
+                onAddEmptyLine: { addEmptyTaskLine() },
+                onHandleReturn: { id in handleTaskReturn(for: id) },
+                onPersistSnapshot: { persistTasksSnapshot() },
+                onExpand: {
+                    loadPracticeDefaultsIfNeeded()
+                    loadDefaultTasksIfNeeded()
+                    persistTasksSnapshot()
+                },
+                onImportTasks: {
+                    showTaskImportPasteSheet = true
+                }
+            )
+        }
+    }
 }
 
     @ViewBuilder
