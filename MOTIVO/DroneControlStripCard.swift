@@ -164,6 +164,55 @@ struct DroneControlStripCard: View {
     }
 }
 
+
+struct DroneCompactTrigger: View {
+    @Binding var droneIsOn: Bool
+    @Binding var droneVolume: Double
+    @Binding var droneNoteIndex: Int
+    @Binding var droneFreq: Int
+
+    let droneNotes: [String]
+    let droneEngine: DroneEngine
+    let recorderIcon: Color
+
+    var body: some View {
+        Button(action: toggleDrone) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .overlay {
+                        if droneIsOn {
+                            Circle()
+                                .fill(Theme.Colors.primaryAction.opacity(0.18))
+                        }
+                    }
+
+                Image(systemName: "tuningfork")
+                    .symbolRenderingMode(.monochrome)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(droneIsOn ? Theme.Colors.primaryAction : recorderIcon)
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(droneIsOn ? "Stop drone" : "Start drone")
+        .accessibilityHint("Toggles the tuning tone using the current settings.")
+    }
+
+    private func toggleDrone() {
+        droneIsOn.toggle()
+        if droneIsOn {
+            let note = droneNotes[droneNoteIndex]
+            let base = Double(droneFreq)
+            let freq = DroneEngine.frequency(for: note, baseA4: base)
+            droneEngine.start(frequency: freq, volume: droneVolume)
+        } else {
+            droneEngine.stop()
+        }
+    }
+}
+
 private struct DroneVolumePopover: View {
     @Binding var value: Double
     let onChanged: (Double) -> Void

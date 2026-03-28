@@ -27,9 +27,9 @@
 // SCOPE: Add root/home-capable presentation path for PracticeTimerView with Journal-parity top controls; preserve timer/session logic and keep existing sheet path intact until app root is switched.
 // SEARCH-TOKEN: 20260324_162700_ptv_home_root_shell
 
-// CHANGE-ID: 20260326_130900_ptv_stage15b_top_zone_micro
-// SCOPE: Stage 1.5B visual-only top-zone micro refinement — tighten header-to-setup and setup-to-tools spacing, and soften the pianokeys trigger contrast/shadow without changing size, alignment, or behavior. No timer/task/engine/backend logic changes.
-// SEARCH-TOKEN: 20260326_130900_ptv_stage15b_top_zone_micro
+// CHANGE-ID: 20260326_141800_stage3a_compact_tool_triggers
+// SCOPE: Stage 3A — replace always-visible drone/metronome strips on the timer surface with compact live-state icon triggers. Short tap toggles each utility on/off using existing settings. No timer/task/routing/backend changes.
+// SEARCH-TOKEN: 20260326_141800_stage3a_compact_tool_triggers
 
 //////
 //  PracticeTimerView.swift
@@ -1268,8 +1268,7 @@ private func loadPracticeDefaultsIfNeeded() {
     private var mainContent: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             sessionMetaSection
-            droneSection
-            metronomeSection
+            compactToolsSection
             timerSection
             mediaRecorderSection
             if showAudioRecorder {
@@ -1326,40 +1325,34 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     @ViewBuilder
-    private var droneSection: some View {
-        if showDroneStrip {
-            DroneControlStripCard(
-                droneIsOn: $droneIsOn,
-                droneVolume: $droneVolume,
-                droneNoteIndex: $droneNoteIndex,
-                droneFreq: $droneFreq,
-                showDroneVolumePopover: $showDroneVolumePopover,
-                droneNotes: droneNotes,
-                droneEngine: audioServices.droneEngine,
-                recorderIcon: recorderIcon
-            )
-            .frame(maxWidth: .infinity, alignment: .center)
-            // Visual tier: treat as control tray (lighter than full content cards)
-            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
-            .zIndex(5)
-        }
-    }
+    private var compactToolsSection: some View {
+        if showDroneStrip || showMetronomeStrip {
+            HStack(spacing: Theme.Spacing.m) {
+                if showDroneStrip {
+                    DroneCompactTrigger(
+                        droneIsOn: $droneIsOn,
+                        droneVolume: $droneVolume,
+                        droneNoteIndex: $droneNoteIndex,
+                        droneFreq: $droneFreq,
+                        droneNotes: droneNotes,
+                        droneEngine: audioServices.droneEngine,
+                        recorderIcon: recorderIcon
+                    )
+                }
 
-    @ViewBuilder
-    private var metronomeSection: some View {
-        if showMetronomeStrip {
-            MetronomeControlStripCard(
-                metronomeIsOn: $metronomeIsOn,
-                metronomeBPM: $metronomeBPM,
-                metronomeAccentEvery: $metronomeAccentEvery,
-                metronomeVolume: $metronomeVolume,
-                metronomeEngine: audioServices.metronomeEngine,
-                recorderIcon: recorderIcon
-            )
+                if showMetronomeStrip {
+                    MetronomeCompactTrigger(
+                        metronomeIsOn: $metronomeIsOn,
+                        metronomeBPM: $metronomeBPM,
+                        metronomeAccentEvery: $metronomeAccentEvery,
+                        metronomeVolume: $metronomeVolume,
+                        metronomeEngine: audioServices.metronomeEngine,
+                        recorderIcon: recorderIcon
+                    )
+                }
+            }
             .frame(maxWidth: .infinity, alignment: .center)
-            // Visual tier: treat as control tray (lighter than full content cards)
-            .cardSurfaceNonClipping(padding: Theme.Spacing.m)
-            .zIndex(5)
+            .padding(.bottom, Theme.Spacing.xs)
         }
     }
 

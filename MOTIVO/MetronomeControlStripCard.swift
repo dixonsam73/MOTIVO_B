@@ -297,6 +297,81 @@ struct MetronomeControlStripCard: View {
     }
 }
 
+
+struct MetronomeCompactTrigger: View {
+    @Binding var metronomeIsOn: Bool
+    @Binding var metronomeBPM: Int
+    @Binding var metronomeAccentEvery: Int
+    @Binding var metronomeVolume: Double
+
+    let metronomeEngine: MetronomeEngine
+    let recorderIcon: Color
+
+    @State private var metronomeSwingRight: Bool = false
+
+    var body: some View {
+        Button(action: toggleMetronome) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .overlay {
+                        if metronomeIsOn {
+                            Circle()
+                                .fill(Theme.Colors.primaryAction.opacity(0.18))
+                        }
+                    }
+
+                MetronomeIcon(
+                    isOn: metronomeIsOn,
+                    swingRight: metronomeSwingRight,
+                    color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon
+                )
+                .frame(width: 22, height: 22)
+            }
+            .frame(width: 44, height: 44)
+            .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(metronomeIsOn ? "Stop metronome" : "Start metronome")
+        .accessibilityHint("Toggles the metronome using the current settings.")
+        .onAppear {
+            metronomeIsOn = metronomeEngine.isRunning
+            metronomeEngine.onBeat = { _ in
+                let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
+                let response = max(0.12, min(beatDuration * 0.55, 0.35))
+                withAnimation(
+                    .spring(
+                        response: response,
+                        dampingFraction: 0.72,
+                        blendDuration: 0.1
+                    )
+                ) {
+                    metronomeSwingRight.toggle()
+                }
+            }
+        }
+        .onDisappear {
+            metronomeEngine.onBeat = nil
+        }
+    }
+
+    private func toggleMetronome() {
+        let currentlyRunning = metronomeEngine.isRunning
+
+        if currentlyRunning {
+            metronomeEngine.stop()
+            metronomeIsOn = false
+        } else {
+            metronomeEngine.start(
+                bpm: metronomeBPM,
+                accentEvery: metronomeAccentEvery,
+                volume: metronomeVolume
+            )
+            metronomeIsOn = true
+        }
+    }
+}
+
 // MARK: - Custom Metronome Icon (Outlined Body + Swinging Arm)
 
 private struct MetronomeIcon: View {
