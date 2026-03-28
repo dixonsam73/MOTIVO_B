@@ -1299,7 +1299,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 Image(systemName: "pianokeys")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(showSessionMetaSetup ? tasksAccentIcon : Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .foregroundStyle(showSessionMetaSetup ? tasksAccentIcon : recorderIcon)
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }
@@ -1449,7 +1449,7 @@ private var bottomActionSection: some View {
                 Image(systemName: "checklist")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(showTasksPad ? tasksAccentIcon : Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .foregroundStyle(showTasksPad ? tasksAccentIcon : recorderIcon)
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }
@@ -1467,7 +1467,7 @@ private var bottomActionSection: some View {
                 Image(systemName: "plus")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
+                    .foregroundStyle(recorderIcon)
                     .frame(width: 48, height: 48)
                     .contentShape(Circle())
             }
