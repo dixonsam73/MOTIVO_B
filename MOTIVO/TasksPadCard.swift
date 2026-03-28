@@ -44,26 +44,7 @@ struct TasksPadCard: View {
     @ViewBuilder
     private var expandedPad: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Tasks")
-                    .sectionHeader()
-
-                Spacer(minLength: 0)
-
-                Button(action: {
-                    showTasksPad = false
-                }) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 6)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Hide tasks")
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
+       
 
             VStack(alignment: .leading, spacing: 0) {
                 ForEach($taskLines) { $line in
@@ -126,7 +107,7 @@ struct TasksPadCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.top, 8)
+        .padding(.top, 2)
         .padding(.bottom, 12)
     }
 
