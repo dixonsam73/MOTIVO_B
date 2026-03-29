@@ -241,6 +241,7 @@ struct PracticeTimerView: View {
     @State private var showProfile: Bool = false
     @State private var showAppSetUp: Bool = false
     @State var showContentView: Bool = false
+    @State private var showMeView: Bool = false
     #if canImport(UIKit)
     @State private var toolbarRemoteAvatar: UIImage? = nil
     #endif
@@ -692,12 +693,18 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 .accessibilityLabel("Open profile")
 
-                Text(weeklyPulseLine)
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .lineLimit(1)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.leading, Theme.Spacing.xs)
+                Button {
+                    showMeView = true
+                } label: {
+                    Text(weeklyPulseLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.leading, Theme.Spacing.xs)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open MeView")
 
                 Button {
                     appRoute.route = .content
@@ -726,6 +733,9 @@ private func loadPracticeDefaultsIfNeeded() {
     var body: some View {
         NavigationStack {
             mainScrollView
+                .navigationDestination(isPresented: $showMeView) {
+                    MeView()
+                }
         }
     }
 
