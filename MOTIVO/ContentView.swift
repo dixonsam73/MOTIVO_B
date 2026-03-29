@@ -1032,7 +1032,13 @@ fileprivate struct SessionsRootView: View {
                                                 ),
                                                 isActive: Binding(
                                                     get: { pushRemotePostID == post.id },
-                                                    set: { active in if !active { pushRemotePostID = nil } }
+                                                    set: { active in
+                                                        if !active {
+                                                            pushRemotePostID = nil
+                                                            BackendDetailPopGate.lastPopAt = Date()
+                                                            remotePrewarmNonce &+= 1
+                                                        }
+                                                    }
                                                 )
                                             ) { EmptyView() }
                                             .opacity(0)
@@ -1315,11 +1321,7 @@ fileprivate struct SessionsRootView: View {
 #endif
 
 
-            .onReceive(NotificationCenter.default.publisher(for: Notification.Name("BackendSessionDetailView.didPop"))) { _ in
-                pushRemotePostID = nil
-                BackendDetailPopGate.lastPopAt = Date()
-                remotePrewarmNonce &+= 1
-            }
+     
 
             // Feed identity freeze across navigation transitions (covers interactive pop where ContentView is visible before didPop fires).
             .onChange(of: pushRemotePostID) { _, _ in

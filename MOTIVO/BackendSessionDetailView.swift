@@ -274,7 +274,6 @@ struct BackendSessionDetailView: View {
         }
         .appBackground()
         .onDisappear {
-            NotificationCenter.default.post(name: Notification.Name("BackendSessionDetailView.didPop"), object: nil)
             resetViewerState()
         }
     }
