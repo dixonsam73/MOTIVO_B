@@ -1353,7 +1353,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     showSessionMetaSetup.toggle()
                 }
             } label: {
-                Image(systemName: "pianokeys")
+                Image(systemName: "music.note")
                     .symbolRenderingMode(.monochrome)
                     .font(.system(size: 22, weight: .semibold))
                     .foregroundStyle(showSessionMetaSetup ? tasksAccentIcon : recorderIcon)
