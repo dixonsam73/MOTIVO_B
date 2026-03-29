@@ -474,9 +474,7 @@ struct PeopleView: View {
                 }
             }
 
-            Text("Intentional lookup only — no browsing.")
-                .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
+          
         }
         .cardSurface()
     }
