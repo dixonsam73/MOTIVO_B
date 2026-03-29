@@ -42,9 +42,9 @@ final class MetronomeEngine {
 
     private(set) var isRunning: Bool = false
 
-    /// Optional UI callback fired whenever a new beat starts.
+    /// Registered UI callbacks fired whenever a new beat starts.
     /// Called on the main queue; `isAccent` is true for accented beats.
-    var onBeat: ((Bool) -> Void)?
+    private var beatListeners: [UUID: (Bool) -> Void] = [:]
 
     // MARK: - State (audio-thread timing)
 
@@ -151,6 +151,19 @@ final class MetronomeEngine {
         if MetronomeEngine.activeInstance === self {
             MetronomeEngine.activeInstance = nil
         }
+    }
+
+    /// Register a UI beat listener. Returns a token that can later be removed.
+    @discardableResult
+    func addBeatListener(_ listener: @escaping (Bool) -> Void) -> UUID {
+        let token = UUID()
+        beatListeners[token] = listener
+        return token
+    }
+
+    /// Remove a previously registered UI beat listener.
+    func removeBeatListener(_ token: UUID) {
+        beatListeners.removeValue(forKey: token)
     }
 
     // MARK: - Session
@@ -299,10 +312,11 @@ final class MetronomeEngine {
                 samplesUntilNextBeat = samplesPerBeat
 
                 // Notify UI on the main queue (lightweight, once per beat).
-                if let beatCallback = onBeat {
+                if !beatListeners.isEmpty {
                     let accentFlag = isAccent
+                    let listeners = Array(beatListeners.values)
                     DispatchQueue.main.async {
-                        beatCallback(accentFlag)
+                        listeners.forEach { $0(accentFlag) }
                     }
                 }
             }

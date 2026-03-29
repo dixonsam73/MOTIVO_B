@@ -20,6 +20,7 @@ struct MetronomeControlStripCard: View {
     // UI beat/animation state
     @State private var accentFlashIntensity: Double = 0.0
     @State private var metronomeSwingRight: Bool = false
+    @State private var beatListenerToken: UUID?
 
     // Tap tempo state (dedicated Tap button)
     @State private var tapTempoTimestamps: [Date] = []
@@ -41,7 +42,8 @@ struct MetronomeControlStripCard: View {
                     MetronomeIcon(
                         isOn: metronomeIsOn,
                         swingRight: metronomeSwingRight,
-                        color: recorderIcon
+                        color: recorderIcon,
+                        animateArm: true
                     )
                     .frame(width: 36, height: 36)
                     .contentShape(Circle())
@@ -187,35 +189,10 @@ struct MetronomeControlStripCard: View {
         .onAppear {
             // Ensure UI flag matches the real engine state on entry/return
             metronomeIsOn = metronomeEngine.isRunning
-
-            metronomeEngine.onBeat = { isAccent in
-                let beatDuration = 60.0 / Double(metronomeBPM)
-
-                // Swing the arm every beat with spring/inertia (arm "mass")
-                let response = max(0.12, min(beatDuration * 0.55, 0.35))
-                withAnimation(
-                    .spring(
-                        response: response,
-                        dampingFraction: 0.72,
-                        blendDuration: 0.1
-                    )
-                ) {
-                    metronomeSwingRight.toggle()
-                }
-
-                // Flash the accent bubble only on accented beats
-                if isAccent {
-                    accentFlashIntensity = 1.0
-                    withAnimation(.linear(duration: beatDuration)) {
-                        accentFlashIntensity = 0.0
-                    }
-                } else {
-                    accentFlashIntensity = 0.0
-                }
-            }
+            registerBeatListenerIfNeeded()
         }
         .onDisappear {
-            metronomeEngine.onBeat = nil
+            unregisterBeatListener()
         }
     }
 
@@ -278,6 +255,49 @@ struct MetronomeControlStripCard: View {
         }
     }
 
+
+    private func registerBeatListenerIfNeeded() {
+        unregisterBeatListener()
+        beatListenerToken = metronomeEngine.addBeatListener { isAccent in
+            let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
+
+            // Swing the arm every beat with spring/inertia (arm "mass")
+            let response = max(0.12, min(beatDuration * 0.55, 0.35))
+            withAnimation(
+                .spring(
+                    response: response,
+                    dampingFraction: 0.72,
+                    blendDuration: 0.1
+                )
+            ) {
+                metronomeSwingRight.toggle()
+            }
+
+            // Flash the accent bubble only on accented beats
+            if isAccent {
+                accentFlashIntensity = 1.0
+                withAnimation(.linear(duration: beatDuration)) {
+                    accentFlashIntensity = 0.0
+                }
+            } else {
+                accentFlashIntensity = 0.0
+            }
+        }
+    }
+
+    private func unregisterBeatListener(resetSwing: Bool = false) {
+        if let beatListenerToken {
+            metronomeEngine.removeBeatListener(beatListenerToken)
+            self.beatListenerToken = nil
+        }
+
+        if resetSwing {
+            withAnimation(.easeOut(duration: 0.12)) {
+                metronomeSwingRight = false
+            }
+        }
+    }
+
     // MARK: - Helpers
 
     private func accentLabel(for value: Int) -> String {
@@ -313,13 +333,15 @@ struct MetronomeCompactTrigger: View {
 
     @State private var metronomeSwingRight: Bool = false
     @State private var suppressNextTap = false
+    @State private var beatListenerToken: UUID?
 
     var body: some View {
         Button(action: handleTap) {
             MetronomeIcon(
                 isOn: metronomeIsOn,
                 swingRight: metronomeSwingRight,
-                color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon
+                color: metronomeIsOn ? Theme.Colors.primaryAction : recorderIcon,
+                animateArm: shouldAnimateCompactIcon
             )
             .frame(width: 24, height: 24)
             .frame(width: 48, height: 48)
@@ -351,9 +373,7 @@ struct MetronomeCompactTrigger: View {
             updateCompactBeatHandler()
         }
         .onDisappear {
-            if shouldAnimateCompactIcon {
-                metronomeEngine.onBeat = nil
-            }
+            unregisterBeatListener(resetSwing: true)
         }
     }
 
@@ -387,11 +407,16 @@ struct MetronomeCompactTrigger: View {
         metronomeIsOn = metronomeEngine.isRunning
 
         guard shouldAnimateCompactIcon, metronomeIsOn else {
-            metronomeEngine.onBeat = nil
+            unregisterBeatListener(resetSwing: true)
             return
         }
 
-        metronomeEngine.onBeat = { _ in
+        registerBeatListenerIfNeeded()
+    }
+
+    private func registerBeatListenerIfNeeded() {
+        unregisterBeatListener(resetSwing: false)
+        beatListenerToken = metronomeEngine.addBeatListener { _ in
             let beatDuration = 60.0 / Double(max(metronomeBPM, 1))
             let response = max(0.12, min(beatDuration * 0.55, 0.35))
             withAnimation(
@@ -405,6 +430,19 @@ struct MetronomeCompactTrigger: View {
             }
         }
     }
+
+    private func unregisterBeatListener(resetSwing: Bool = false) {
+        if let beatListenerToken {
+            metronomeEngine.removeBeatListener(beatListenerToken)
+            self.beatListenerToken = nil
+        }
+
+        if resetSwing {
+            withAnimation(.easeOut(duration: 0.12)) {
+                metronomeSwingRight = false
+            }
+        }
+    }
 }
 
 // MARK: - Custom Metronome Icon (Outlined Body + Swinging Arm)
@@ -413,6 +451,7 @@ private struct MetronomeIcon: View {
     let isOn: Bool
     let swingRight: Bool
     let color: Color
+    let animateArm: Bool
 
     var body: some View {
         ZStack {
@@ -442,7 +481,7 @@ private struct MetronomeIcon: View {
                 .frame(width: 1.5, height: 14)
                 .offset(y: 3)
                 .rotationEffect(
-                    .degrees(isOn ? (swingRight ? 16 : -16) : 0),
+                    .degrees(isOn && animateArm ? (swingRight ? 16 : -16) : 0),
                     anchor: .bottom
                 )
                 .foregroundStyle(color)
