@@ -60,7 +60,7 @@ public struct CommentsView: View {
     @State private var replyTargetDisplayName: String? = nil
     @State private var isTargetPickerPresented: Bool = false
     @State private var isRespondToCommentersMode: Bool = false
-
+    @State private var isSending = false
     // UI-only: read-through identity cache for comment rows (displayName/location/avatarKey). Never shows raw IDs.
     @State private var directoryAccounts: [String: DirectoryAccount] = [:]
     @Environment(\.dismiss) private var dismiss
@@ -1592,7 +1592,9 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     .focused($composerFocused)
                     .textFieldStyle(.roundedBorder)
                     .accessibilityLabel("Add a comment")
-                    .onSubmit(send)
+                    .onSubmit {
+                        if !isSending { send() }
+                    }
                 
                 Button(action: send) {
                     let ownerID = ownerUserIDForSession()
@@ -1621,6 +1623,8 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                 }
                 .buttonStyle(.plain)
                 .disabled({
+                    if isSending { return true }   // ← ADD THIS LINE
+
                     let ownerID = ownerUserIDForSession()
                     let viewerID = viewerUserID()
                     let isOwner = (ownerID != nil && viewerID != nil && ownerID == viewerID)
@@ -1729,6 +1733,8 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
     }
 
     private func send() {
+        guard !isSending else { return }
+
         let trimmed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         
@@ -1810,16 +1816,19 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                     }
                 }
             } else {
+                isSending = true
+
                 Task {
                     let result = await backendStore.addComment(postID: pid, body: trimmed)
-                    switch result {
-                    case .success:
-                        await MainActor.run {
+                    await MainActor.run {
+                        isSending = false
+                        switch result {
+                        case .success:
                             draft = ""
                             handleSuccessfulSend()
+                        case .failure:
+                            break
                         }
-                    case .failure:
-                        break
                     }
                 }
             }
