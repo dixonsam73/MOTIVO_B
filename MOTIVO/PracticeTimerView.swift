@@ -1,11 +1,11 @@
-// CHANGE-ID: 20260318_201500_SessionHeaderExternalize
-// SCOPE: Visual-only refinement — move "Session" label out of SessionMetaCard and render it as an external section header in PracticeTimerView. No logic, card order, or row layout changes.
+// CHANGE-ID: 20260329_093900_stage5_composition_rebalance_only
+// SCOPE: Stage 5 composition rebalance only — preserve established timer screen order, lower the overall composition via viewport spacing, and make SessionMetaCard reveal upward above its trigger. No logic or behavioral changes.
 // SEARCH-TOKEN: 20260318_201500_SessionHeaderExternalize
 
-// CHANGE-ID: 20260228_223200_ptv_tasks_inst_activity_instrument_sync_fix
-// SCOPE: Fix instrument change in Session sheet to update instrument state before reloading task defaults; no UI/layout changes
+// CHANGE-ID: 20260329_093900_stage5_composition_rebalance_only
+// SCOPE: Stage 5 composition rebalance only — preserve established timer screen order, lower the overall composition via viewport spacing, and make SessionMetaCard reveal upward above its trigger. No logic or behavioral changes.
 
-// CHANGE-ID: 20260225_092000_ptv_audio_saveas_titles
+// CHANGE-ID: 20260329_093900_stage5_composition_rebalance_only
 // SCOPE: Naming-only — PTV audio trim Save-as-New retains source title and appends _N suffix (no UI/layout changes).
 
 // CHANGE-ID: 20260105_231900_ptv_thumbnail_invariants
@@ -17,8 +17,8 @@
 
 // CHANGE-ID: 20251124_213000-ptv-viewerRoutingAndHitTests
 // SCOPE: Ensure audio rows win hit-testing over video tiles in attachments card
-// CHANGE-ID: 20251012_202320-tasks-pad-a2
-// SCOPE: Fix tasks pad placement; proper state; pass notesPrefill
+// CHANGE-ID: 20260329_141500_stage5b_final_composition_balance
+// SCOPE: Stage 5B final composition balance and vertical breathing
 
 // CHANGE-ID: 20251227_150000-ptv-videoTitles
 // SCOPE: Add staged videoTitles map persistence + hydration (metadata only) for AttachmentViewer rename
@@ -71,6 +71,15 @@ private enum PracticeTimerTopButtonsUI {
     static let spacing: CGFloat = Theme.Spacing.l
     static let fillOpacityLight: CGFloat = 0.96
     static let fillOpacityDark: CGFloat = 0.88
+}
+
+
+private enum PracticeTimerCompositionUI {
+    static let minimumViewportTopInset: CGFloat = 6
+    static let viewportTopInsetRatio: CGFloat = 0.024
+    static let viewportBottomBreathingRoom: CGFloat = Theme.Spacing.l
+    static let homeTopBarAllowance: CGFloat = 64
+    static let sessionMetaOpenTopBuffer: CGFloat = Theme.Spacing.s + 2
 }
 
 struct PracticeTimerView: View {
@@ -710,7 +719,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 .accessibilityLabel("Open Journal and Feed")
             }
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.s)
+            .padding(.top, 0)
         }
     }
 
@@ -726,13 +735,34 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var mainScrollView: some View {
-        ScrollView {
-            VStack(spacing: 0) {
-                if isHomePresentation {
-                    homeTopBar
-                }
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    if isHomePresentation {
+                        homeTopBar
+                    }
 
-                mainContent
+                    VStack(spacing: 0) {
+                        Color.clear
+                            .frame(
+                                height: max(
+                                    PracticeTimerCompositionUI.minimumViewportTopInset,
+                                    proxy.size.height * PracticeTimerCompositionUI.viewportTopInsetRatio
+                                )
+                            )
+
+                        mainContent
+
+                        Spacer(minLength: PracticeTimerCompositionUI.viewportBottomBreathingRoom)
+                    }
+                    .frame(
+                        minHeight: max(
+                            proxy.size.height - (isHomePresentation ? PracticeTimerCompositionUI.homeTopBarAllowance : 0),
+                            0
+                        ),
+                        alignment: .top
+                    )
+                }
             }
         }
         .navigationTitle("")
@@ -1272,7 +1302,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var mainContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.m) {
+        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             sessionMetaSection
             compactToolsSection
             timerSection
@@ -1284,13 +1314,40 @@ private func loadPracticeDefaultsIfNeeded() {
             attachmentsSection
         }
         .padding(.horizontal, Theme.Spacing.l)
-        .padding(.top, Theme.Spacing.s)
+        .padding(.top, 0)
         .padding(.bottom, Theme.Spacing.xl)
     }
 
     @ViewBuilder
     private var sessionMetaSection: some View {
-        VStack(alignment: .center, spacing: Theme.Spacing.xs + 2) {
+        VStack(alignment: .center, spacing: Theme.Spacing.xs) {
+            ZStack {
+                SessionMetaCard(
+                    instruments: instruments,
+                    instrument: $instrument,
+                    showInstrumentSheet: $showInstrumentSheet,
+                    showActivitySheet: $showActivitySheet,
+                    currentInstrumentName: currentInstrumentName(),
+                    activityLabel: activityDisplayName(for: activityChoice)
+                )
+                .hidden()
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+
+                if showSessionMetaSetup {
+                    SessionMetaCard(
+                        instruments: instruments,
+                        instrument: $instrument,
+                        showInstrumentSheet: $showInstrumentSheet,
+                        showActivitySheet: $showActivitySheet,
+                        currentInstrumentName: currentInstrumentName(),
+                        activityLabel: activityDisplayName(for: activityChoice)
+                    )
+                    .padding(.top, PracticeTimerCompositionUI.sessionMetaOpenTopBuffer)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
                     showSessionMetaSetup.toggle()
@@ -1312,21 +1369,9 @@ private func loadPracticeDefaultsIfNeeded() {
             .frame(maxWidth: .infinity, alignment: .center)
             .accessibilityLabel(showSessionMetaSetup ? "Hide session setup" : "Show session setup")
             .padding(.bottom, 2)
-
-            if showSessionMetaSetup {
-                SessionMetaCard(
-                    instruments: instruments,
-                    instrument: $instrument,
-                    showInstrumentSheet: $showInstrumentSheet,
-                    showActivitySheet: $showActivitySheet,
-                    currentInstrumentName: currentInstrumentName(),
-                    activityLabel: activityDisplayName(for: activityChoice)
-                )
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.bottom, Theme.Spacing.xs)
+          .padding(.bottom, Theme.Spacing.xs)
     }
 
     @ViewBuilder
