@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260330_194600_ContentView_FinalFilterPolishKeyboardDismiss_42bf
+// SCOPE: Final filter micro-polish plus outside-tap keyboard dismissal for the search field; preserve layout structure, filter logic, state, navigation, and backend behavior.
+// SEARCH-TOKEN: 20260330_194600_ContentView_FinalFilterPolishKeyboardDismiss_42bf
+
+// CHANGE-ID: 20260330_190800_ContentView_FilterCardFeedParity_3f7c
+// SCOPE: Week-mode filter card visual parity pass — restyle the filter container and expanded rows to match feed card rhythm, soften the search field, and preserve all filter logic/state/navigation/backend behavior.
+// SEARCH-TOKEN: 20260330_190800_ContentView_FilterCardFeedParity_3f7c
+
 // CHANGE-ID: 20260325_223000_ContentView_YearCalendarSpacingMicroPass_8d2a
 // SCOPE: Phase 2B Year journal correction pass — refine Year-only month-aggregate row rendering to borrow Month’s existing bar/spacing language more directly, with tighter compression and clearer bar visibility. Preserve Week, Month, Feed, filters, routing, Theme, and aggregation behavior unchanged.
 // SEARCH-TOKEN: 20260325_214500_ContentView_YearCalendarOverviewCompaction_a9d1
@@ -187,6 +195,16 @@
 // SCOPE: Soften the permanent Journal/Feed mode selector styling and tighten its spacing to the summary card without changing selector logic, layout structure, filters, or behavior.
 // SEARCH-TOKEN: 20260323_162900_ContentView_ModeSelectorSoftening_5d1a
 import SwiftUI
+
+
+#if canImport(UIKit)
+private enum ContentViewKeyboardDismiss {
+    static func dismiss() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+}
+#endif
+
 
 #if DEBUG
 private struct TopToolbarPeopleFramePreferenceKey: PreferenceKey {
@@ -381,7 +399,7 @@ fileprivate struct SessionsRootView: View {
     let userID: String?
     let backendUserID: String?
 
-    @AppStorage("filtersExpanded") private var filtersExpanded = false
+    @State private var filtersExpanded = false
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
@@ -543,6 +561,9 @@ fileprivate struct SessionsRootView: View {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 ForEach(JournalTimeLens.allCases) { lens in
                     Button {
+                        #if canImport(UIKit)
+                        ContentViewKeyboardDismiss.dismiss()
+                        #endif
                         selectedJournalLens = lens
                     } label: {
                         Text(lens.rawValue)
@@ -609,6 +630,11 @@ fileprivate struct SessionsRootView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
+        .onChange(of: selectedScope) { _ in
+            #if canImport(UIKit)
+            ContentViewKeyboardDismiss.dismiss()
+            #endif
+        }
       }
 
     @ViewBuilder
@@ -667,7 +693,7 @@ fileprivate struct SessionsRootView: View {
             refreshStats()
         }
         .cardSurface()
-        .padding(.bottom, Theme.Spacing.s)
+        .padding(.bottom, 6)
     }
    
 
@@ -681,52 +707,55 @@ fileprivate struct SessionsRootView: View {
 
                 modeSelectorControl
 
-                // ---------- Filters (utility strip) ----------
-                VStack(alignment: .leading, spacing: 6) {
-                        // Header toggles expansion; visually demoted (utility row)
-                        Button { withAnimation { filtersExpanded.toggle() } } label: {
-                            HStack(alignment: .center, spacing: 8) {
-                                Image(systemName: "slider.horizontal.3")
-                                    .font(.system(size: 15, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                    .padding(.leading, 3)
+                // ---------- Filters (card-parity refinement) ----------
+                // CHANGE-ID: 20260330_191900_ContentView_FilterDensityTypography_b91a
+                // SCOPE: Tighten expanded filter density and typography; quiet search row while preserving behaviour
+                VStack(alignment: .leading, spacing: 0) {
+                    Button {
+                        #if canImport(UIKit)
+                        ContentViewKeyboardDismiss.dismiss()
+                        #endif
+                        withAnimation { filtersExpanded.toggle() }
+                    } label: {
+                        HStack(alignment: .center, spacing: Theme.Spacing.inline) {
+                            Image(systemName: "slider.horizontal.3")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
 
-                                Spacer(minLength: 0)
+                            Spacer(minLength: 0)
 
-                                Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                                    .imageScale(.small)
-                            }
-                            .padding(.top, 1) // optical centering in collapsed pill
-                            .contentShape(Rectangle())
+                            Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .imageScale(.small)
                         }
-                        .buttonStyle(.plain)
-
-                        FilterBar(
-                            filtersExpanded: $filtersExpanded,
-                            instruments: Array(instruments),
-                            customNames: userActivities
-                                .map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
-                                .filter { !$0.isEmpty },
-                            selectedInstrument: $selectedInstrument,
-                            selectedActivity: $selectedActivity,
-                            searchText: $searchText,
-                            savedOnly: $savedOnly,
-                            selectedThread: $selectedThread,
-                            threadOptions: existingThreadOptions
-                        )
+                        .padding(.horizontal, Theme.Spacing.card)
+                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .fill(Theme.Colors.surface(colorScheme).opacity(0.55))
+                    .buttonStyle(.plain)
+
+                    FilterBar(
+                        filtersExpanded: $filtersExpanded,
+                        instruments: Array(instruments),
+                        customNames: userActivities
+                            .map { ($0.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines) }
+                            .filter { !$0.isEmpty },
+                        selectedInstrument: $selectedInstrument,
+                        selectedActivity: $selectedActivity,
+                        searchText: $searchText,
+                        savedOnly: $savedOnly,
+                        selectedThread: $selectedThread,
+                        threadOptions: existingThreadOptions
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.55), lineWidth: 1)
-                    )
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    #if canImport(UIKit)
+                    ContentViewKeyboardDismiss.dismiss()
+                    #endif
+                }
+                .cardSurface()
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"
@@ -736,6 +765,9 @@ fileprivate struct SessionsRootView: View {
                         .frame(height: Theme.Spacing.s)
                         .contentShape(Rectangle())
                         .onTapGesture {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
                             withAnimation {
                                 proxy.scrollTo(topID, anchor: .top)
                             }
@@ -1116,6 +1148,13 @@ fileprivate struct SessionsRootView: View {
                     .listRowSeparator(.hidden)
                     .scrollContentBackground(.hidden)
                     .listRowBackground(Color.clear)
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
                 }
             }
             .padding(.horizontal, Theme.Spacing.l)
@@ -1423,6 +1462,9 @@ fileprivate struct SessionsRootView: View {
                     await sharedWithYouStore.refreshUnreadShares()
                     await unreadCommentsStore.refresh(force: true)
                 }
+            }
+            .onAppear {
+                filtersExpanded = false
             }
             .appBackground()
         }
@@ -2520,30 +2562,114 @@ fileprivate struct FilterSelectorValueControl: View {
     let valueText: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Text(valueText)
-                .font(Theme.Text.body)
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.primary.opacity(0.8))
                 .lineLimit(1)
                 .truncationMode(.tail)
 
             Image(systemName: "chevron.up.chevron.down")
-                .font(.caption.weight(.semibold))
+                .font(.caption2.weight(.regular))
                 .imageScale(.small)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.42))
         }
+        .padding(.trailing, 3)
     }
 }
 
 fileprivate struct FilterSelectorTrailingControlStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.85))
-            .tint(Theme.Colors.secondaryText)
+            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.66))
+            .tint(Theme.Colors.secondaryText.opacity(0.66))
             .controlSize(.small)
             .scaleEffect(1.0, anchor: .trailing)
     }
 }
 
 
+
+fileprivate enum FilterCardUI {
+    static let rowMinHeight: CGFloat = 34
+    static let rowVerticalPadding: CGFloat = 3
+    static let trailingControlWidth: CGFloat = 160
+    static let searchCornerRadius: CGFloat = 12
+}
+
+fileprivate struct FilterCardDivider: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Rectangle()
+            .fill(Theme.Colors.cardStroke(colorScheme).opacity(colorScheme == .dark ? 0.09 : 0.04))
+            .frame(height: 1)
+    }
+}
+
+fileprivate struct FilterCardRow<Trailing: View>: View {
+    let label: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Spacing.s) {
+            Text(label)
+                .font(.footnote)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+
+            Spacer(minLength: Theme.Spacing.s)
+
+            trailing()
+                .frame(width: FilterCardUI.trailingControlWidth, alignment: .trailing)
+                .padding(.trailing, 3)
+        }
+        .frame(minHeight: FilterCardUI.rowMinHeight)
+        .padding(.horizontal, Theme.Spacing.card)
+        .padding(.vertical, FilterCardUI.rowVerticalPadding)
+    }
+}
+
+fileprivate struct FilterCardSearchField: View {
+    @Binding var text: String
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+
+            TextField(
+                "Search",
+                text: $text,
+                prompt: Text("Search")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.82))
+            )
+            .textInputAutocapitalization(.never)
+            .disableAutocorrection(true)
+            .font(.footnote)
+            .textFieldStyle(.plain)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: FilterCardUI.searchCornerRadius, style: .continuous)
+                .fill(
+                    Theme.Colors.surface(colorScheme)
+                        .opacity(colorScheme == .dark ? 0.94 : 0.88)
+                )
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: FilterCardUI.searchCornerRadius, style: .continuous)
+                .stroke(
+                    Theme.Colors.cardStroke(colorScheme).opacity(colorScheme == .dark ? 0.18 : 0.1),
+                    lineWidth: 1
+                )
+        )
+        .frame(maxWidth: .infinity, alignment: .trailing)
+    }
+}
 
 fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
@@ -2558,121 +2684,147 @@ fileprivate struct FilterBar: View {
 
     @State private var showThreadPicker: Bool = false
 
+    private var selectedInstrumentLabel: String {
+        if let inst = selectedInstrument {
+            let name = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            return name.isEmpty ? "(Unnamed)" : name
+        } else {
+            return "Any"
+        }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            // This view only renders contents when expanded (logic unchanged)
-            if filtersExpanded {
-                VStack(alignment: .leading, spacing: 20) {
+        if filtersExpanded {
+            VStack(alignment: .leading, spacing: 0) {
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
 
-                    // Search
-                    TextField("Search", text: $searchText)
-                        .textInputAutocapitalization(.never)
-                        .disableAutocorrection(true)
-                        .font(Theme.Text.body)
-                        .textFieldStyle(.roundedBorder)
-                        .controlSize(.small)
-                        .padding(.vertical, -2)
-                        .padding(.horizontal, 2)
-                        .controlSize(.small)
-
-                    // Instrument
-                    HStack(spacing: 10) {
-                        Text("Instrument")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        Spacer(minLength: 0)
-                                                Menu {
-                            Button("Any") {
-                                selectedInstrument = nil
-                            }
-                            ForEach(instruments, id: \.objectID) { inst in
-                                Button(((inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? "(Unnamed)" : (inst.name ?? "")) {
-                                    selectedInstrument = inst
-                                }
-                            }
-                        } label: {
-                            FilterSelectorValueControl(valueText: {
-                                if let inst = selectedInstrument {
-                                    let name = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-                                    return name.isEmpty ? "(Unnamed)" : name
-                                } else {
-                                    return "Any"
-                                }
-                            }())
-                        }
-                        .modifier(FilterSelectorTrailingControlStyle())
-                    }
-                    .padding(.vertical, 2)
-
-                    // Activity — include customs
-                    HStack(spacing: 10) {
-                        Text("Activity")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        Spacer(minLength: 0)
-                                                Menu {
-                            Button("Any") {
-                                selectedActivity = .any
-                            }
-                            ForEach(ActivityType.allCases) { a in
-                                Button(a.label) {
-                                    selectedActivity = .core(a)
-                                }
-                            }
-                            if !customNames.isEmpty {
-                                ForEach(customNames, id: \.self) { name in
-                                    Button(name) {
-                                        selectedActivity = .custom(name)
-                                    }
-                                }
-                            }
-                        } label: {
-                            FilterSelectorValueControl(valueText: selectedActivity.label)
-                        }
-                        .modifier(FilterSelectorTrailingControlStyle())
-                    }
-                    .padding(.vertical, 2)
-
-                    // Thread (owner-only)
-                    HStack(spacing: 10) {
-                        Text("Thread")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        Spacer(minLength: 0)
-                        Button {
-                            showThreadPicker = true
-                        } label: {
-                            FilterSelectorValueControl(valueText: selectedThread ?? "Any")
-                        }
-                        .buttonStyle(.plain)
-                        .modifier(FilterSelectorTrailingControlStyle())
-                        .contentShape(Rectangle())
-                    }
-                    .padding(.vertical, 2)
-                    .sheet(isPresented: $showThreadPicker) {
-                        ThreadPickerView(
-                            selectedThread: $selectedThread,
-                            title: "Thread",
-                            recentThreads: threadOptions,
-                            maxLength: 32
-                        )
-                    }
-
-                    // Saved only — peer row (same label style/alignment as Instrument/Activity)
-                    HStack(spacing: 10) {
-                        Text("Saved only")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                        Spacer(minLength: 0)
-                        Toggle("", isOn: $savedOnly)
-                            .labelsHidden()
-                            .tint(Theme.Colors.accent)
-                            .controlSize(.small)
-                            .scaleEffect(1.0, anchor: .trailing)
-                            .padding(.trailing, 10) // aligns switch with menu picker trailing inset
-                    }
-                    .padding(.vertical, 2)
+                HStack(spacing: 0) {
+                    FilterCardSearchField(text: $searchText)
                 }
+                .frame(minHeight: FilterCardUI.rowMinHeight)
+                .padding(.horizontal, Theme.Spacing.card)
+                .padding(.vertical, FilterCardUI.rowVerticalPadding)
+
+                FilterCardRow(label: "Instrument") {
+                    Menu {
+                        Button("Any") {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                            selectedInstrument = nil
+                        }
+                        ForEach(instruments, id: \.objectID) { inst in
+                            Button(((inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty) ? "(Unnamed)" : (inst.name ?? "")) {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                                selectedInstrument = inst
+                            }
+                        }
+                    } label: {
+                        FilterSelectorValueControl(valueText: selectedInstrumentLabel)
+                    }
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
+                    .modifier(FilterSelectorTrailingControlStyle())
+                }
+
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
+
+                FilterCardRow(label: "Activity") {
+                    Menu {
+                        Button("Any") {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                            selectedActivity = .any
+                        }
+                        ForEach(ActivityType.allCases) { a in
+                            Button(a.label) {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                                selectedActivity = .core(a)
+                            }
+                        }
+                        if !customNames.isEmpty {
+                            ForEach(customNames, id: \.self) { name in
+                                Button(name) {
+                                    #if canImport(UIKit)
+                                    ContentViewKeyboardDismiss.dismiss()
+                                    #endif
+                                    selectedActivity = .custom(name)
+                                }
+                            }
+                        }
+                    } label: {
+                        FilterSelectorValueControl(valueText: selectedActivity.label)
+                    }
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
+                    .modifier(FilterSelectorTrailingControlStyle())
+                }
+
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
+
+                FilterCardRow(label: "Thread") {
+                    Button {
+                        #if canImport(UIKit)
+                        ContentViewKeyboardDismiss.dismiss()
+                        #endif
+                        showThreadPicker = true
+                    } label: {
+                        FilterSelectorValueControl(valueText: selectedThread ?? "Any")
+                    }
+                    .buttonStyle(.plain)
+                    .modifier(FilterSelectorTrailingControlStyle())
+                    .contentShape(Rectangle())
+                }
+
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
+
+                FilterCardRow(label: "Saved only") {
+                    Toggle("", isOn: $savedOnly)
+                        .labelsHidden()
+                        .tint(Theme.Colors.accent.opacity(0.72))
+                        .controlSize(.small)
+                        .scaleEffect(1.0, anchor: .trailing)
+                        .onChange(of: savedOnly) { _ in
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                }
+            }
+            .padding(.top, 1)
+            .padding(.bottom, 5)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                #if canImport(UIKit)
+                ContentViewKeyboardDismiss.dismiss()
+                #endif
+            }
+            .sheet(isPresented: $showThreadPicker) {
+                ThreadPickerView(
+                    selectedThread: $selectedThread,
+                    title: "Thread",
+                    recentThreads: threadOptions,
+                    maxLength: 32
+                )
             }
         }
     }
