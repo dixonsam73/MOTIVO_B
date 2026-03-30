@@ -730,7 +730,7 @@ fileprivate struct SessionsRootView: View {
                                 .imageScale(.small)
                         }
                         .padding(.horizontal, Theme.Spacing.card)
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 9)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
