@@ -651,7 +651,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  }
 
                  Toggle(isOn: $showTasksPad) {
-                     Text("Show Tasks")
+                     Text("Show Tasks Pad")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)
