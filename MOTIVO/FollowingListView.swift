@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260401_183900_FollowLists_AlphabeticalDisplayNameSort
+// SCOPE: View-only ordering update for FollowingListView — sort following alphabetically by resolved display name, using surname-first ordering when multiple name parts exist; fallback safely to userID; preserve all UI, loading, and navigation behavior.
+// SEARCH-TOKEN: 20260401_183900_FollowLists_AlphabeticalDisplayNameSort
+
 // CHANGE-ID: 20260318_165400_FollowLists_ProfileParity
 // SCOPE: Visual-only parity pass for FollowingListView — replace plain List container with Profile-style section header + grouped card surface; preserve row content, async loading, and navigation behavior.
 // SEARCH-TOKEN: 20260318_165400_FollowLists_ProfileParity
@@ -18,8 +22,38 @@ struct FollowingListView: View {
 
     @State private var directory: [String: DirectoryAccount] = [:]
 
+    private func alphabeticalSortKey(for userID: String) -> String {
+        let fallback = userID.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
+        guard let rawName = directory[userID]?.displayName
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !rawName.isEmpty else {
+            return fallback
+        }
+
+        let parts = rawName
+            .split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+
+        guard !parts.isEmpty else { return fallback }
+
+        if parts.count >= 2 {
+            let surname = parts.last ?? ""
+            let givenNames = parts.dropLast().joined(separator: " ")
+            return "\(surname.localizedLowercase) \(givenNames.localizedLowercase)"
+        } else {
+            return parts[0].localizedLowercase
+        }
+    }
+
     private var userIDs: [String] {
-        Array(followStore.following).sorted()
+        Array(followStore.following).sorted {
+            let lhsKey = alphabeticalSortKey(for: $0)
+            let rhsKey = alphabeticalSortKey(for: $1)
+            if lhsKey == rhsKey {
+                return $0.localizedLowercase < $1.localizedLowercase
+            }
+            return lhsKey < rhsKey
+        }
     }
 
     var body: some View {
