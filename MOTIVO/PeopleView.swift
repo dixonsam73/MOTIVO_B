@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260401_184900_PeopleView_ConnectionsChevronParity
+// SCOPE: PeopleView — visual-only parity tweak for Your Connections rows: replace plain trailing chevrons on Followers/Following with the same circular material chevron treatment used in ProfileView. No other UI, layout, or logic changes.
+// SEARCH-TOKEN: 20260401_184900_PeopleView_ConnectionsChevronParity
+
 // CHANGE-ID: 20260317_115600_PeopleView_BackChevronAndInset_Fix
 // SCOPE: PeopleView — align People header inset with card rhythm and replace swipe-only dismissal with explicit back chevron, correctly scoped to PeopleView only. Visual/navigation only.
 // SEARCH-TOKEN: 20260317_115600_PeopleView_BackChevronAndInset_Fix
@@ -159,7 +163,7 @@ struct PeopleView: View {
                 responseAuthorDirectory = map
             }
         }
-.task(id: incomingRequestIDs) {
+        .task(id: incomingRequestIDs) {
             let ids = incomingRequestIDs
             guard !ids.isEmpty else {
                 requestDirectory = [:]
@@ -195,6 +199,7 @@ struct PeopleView: View {
     private var responseAuthorIDsTaskToken: String {
         responseAuthorIDs.joined(separator: ",")
     }
+
     private var effectiveBackendUserID: String {
         #if DEBUG
         if BackendEnvironment.shared.isConnected == false,
@@ -209,6 +214,7 @@ struct PeopleView: View {
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
     }
+
     private var sharedWithYouSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Shared with you").sectionHeader()
@@ -261,24 +267,24 @@ struct PeopleView: View {
                     overrideAvatarKey: acct?.avatarKey
                 ) {
                     ResponsesCommentsHost(
-                            postID: group.postID,
-                            ownerUserID: effectiveBackendUserID,
-                            viewerUserID: effectiveBackendUserID
-                        ) {
-                            Task { await unreadCommentsStore.markViewed(postID: group.postID) }
-                        }
-                } trailing: {
-                        VStack(alignment: .trailing, spacing: 4) {
-                            Text(responsesTimeLabel(from: group.latestUnreadAt))
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
-                        }
+                        postID: group.postID,
+                        ownerUserID: effectiveBackendUserID,
+                        viewerUserID: effectiveBackendUserID
+                    ) {
+                        Task { await unreadCommentsStore.markViewed(postID: group.postID) }
                     }
-                
+                } trailing: {
+                    VStack(alignment: .trailing, spacing: 4) {
+                        Text(responsesTimeLabel(from: group.latestUnreadAt))
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                    }
+                }
+
             }
         }
         .cardSurface()
@@ -325,10 +331,7 @@ struct PeopleView: View {
         }
     }
 
-
-
-
-/// Phase 10D.1: Incoming requests only (defensive filter).
+    /// Phase 10D.1: Incoming requests only (defensive filter).
     /// Requests UI must never surface outgoing requests.
     private var incomingRequestIDs: [String] {
         Array(followStore.requests.subtracting(followStore.outgoingRequests))
@@ -473,8 +476,6 @@ struct PeopleView: View {
                     }
                 }
             }
-
-          
         }
         .cardSurface()
     }
@@ -530,7 +531,9 @@ struct PeopleView: View {
                 .foregroundStyle(Color.primary)
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.footnote.weight(.semibold))
+                .padding(6)
+                .background(.ultraThinMaterial, in: Circle())
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
         .contentShape(Rectangle())
@@ -591,7 +594,6 @@ private struct SharedPostDetailHost: View {
         }
     }
 }
-
 
 private struct ResponsesPostDetailHost: View {
     let postID: UUID
