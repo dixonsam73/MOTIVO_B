@@ -120,6 +120,7 @@ struct PracticeTimerView: View {
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
     @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
+    @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
 
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
@@ -1491,30 +1492,32 @@ private func loadPracticeDefaultsIfNeeded() {
 private var bottomActionSection: some View {
     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         HStack(spacing: Theme.Spacing.m) {
-            Button {
-                if showTasksPad {
-                    showTasksPad = false
-                } else {
-                    showTasksPad = true
-                    loadPracticeDefaultsIfNeeded()
-                    loadDefaultTasksIfNeeded()
-                    persistTasksSnapshot()
+            if showTasksButton {
+                Button {
+                    if showTasksPad {
+                        showTasksPad = false
+                    } else {
+                        showTasksPad = true
+                        loadPracticeDefaultsIfNeeded()
+                        loadDefaultTasksIfNeeded()
+                        persistTasksSnapshot()
+                    }
+                } label: {
+                    Image(systemName: "checklist")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(showTasksPad ? tasksAccentIcon : recorderIcon)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
                 }
-            } label: {
-                Image(systemName: "checklist")
-                    .symbolRenderingMode(.monochrome)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(showTasksPad ? tasksAccentIcon : recorderIcon)
-                    .frame(width: 48, height: 48)
-                    .contentShape(Circle())
+                .buttonStyle(.bordered)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
+                )
+                .clipShape(Capsule(style: .continuous))
+                .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
             }
-            .buttonStyle(.bordered)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
-            )
-            .clipShape(Capsule(style: .continuous))
-            .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
 
             Button {
                 showManualAddSheet = true
@@ -1531,7 +1534,7 @@ private var bottomActionSection: some View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
 
-        if showTasksPad {
+        if showTasksButton && showTasksPad {
             TasksPadCard(
                 showTasksPad: $showTasksPad,
                 taskLines: $taskLines,

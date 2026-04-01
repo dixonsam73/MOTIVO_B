@@ -176,6 +176,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
 
      @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
+     @AppStorage("appSettings_showTasksPad") private var showTasksPad: Bool = true
 
 @FocusState private var isNameFocused: Bool
 @FocusState private var isLocationFocused: Bool
@@ -639,6 +640,18 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
                  Toggle(isOn: $showDroneStrip) {
                      Text("Show Drone")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
+
+                 Toggle(isOn: $showTasksPad) {
+                     Text("Show Tasks")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)
