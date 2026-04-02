@@ -57,6 +57,7 @@ final class TunerService: ObservableObject {
             print("⚠️ TunerService failed to start engine: \(error)")
             teardownAudioGraph()
             deactivateAudioSession()
+            restorePlaybackFriendlySession()
             isRunning = false
         }
     }
@@ -67,6 +68,7 @@ final class TunerService: ObservableObject {
 
         teardownAudioGraph()
         deactivateAudioSession()
+        restorePlaybackFriendlySession()
 
         DispatchQueue.main.async {
             self.state = .listening
@@ -98,6 +100,21 @@ final class TunerService: ObservableObject {
             try session.setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
             print("⚠️ TunerService audio session deactivation error: \(error)")
+        }
+    }
+
+    private func restorePlaybackFriendlySession() {
+        let session = AVAudioSession.sharedInstance()
+
+        do {
+            try session.setCategory(
+                .playback,
+                mode: .default,
+                options: [.mixWithOthers]
+            )
+            try session.setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            print("⚠️ TunerService playback session restore error: \(error)")
         }
     }
 
@@ -149,4 +166,4 @@ final class TunerService: ObservableObject {
         mutedInput = nil
         analysisMixer = nil
     }
-}   
+}
