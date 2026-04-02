@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260329_093900_stage5_composition_rebalance_only
-// SCOPE: Stage 5 composition rebalance only — preserve established timer screen order, lower the overall composition via viewport spacing, and make SessionMetaCard reveal upward above its trigger. No logic or behavioral changes.
+// CHANGE-ID: 20260402_112600_signed_out_launch_gate
+// SCOPE: Connected beta launch gating only — auto-present existing ProfileView signed-out gate from PracticeTimerView home mode when backend is configured and user is signed out. No layout/UI changes.
 // SEARCH-TOKEN: 20260318_201500_SessionHeaderExternalize
 
 // CHANGE-ID: 20260329_093900_stage5_composition_rebalance_only
@@ -612,6 +612,25 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+    private func evaluateSignedOutLaunchGate() {
+        guard isHomePresentation else { return }
+        guard BackendConfig.isConfigured else { return }
+        guard !auth.isSignedIn else { return }
+        guard !appRoute.isProfilePresented else { return }
+        handleProfileTap()
+    }
+
+    private var launchGateEvaluationKey: String {
+        [
+            isHomePresentation ? "home" : "flow",
+            BackendConfig.isConfigured ? "configured" : "notConfigured",
+            auth.isSignedIn ? "signedIn" : "signedOut",
+            appRoute.isProfilePresented ? "profileOpen" : "profileClosed",
+            String(appSetUpBootstrapStateKey),
+            String(appSetUpCompletenessKey)
+        ].joined(separator: "|")
+    }
+
     private func handleProfileTap() {
         appRoute.isProfilePresented = true
         showAppSetUp = false
@@ -1025,13 +1044,8 @@ private func loadPracticeDefaultsIfNeeded() {
             showContentView = false
             appRoute.route = .content
         }
-        .onAppear {
-            evaluateAppSetUpGate()
-        }
-        .onChange(of: appSetUpBootstrapStateKey) { _, _ in
-            evaluateAppSetUpGate()
-        }
-        .onChange(of: appSetUpCompletenessKey) { _, _ in
+        .task(id: launchGateEvaluationKey) {
+            evaluateSignedOutLaunchGate()
             evaluateAppSetUpGate()
         }
         .toolbar {
