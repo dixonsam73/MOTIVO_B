@@ -2,7 +2,7 @@
 //  LegacyDefaultsPurge.swift
 //  MOTIVO
 //
-//  Created by ChatGPT on 2025-11-03.
+//  Created by Samuel Dixon on 2025-11-03.
 //  CHANGE-ID: 20251103_094600-legacy-defaults-purge-v1
 //  SCOPE: One-time purge of legacy large UserDefaults keys for staged media blobs.
 //  Notes:

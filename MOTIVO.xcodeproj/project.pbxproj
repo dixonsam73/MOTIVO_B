@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		1C7DC54B2F7E3206008EC570 /* AudioKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1C7DC54A2F7E3206008EC570 /* AudioKit */; };
+		1C7DC54E2F7E328A008EC570 /* SoundpipeAudioKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1C7DC54D2F7E328A008EC570 /* SoundpipeAudioKit */; };
+		1C7DC5592F7E48AC008EC570 /* AudioKitEX in Frameworks */ = {isa = PBXBuildFile; productRef = 1C7DC5582F7E48AC008EC570 /* AudioKitEX */; };
 		1CE3B0332F04671D00BFF0B8 /* Auth in Frameworks */ = {isa = PBXBuildFile; productRef = 1CE3B0322F04671D00BFF0B8 /* Auth */; };
 		1CE3B03E2F04730900BFF0B8 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 1CE3B03D2F04730900BFF0B8 /* Supabase */; };
 /* End PBXBuildFile section */
@@ -70,7 +73,10 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1C7DC54B2F7E3206008EC570 /* AudioKit in Frameworks */,
+				1C7DC5592F7E48AC008EC570 /* AudioKitEX in Frameworks */,
 				1CE3B03E2F04730900BFF0B8 /* Supabase in Frameworks */,
+				1C7DC54E2F7E328A008EC570 /* SoundpipeAudioKit in Frameworks */,
 				1CE3B0332F04671D00BFF0B8 /* Auth in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -142,6 +148,9 @@
 			packageProductDependencies = (
 				1CE3B0322F04671D00BFF0B8 /* Auth */,
 				1CE3B03D2F04730900BFF0B8 /* Supabase */,
+				1C7DC54A2F7E3206008EC570 /* AudioKit */,
+				1C7DC54D2F7E328A008EC570 /* SoundpipeAudioKit */,
+				1C7DC5582F7E48AC008EC570 /* AudioKitEX */,
 			);
 			productName = MOTIVO;
 			productReference = 1CA2DFBB2E704AF800F23C97 /* Etudes.app */;
@@ -227,6 +236,9 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1CE3B0312F04671D00BFF0B8 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+				1C7DC5492F7E3206008EC570 /* XCRemoteSwiftPackageReference "AudioKit" */,
+				1C7DC54C2F7E328A008EC570 /* XCRemoteSwiftPackageReference "SoundpipeAudioKit" */,
+				1C7DC5572F7E48AC008EC570 /* XCRemoteSwiftPackageReference "AudioKitEX" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1CA2DFBC2E704AF800F23C97 /* Products */;
@@ -617,6 +629,30 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		1C7DC5492F7E3206008EC570 /* XCRemoteSwiftPackageReference "AudioKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AudioKit/AudioKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.7.2;
+			};
+		};
+		1C7DC54C2F7E328A008EC570 /* XCRemoteSwiftPackageReference "SoundpipeAudioKit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AudioKit/SoundpipeAudioKit";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.7.3;
+			};
+		};
+		1C7DC5572F7E48AC008EC570 /* XCRemoteSwiftPackageReference "AudioKitEX" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/AudioKit/AudioKitEX";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 5.7.0;
+			};
+		};
 		1CE3B0312F04671D00BFF0B8 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/supabase-community/supabase-swift.git";
@@ -628,6 +664,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		1C7DC54A2F7E3206008EC570 /* AudioKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C7DC5492F7E3206008EC570 /* XCRemoteSwiftPackageReference "AudioKit" */;
+			productName = AudioKit;
+		};
+		1C7DC54D2F7E328A008EC570 /* SoundpipeAudioKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C7DC54C2F7E328A008EC570 /* XCRemoteSwiftPackageReference "SoundpipeAudioKit" */;
+			productName = SoundpipeAudioKit;
+		};
+		1C7DC5582F7E48AC008EC570 /* AudioKitEX */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C7DC5572F7E48AC008EC570 /* XCRemoteSwiftPackageReference "AudioKitEX" */;
+			productName = AudioKitEX;
+		};
 		1CE3B0322F04671D00BFF0B8 /* Auth */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 1CE3B0312F04671D00BFF0B8 /* XCRemoteSwiftPackageReference "supabase-swift" */;

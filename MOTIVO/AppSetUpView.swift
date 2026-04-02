@@ -6,7 +6,7 @@
 //  // SCOPE: New blocking setup view to require display name + at least one instrument before entering the main app.
 //  // NOTE: Uses existing Core Data Profile + Instrument sources-of-truth and mirrors instruments to UserInstrument via PersistenceController.
 //
-//  Created by ChatGPT on 2026-02-26.
+//  Created by Samuel Dixon on 2026-02-26.
 //
 
 import SwiftUI

@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260402_163900_tuner_v1_integration
+// SCOPE: Tuner v1 integration only — add tuner tool, inline tuner panel, exclusive audio override, and recorder gating hook usage. No unrelated layout or logic changes.
+
 // CHANGE-ID: 20260402_112600_signed_out_launch_gate
 // SCOPE: Connected beta launch gating only — auto-present existing ProfileView signed-out gate from PracticeTimerView home mode when backend is configured and user is signed out. No layout/UI changes.
 // SEARCH-TOKEN: 20260318_201500_SessionHeaderExternalize
@@ -128,6 +131,8 @@ struct PracticeTimerView: View {
     @State private var showSessionMetaSetup: Bool = false
     @State private var showDroneControlsExpanded: Bool = false
     @State private var showMetronomeControlsExpanded: Bool = false
+    @State private var isTunerOpen: Bool = false
+    @StateObject private var tunerService = TunerService()
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -990,6 +995,7 @@ private func loadPracticeDefaultsIfNeeded() {
             case .inactive, .background:
                 // Commit all buffered title edits before persisting snapshot
                 commitAllAudioTitleBuffersAndPersist()
+                closeTuner()
 
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
                 stopTicker()
@@ -1002,6 +1008,8 @@ private func loadPracticeDefaultsIfNeeded() {
             }
         }
         .onDisappear {
+            closeTuner()
+
             // Remove willResignActive observer to avoid leaks
             NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
             NotificationCenter.default.removeObserver(self, name: UIApplication.willTerminateNotification, object: nil)
@@ -1281,6 +1289,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .onChange(of: showVideoRecorder) { _, newValue in
             if newValue {
+                closeTuner()
                 killDroneAndMetronome()
             }
         }
@@ -1289,6 +1298,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .onChange(of: showCamera) { oldValue, newValue in
             if newValue == true {
+                closeTuner()
                 audioServices.droneEngine.stop()
                 droneIsOn = false
             }
@@ -1334,6 +1344,9 @@ private func loadPracticeDefaultsIfNeeded() {
             mediaRecorderSection
             if showAudioRecorder {
                 audioRecorderPanel
+            }
+            if isTunerOpen {
+                tunerPanel
             }
             bottomActionSection
             attachmentsSection
@@ -1402,45 +1415,67 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var compactToolsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            if showDroneStrip || showMetronomeStrip {
-                HStack(spacing: Theme.Spacing.m) {
-                    if showDroneStrip {
-                        DroneCompactTrigger(
-                            droneIsOn: $droneIsOn,
-                            droneVolume: $droneVolume,
-                            droneNoteIndex: $droneNoteIndex,
-                            droneFreq: $droneFreq,
-                            droneNotes: droneNotes,
-                            droneEngine: audioServices.droneEngine,
-                            recorderIcon: recorderIcon,
-                            onRevealControls: {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showDroneControlsExpanded.toggle()
-                                }
+            HStack(spacing: Theme.Spacing.m) {
+                if showDroneStrip {
+                    DroneCompactTrigger(
+                        droneIsOn: $droneIsOn,
+                        droneVolume: $droneVolume,
+                        droneNoteIndex: $droneNoteIndex,
+                        droneFreq: $droneFreq,
+                        droneNotes: droneNotes,
+                        droneEngine: audioServices.droneEngine,
+                        recorderIcon: recorderIcon,
+                        onRevealControls: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showDroneControlsExpanded.toggle()
                             }
-                        )
-                    }
-
-                    if showMetronomeStrip {
-                        MetronomeCompactTrigger(
-                            metronomeIsOn: $metronomeIsOn,
-                            metronomeBPM: $metronomeBPM,
-                            metronomeAccentEvery: $metronomeAccentEvery,
-                            metronomeVolume: $metronomeVolume,
-                            metronomeEngine: audioServices.metronomeEngine,
-                            recorderIcon: recorderIcon,
-                            shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
-                            onRevealControls: {
-                                withAnimation(.easeInOut(duration: 0.18)) {
-                                    showMetronomeControlsExpanded.toggle()
-                                }
-                            }
-                        )
-                    }
+                        }
+                    )
+                    .opacity(isTunerOpen ? 0.45 : 1.0)
+                    .allowsHitTesting(!isTunerOpen)
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
-                .padding(.bottom, Theme.Spacing.xs)
+
+                if showMetronomeStrip {
+                    MetronomeCompactTrigger(
+                        metronomeIsOn: $metronomeIsOn,
+                        metronomeBPM: $metronomeBPM,
+                        metronomeAccentEvery: $metronomeAccentEvery,
+                        metronomeVolume: $metronomeVolume,
+                        metronomeEngine: audioServices.metronomeEngine,
+                        recorderIcon: recorderIcon,
+                        shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
+                        onRevealControls: {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showMetronomeControlsExpanded.toggle()
+                            }
+                        }
+                    )
+                    .opacity(isTunerOpen ? 0.45 : 1.0)
+                    .allowsHitTesting(!isTunerOpen)
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        toggleTuner()
+                    }
+                } label: {
+                    Image(systemName: "tuningfork")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(isTunerOpen ? tasksAccentIcon : recorderIcon)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isTunerOpen ? tasksAccent.opacity(0.26) : Color.clear)
+                )
+                .clipShape(Capsule(style: .continuous))
+                .accessibilityLabel(isTunerOpen ? "Hide tuner" : "Show tuner")
             }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.bottom, Theme.Spacing.xs)
 
             if showDroneStrip && showDroneControlsExpanded {
                 DroneControlStripCard(
@@ -1498,8 +1533,77 @@ private func loadPracticeDefaultsIfNeeded() {
             recorderIcon: recorderIcon,
             droneEngine: audioServices.droneEngine,
             stopAttachmentPlayback: stopAttachmentPlayback,
-            ensureCameraAuthorized: ensureCameraAuthorized
+            ensureCameraAuthorized: ensureCameraAuthorized,
+            isTunerOpen: isTunerOpen
         )
+    }
+
+
+    @ViewBuilder
+    private var tunerPanel: some View {
+        VStack(spacing: Theme.Spacing.m) {
+            Text(tunerPrimaryLabel)
+                .font(.system(size: 34, weight: .semibold, design: .rounded))
+                .foregroundStyle(Color.primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            VStack(spacing: Theme.Spacing.s) {
+                GeometryReader { proxy in
+                    let trackWidth = max(proxy.size.width - 20, 1)
+                    let markerX = ((tunerService.state.indicatorOffset + 1) / 2) * trackWidth + 10
+
+                    ZStack(alignment: .leading) {
+                        Capsule(style: .continuous)
+                            .fill(Color.secondary.opacity(0.16))
+                            .frame(height: 4)
+
+                        Capsule(style: .continuous)
+                            .fill(tunerService.state.isInTune ? Theme.Colors.primaryAction.opacity(0.18) : Color.clear)
+                            .frame(width: 52, height: 8)
+                            .frame(maxWidth: .infinity, alignment: .center)
+
+                        Rectangle()
+                            .fill(tunerService.state.isInTune ? Theme.Colors.primaryAction : recorderIcon)
+                            .frame(width: 2, height: 18)
+                            .offset(x: markerX - 1)
+                    }
+                }
+                .frame(height: 18)
+
+                HStack {
+                    Text(tunerStatusLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Spacer()
+
+                    Text(tunerFrequencyLine)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .monospacedDigit()
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .cardSurfaceNonClipping(padding: Theme.Spacing.m)
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    private var tunerPrimaryLabel: String {
+        tunerService.state.noteName ?? "Listening…"
+    }
+
+    private var tunerStatusLine: String {
+        guard tunerService.state.noteName != nil else { return "Listening…" }
+        guard let cents = tunerService.state.cents else { return "Listening…" }
+        if tunerService.state.isInTune { return "In tune" }
+        if cents == 0 { return "Listening…" }
+        return cents < 0 ? "\(abs(cents)) cents flat" : "\(cents) cents sharp"
+    }
+
+    private var tunerFrequencyLine: String {
+        guard let frequency = tunerService.state.frequencyHz, frequency > 0 else { return "— Hz" }
+        return String(format: "%.1f Hz", frequency)
     }
 
 @ViewBuilder
@@ -3056,6 +3160,31 @@ private func openAudioViewer(_ id: UUID) {
         #if DEBUG
         StorageInspector.logSandboxUsage(tag: "After Terminate Cleanup")
         #endif
+    }
+
+    private func toggleTuner() {
+        if isTunerOpen {
+            closeTuner()
+        } else {
+            openTuner()
+        }
+    }
+
+    private func openTuner() {
+        killDroneAndMetronome()
+        stopAttachmentPlayback()
+        showDroneControlsExpanded = false
+        showMetronomeControlsExpanded = false
+        showAudioRecorder = false
+        showVideoRecorder = false
+        isTunerOpen = true
+        tunerService.start()
+    }
+
+    private func closeTuner() {
+        guard isTunerOpen else { return }
+        isTunerOpen = false
+        tunerService.stop()
     }
 
     // MARK: - New helper: killDroneAndMetronome

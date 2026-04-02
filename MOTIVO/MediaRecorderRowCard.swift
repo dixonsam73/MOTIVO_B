@@ -1,18 +1,6 @@
-// CHANGE-ID: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
-// SCOPE: Visual-only — align audio recorder trigger with established neutral / warm-open / green-live state language, including green trigger while actively recording; no logic or layout changes.
-// SEARCH-TOKEN: 20260328_023900_stage5_recorder_live_trigger_alignment_fix
-
-
-// CHANGE-ID: 20260104_103646-mrrc-densityDemoteA
-// SCOPE: Visual-only — slightly reduce MediaRecorderRowCard vertical density to demote it vs TimerCard (Option A)
-
-// MediaRecorderRowCard.swift
-// Extracted from PracticeTimerView as part of refactor step 2.
-// Visual/interaction row for audio, photo, and video recorders.
-// No logic moves; all state/behaviour stays in PracticeTimerView.
-//
-// CHANGE-ID: 20251214-VIDPERM-GATE-001
-// SCOPE: Gate “Record video” launch on camera + microphone permissions (one-file, button-action only).
+// CHANGE-ID: 20260402_161200_tuner_recorder_gate_v1
+// SCOPE: Tuner scope only — gate audio recorder activation while tuner is open; preserve all existing UI/logic otherwise.
+// SEARCH-TOKEN: 20260402_161200_tuner_recorder_gate_v1
 
 import SwiftUI
 import AVFoundation
@@ -30,6 +18,7 @@ struct MediaRecorderRowCard: View {
     let droneEngine: DroneEngine
     let stopAttachmentPlayback: () -> Void
     let ensureCameraAuthorized: (@escaping () -> Void) -> Void
+    var isTunerOpen: Bool = false
 
     private let tasksAccent = Color(red: 0.66, green: 0.58, blue: 0.46)
     private let tasksAccentIcon = Color(red: 0.44, green: 0.37, blue: 0.29)
@@ -54,6 +43,10 @@ struct MediaRecorderRowCard: View {
         return .clear
     }
 
+    private var audioTriggerOpacity: Double {
+        isTunerOpen ? 0.45 : 1.0
+    }
+
     var body: some View {
         VStack(spacing: Theme.Spacing.s) {
             HStack(spacing: Theme.Spacing.m) {
@@ -62,6 +55,7 @@ struct MediaRecorderRowCard: View {
                         // Close the recorder panel when already visible
                         showAudioRecorder = false
                     } else {
+                        guard !isTunerOpen else { return }
                         stopAttachmentPlayback()
                         showAudioRecorder = true
                     }
@@ -69,28 +63,30 @@ struct MediaRecorderRowCard: View {
                     Image(systemName: "mic.fill")
                         .symbolRenderingMode(.monochrome)
                         .font(.system(size: 22, weight: .semibold))
-                                                .foregroundStyle(audioTriggerIconColor)
+                        .foregroundStyle(audioTriggerIconColor)
                         .frame(width: 48, height: 48)
                         .contentShape(Circle())
                 }
                 .buttonStyle(.bordered)
                 .background(
-                    // Always-present overlay sized to the same rect as the button; only fill color changes
                     Capsule(style: .continuous)
                         .fill(audioTriggerFillColor)
                 )
                 .clipShape(Capsule(style: .continuous))
+                .opacity(audioTriggerOpacity)
                 .animation(.none, value: showAudioRecorder)
                 .transaction { txn in
                     txn.disablesAnimations = true
                 }
                 .accessibilityLabel("Record audio")
-                .accessibilityHint("Opens the audio recorder for this session.")
+                .accessibilityHint(
+                    isTunerOpen
+                    ? "Unavailable while tuner is open."
+                    : "Opens the audio recorder for this session."
+                )
 
-                // New: Take Photo button (camera) inserted between mic and video
                 if UIImagePickerController.isSourceTypeAvailable(.camera) {
                     Button {
-                        // Stop drone before opening camera
                         droneEngine.stop()
                         droneIsOn = false
 
@@ -112,7 +108,6 @@ struct MediaRecorderRowCard: View {
                     stopAttachmentPlayback()
 
                     func presentVideoRecorder() {
-                        // Stop drone before opening video recorder (only once we're actually presenting)
                         droneEngine.stop()
                         droneIsOn = false
                         showVideoRecorder = true
@@ -134,7 +129,6 @@ struct MediaRecorderRowCard: View {
                                 }
                             }
                         case .denied:
-                            // denied: do nothing (per scope)
                             break
                         @unknown default:
                             break
@@ -156,7 +150,6 @@ struct MediaRecorderRowCard: View {
                             }
                         }
                     case .denied, .restricted:
-                        // denied/restricted: do nothing (per scope)
                         break
                     @unknown default:
                         break
