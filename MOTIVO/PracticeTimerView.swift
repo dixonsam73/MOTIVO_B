@@ -1545,9 +1545,11 @@ private func loadPracticeDefaultsIfNeeded() {
             Text(tunerPrimaryLabel)
                 .font(.system(size: 32, weight: .medium, design: .rounded))
                 .foregroundStyle(
-                    Theme.Colors.secondaryText.opacity(
-                        tunerService.state.noteName == nil ? 0.72 : 0.84
-                    )
+                    tunerService.state.noteName == nil
+                        ? Theme.Colors.secondaryText.opacity(0.62)
+                        : (tunerService.state.isInTune
+                            ? Theme.Colors.primaryAction.opacity(0.88)
+                            : Theme.Colors.secondaryText.opacity(0.84))
                 )
                 .frame(maxWidth: .infinity, alignment: .center)
 
