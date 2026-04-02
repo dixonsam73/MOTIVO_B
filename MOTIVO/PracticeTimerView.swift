@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260402_163900_tuner_v1_integration
-// SCOPE: Tuner v1 integration only — add tuner tool, inline tuner panel, exclusive audio override, and recorder gating hook usage. No unrelated layout or logic changes.
+// CHANGE-ID: 20260402_183500_tuner_visual_soften
+// SCOPE: Tuner visual-only refinement — soften tuner readout hierarchy and replace loud listening header with quiet placeholder. No audio, state, or behavioural changes.
 
 // CHANGE-ID: 20260402_112600_signed_out_launch_gate
 // SCOPE: Connected beta launch gating only — auto-present existing ProfileView signed-out gate from PracticeTimerView home mode when backend is configured and user is signed out. No layout/UI changes.
@@ -1543,8 +1543,12 @@ private func loadPracticeDefaultsIfNeeded() {
     private var tunerPanel: some View {
         VStack(spacing: Theme.Spacing.m) {
             Text(tunerPrimaryLabel)
-                .font(.system(size: 34, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.primary)
+                .font(.system(size: 32, weight: .medium, design: .rounded))
+                .foregroundStyle(
+                    Theme.Colors.secondaryText.opacity(
+                        tunerService.state.noteName == nil ? 0.72 : 0.84
+                    )
+                )
                 .frame(maxWidth: .infinity, alignment: .center)
 
             VStack(spacing: Theme.Spacing.s) {
@@ -1590,7 +1594,7 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private var tunerPrimaryLabel: String {
-        tunerService.state.noteName ?? "Listening…"
+        tunerService.state.noteName ?? "—"
     }
 
     private var tunerStatusLine: String {
