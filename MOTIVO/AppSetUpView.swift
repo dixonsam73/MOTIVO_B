@@ -15,6 +15,7 @@ import CoreData
 struct AppSetUpView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.colorScheme) private var scheme
+    @EnvironmentObject private var auth: AuthManager
 
     // Fetch the single local Profile row (create if missing).
     @FetchRequest(
@@ -36,6 +37,7 @@ struct AppSetUpView: View {
     @State private var newInstrumentName: String = ""
     @State private var statusMessage: String? = nil
     @State private var isEnsuringProfile: Bool = false
+    @State private var isCompleting: Bool = false
 
     private var profile: Profile? {
         profiles.first
@@ -191,8 +193,8 @@ struct AppSetUpView: View {
         }
         .buttonStyle(.plain)
         .padding(.horizontal, Theme.Spacing.l)
-        .disabled(!canContinue)
-        .opacity(canContinue ? 1.0 : 0.5)
+        .disabled(!canContinue || isCompleting)
+        .opacity((canContinue && !isCompleting) ? 1.0 : 0.5)
     }
 
     // MARK: - Actions
@@ -265,6 +267,17 @@ struct AppSetUpView: View {
     }
 
     private func completeIfPossible() {
+        guard !isCompleting else { return }
+        isCompleting = true
+
+        Task { @MainActor in
+            await completeIfPossibleAsync()
+            isCompleting = false
+        }
+    }
+
+    @MainActor
+    private func completeIfPossibleAsync() async {
         statusMessage = nil
         guard canContinue else { return }
         guard let p = profiles.first else {
@@ -276,10 +289,49 @@ struct AppSetUpView: View {
 
         do {
             try context.save()
-            onComplete()
         } catch {
             statusMessage = "Couldn’t save your details. Please try again."
             context.rollback()
+            return
         }
+
+        if BackendEnvironment.shared.isConnected {
+            guard auth.hasSupabaseAccessToken else {
+                statusMessage = "Couldn’t finish setup right now. Please try again."
+                return
+            }
+
+            guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else {
+                statusMessage = "Couldn’t finish setup right now. Please try again."
+                return
+            }
+
+            let instrumentsSorted = profileInstruments
+                .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .sorted { a, b in
+                    a.localizedCaseInsensitiveCompare(b) == .orderedAscending
+                }
+
+            let result = await AccountDirectoryService.shared.upsertSelfRow(
+                userID: backendID,
+                displayName: trimmedName,
+                accountID: nil,
+                lookupEnabled: false,
+                followRequestsEnabled: true,
+                location: nil,
+                instruments: instrumentsSorted
+            )
+
+            switch result {
+            case .success:
+                break
+            case .failure:
+                statusMessage = "Couldn’t finish setup right now. Please try again."
+                return
+            }
+        }
+
+        onComplete()
     }
 }
