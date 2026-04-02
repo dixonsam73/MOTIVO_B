@@ -124,6 +124,7 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
+    @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
 
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
@@ -1293,6 +1294,11 @@ private func loadPracticeDefaultsIfNeeded() {
                 killDroneAndMetronome()
             }
         }
+        .onChange(of: showTuner) { _, newValue in
+            if !newValue, isTunerOpen {
+                closeTuner()
+            }
+        }
         .sheet(isPresented: $showCamera) {
             cameraSheet
         }
@@ -1454,25 +1460,27 @@ private func loadPracticeDefaultsIfNeeded() {
                     .allowsHitTesting(!isTunerOpen)
                 }
 
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        toggleTuner()
+                if showTuner {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            toggleTuner()
+                        }
+                    } label: {
+                        Image(systemName: "tuningfork")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(isTunerOpen ? tasksAccentIcon : recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
                     }
-                } label: {
-                    Image(systemName: "tuningfork")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isTunerOpen ? tasksAccentIcon : recorderIcon)
-                        .frame(width: 48, height: 48)
-                        .contentShape(Circle())
+                    .buttonStyle(.bordered)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(isTunerOpen ? tasksAccent.opacity(0.26) : Color.clear)
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                    .accessibilityLabel(isTunerOpen ? "Hide tuner" : "Show tuner")
                 }
-                .buttonStyle(.bordered)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(isTunerOpen ? tasksAccent.opacity(0.26) : Color.clear)
-                )
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel(isTunerOpen ? "Hide tuner" : "Show tuner")
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.bottom, Theme.Spacing.xs)
