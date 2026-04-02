@@ -34,7 +34,7 @@ struct DroneControlStripCard: View {
                         droneEngine.stop()
                     }
                 }) {
-                    Image(systemName: "tuningfork")
+                    Image(systemName: "waveform.path")
                         .symbolRenderingMode(.monochrome)
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundStyle(recorderIcon)
@@ -178,7 +178,7 @@ struct DroneCompactTrigger: View {
 
     var body: some View {
         Button(action: handleTap) {
-            Image(systemName: "tuningfork")
+            Image(systemName: "waveform.path")
                 .symbolRenderingMode(.monochrome)
                 .font(.system(size: 22, weight: .semibold))
                 .foregroundStyle(droneIsOn ? Theme.Colors.primaryAction : recorderIcon)
