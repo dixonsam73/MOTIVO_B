@@ -1340,13 +1340,13 @@ private func loadPracticeDefaultsIfNeeded() {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
             sessionMetaSection
             compactToolsSection
+            if isTunerOpen {
+                tunerPanel
+            }
             timerSection
             mediaRecorderSection
             if showAudioRecorder {
                 audioRecorderPanel
-            }
-            if isTunerOpen {
-                tunerPanel
             }
             bottomActionSection
             attachmentsSection
