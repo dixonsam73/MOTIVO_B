@@ -1,5 +1,5 @@
 // CHANGE-ID: 20260227_213731_PTV_audio_pencil_214aa856
-// SCOPE: Visual-only: show a small pencil icon next to audio clip titles when not editing (PTV AttachmentsCard).
+// SCOPE: Visual-only: remove attachments header label and preserve existing attachments content behaviour.
 // AttachmentsCard.swift
 // Extracted from PracticeTimerView as part of refactor step 3 (fixed).
 // Renders staged images, audio, and videos for the session.
@@ -51,8 +51,6 @@ struct AttachmentsCard: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Attachments").sectionHeader()
-            
             if !stagedImages.isEmpty || !stagedVideos.isEmpty {
                 let visuals = stagedImages + stagedVideos
                 let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]

@@ -38,6 +38,9 @@
 // SCOPE: Visual-only — refine warm open-state so the button fill carries state more clearly and icon contrast is slightly stronger; no logic/layout changes.
 // SEARCH-TOKEN: 20260328_021100_stage5_warm_open_fill_refine
 
+// CHANGE-ID: 20260403_202500_ptv_attachments_toggle
+// SCOPE: Visual-only/local-state only — add paperclip toggle for staged attachments visibility on timer surface and remove attachments header. No attachment data, playback, or backend changes.
+
 //////
 //  PracticeTimerView.swift
 //  MOTIVO
@@ -133,6 +136,7 @@ struct PracticeTimerView: View {
     @State private var showDroneControlsExpanded: Bool = false
     @State private var showMetronomeControlsExpanded: Bool = false
     @State private var isTunerOpen: Bool = false
+    @State private var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
 
     // Prefetch guard to avoid duplicate first-paint work
@@ -968,6 +972,7 @@ private func loadPracticeDefaultsIfNeeded() {
             if (localEmpty && storeHas) || idsDiffer {
                 mirrorFromStagingStore()
             }
+            isAttachmentsVisible = false
         }
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
@@ -1620,10 +1625,34 @@ private func loadPracticeDefaultsIfNeeded() {
         return String(format: "%.1f Hz", frequency)
     }
 
+    private var hasAttachments: Bool {
+        !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty
+    }
+
 @ViewBuilder
 private var bottomActionSection: some View {
     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
         HStack(spacing: Theme.Spacing.m) {
+            if hasAttachments {
+                Button {
+                    isAttachmentsVisible.toggle()
+                } label: {
+                    Image(systemName: "paperclip")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(isAttachmentsVisible ? tasksAccentIcon : recorderIcon)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.bordered)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(isAttachmentsVisible ? tasksAccent.opacity(0.26) : Color.clear)
+                )
+                .clipShape(Capsule(style: .continuous))
+                .accessibilityLabel(isAttachmentsVisible ? "Hide attachments" : "Show attachments")
+            }
+
             if showTasksButton {
                 Button {
                     if showTasksPad {
@@ -1694,7 +1723,7 @@ private var bottomActionSection: some View {
 
     @ViewBuilder
     private var attachmentsSection: some View {
-        if !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty {
+        if hasAttachments && isAttachmentsVisible {
             AttachmentsCard(
                 stagedImages: $stagedImages,
                 stagedAudio: $stagedAudio,
@@ -1729,6 +1758,7 @@ private var bottomActionSection: some View {
                 onPlayVideo: { playVideo($0) },
                 onViewImage: { openImageViewer($0) }
             )
+            .padding(.top, 4)
             .cardSurface()
         }
     }
