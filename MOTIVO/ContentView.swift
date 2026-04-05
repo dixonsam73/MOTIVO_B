@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260405_201900_ContentView_FilterMicroContrastPass_6d3e
+// SCOPE: ContentView filter-card visual-only micro pass — slightly strengthen search-field contrast, raise light-mode divider visibility, tighten expanded-row rhythm, and make the filter control surface fractionally flatter while preserving all filter logic, layout structure, navigation, and backend behavior.
+// SEARCH-TOKEN: 20260405_201900_ContentView_FilterMicroContrastPass_6d3e
+
 // CHANGE-ID: 20260330_194600_ContentView_FinalFilterPolishKeyboardDismiss_42bf
 // SCOPE: Final filter micro-polish plus outside-tap keyboard dismissal for the search field; preserve layout structure, filter logic, state, navigation, and backend behavior.
 // SEARCH-TOKEN: 20260330_194600_ContentView_FinalFilterPolishKeyboardDismiss_42bf
@@ -757,6 +761,11 @@ fileprivate struct SessionsRootView: View {
                     #endif
                 }
                 .cardSurface()
+                .overlay {
+                    RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+                        .fill(Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.012 : 0.028))
+                        .allowsHitTesting(false)
+                }
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"
@@ -2608,8 +2617,8 @@ fileprivate struct FilterSelectorTrailingControlStyle: ViewModifier {
 
 
 fileprivate enum FilterCardUI {
-    static let rowMinHeight: CGFloat = 34
-    static let rowVerticalPadding: CGFloat = 3
+    static let rowMinHeight: CGFloat = 33
+    static let rowVerticalPadding: CGFloat = 2
     static let trailingControlWidth: CGFloat = 160
     static let searchCornerRadius: CGFloat = 12
 }
@@ -2619,7 +2628,7 @@ fileprivate struct FilterCardDivider: View {
 
     var body: some View {
         Rectangle()
-            .fill(Theme.Colors.cardStroke(colorScheme).opacity(colorScheme == .dark ? 0.09 : 0.04))
+            .fill(Theme.Colors.cardStroke(colorScheme).opacity(colorScheme == .dark ? 0.09 : 0.05))
             .frame(height: 1)
     }
 }
@@ -2661,7 +2670,7 @@ fileprivate struct FilterCardSearchField: View {
                 text: $text,
                 prompt: Text("Search")
                     .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.82))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
             )
             .textInputAutocapitalization(.never)
             .disableAutocorrection(true)
@@ -2673,21 +2682,23 @@ fileprivate struct FilterCardSearchField: View {
         .background(
             RoundedRectangle(cornerRadius: FilterCardUI.searchCornerRadius, style: .continuous)
                 .fill(
-                    Theme.Colors.surface(colorScheme)
-                        .opacity(colorScheme == .dark ? 0.94 : 0.88)
+                    colorScheme == .dark
+                    ? Theme.Colors.surface(colorScheme).opacity(0.94)
+                    : Color.primary.opacity(0.035)
                 )
         )
         .overlay(
             RoundedRectangle(cornerRadius: FilterCardUI.searchCornerRadius, style: .continuous)
                 .stroke(
-                    Theme.Colors.cardStroke(colorScheme).opacity(colorScheme == .dark ? 0.18 : 0.1),
+                    colorScheme == .dark
+                    ? Theme.Colors.cardStroke(colorScheme).opacity(0.18)
+                    : Color.primary.opacity(0.08),
                     lineWidth: 1
                 )
         )
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
-
 fileprivate struct FilterBar: View {
     @Binding var filtersExpanded: Bool
     let instruments: [Instrument]
