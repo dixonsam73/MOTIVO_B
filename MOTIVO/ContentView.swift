@@ -404,6 +404,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedThread: String? = nil
+    @State private var activeUserFilterUserID: String? = nil
     @State private var selectedScope: FeedScope = .mine
     @State private var selectedJournalLens: JournalTimeLens = .week
     @State private var searchText: String = ""
@@ -849,7 +850,7 @@ fileprivate struct SessionsRootView: View {
                                                     ) { EmptyView() }
                                                     .opacity(0)
 
-                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
+                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, filtersExpanded: $filtersExpanded)
                                                         .contentShape(Rectangle())
                                                         .onTapGesture {
                                                             feedNavFreezeTask?.cancel()
@@ -918,6 +919,7 @@ fileprivate struct SessionsRootView: View {
                                                         session: session,
                                                         scope: selectedScope,
                                                         selectedThread: $selectedThread,
+                                                        activeUserFilterUserID: $activeUserFilterUserID,
                                                         filtersExpanded: $filtersExpanded,
                                                         journalStyle: .yearCompact
                                                     )
@@ -1018,7 +1020,7 @@ fileprivate struct SessionsRootView: View {
                                             ) { EmptyView() }
                                             .opacity(0)
 
-                                            SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, filtersExpanded: $filtersExpanded)
+                                            SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, filtersExpanded: $filtersExpanded)
                                                 .contentShape(Rectangle())
                                                 .onTapGesture {
                                                     feedNavFreezeTask?.cancel()
@@ -1078,7 +1080,8 @@ fileprivate struct SessionsRootView: View {
                                             RemotePostRowTwin(
                                                 post: post,
                                                 scope: selectedScope,
-                                                viewerUserID: effectiveBackendUserID
+                                                viewerUserID: effectiveBackendUserID,
+                                                activeUserFilterUserID: $activeUserFilterUserID
                                             )
                                             .contentShape(Rectangle())
                                             .onTapGesture {
@@ -1720,6 +1723,13 @@ fileprivate struct SessionsRootView: View {
             }
         }
 
+        // Single-user filter (local view-state only)
+        if let selectedOwner = activeUserFilterUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !selectedOwner.isEmpty {
+            out = out.filter { s in
+                let owner = (s.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                return !owner.isEmpty && owner == selectedOwner
+            }
+        }
 
         // Saved-only (viewer-local)
         if savedOnly {
@@ -1799,6 +1809,12 @@ fileprivate struct SessionsRootView: View {
         guard savedOnly else { return true }
         guard let vid = effectiveBackendUserID else { return false }
         return FeedInteractionStore.isSaved(post.id, viewerUserID: vid)
+    }
+
+    private func remoteMatchesActiveUserFilter(_ post: BackendPost) -> Bool {
+        guard let selectedOwner = activeUserFilterUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !selectedOwner.isEmpty else { return true }
+        let owner = (post.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !owner.isEmpty && owner == selectedOwner
     }
 
     // CHANGE-ID: 20260314_081900_FeedSearchNamesAndAttachmentTitles_6f3a
@@ -1916,6 +1932,7 @@ fileprivate struct SessionsRootView: View {
         return posts.filter { post in
             remoteMatchesSelectedInstrument(post) &&
             remoteMatchesSelectedActivity(post) &&
+            remoteMatchesActiveUserFilter(post) &&
             remoteMatchesSavedOnly(post) &&
             remoteMatchesSearch(post)
         }
@@ -2986,6 +3003,12 @@ fileprivate struct JournalYearMonthRow: View {
     }
 }
 
+fileprivate func isActiveUserFilter(_ candidateUserID: String?, activeUserFilterUserID: String?) -> Bool {
+    let candidate = (candidateUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let active = (activeUserFilterUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return !candidate.isEmpty && !active.isEmpty && candidate == active
+}
+
 fileprivate struct ThreadMetaPill: View {
     let title: String
     let isSelected: Bool
@@ -3075,6 +3098,7 @@ fileprivate struct SessionRow: View {
     let journalStyle: JournalStyle
 
     @Binding var selectedThread: String?
+    @Binding var activeUserFilterUserID: String?
     @Binding var filtersExpanded: Bool
 
     @Environment(\.managedObjectContext) private var ctx
@@ -3103,6 +3127,7 @@ fileprivate struct SessionRow: View {
         session: Session,
         scope: FeedScope,
         selectedThread: Binding<String?>,
+        activeUserFilterUserID: Binding<String?>,
         filtersExpanded: Binding<Bool>,
         journalStyle: JournalStyle = .standard
     ) {
@@ -3110,6 +3135,7 @@ fileprivate struct SessionRow: View {
         self.scope = scope
         self.journalStyle = journalStyle
         self._selectedThread = selectedThread
+        self._activeUserFilterUserID = activeUserFilterUserID
         self._filtersExpanded = filtersExpanded
     }
 
@@ -3398,6 +3424,31 @@ fileprivate struct SessionRow: View {
         return viewer == owner
     }
 
+    private var activeHeaderFilterOwnerID: String? {
+        let owner = (session.ownerUserID ?? (viewerIsOwner ? viewerUserID : nil))?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let owner, !owner.isEmpty else { return nil }
+        return owner
+    }
+
+    private var isHeaderFilterActive: Bool {
+        isActiveUserFilter(activeHeaderFilterOwnerID, activeUserFilterUserID: activeUserFilterUserID)
+    }
+
+    private func toggleHeaderUserFilter(ownerID: String) {
+        guard scope == .all else { return }
+        if isActiveUserFilter(ownerID, activeUserFilterUserID: activeUserFilterUserID) {
+            activeUserFilterUserID = nil
+        } else {
+            activeUserFilterUserID = ownerID
+        }
+    }
+
+    private var identityHeaderHighlight: some View {
+        Capsule(style: .continuous)
+            .fill(isHeaderFilterActive ? Color(uiColor: .systemGray5) : .clear)
+    }
+
     private func isPrivate(_ att: Attachment) -> Bool {
         let id = att.value(forKey: "id") as? UUID
         // Resolve a stable URL if possible
@@ -3410,11 +3461,12 @@ fileprivate struct SessionRow: View {
             VStack(alignment: .leading, spacing: isYearCompactJournalRow ? 2 : (isMonthCompactJournalRow ? 3 : 6)) {
                 // Identity header
                 if scope != .mine,
-                   let ownerIDNonEmpty = (session.ownerUserID ?? (viewerIsOwner ? viewerUserID : nil)),
+                   let ownerIDNonEmpty = activeHeaderFilterOwnerID,
                    !ownerIDNonEmpty.isEmpty {
                     HStack(alignment: .center, spacing: 8) {
-                        // Avatar 32pt circle
-                        Button(action: { showPeek = true }) {
+                        HStack(alignment: .center, spacing: 8) {
+                            // Avatar 32pt circle
+                            Button(action: { showPeek = true }) {
                             Group {
                                 #if canImport(UIKit)
                                 let ownerAvatarKey = viewerIsOwner ? (auth.backendAvatarKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") : ""
@@ -3543,6 +3595,18 @@ fileprivate struct SessionRow: View {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
+                        
+
+                        }
+                        .background(
+                            identityHeaderHighlight
+                                .padding(.trailing, -12)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleHeaderUserFilter(ownerID: ownerIDNonEmpty)
+                        }
+                        .accessibilityLabel(isHeaderFilterActive ? "Clear user filter" : "Filter feed to this user")
 
                         Spacer(minLength: 0)
                     }
@@ -4543,6 +4607,7 @@ fileprivate struct RemotePostRowTwin: View {
     let post: BackendPost
     let scope: FeedScope
     let viewerUserID: String?
+    @Binding var activeUserFilterUserID: String?
 
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
@@ -4612,6 +4677,24 @@ fileprivate struct RemotePostRowTwin: View {
               let owner = post.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
               !viewer.isEmpty, !owner.isEmpty else { return false }
         return viewer == owner
+    }
+
+    private var isHeaderFilterActive: Bool {
+        isActiveUserFilter(ownerIDNonEmpty, activeUserFilterUserID: activeUserFilterUserID)
+    }
+
+    private func toggleHeaderUserFilter(ownerID: String) {
+        guard scope == .all else { return }
+        if isActiveUserFilter(ownerID, activeUserFilterUserID: activeUserFilterUserID) {
+            activeUserFilterUserID = nil
+        } else {
+            activeUserFilterUserID = ownerID
+        }
+    }
+
+    private var identityHeaderHighlight: some View {
+        Capsule(style: .continuous)
+            .fill(isHeaderFilterActive ? Color(uiColor: .systemGray5) : .clear)
     }
 
     private var ownerIDNonEmpty: String? {
@@ -4772,8 +4855,9 @@ private var extraAttachmentCount: Int {
                    !owner.isEmpty {
 
                     HStack(alignment: .center, spacing: 8) {
-                        // Avatar 32pt circle
-                        Button(action: { showPeek = true }) {
+                        HStack(alignment: .center, spacing: 8) {
+                            // Avatar 32pt circle
+                            Button(action: { showPeek = true }) {
                             DirectoryAvatarCircle(
                                 ownerID: owner,
                                 displayName: (resolvedDirectoryAccount?.displayName ?? (viewerIsOwner ? "You" : "User")),
@@ -4872,6 +4956,18 @@ private var extraAttachmentCount: Int {
                                     .foregroundStyle(Theme.Colors.secondaryText)
                             }
                         }
+                        
+
+                        }
+                        .background(
+                            identityHeaderHighlight
+                                .padding(.trailing, -12)
+                        )
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            toggleHeaderUserFilter(ownerID: owner)
+                        }
+                        .accessibilityLabel(isHeaderFilterActive ? "Clear user filter" : "Filter feed to this user")
 
                         Spacer(minLength: 0)
                     }
