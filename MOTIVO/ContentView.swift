@@ -2594,12 +2594,15 @@ fileprivate struct FilterSelectorValueControl: View {
                 .foregroundStyle(Color.primary.opacity(0.8))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .animation(nil, value: valueText)
 
             Image(systemName: "chevron.up.chevron.down")
                 .font(.caption2.weight(.regular))
                 .imageScale(.small)
                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.42))
         }
+        .frame(maxWidth: .infinity, alignment: .trailing)
         .padding(.trailing, 3)
     }
 }
