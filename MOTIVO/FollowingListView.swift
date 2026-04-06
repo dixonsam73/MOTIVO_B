@@ -1,26 +1,24 @@
-// CHANGE-ID: 20260401_183900_FollowLists_AlphabeticalDisplayNameSort
-// SCOPE: View-only ordering update for FollowingListView — sort following alphabetically by resolved display name, using surname-first ordering when multiple name parts exist; fallback safely to userID; preserve all UI, loading, and navigation behavior.
-// SEARCH-TOKEN: 20260401_183900_FollowLists_AlphabeticalDisplayNameSort
-
-// CHANGE-ID: 20260318_165400_FollowLists_ProfileParity
-// SCOPE: Visual-only parity pass for FollowingListView — replace plain List container with Profile-style section header + grouped card surface; preserve row content, async loading, and navigation behavior.
-// SEARCH-TOKEN: 20260318_165400_FollowLists_ProfileParity
-
-// CHANGE-ID: 20260210_211128_P15_Avatars_PeopleLists
-// SCOPE: FollowingListView: pass avatar_key into PeopleUserRow so following rows can render remote avatars.
-// SEARCH-TOKEN: 20260210_211128_P15_Avatars_PeopleLists
-
-// CHANGE-ID: 20260121_203420_Phase141_FollowingListView_DirectoryIdentityWiring
-// SCOPE: Phase 14.1 — Resolve directory identity for list rows and pass into PeopleUserRow/ProfilePeek; avoid opaque ID fallback.
-// SEARCH-TOKEN: 20260121_203420_Phase141_FollowingListView_DirectoryIdentityWiring
+// CHANGE-ID: 20260406_095100_Ensembles_FollowingList_LocalEditor_b41a
+// SCOPE: FollowingListView — add local-only Ensemble creation/edit/rename/delete using the existing Following list as the single member-selection surface; preserve follow graph and profile navigation outside editor mode.
+// SEARCH-TOKEN: 20260406_095100_Ensembles_FollowingList_LocalEditor_b41a
 
 import SwiftUI
 
 struct FollowingListView: View {
 
+    private enum EnsembleEditorMode: Equatable {
+        case create
+        case edit(String)
+    }
+
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var ensembleStore = EnsembleStore.shared
 
     @State private var directory: [String: DirectoryAccount] = [:]
+    @State private var editorMode: EnsembleEditorMode? = nil
+    @State private var draftName: String = ""
+    @State private var selectedUserIDs: Set<String> = []
+    @State private var pendingDeleteEnsembleID: String? = nil
 
     private func alphabeticalSortKey(for userID: String) -> String {
         let fallback = userID.trimmingCharacters(in: .whitespacesAndNewlines).localizedLowercase
@@ -56,11 +54,37 @@ struct FollowingListView: View {
         }
     }
 
+    private var sortedEnsembles: [Ensemble] {
+        ensembleStore.ensembles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var canCreateEnsemble: Bool {
+        userIDs.count >= 2
+    }
+
+    private var canShowEnsembleControls: Bool {
+        canCreateEnsemble || !sortedEnsembles.isEmpty
+    }
+
+    private var editorTitle: String {
+        switch editorMode {
+        case .create:
+            return "New Ensemble"
+        case .edit:
+            return "Edit Ensemble"
+        case nil:
+            return ""
+        }
+    }
+
+    private var canSaveDraft: Bool {
+        !draftName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedUserIDs.count >= 2
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
-                Text("Following")
-                    .sectionHeader()
+                headerRow
 
                 Group {
                     if userIDs.isEmpty {
@@ -71,24 +95,15 @@ struct FollowingListView: View {
                             .padding(24)
                     } else {
                         VStack(spacing: 0) {
-                            ForEach(Array(userIDs.enumerated()), id: \.element) { index, userID in
-                                let acct = directory[userID]
-
-                                PeopleUserRow(
-                                    userID: userID,
-                                    overrideDisplayName: acct?.displayName,
-                                    overrideSubtitle: acct?.accountID.map { "@\($0)" },
-                                    overrideAvatarKey: acct?.avatarKey
-                                ) {
-                                    ProfilePeekView(
-                                        ownerID: userID,
-                                        directoryDisplayName: acct?.displayName,
-                                        directoryAccountID: acct?.accountID,
-                                        directoryLocation: acct?.location,
-                                        directoryAvatarKey: acct?.avatarKey,
-                                        directoryInstruments: acct?.instruments,
-                                    )
+                            if editorMode != nil {
+                                editorPanel
+                                if !userIDs.isEmpty {
+                                    Divider()
                                 }
+                            }
+
+                            ForEach(Array(userIDs.enumerated()), id: \.element) { index, userID in
+                                userRow(for: userID)
 
                                 if index < userIDs.count - 1 {
                                     Divider()
@@ -122,7 +137,205 @@ struct FollowingListView: View {
                 directory = map
             }
         }
+        .confirmationDialog("Delete Ensemble?", isPresented: Binding(
+            get: { pendingDeleteEnsembleID != nil },
+            set: { isPresented in
+                if !isPresented { pendingDeleteEnsembleID = nil }
+            }
+        )) {
+            Button("Delete Ensemble", role: .destructive) {
+                guard let id = pendingDeleteEnsembleID else { return }
+                ensembleStore.delete(id: id)
+                cancelEditing()
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteEnsembleID = nil
+            }
+        } message: {
+            Text("This removes only the local Ensemble and does not change any follows.")
+        }
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var headerRow: some View {
+        HStack(alignment: .center, spacing: Theme.Spacing.s) {
+            Text("Following")
+                .sectionHeader()
+
+            Spacer(minLength: 0)
+
+            if canShowEnsembleControls {
+                Menu {
+                    Button("New Ensemble") {
+                        beginCreate()
+                    }
+                    .disabled(!canCreateEnsemble)
+
+                    if !sortedEnsembles.isEmpty {
+                        Section("Edit Ensemble") {
+                            ForEach(sortedEnsembles) { ensemble in
+                                Button(ensemble.name) {
+                                    beginEditing(ensemble)
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private var editorPanel: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(alignment: .center, spacing: Theme.Spacing.s) {
+                Text(editorTitle)
+                    .font(Theme.Text.meta.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+
+                Spacer(minLength: 0)
+
+                Button("Cancel") {
+                    cancelEditing()
+                }
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .buttonStyle(.plain)
+            }
+
+            TextField("Ensemble name", text: $draftName)
+                .textInputAutocapitalization(.words)
+                .autocorrectionDisabled()
+                .font(Theme.Text.body)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.primary.opacity(0.04))
+                )
+
+            Text(selectedUserIDs.count >= 2 ? "Select the followed people you want in this Ensemble." : "Select at least 2 followed people.")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            HStack(spacing: Theme.Spacing.s) {
+                if case .edit = editorMode {
+                    Button("Delete", role: .destructive) {
+                        if case .edit(let id) = editorMode {
+                            pendingDeleteEnsembleID = id
+                        }
+                    }
+                    .font(Theme.Text.meta)
+                }
+
+                Spacer(minLength: 0)
+
+                Button("Save") {
+                    saveEditor()
+                }
+                .font(Theme.Text.meta.weight(.semibold))
+                .disabled(!canSaveDraft)
+            }
+        }
+        .padding(20)
+    }
+
+    @ViewBuilder
+    private func userRow(for userID: String) -> some View {
+        let acct = directory[userID]
+        let isSelected = selectedUserIDs.contains(userID)
+
+        ZStack(alignment: .trailing) {
+            PeopleUserRow(
+                userID: userID,
+                overrideDisplayName: acct?.displayName,
+                overrideSubtitle: acct?.accountID.map { "@\($0)" },
+                overrideAvatarKey: acct?.avatarKey
+            ) {
+                ProfilePeekView(
+                    ownerID: userID,
+                    directoryDisplayName: acct?.displayName,
+                    directoryAccountID: acct?.accountID,
+                    directoryLocation: acct?.location,
+                    directoryAvatarKey: acct?.avatarKey,
+                    directoryInstruments: acct?.instruments,
+                )
+            }
+            .allowsHitTesting(editorMode == nil)
+
+            if editorMode != nil {
+                HStack {
+                    Spacer(minLength: 0)
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(isSelected ? Color.primary : Theme.Colors.secondaryText.opacity(0.75))
+                        .padding(.trailing, 18)
+                }
+                .allowsHitTesting(false)
+
+                Button {
+                    toggleSelection(for: userID)
+                } label: {
+                    Color.clear
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(editorMode != nil && isSelected ? Color.primary.opacity(0.05) : .clear)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+        )
+    }
+
+    private func beginCreate() {
+        guard canCreateEnsemble else { return }
+        editorMode = .create
+        draftName = ""
+        selectedUserIDs = []
+    }
+
+    private func beginEditing(_ ensemble: Ensemble) {
+        editorMode = .edit(ensemble.id)
+        draftName = ensemble.name
+        selectedUserIDs = Set(ensemble.memberUserIDs.filter { userIDs.contains($0) })
+    }
+
+    private func cancelEditing() {
+        editorMode = nil
+        draftName = ""
+        selectedUserIDs = []
+        pendingDeleteEnsembleID = nil
+    }
+
+    private func toggleSelection(for userID: String) {
+        if selectedUserIDs.contains(userID) {
+            selectedUserIDs.remove(userID)
+        } else {
+            selectedUserIDs.insert(userID)
+        }
+    }
+
+    private func saveEditor() {
+        let sanitizedMembers = userIDs.filter { selectedUserIDs.contains($0) }
+        switch editorMode {
+        case .create:
+            guard let _ = ensembleStore.create(name: draftName, memberUserIDs: sanitizedMembers) else { return }
+            cancelEditing()
+        case .edit(let id):
+            guard let _ = ensembleStore.update(id: id, name: draftName, memberUserIDs: sanitizedMembers) else { return }
+            cancelEditing()
+        case nil:
+            break
+        }
     }
 }

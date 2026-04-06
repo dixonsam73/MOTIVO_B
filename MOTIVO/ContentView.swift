@@ -395,6 +395,7 @@ fileprivate struct SessionsRootView: View {
 
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var ensembleStore = EnsembleStore.shared
 
 
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
@@ -409,6 +410,7 @@ fileprivate struct SessionsRootView: View {
     @State private var selectedActivity: ActivityFilter = .any
     @State private var selectedThread: String? = nil
     @State private var activeUserFilterUserID: String? = nil
+    @State private var selectedEnsembleID: String? = nil
     @State private var selectedScope: FeedScope = .mine
     @State private var selectedJournalLens: JournalTimeLens = .week
     @State private var searchText: String = ""
@@ -751,7 +753,9 @@ fileprivate struct SessionsRootView: View {
                         searchText: $searchText,
                         savedOnly: $savedOnly,
                         selectedThread: $selectedThread,
-                        threadOptions: existingThreadOptions
+                        selectedEnsembleID: $selectedEnsembleID,
+                        threadOptions: existingThreadOptions,
+                        ensembles: ensembleStore.ensembles
                     )
                 }
                 .contentShape(Rectangle())
@@ -859,7 +863,7 @@ fileprivate struct SessionsRootView: View {
                                                     ) { EmptyView() }
                                                     .opacity(0)
 
-                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, filtersExpanded: $filtersExpanded)
+                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
                                                         .contentShape(Rectangle())
                                                         .onTapGesture {
                                                             feedNavFreezeTask?.cancel()
@@ -929,6 +933,7 @@ fileprivate struct SessionsRootView: View {
                                                         scope: selectedScope,
                                                         selectedThread: $selectedThread,
                                                         activeUserFilterUserID: $activeUserFilterUserID,
+                                                        activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs,
                                                         filtersExpanded: $filtersExpanded,
                                                         journalStyle: .yearCompact
                                                     )
@@ -1029,7 +1034,7 @@ fileprivate struct SessionsRootView: View {
                                             ) { EmptyView() }
                                             .opacity(0)
 
-                                            SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, filtersExpanded: $filtersExpanded)
+                                            SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
                                                 .contentShape(Rectangle())
                                                 .onTapGesture {
                                                     feedNavFreezeTask?.cancel()
@@ -1090,7 +1095,8 @@ fileprivate struct SessionsRootView: View {
                                                 post: post,
                                                 scope: selectedScope,
                                                 viewerUserID: effectiveBackendUserID,
-                                                activeUserFilterUserID: $activeUserFilterUserID
+                                                activeUserFilterUserID: $activeUserFilterUserID,
+                                                activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs
                                             )
                                             .contentShape(Rectangle())
                                             .onTapGesture {
@@ -1732,6 +1738,11 @@ fileprivate struct SessionsRootView: View {
             }
         }
 
+        // Ensemble (viewer-local feed lens only)
+        if selectedScope == .all, selectedEnsembleID != nil, !activeEnsembleMemberUserIDs.isEmpty {
+            out = out.filter { localMatchesSelectedEnsemble($0) }
+        }
+
         // Single-user filter (local view-state only)
         if let selectedOwner = activeUserFilterUserID?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), !selectedOwner.isEmpty {
             out = out.filter { s in
@@ -1771,6 +1782,28 @@ fileprivate struct SessionsRootView: View {
 
     private func normalize(_ s: String?) -> String {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+
+    private var activeEnsembleMemberUserIDs: Set<String> {
+        guard selectedScope == .all else { return [] }
+        return ensembleStore.memberUserIDs(for: selectedEnsembleID)
+    }
+
+    private func localMatchesSelectedEnsemble(_ session: Session) -> Bool {
+        guard selectedScope == .all else { return true }
+        guard selectedEnsembleID != nil else { return true }
+        guard !activeEnsembleMemberUserIDs.isEmpty else { return true }
+        let owner = normalize(session.ownerUserID)
+        return !owner.isEmpty && activeEnsembleMemberUserIDs.contains(owner)
+    }
+
+    private func remoteMatchesSelectedEnsemble(_ post: BackendPost) -> Bool {
+        guard selectedScope == .all else { return true }
+        guard selectedEnsembleID != nil else { return true }
+        guard !activeEnsembleMemberUserIDs.isEmpty else { return true }
+        let owner = normalize(post.ownerUserID)
+        return !owner.isEmpty && activeEnsembleMemberUserIDs.contains(owner)
     }
 
     private func remoteMatchesSelectedInstrument(_ post: BackendPost) -> Bool {
@@ -1941,6 +1974,7 @@ fileprivate struct SessionsRootView: View {
         return posts.filter { post in
             remoteMatchesSelectedInstrument(post) &&
             remoteMatchesSelectedActivity(post) &&
+            remoteMatchesSelectedEnsemble(post) &&
             remoteMatchesActiveUserFilter(post) &&
             remoteMatchesSavedOnly(post) &&
             remoteMatchesSearch(post)
@@ -2711,9 +2745,23 @@ fileprivate struct FilterBar: View {
     @Binding var searchText: String
     @Binding var savedOnly: Bool
     @Binding var selectedThread: String?
+    @Binding var selectedEnsembleID: String?
     let threadOptions: [String]
+    let ensembles: [Ensemble]
 
     @State private var showThreadPicker: Bool = false
+
+    private var sortedEnsembles: [Ensemble] {
+        ensembles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private var selectedEnsembleName: String {
+        guard let selectedEnsembleID,
+              let ensemble = sortedEnsembles.first(where: { $0.id == selectedEnsembleID }) else {
+            return "Any"
+        }
+        return ensemble.name
+    }
 
     private var selectedInstrumentLabel: String {
         if let inst = selectedInstrument {
@@ -2823,6 +2871,38 @@ fileprivate struct FilterBar: View {
                     .buttonStyle(.plain)
                     .modifier(FilterSelectorTrailingControlStyle())
                     .contentShape(Rectangle())
+                }
+
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
+
+                FilterCardRow(label: "Ensemble") {
+                    Menu {
+                        Button("Any") {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                            selectedEnsembleID = nil
+                        }
+                        ForEach(sortedEnsembles) { ensemble in
+                            Button(ensemble.name) {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                                selectedEnsembleID = ensemble.id
+                            }
+                        }
+                    } label: {
+                        FilterSelectorValueControl(valueText: selectedEnsembleName)
+                    }
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
+                    .modifier(FilterSelectorTrailingControlStyle())
                 }
 
                 FilterCardDivider()
@@ -3023,6 +3103,11 @@ fileprivate func isActiveUserFilter(_ candidateUserID: String?, activeUserFilter
     return !candidate.isEmpty && !active.isEmpty && candidate == active
 }
 
+fileprivate func isActiveEnsembleMember(_ candidateUserID: String?, activeEnsembleMemberUserIDs: Set<String>) -> Bool {
+    let candidate = (candidateUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    return !candidate.isEmpty && activeEnsembleMemberUserIDs.contains(candidate)
+}
+
 fileprivate struct ThreadMetaPill: View {
     let title: String
     let isSelected: Bool
@@ -3113,6 +3198,7 @@ fileprivate struct SessionRow: View {
 
     @Binding var selectedThread: String?
     @Binding var activeUserFilterUserID: String?
+    let activeEnsembleMemberUserIDs: Set<String>
     @Binding var filtersExpanded: Bool
 
     @Environment(\.managedObjectContext) private var ctx
@@ -3142,6 +3228,7 @@ fileprivate struct SessionRow: View {
         scope: FeedScope,
         selectedThread: Binding<String?>,
         activeUserFilterUserID: Binding<String?>,
+        activeEnsembleMemberUserIDs: Set<String>,
         filtersExpanded: Binding<Bool>,
         journalStyle: JournalStyle = .standard
     ) {
@@ -3150,6 +3237,7 @@ fileprivate struct SessionRow: View {
         self.journalStyle = journalStyle
         self._selectedThread = selectedThread
         self._activeUserFilterUserID = activeUserFilterUserID
+        self.activeEnsembleMemberUserIDs = activeEnsembleMemberUserIDs
         self._filtersExpanded = filtersExpanded
     }
 
@@ -3446,7 +3534,9 @@ fileprivate struct SessionRow: View {
     }
 
     private var isHeaderFilterActive: Bool {
-        isActiveUserFilter(activeHeaderFilterOwnerID, activeUserFilterUserID: activeUserFilterUserID)
+        guard scope == .all else { return false }
+        return isActiveUserFilter(activeHeaderFilterOwnerID, activeUserFilterUserID: activeUserFilterUserID)
+            || isActiveEnsembleMember(activeHeaderFilterOwnerID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs)
     }
 
     private func toggleHeaderUserFilter(ownerID: String) {
@@ -4622,6 +4712,7 @@ fileprivate struct RemotePostRowTwin: View {
     let scope: FeedScope
     let viewerUserID: String?
     @Binding var activeUserFilterUserID: String?
+    let activeEnsembleMemberUserIDs: Set<String>
 
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
@@ -4694,7 +4785,9 @@ fileprivate struct RemotePostRowTwin: View {
     }
 
     private var isHeaderFilterActive: Bool {
-        isActiveUserFilter(ownerIDNonEmpty, activeUserFilterUserID: activeUserFilterUserID)
+        guard scope == .all else { return false }
+        return isActiveUserFilter(ownerIDNonEmpty, activeUserFilterUserID: activeUserFilterUserID)
+            || isActiveEnsembleMember(ownerIDNonEmpty, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs)
     }
 
     private func toggleHeaderUserFilter(ownerID: String) {
