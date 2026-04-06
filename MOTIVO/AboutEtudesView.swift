@@ -52,14 +52,22 @@ struct AboutEtudesView: View {
                     Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll see what they’ve chosen to share.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
+                    
+                    Text("Tapping a user’s name in a post filters the Feed to their sessions. Tap again to return to the full Feed.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
 
                     (
                         Text("Use the Filter to narrow what you see by instrument, activity, saved sessions (")
                         + Text(Image(systemName: "heart"))
-                        + Text("), search, and your thread filters.")
+                        + Text("), search, and your thread and ensemble filters.")
                     )
                     .font(Theme.Text.body)
                     .foregroundStyle(Theme.Colors.secondaryText)
+                    
+                    Text("Ensembles group people you follow — for example, students or band members. Selecting one filters the Feed.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
 
                     Text("Search helps you quickly find what you’re looking for in your sessions and Feed.")
                         .font(Theme.Text.body)
