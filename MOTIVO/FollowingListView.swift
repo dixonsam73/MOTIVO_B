@@ -165,7 +165,7 @@ struct FollowingListView: View {
 
             Spacer(minLength: 0)
 
-            if canShowEnsembleControls {
+            if canShowEnsembleControls && editorMode == nil {
                 Menu {
                     Button("New Ensemble") {
                         beginCreate()
@@ -173,20 +173,23 @@ struct FollowingListView: View {
                     .disabled(!canCreateEnsemble)
 
                     if !sortedEnsembles.isEmpty {
-                        Section("Edit Ensemble") {
-                            ForEach(sortedEnsembles) { ensemble in
-                                Button(ensemble.name) {
-                                    beginEditing(ensemble)
-                                }
+                        Divider()
+
+                        ForEach(sortedEnsembles) { ensemble in
+                            Button(ensemble.name) {
+                                beginEditing(ensemble)
                             }
                         }
                     }
                 } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Circle())
+                    HStack(spacing: 4) {
+                        Text("Ensembles")
+                            .font(.callout.weight(.medium))
+                        Image(systemName: "chevron.down")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
@@ -195,19 +198,28 @@ struct FollowingListView: View {
 
     private var editorPanel: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            HStack(alignment: .center, spacing: Theme.Spacing.s) {
+            ZStack {
                 Text(editorTitle)
                     .font(Theme.Text.meta.weight(.semibold))
                     .foregroundStyle(Color.primary)
 
-                Spacer(minLength: 0)
+                HStack(alignment: .center, spacing: Theme.Spacing.s) {
+                    Button("Cancel") {
+                        cancelEditing()
+                    }
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .buttonStyle(.plain)
 
-                Button("Cancel") {
-                    cancelEditing()
+                    Spacer(minLength: 0)
+
+                    Button("Save") {
+                        saveEditor()
+                    }
+                    .font(Theme.Text.meta.weight(.semibold))
+                    .foregroundStyle(canSaveDraft ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
+                    .disabled(!canSaveDraft)
                 }
-                .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
-                .buttonStyle(.plain)
             }
 
             TextField("Ensemble name", text: $draftName)
@@ -218,30 +230,23 @@ struct FollowingListView: View {
                 .padding(.vertical, 10)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.primary.opacity(0.04))
+                        .fill(Color.primary.opacity(0.03))
                 )
+               
 
-            Text(selectedUserIDs.count >= 2 ? "Select the followed people you want in this Ensemble." : "Select at least 2 followed people.")
-                .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
+           
 
-            HStack(spacing: Theme.Spacing.s) {
-                if case .edit = editorMode {
+            if case .edit = editorMode {
+                HStack(spacing: Theme.Spacing.s) {
                     Button("Delete", role: .destructive) {
                         if case .edit(let id) = editorMode {
                             pendingDeleteEnsembleID = id
                         }
                     }
                     .font(Theme.Text.meta)
-                }
 
-                Spacer(minLength: 0)
-
-                Button("Save") {
-                    saveEditor()
+                    Spacer(minLength: 0)
                 }
-                .font(Theme.Text.meta.weight(.semibold))
-                .disabled(!canSaveDraft)
             }
         }
         .padding(20)
@@ -275,7 +280,7 @@ struct FollowingListView: View {
                     Spacer(minLength: 0)
                     Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(isSelected ? Color.primary : Theme.Colors.secondaryText.opacity(0.75))
+                        .foregroundStyle(isSelected ? Color.primary.opacity(0.78) : Theme.Colors.secondaryText.opacity(0.68))
                         .padding(.trailing, 18)
                 }
                 .allowsHitTesting(false)
