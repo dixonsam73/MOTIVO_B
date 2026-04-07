@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260407_214600_ContentView_FeedEmptyState_CachedHydrationGate_c91d
+// SCOPE: ContentView only — keep Feed empty-state copy deferred while Feed hydrates, but treat already-cached visible Feed content as ready when returning from Journal. Preserve feed composition, filtering, ordering, Journal behavior, and empty-state copy.
+// SEARCH-TOKEN: 20260407_214600_ContentView_FeedEmptyState_CachedHydrationGate_c91d
+
 // CHANGE-ID: 20260405_201900_ContentView_FilterMicroContrastPass_6d3e
 // SCOPE: ContentView filter-card visual-only micro pass — slightly strengthen search-field contrast, raise light-mode divider visibility, tighten expanded-row rhythm, and make the filter control surface fractionally flatter while preserving all filter logic, layout structure, navigation, and backend behavior.
 // SEARCH-TOKEN: 20260405_201900_ContentView_FilterMicroContrastPass_6d3e
@@ -422,7 +426,7 @@ fileprivate struct SessionsRootView: View {
     @State private var frozenFeedItems: [FeedRowItem] = []
     @State private var feedNavFreezeTask: Task<Void, Never>? = nil
     @State private var remotePrewarmNonce: Int = 0
-
+    
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
     @State private var backendOwnerStatsSnapshot: BackendStatsSnapshot? = nil
     @State private var backendStatsLoading: Bool = false
@@ -518,6 +522,7 @@ fileprivate struct SessionsRootView: View {
     // Step 8C (backend preview): render backend-backed feed when Backend Preview mode is enabled
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
+    @State private var isAwaitingFeedFetchStart: Bool = false
 
     private var useBackendFeed: Bool {
         _ = backendModeChangeTick
@@ -525,6 +530,11 @@ fileprivate struct SessionsRootView: View {
         BackendConfig.isConfigured &&
         (NetworkManager.shared.baseURL != nil)
     }
+
+    private var shouldDeferFeedEmptyState: Bool {
+        selectedScope == .all && useBackendFeed && (isAwaitingFeedFetchStart || backendFeedStore.isFetching)
+    }
+
 
     // Fetch ALL sessions; filter in-memory to avoid mutating @FetchRequest.
     @FetchRequest(
@@ -637,10 +647,16 @@ fileprivate struct SessionsRootView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
-        .onChange(of: selectedScope) { _ in
+        .onChange(of: selectedScope) { newValue in
             #if canImport(UIKit)
             ContentViewKeyboardDismiss.dismiss()
             #endif
+            isAwaitingFeedFetchStart = (newValue == .all) && useBackendFeed
+        }
+        .onChange(of: backendFeedStore.isFetching) { isFetching in
+            if isFetching {
+                isAwaitingFeedFetchStart = false
+            }
         }
       }
 
@@ -1063,7 +1079,10 @@ fileprivate struct SessionsRootView: View {
                                     }
                                 }
                             } else if renderFeedItems.isEmpty {
-                                if hasExplicitFeedNarrowing {
+                                if shouldDeferFeedEmptyState {
+                                    EmptyView()
+                                        .id(topID)
+                                } else if hasExplicitFeedNarrowing {
                                     Text("No sessions match your filters.")
                                         .foregroundStyle(Theme.Colors.secondaryText)
                                         .id(topID)
@@ -1182,7 +1201,9 @@ fileprivate struct SessionsRootView: View {
                         .listSectionSeparator(.hidden, edges: .all)
                     }
                     .task(id: selectedScope) {
-                        guard useBackendFeed else { return }
+                        guard useBackendFeed else {
+                            return
+                        }
 
                         // When returning from BSDV, suppress the immediate auto-fetch to avoid a one-frame list rebind/flash.
                         if Date().timeIntervalSince(BackendDetailPopGate.lastPopAt) < 0.75 {
