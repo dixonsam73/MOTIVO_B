@@ -820,8 +820,37 @@ fileprivate struct SessionsRootView: View {
                                 }
 
                             // Build unified row source (Local sessions + Remote posts)
+                            let finalLocalRowsForFeed: [Session] = {
+                                guard selectedScope == .all else { return localRows }
+
+                                func normalizedOwnerID(_ raw: String?) -> String {
+                                    (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                                }
+
+                                let me = normalizedOwnerID(effectiveUserID)
+                                guard !me.isEmpty else { return localRows }
+
+                                if hasExplicitFeedNarrowing {
+                                    return localRows
+                                }
+
+                                let hasEligibleNonOwnerLocalPost = localRows.contains {
+                                    normalizedOwnerID($0.ownerUserID) != me
+                                }
+
+                                let hasEligibleNonOwnerRemotePost = remotePosts.contains {
+                                    normalizedOwnerID($0.ownerUserID) != me
+                                }
+
+                                guard !(hasEligibleNonOwnerLocalPost || hasEligibleNonOwnerRemotePost) else {
+                                    return localRows
+                                }
+
+                                return localRows.filter { normalizedOwnerID($0.ownerUserID) != me }
+                            }()
+
                             let liveFeedItems: [FeedRowItem] = FeedRowItem.build(
-                                local: localRows,
+                                local: finalLocalRowsForFeed,
                                 remote: remotePosts
                             )
 
@@ -833,9 +862,18 @@ fileprivate struct SessionsRootView: View {
                                     let journalSections = journalWeekSections(sessions: localRows)
 
                                     if journalSections.isEmpty {
-                                        Text("No sessions match your filters yet.")
-                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                        if !hasAnyJournalContent {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Your journal is empty.")
+                                                Text("Log your first session to begin.")
+                                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                            }
                                             .id(topID)
+                                        } else {
+                                            Text("No sessions match your filters.")
+                                                .foregroundStyle(Theme.Colors.secondaryText)
+                                                .id(topID)
+                                        }
                                     } else {
                                         ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
                                             HStack {
@@ -898,9 +936,18 @@ fileprivate struct SessionsRootView: View {
                                     let usesYearArchivePresentation = true
 
                                     if journalSections.isEmpty {
-                                        Text("No sessions match your filters yet.")
-                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                        if !hasAnyJournalContent {
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text("Your journal is empty.")
+                                                Text("Log your first session to begin.")
+                                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                            }
                                             .id(topID)
+                                        } else {
+                                            Text("No sessions match your filters.")
+                                                .foregroundStyle(Theme.Colors.secondaryText)
+                                                .id(topID)
+                                        }
                                     } else {
                                         ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
                                             HStack {
@@ -976,8 +1023,7 @@ fileprivate struct SessionsRootView: View {
                                     let currentMonthAnchorID = journalCurrentMonthAnchorID(in: yearSections)
 
                                     if yearSections.isEmpty {
-                                        Text("No sessions match your filters yet.")
-                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                        EmptyView()
                                             .id(topID)
                                     } else {
                                         VStack(alignment: .leading, spacing: Theme.Spacing.l + 6) {
@@ -1017,9 +1063,18 @@ fileprivate struct SessionsRootView: View {
                                     }
                                 }
                             } else if renderFeedItems.isEmpty {
-                                Text("No sessions match your filters yet.")
-                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                if hasExplicitFeedNarrowing {
+                                    Text("No sessions match your filters.")
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .id(topID)
+                                } else {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text("Your feed is empty.")
+                                        Text("Follow people to see their sessions here.")
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                    }
                                     .id(topID)
+                                }
                             } else {
                                 ForEach(Array(renderFeedItems.enumerated()), id: \.element.id) { index, item in
                                     switch item.kind {
@@ -2238,6 +2293,43 @@ fileprivate struct SessionsRootView: View {
         let endDay = calendar.component(.day, from: end)
         let month = Self.journalMonthFormatter.string(from: start)
         return "\(startDay)–\(endDay) \(month)"
+    }
+
+    private var hasAnyJournalContent: Bool {
+        sessions.isEmpty == false
+    }
+
+    private var hasExplicitFeedNarrowing: Bool {
+        let activeUserFilter = (activeUserFilterUserID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let hasActiveUserFilter = !activeUserFilter.isEmpty
+        let hasSelectedInstrument = (selectedInstrument != nil)
+        let hasSelectedActivity: Bool = {
+            switch selectedActivity {
+            case .any:
+                return false
+            case .core, .custom:
+                return true
+            }
+        }()
+        let hasSelectedThread = !(selectedThread ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+        let hasSelectedEnsemble = !(selectedEnsembleID ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+        let hasSearchQuery = !debouncedQuery
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty
+
+        return hasActiveUserFilter ||
+            hasSelectedInstrument ||
+            hasSelectedActivity ||
+            hasSelectedThread ||
+            hasSelectedEnsemble ||
+            savedOnly ||
+            hasSearchQuery
     }
 
     private var journalArchiveSessions: [Session] {
