@@ -23,6 +23,10 @@
 // SCOPE: PRDV Threads v1 Stage 6.1 — pass existing thread suggestions into ThreadPickerView from local Core Data Sessions. No other UI/logic changes.
 // SEARCH-TOKEN: 20260304_140500_Threads_S6_1_PRDV_ThreadSuggestions
 
+// CHANGE-ID: 20260412_000100_PRDV_BottomSaveSession
+// SCOPE: PostRecordDetailsView — remove top-right Save and add bottom "Save Session" commit action with TimerCard-family styling. No other UI or logic changes.
+// SEARCH-TOKEN: 20260412_000100_PRDV_BottomSaveSession
+
 import SwiftUI
 import CoreData
 import PhotosUI
@@ -584,7 +588,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                         .cardSurface(padding: Theme.Spacing.m)
 
                     addAttachmentsControlsSection
-                        .cardSurface(padding: Theme.Spacing.m)
+
+                    Group {
+                        bottomSaveButton
+                    }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
                 .padding(.top, Theme.Spacing.m)
@@ -618,18 +625,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .accessibilityLabel("Back to Timer")
                 }
 
-
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(action: {
-                        let visibility = isPublic
-                        saveToCoreData(visibility: visibility)
-                        DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
-                    }) {
-                        Text("Save")
-                            .font(Theme.Text.body)
-                    }
-                    .disabled(durationSeconds == 0 || instrument == nil)
-                }
             }
             .onAppear {
                 loadDraftIsPublicIfNeeded()
@@ -1171,6 +1166,33 @@ isPrivate: { url in
             }
         }
     }
+
+    private var bottomSaveButton: some View {
+        HStack {
+            Spacer(minLength: 0)
+
+            Button(action: {
+                let visibility = isPublic
+                saveToCoreData(visibility: visibility)
+                DispatchQueue.main.async { withAnimation(.none) { isPresented = false } }
+            }) {
+                Text("Save Session")
+                    .font(Theme.Text.body)
+            }
+            .buttonStyle(.bordered)
+            .tint(.clear)
+            .frame(maxWidth: 260, minHeight: 44)
+            .background(Theme.Colors.primaryAction.opacity(0.17))
+            .foregroundStyle(.primary)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .disabled(durationSeconds == 0 || instrument == nil)
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, Theme.Spacing.xs)
+        .padding(.bottom, Theme.Spacing.m)
+    }
+
     private var addAttachmentsControlsSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             HStack(spacing: 32) {
@@ -1212,7 +1234,8 @@ isPrivate: { url in
             }
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.vertical, 2)
+            .padding(.top, Theme.Spacing.s)
+            .padding(.bottom, Theme.Spacing.s)
         }
     }
 
