@@ -387,15 +387,6 @@ struct AddEditSessionView: View {
                         .font(Theme.Text.body)
                 }
             }
-            ToolbarItem(placement: .confirmationAction) {
-                Button(action: { save() }) {
-                    Text("Save")
-                        .font(Theme.Text.body)
-                }
-                .disabled(durationSeconds == 0 || instrument == nil)
-                .accessibilityLabel("Save session")
-                .accessibilityIdentifier("button.saveSession")
-            }
         }
         .sheet(isPresented: $showInstrumentPicker) {
             instrumentPicker
@@ -1111,9 +1102,35 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .padding(.horizontal, Theme.Spacing.l)
                     .padding(.vertical, 2)
                 }
-                .cardSurface(padding: Theme.Spacing.m)
+                .padding(.top, Theme.Spacing.xs)
+                .padding(.bottom, Theme.Spacing.s)
 
+                bottomSaveButton
             }
+    }
+
+    private var bottomSaveButton: some View {
+        HStack {
+            Spacer(minLength: 0)
+
+            Button(action: { save() }) {
+                Text("Save Session")
+                    .font(Theme.Text.body)
+                    .foregroundColor(.primary)
+                    .opacity(1.0)
+            }
+            .frame(maxWidth: 260, minHeight: 44)
+            .background(Theme.Colors.primaryAction.opacity(0.17))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .buttonStyle(.plain)
+            .disabled(durationSeconds == 0 || instrument == nil)
+            .accessibilityLabel("Save session")
+            .accessibilityIdentifier("button.saveSession")
+
+            Spacer(minLength: 0)
+        }
+        .padding(.top, Theme.Spacing.s)
+        .padding(.bottom, Theme.Spacing.m)
     }
 
     // Instrument picker sheet (wheel style)

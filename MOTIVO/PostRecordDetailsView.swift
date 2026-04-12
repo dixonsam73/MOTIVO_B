@@ -1179,12 +1179,11 @@ isPrivate: { url in
                 Text("Save Session")
                     .font(Theme.Text.body)
             }
-            .buttonStyle(.bordered)
-            .tint(.clear)
             .frame(maxWidth: 260, minHeight: 44)
             .background(Theme.Colors.primaryAction.opacity(0.17))
             .foregroundStyle(.primary)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .buttonStyle(.plain)
             .disabled(durationSeconds == 0 || instrument == nil)
 
             Spacer(minLength: 0)
