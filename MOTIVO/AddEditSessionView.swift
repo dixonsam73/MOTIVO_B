@@ -382,10 +382,11 @@ struct AddEditSessionView: View {
         .navigationTitle("")
         .toolbar {
             ToolbarItem(placement: .cancellationAction) {
-                Button(action: { cancelAndCleanup_AESV_bestEffort() }) {
-                    Text("Cancel")
-                        .font(Theme.Text.body)
+                Button("Cancel") {
+                    cancelAndCleanup_AESV_bestEffort()
                 }
+                .font(.body.weight(.medium))
+                .foregroundStyle(Theme.Colors.secondaryText)
             }
         }
         .sheet(isPresented: $showInstrumentPicker) {
@@ -717,6 +718,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Share with followers").sectionHeader()
                     Toggle("On", isOn: $isPublic)
                         .font(Theme.Text.body)
+                        .tint(Theme.Colors.accent)
                 }
                 .cardSurface()
 
@@ -744,6 +746,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
+
+                    Spacer()
+                        .frame(height: Theme.Spacing.s)
+
                     ZStack(alignment: .topLeading) {
                         TextEditor(text: $notes)
                             .focused($isNotesFocused)
@@ -753,7 +759,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     }
                 }
                 .cardSurface()
-
+                .padding(.bottom, Theme.Spacing.s)
                 // NEW — State card (read/write)
                 stateStripCard_edit
 
@@ -1100,7 +1106,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     }
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(.horizontal, Theme.Spacing.l)
-                    .padding(.vertical, 2)
+                    .padding(.top, Theme.Spacing.s)
+                    .padding(.bottom, Theme.Spacing.s)
                 }
                 .padding(.top, Theme.Spacing.xs)
                 .padding(.bottom, Theme.Spacing.s)
@@ -1129,7 +1136,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
             Spacer(minLength: 0)
         }
-        .padding(.top, Theme.Spacing.s)
+        .padding(.top, Theme.Spacing.xs)
         .padding(.bottom, Theme.Spacing.m)
     }
 
