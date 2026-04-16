@@ -881,28 +881,10 @@ isPrivate: { url in
             .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
             .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
             .onChange(of: isActivityDetailFocused) { oldValue, newValue in
-                if oldValue == false && newValue == true {
-                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !userEditedActivityDetail,
-                       !trimmed.isEmpty,
-                       activityDetail == lastAutoActivityDetail {
-                        activityDetail = ""
-                    }
-                }
-
-                if oldValue == true && newValue == false {
-                    let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if trimmed.isEmpty {
-                        let autoDesc = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
-                        activityDetail = autoDesc
-                        lastAutoActivityDetail = autoDesc
-                        userEditedActivityDetail = false
-                    }
-                }
+                handleActivityDetailFocusChange(oldValue: oldValue, newValue: newValue)
             }
-            .onChange(of: activityDetail) { old, new in
-                let trimmed = new.trimmingCharacters(in: .whitespacesAndNewlines)
-                userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
+            .onChange(of: activityDetail) { _, newValue in
+                handleActivityDetailChange(newValue)
             }
             .onChange(of: notes) { _, new in
                 UserDefaults.standard.set(new, forKey: draftNotesKey)
@@ -1530,6 +1512,36 @@ isPrivate: { url in
         } else {
             activityChoice = "custom:\(selectedCustomName)"
         }
+    }
+
+    private func handleActivityDetailFocusChange(oldValue: Bool, newValue: Bool) {
+        if oldValue == false && newValue == true {
+            let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !userEditedActivityDetail,
+               !trimmed.isEmpty,
+               activityDetail == lastAutoActivityDetail {
+                activityDetail = ""
+            }
+        }
+
+        if oldValue == true && newValue == false {
+            let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                let autoDesc = editorDefaultDescription(
+                    timestamp: timestamp,
+                    activity: activity,
+                    customName: selectedCustomName
+                )
+                activityDetail = autoDesc
+                lastAutoActivityDetail = autoDesc
+                userEditedActivityDetail = false
+            }
+        }
+    }
+
+    private func handleActivityDetailChange(_ newValue: String) {
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        userEditedActivityDetail = (!trimmed.isEmpty && trimmed != lastAutoActivityDetail)
     }
 
     private func editorDefaultDescription(timestamp: Date, activity: SessionActivityType, customName: String) -> String {
