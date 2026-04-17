@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260417_201100_SDV_OwnerInstrumentMetaTint
+// SCOPE: Owner-only visual tint on the existing SessionDetailView instrument/meta card; no other surfaces changed.
+// SEARCH-TOKEN: 20260417_201100_SDV_OwnerInstrumentMetaTint
+
 // CHANGE-ID: 20260304_204900_SDV_ThreadMetaPill
 // SCOPE: Visual-only — render owner-only thread label as subtle capsule in meta line (SessionDetailView).
 // SEARCH-TOKEN: 20260304_204900_SDV_ThreadMetaPill
@@ -685,7 +689,7 @@ return AttachmentViewerView(
                 }
                 .accessibilityElement(children: .contain)
             }
-            .cardSurface()
+            .cardSurface(fillColor: metaCardFillColor, strokeColor: metaCardStrokeColor)
 
             let originalNotes = session.notes ?? ""
             let (focusDotIndexFromNotes, displayNotes) = extractFocusDotIndex(from: originalNotes)
@@ -873,6 +877,36 @@ return AttachmentViewerView(
             return "\(thread) · \(metaLine)"
         }
         return metaLine
+    }
+
+    private var ownerInstrumentLabelForTint: String? {
+        let direct = session.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty { return direct }
+
+        let related = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let related, !related.isEmpty { return related }
+
+        return nil
+    }
+
+    private var metaCardFillColor: Color {
+        guard viewerIsOwner else { return Theme.Colors.surface(colorScheme) }
+        return Theme.InstrumentTint.surfaceFill(
+            for: ownerInstrumentLabelForTint,
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var metaCardStrokeColor: Color {
+        guard viewerIsOwner else { return Theme.Colors.cardStroke(colorScheme) }
+        return Theme.InstrumentTint.cardStroke(
+            for: ownerInstrumentLabelForTint,
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
     }
 
 
