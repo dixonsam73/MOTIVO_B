@@ -925,7 +925,10 @@ fileprivate struct SessionsRootView: View {
                                                             frozenFeedItems = renderFeedItems
                                                             pushSessionID = (session.value(forKey: "id") as? UUID)
                                                         }
-                                                        .cardSurface()
+                                                        .cardSurface(
+                                                            fillColor: journalWeekCardFillColor(for: session),
+                                                            strokeColor: journalWeekCardStrokeColor(for: session)
+                                                        )
                                                         .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
                                                 }
                                                                                             .buttonStyle(.plain)
@@ -1010,7 +1013,9 @@ fileprivate struct SessionsRootView: View {
                                                     .modifier(
                                                         JournalArchiveRowContainerModifier(
                                                             lens: usesYearArchivePresentation ? .year : selectedJournalLens,
-                                                            yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows))
+                                                            yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
+                                                            barFillColor: journalMonthBarFillColor(for: session),
+                                                            barStrokeColor: journalMonthBarStrokeColor(for: session)
                                                         )
                                                     )
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : 4)
@@ -1860,6 +1865,66 @@ fileprivate struct SessionsRootView: View {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private func journalInstrumentLabel(for session: Session) -> String? {
+        let explicitLabel = (session.value(forKey: "userInstrumentLabel") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let explicitLabel, !explicitLabel.isEmpty {
+            return explicitLabel
+        }
+
+        let fallbackName = session.instrument?.name?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let fallbackName, !fallbackName.isEmpty {
+            return fallbackName
+        }
+
+        return nil
+    }
+
+    private func journalInstrumentOwnerID(for session: Session) -> String? {
+        let ownerID = session.ownerUserID?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let ownerID, !ownerID.isEmpty {
+            return ownerID
+        }
+        return effectiveUserID
+    }
+
+    private func journalWeekCardFillColor(for session: Session) -> Color {
+        Theme.InstrumentTint.surfaceFill(
+            for: journalInstrumentLabel(for: session),
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private func journalWeekCardStrokeColor(for session: Session) -> Color {
+        Theme.InstrumentTint.cardStroke(
+            for: journalInstrumentLabel(for: session),
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private func journalMonthBarFillColor(for session: Session) -> Color {
+        Theme.InstrumentTint.surfaceFill(
+            for: journalInstrumentLabel(for: session),
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .monthBar
+        )
+    }
+
+    private func journalMonthBarStrokeColor(for session: Session) -> Color {
+        Theme.InstrumentTint.cardStroke(
+            for: journalInstrumentLabel(for: session),
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .monthBar
+        )
+    }
 
     private var activeEnsembleMemberUserIDs: Set<String> {
         guard selectedScope == .all else { return [] }
@@ -3264,6 +3329,20 @@ fileprivate struct AttachmentCountBadge: View {
 fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
     let lens: JournalTimeLens
     let yearWidthFraction: CGFloat
+    let barFillColor: Color?
+    let barStrokeColor: Color?
+
+    init(
+        lens: JournalTimeLens,
+        yearWidthFraction: CGFloat,
+        barFillColor: Color? = nil,
+        barStrokeColor: Color? = nil
+    ) {
+        self.lens = lens
+        self.yearWidthFraction = yearWidthFraction
+        self.barFillColor = barFillColor
+        self.barStrokeColor = barStrokeColor
+    }
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -3284,11 +3363,11 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
                         let width = max(0, proxy.size.width * clampedFraction)
 
                         RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055))
+                            .fill(barFillColor ?? Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055))
                             .frame(width: width, height: 58, alignment: .leading)
                             .overlay(alignment: .leading) {
                                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05), lineWidth: 0.5)
+                                    .stroke(barStrokeColor ?? Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05), lineWidth: 0.5)
                                     .frame(width: width, height: 58, alignment: .leading)
                             }
                     }

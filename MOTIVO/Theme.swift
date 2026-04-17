@@ -234,11 +234,11 @@ enum Theme {
             case (.neutralAnchor, _):
                 return Theme.Colors.surface(scheme)
             case (.coolDeep, .light):
-                return Color(red: 0.76, green: 0.80, blue: 0.84)
+                return Color(red: 0.73, green: 0.78, blue: 0.83)
             case (.coolDeep, .dark):
                 return Color(red: 0.31, green: 0.36, blue: 0.42)
             case (.warmOrganic, .light):
-                return Color(red: 0.86, green: 0.82, blue: 0.76)
+                return Color(red: 0.90, green: 0.82, blue: 0.72)
             case (.warmOrganic, .dark):
                 return Color(red: 0.40, green: 0.35, blue: 0.30)
             case (.softWarmLight, .light):
@@ -255,31 +255,31 @@ enum Theme {
         private static func blendAmount(for strength: Strength, slot: Slot, scheme: ColorScheme) -> CGFloat {
             guard slot != .neutralAnchor else { return 0 }
             switch (strength, scheme) {
-            case (.pickerStrong, .light): return 0.42
-            case (.pickerStrong, .dark): return 0.34
-            case (.cardMedium, .light): return 0.26
-            case (.cardMedium, .dark): return 0.22
-            case (.cardMediumLight, .light): return 0.20
-            case (.cardMediumLight, .dark): return 0.18
-            case (.cardLight, .light): return 0.14
-            case (.cardLight, .dark): return 0.14
-            case (.monthBar, .light): return 0.24
-            case (.monthBar, .dark): return 0.20
+            case (.pickerStrong, .light): return 0.46
+            case (.pickerStrong, .dark): return 0.36
+            case (.cardMedium, .light): return 0.28
+            case (.cardMedium, .dark): return 0.23
+            case (.cardMediumLight, .light): return 0.25
+            case (.cardMediumLight, .dark): return 0.19
+            case (.cardLight, .light): return 0.17
+            case (.cardLight, .dark): return 0.15
+            case (.monthBar, .light): return 0.30
+            case (.monthBar, .dark): return 0.24
             }
         }
 
         private static func strokeBlendAmount(for strength: Strength, scheme: ColorScheme) -> CGFloat {
             switch (strength, scheme) {
-            case (.pickerStrong, .light): return 0.28
-            case (.pickerStrong, .dark): return 0.24
-            case (.cardMedium, .light): return 0.18
-            case (.cardMedium, .dark): return 0.16
-            case (.cardMediumLight, .light): return 0.14
-            case (.cardMediumLight, .dark): return 0.13
-            case (.cardLight, .light): return 0.10
-            case (.cardLight, .dark): return 0.10
-            case (.monthBar, .light): return 0.16
-            case (.monthBar, .dark): return 0.14
+            case (.pickerStrong, .light): return 0.32
+            case (.pickerStrong, .dark): return 0.26
+            case (.cardMedium, .light): return 0.20
+            case (.cardMedium, .dark): return 0.17
+            case (.cardMediumLight, .light): return 0.16
+            case (.cardMediumLight, .dark): return 0.14
+            case (.cardLight, .light): return 0.12
+            case (.cardLight, .dark): return 0.11
+            case (.monthBar, .light): return 0.20
+            case (.monthBar, .dark): return 0.16
             }
         }
 

@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260417_195650_owner_instrument_tint_4b27
-// SCOPE: Apply owner-local instrument tint to the existing SessionMetaCard surface only. No layout, typography, spacing, interaction, or logic changes outside card fill/stroke selection.
+// CHANGE-ID: 20260417_214700_owner_local_tint_namespace_fix_91ac
+// SCOPE: Align SessionMetaCard owner-local instrument tint resolution with ContentView/SessionDetailView by using the local owner namespace for tint slot mapping only. No layout, typography, spacing, interaction, or logic changes outside card fill/stroke selection.
 
 import SwiftUI
 import CoreData
@@ -21,6 +21,7 @@ struct SessionMetaCard: View {
     let activityLabel: String
 
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject private var auth: AuthManager
 
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
@@ -44,10 +45,35 @@ struct SessionMetaCard: View {
         return nil
     }
 
+    /// Matches the owner-local namespace path used by the owner Journal/detail surfaces.
+    private var tintOwnerID: String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+
+        if let authID = auth.currentUserID?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !authID.isEmpty {
+            return authID
+        }
+
+        if let persistenceID = PersistenceController.shared.currentUserID?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !persistenceID.isEmpty {
+            return persistenceID
+        }
+
+        return nil
+    }
+
     private var resolvedFillColor: Color {
         Theme.InstrumentTint.surfaceFill(
             for: effectiveInstrumentLabel,
-            ownerID: nil,
+            ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
         )
@@ -56,7 +82,7 @@ struct SessionMetaCard: View {
     private var resolvedStrokeColor: Color {
         Theme.InstrumentTint.cardStroke(
             for: effectiveInstrumentLabel,
-            ownerID: nil,
+            ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
         )
