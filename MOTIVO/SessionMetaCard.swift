@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260320_095800_PressedRowAffordance
-// SCOPE: Affordance-only refinement — add subtle pressed-state feedback to tappable Instrument and Activity rows in SessionMetaCard. No layout, typography, spacing, or logic changes.
+// CHANGE-ID: 20260417_195650_owner_instrument_tint_4b27
+// SCOPE: Apply owner-local instrument tint to the existing SessionMetaCard surface only. No layout, typography, spacing, interaction, or logic changes outside card fill/stroke selection.
 
 import SwiftUI
 import CoreData
@@ -20,8 +20,47 @@ struct SessionMetaCard: View {
     let currentInstrumentName: String
     let activityLabel: String
 
+    @Environment(\.colorScheme) private var colorScheme
+
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
+
+    private var effectiveInstrumentLabel: String? {
+        if let selectedName = instrument?.name,
+           let normalized = Theme.InstrumentTint.normalizedLabel(selectedName) {
+            return normalized
+        }
+
+        if hasMultipleInstruments,
+           let normalized = Theme.InstrumentTint.normalizedLabel(currentInstrumentName) {
+            return normalized
+        }
+
+        if let onlyName = instruments.first?.name,
+           let normalized = Theme.InstrumentTint.normalizedLabel(onlyName) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private var resolvedFillColor: Color {
+        Theme.InstrumentTint.surfaceFill(
+            for: effectiveInstrumentLabel,
+            ownerID: nil,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var resolvedStrokeColor: Color {
+        Theme.InstrumentTint.cardStroke(
+            for: effectiveInstrumentLabel,
+            ownerID: nil,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
 
     var body: some View {
         if hasNoInstruments {
@@ -82,7 +121,7 @@ struct SessionMetaCard: View {
                     .buttonStyle(SessionMetaRowButtonStyle())
                 }
             }
-            .cardSurface()
+            .cardSurface(fillColor: resolvedFillColor, strokeColor: resolvedStrokeColor)
         }
     }
 }
