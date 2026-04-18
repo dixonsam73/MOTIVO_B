@@ -426,6 +426,7 @@ fileprivate struct SessionsRootView: View {
     @State private var frozenFeedItems: [FeedRowItem] = []
     @State private var feedNavFreezeTask: Task<Void, Never>? = nil
     @State private var remotePrewarmNonce: Int = 0
+    @State private var pendingJournalMonthTargetMonthStart: Date? = nil
     
     @State private var stats: SessionStats = .init(count: 0, seconds: 0)
     @State private var backendOwnerStatsSnapshot: BackendStatsSnapshot? = nil
@@ -891,6 +892,13 @@ fileprivate struct SessionsRootView: View {
                                                 .id(topID)
                                         }
                                     } else {
+                                        Color.clear
+                                            .frame(height: 0)
+                                            .id(topID)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+
                                         ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
                                             HStack {
                                                 Text(section.title)
@@ -968,6 +976,13 @@ fileprivate struct SessionsRootView: View {
                                                 .id(topID)
                                         }
                                     } else {
+                                        Color.clear
+                                            .frame(height: 0)
+                                            .id(topID)
+                                            .listRowSeparator(.hidden)
+                                            .listRowBackground(Color.clear)
+                                            .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
+
                                         ForEach(Array(journalSections.enumerated()), id: \.element.id) { sectionIndex, section in
                                             HStack {
                                                 Text(section.title)
@@ -981,7 +996,7 @@ fileprivate struct SessionsRootView: View {
                                             .listRowSeparator(.hidden)
                                             .listRowBackground(Color.clear)
                                             .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 0))
-                                            .id(sectionIndex == 0 ? topID : nil)
+                                            .id(journalMonthSectionAnchorID(for: section))
 
                                             ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
                                                 ZStack {
@@ -1065,6 +1080,12 @@ fileprivate struct SessionsRootView: View {
                                                     VStack(alignment: .leading, spacing: 0) {
                                                         ForEach(Array(section.rows.enumerated()), id: \.element.id) { rowIndex, row in
                                                             JournalYearMonthRow(row: row, isFirstInYear: rowIndex == 0)
+                                                                .contentShape(Rectangle())
+                                                                .onTapGesture {
+                                                                    guard row.sessionCount > 0 else { return }
+                                                                    pendingJournalMonthTargetMonthStart = row.monthStart
+                                                                    selectedJournalLens = .month
+                                                                }
                                                                 .id(row.id)
                                                         }
                                                     }
@@ -1238,6 +1259,18 @@ fileprivate struct SessionsRootView: View {
                         DispatchQueue.main.async {
                             proxy.scrollTo(topID, anchor: .top)
                         }
+                    }
+                    .task(id: pendingJournalMonthTargetMonthStart?.timeIntervalSinceReferenceDate ?? -1) {
+                        guard selectedScope == .mine,
+                              selectedJournalLens == .month,
+                              let targetMonthStart = pendingJournalMonthTargetMonthStart,
+                              hasVisibleJournalMonthSection(for: targetMonthStart, in: journalArchiveSessions) else { return }
+                        let targetID = journalMonthSectionAnchorID(for: targetMonthStart)
+                        DispatchQueue.main.async {
+                            proxy.scrollTo(targetID, anchor: .top)
+                            pendingJournalMonthTargetMonthStart = nil
+                        }
+                    
                     }
                     }
 
@@ -2631,6 +2664,27 @@ fileprivate struct SessionsRootView: View {
             .flatMap { $0.rows }
             .first(where: { $0.isCurrentMonth })?
             .id
+    }
+
+    private func journalMonthSectionAnchorID(for monthStart: Date) -> String {
+        "journal-month-section-\(Self.journalWeekIDFormatter.string(from: monthStart))"
+    }
+
+    private func journalMonthSectionAnchorID(for section: JournalSection) -> String {
+        let monthStart = section.sessions
+            .map { journalDate(for: $0) }
+            .map { journalMonthStart(for: $0) }
+            .max() ?? Date.distantPast
+        return journalMonthSectionAnchorID(for: monthStart)
+    }
+
+    private func hasVisibleJournalMonthSection(for monthStart: Date, in sessions: [Session]) -> Bool {
+        journalYearSections(sessions: sessions)
+            .contains { section in
+                section.sessions.contains {
+                    journalMonthStart(for: journalDate(for: $0)) == monthStart
+                }
+            }
     }
 
     private struct JournalYearFacetSummary {
