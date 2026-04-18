@@ -1015,7 +1015,9 @@ fileprivate struct SessionsRootView: View {
                                                             lens: usesYearArchivePresentation ? .year : selectedJournalLens,
                                                             yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
                                                             barFillColor: journalMonthBarFillColor(for: session),
-                                                            barStrokeColor: journalMonthBarStrokeColor(for: session)
+                                                            barStrokeColor: journalMonthBarStrokeColor(for: session),
+                                                            barAccentColor: journalMonthBarAccentColor(for: session),
+                                                            barAccentWidth: 6
                                                         )
                                                     )
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : 4)
@@ -1909,20 +1911,18 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func journalMonthBarFillColor(for session: Session) -> Color {
-        Theme.InstrumentTint.surfaceFill(
-            for: journalInstrumentLabel(for: session),
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .monthBar
-        )
+        Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
     }
 
     private func journalMonthBarStrokeColor(for session: Session) -> Color {
-        Theme.InstrumentTint.cardStroke(
+        Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
+    }
+
+    private func journalMonthBarAccentColor(for session: Session) -> Color? {
+        Theme.InstrumentTint.visibleAccentColor(
             for: journalInstrumentLabel(for: session),
             ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .monthBar
+            scheme: colorScheme
         )
     }
 
@@ -3331,17 +3331,23 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
     let yearWidthFraction: CGFloat
     let barFillColor: Color?
     let barStrokeColor: Color?
+    let barAccentColor: Color?
+    let barAccentWidth: CGFloat
 
     init(
         lens: JournalTimeLens,
         yearWidthFraction: CGFloat,
         barFillColor: Color? = nil,
-        barStrokeColor: Color? = nil
+        barStrokeColor: Color? = nil,
+        barAccentColor: Color? = nil,
+        barAccentWidth: CGFloat = 0
     ) {
         self.lens = lens
         self.yearWidthFraction = yearWidthFraction
         self.barFillColor = barFillColor
         self.barStrokeColor = barStrokeColor
+        self.barAccentColor = barAccentColor
+        self.barAccentWidth = barAccentWidth
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -3362,18 +3368,62 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
                         let clampedFraction = min(max(yearWidthFraction, 0.05), 0.94)
                         let width = max(0, proxy.size.width * clampedFraction)
 
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .fill(barFillColor ?? Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055))
+                        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        let resolvedFill = barFillColor ?? Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
+                        let resolvedStroke = barStrokeColor ?? Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
+                        let hasAccent = barAccentColor != nil && barAccentWidth > 0
+                        let accentWidth = min(barAccentWidth, width)
+                        let accentShape = MonthBarLeadingAccentShape(cornerRadius: 10)
+
+                        shape
+                            .fill(resolvedFill)
                             .frame(width: width, height: 58, alignment: .leading)
                             .overlay(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                    .stroke(barStrokeColor ?? Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05), lineWidth: 0.5)
+                                if hasAccent, let accentColor = barAccentColor {
+                                    accentShape
+                                        .fill(accentColor)
+                                        .frame(width: accentWidth, height: 58, alignment: .leading)
+                                }
+                            }
+                            .overlay(alignment: .leading) {
+                                shape
+                                    .stroke(resolvedStroke, lineWidth: 0.5)
                                     .frame(width: width, height: 58, alignment: .leading)
                             }
                     }
                     .allowsHitTesting(false)
                 }
         }
+    }
+}
+
+fileprivate struct MonthBarLeadingAccentShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.maxY))
+        path.addArc(
+            center: CGPoint(x: rect.minX + radius, y: rect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY + radius))
+        path.addArc(
+            center: CGPoint(x: rect.minX + radius, y: rect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
     }
 }
 
