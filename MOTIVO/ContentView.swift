@@ -2706,15 +2706,7 @@ fileprivate struct SessionsRootView: View {
         guard let top = sorted.first, top.value > 0 else { return nil }
 
         let distinctCount = sorted.count
-        guard distinctCount > 1 else { return nil }
-        guard top.value < totalSeconds else { return nil }
-
-        let second = sorted[1]
-        let share = Double(top.value) / Double(max(totalSeconds, 1))
-        let leadSeconds = top.value - second.value
-        let leadIsMeaningful = top.value > second.value && share >= 0.5 && leadSeconds >= 1800
-
-        guard leadIsMeaningful else { return nil }
+        // Always use the highest-duration instrument for the month
         return JournalYearFacetSummary(label: top.key, seconds: top.value, distinctCount: distinctCount)
     }
 
