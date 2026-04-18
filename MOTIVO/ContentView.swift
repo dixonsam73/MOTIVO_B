@@ -2301,6 +2301,8 @@ fileprivate struct SessionsRootView: View {
         let totalSeconds: Int
         let sessionCount: Int
         let metadataText: String?
+        let dominantInstrumentLabel: String?
+        let ownerUserID: String?
         let widthFraction: CGFloat
         let densityFraction: CGFloat
         let isFutureMonth: Bool
@@ -2571,11 +2573,21 @@ fileprivate struct SessionsRootView: View {
 
             let totalSeconds = monthSessions.reduce(0) { $0 + journalDurationSeconds(for: $1) }
             let sessionCount = monthSessions.count
+            let dominantInstrument = journalYearDominantInstrument(
+                for: monthSessions,
+                totalSeconds: totalSeconds
+            )
             let metadataText = journalYearMetadataText(
                 for: monthSessions,
                 totalSeconds: totalSeconds,
                 sessionCount: sessionCount
             )
+            let rowOwnerUserID = monthSessions
+                .compactMap { session in
+                    let ownerID = session.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return (ownerID?.isEmpty == false) ? ownerID : nil
+                }
+                .first ?? effectiveUserID
 
             let rawWidthFraction = CGFloat(totalSeconds) / CGFloat(maxTotalSeconds)
             let widthFraction: CGFloat = totalSeconds > 0 ? min(max(rawWidthFraction, 0.08), 1.0) : 0.0
@@ -2591,6 +2603,8 @@ fileprivate struct SessionsRootView: View {
                 totalSeconds: totalSeconds,
                 sessionCount: sessionCount,
                 metadataText: metadataText,
+                dominantInstrumentLabel: dominantInstrument?.label,
+                ownerUserID: rowOwnerUserID,
                 widthFraction: widthFraction,
                 densityFraction: densityFraction,
                 isFutureMonth: calendar.component(.year, from: monthStart) == currentYear && monthStart > currentMonthStart,
@@ -3178,6 +3192,9 @@ fileprivate struct JournalYearMonthRow: View {
     private let barCornerRadius: CGFloat = 8
     private let activeBarHeight: CGFloat = 4
     private let quietBarHeight: CGFloat = 1.5
+    private let leaderLaneWidth: CGFloat = 5
+    private let leaderGapToContent: CGFloat = 4
+    private let leaderCornerRadius: CGFloat = 1.5
 
     private var activeBarFill: Color {
         let baseOpacity: Double = colorScheme == .dark ? 0.105 : 0.03
@@ -3215,65 +3232,99 @@ fileprivate struct JournalYearMonthRow: View {
         row.hasSessions ? 12 : 11
     }
 
+    private var leaderColor: Color? {
+        Theme.InstrumentTint.visibleAccentColor(
+            for: row.dominantInstrumentLabel,
+            ownerID: row.ownerUserID,
+            scheme: colorScheme,
+            shouldAssignIfNeeded: false
+        )
+    }
+
+    private var barHeight: CGFloat {
+        row.hasSessions ? activeBarHeight : quietBarHeight
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(row.monthLabel)
-                .font(.caption.weight(row.hasSessions ? .semibold : .medium))
-                .foregroundStyle(Color.primary.opacity(row.hasSessions ? 0.96 : quietTextOpacity))
-                .lineLimit(1)
-                .padding(.bottom, showsMetadata ? 2 : 7)
+        HStack(alignment: .top, spacing: leaderGapToContent) {
+            leaderLane
 
-            if let metadata = row.metadataText, row.hasSessions {
-                let metadataParts = metadata.components(separatedBy: " • ")
-                let primaryTime = metadataParts.first ?? metadata
-                let secondaryMetadata = metadataParts.dropFirst().joined(separator: " • ")
-
-                Group {
-                    if secondaryMetadata.isEmpty {
-                        Text(primaryTime)
-                            .font(.caption2.weight(.semibold))
-                    } else {
-                        Text(primaryTime)
-                            .font(.caption2.weight(.semibold))
-                        + Text(" • \(secondaryMetadata)")
-                            .font(.caption2)
-                    }
-                }
-                    .foregroundStyle(Color.primary.opacity(metadataOpacity))
+            VStack(alignment: .leading, spacing: 0) {
+                Text(row.monthLabel)
+                    .font(.caption.weight(row.hasSessions ? .semibold : .medium))
+                    .foregroundStyle(Color.primary.opacity(row.hasSessions ? 0.96 : quietTextOpacity))
                     .lineLimit(1)
-                    .padding(.bottom, 9)
-            }
+                    .padding(.bottom, showsMetadata ? 2 : 7)
 
-            GeometryReader { proxy in
-                let totalWidth = max(0, proxy.size.width)
-                let clampedFraction = min(max(row.widthFraction, 0.08), 1.0)
-                let fillWidth = row.hasSessions ? max(0, totalWidth * clampedFraction) : 0
+                if let metadata = row.metadataText, row.hasSessions {
+                    let metadataParts = metadata.components(separatedBy: " • ")
+                    let primaryTime = metadataParts.first ?? metadata
+                    let secondaryMetadata = metadataParts.dropFirst().joined(separator: " • ")
 
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
-                        .fill(Color.primary.opacity(quietBarOpacity))
-                        .frame(width: totalWidth, height: quietBarHeight)
+                    Group {
+                        if secondaryMetadata.isEmpty {
+                            Text(primaryTime)
+                                .font(.caption2.weight(.semibold))
+                        } else {
+                            Text(primaryTime)
+                                .font(.caption2.weight(.semibold))
+                            + Text(" • \(secondaryMetadata)")
+                                .font(.caption2)
+                        }
+                    }
+                        .foregroundStyle(Color.primary.opacity(metadataOpacity))
+                        .lineLimit(1)
+                        .padding(.bottom, 9)
+                }
 
-                    if row.hasSessions {
+                GeometryReader { proxy in
+                    let totalWidth = max(0, proxy.size.width)
+                    let clampedFraction = min(max(row.widthFraction, 0.08), 1.0)
+                    let fillWidth = row.hasSessions ? max(0, totalWidth * clampedFraction) : 0
+
+                    ZStack(alignment: .leading) {
                         RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
-                            .fill(activeBarFill)
-                            .frame(width: fillWidth, height: activeBarHeight)
-                            .overlay(alignment: .leading) {
-                                RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
-                                    .stroke(activeBarStroke, lineWidth: 0.45)
-                                    .frame(width: fillWidth, height: activeBarHeight)
-                            }
+                            .fill(Color.primary.opacity(quietBarOpacity))
+                            .frame(width: totalWidth, height: quietBarHeight)
+
+                        if row.hasSessions {
+                            RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
+                                .fill(activeBarFill)
+                                .frame(width: fillWidth, height: activeBarHeight)
+                                .overlay(alignment: .leading) {
+                                    RoundedRectangle(cornerRadius: barCornerRadius, style: .continuous)
+                                        .stroke(activeBarStroke, lineWidth: 0.45)
+                                        .frame(width: fillWidth, height: activeBarHeight)
+                                }
+                        }
                     }
                 }
+                .frame(height: barHeight)
+                .allowsHitTesting(false)
             }
-            .frame(height: row.hasSessions ? activeBarHeight : quietBarHeight)
-            .allowsHitTesting(false)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(alignment: .topLeading) {
+                if let leaderColor {
+                    RoundedRectangle(cornerRadius: leaderCornerRadius, style: .continuous)
+                        .fill(leaderColor)
+                        .frame(width: leaderLaneWidth)
+                        .frame(maxHeight: .infinity, alignment: .top)
+                        .offset(x: -(leaderLaneWidth + leaderGapToContent))
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, rowTopPadding)
         .padding(.bottom, rowBottomPadding)
     }
+
+    @ViewBuilder
+    private var leaderLane: some View {
+        Color.clear
+            .frame(width: leaderLaneWidth)
+    }
 }
+
 
 fileprivate func isActiveUserFilter(_ candidateUserID: String?, activeUserFilterUserID: String?) -> Bool {
     let candidate = (candidateUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
