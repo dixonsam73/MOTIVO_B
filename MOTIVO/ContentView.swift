@@ -3368,28 +3368,48 @@ fileprivate struct JournalArchiveRowContainerModifier: ViewModifier {
                         let clampedFraction = min(max(yearWidthFraction, 0.05), 0.94)
                         let width = max(0, proxy.size.width * clampedFraction)
 
-                        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        let cornerRadius: CGFloat = 10
                         let resolvedFill = barFillColor ?? Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
                         let resolvedStroke = barStrokeColor ?? Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
                         let hasAccent = barAccentColor != nil && barAccentWidth > 0
-                        let accentWidth = min(barAccentWidth, width)
-                        let accentShape = MonthBarLeadingAccentShape(cornerRadius: 10)
+                        let accentWidth = hasAccent ? min(barAccentWidth, width) : 0
+                        let bodyWidth = max(0, width - accentWidth)
 
-                        shape
-                            .fill(resolvedFill)
-                            .frame(width: width, height: 58, alignment: .leading)
-                            .overlay(alignment: .leading) {
-                                if hasAccent, let accentColor = barAccentColor {
-                                    accentShape
-                                        .fill(accentColor)
-                                        .frame(width: accentWidth, height: 58, alignment: .leading)
+                        let fullShape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        let accentShape = MonthBarLeadingAccentShape(cornerRadius: cornerRadius)
+                        let bodyShape = MonthBarTrailingBodyShape(cornerRadius: cornerRadius)
+
+                        ZStack(alignment: .leading) {
+                            if hasAccent, let accentColor = barAccentColor {
+                                if bodyWidth > 0 {
+                                    bodyShape
+                                        .fill(resolvedFill)
+                                        .frame(width: bodyWidth, height: 58, alignment: .leading)
+                                        .offset(x: accentWidth)
+
+                                    bodyShape
+                                        .stroke(resolvedStroke, lineWidth: 0.5)
+                                        .frame(width: bodyWidth, height: 58, alignment: .leading)
+                                        .offset(x: accentWidth)
                                 }
-                            }
-                            .overlay(alignment: .leading) {
-                                shape
+
+                                accentShape
+                                    .fill(accentColor)
+                                    .frame(width: accentWidth, height: 58, alignment: .leading)
+
+                                accentShape
+                                    .stroke(resolvedStroke, lineWidth: 0.5)
+                                    .frame(width: accentWidth, height: 58, alignment: .leading)
+                            } else {
+                                fullShape
+                                    .fill(resolvedFill)
+                                    .frame(width: width, height: 58, alignment: .leading)
+
+                                fullShape
                                     .stroke(resolvedStroke, lineWidth: 0.5)
                                     .frame(width: width, height: 58, alignment: .leading)
                             }
+                        }
                     }
                     .allowsHitTesting(false)
                 }
@@ -3422,6 +3442,35 @@ fileprivate struct MonthBarLeadingAccentShape: Shape {
             endAngle: .degrees(270),
             clockwise: false
         )
+        path.closeSubpath()
+        return path
+    }
+}
+fileprivate struct MonthBarTrailingBodyShape: Shape {
+    let cornerRadius: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let radius = min(cornerRadius, rect.width / 2, rect.height / 2)
+
+        path.move(to: CGPoint(x: rect.minX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+        path.addArc(
+            center: CGPoint(x: rect.maxX - radius, y: rect.minY + radius),
+            radius: radius,
+            startAngle: .degrees(270),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY - radius))
+        path.addArc(
+            center: CGPoint(x: rect.maxX - radius, y: rect.maxY - radius),
+            radius: radius,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
         path.closeSubpath()
         return path
     }
