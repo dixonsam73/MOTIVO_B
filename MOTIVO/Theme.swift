@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260417_194800_theme_tint_foundation_a1f4
-// SCOPE: Add stable owner-local instrument tint palette, UserDefaults slot mapping, and card surface overloads without changing existing default visuals.
+// CHANGE-ID: 20260419_190900_theme_primary_anchor_palette_7c2d
+// SCOPE: Refine shared instrument tint palette, reserve coolDeep as exclusive primary-instrument anchor, and slightly strengthen cardMedium tint application. No other UI/logic changes.
 //
 //  Theme.swift
 //  MOTIVO
@@ -11,6 +11,7 @@
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
 import SwiftUI
+import CoreData
 
 #if canImport(UIKit)
 import UIKit
@@ -94,9 +95,9 @@ enum Theme {
         enum Slot: Int, CaseIterable {
             case neutralAnchor = 0
             case coolDeep = 1
-            case warmOrganic = 2
-            case softWarmLight = 3
-            case coolLight = 4
+            case rose = 2
+            case apricot = 3
+            case sage = 4
         }
 
         enum Strength {
@@ -135,6 +136,10 @@ enum Theme {
         ) -> Slot? {
             guard let normalized = normalizedLabel(instrumentLabel) else { return nil }
 
+            if isPrimaryInstrumentLabel(normalized, ownerID: ownerID) {
+                return .coolDeep
+            }
+
             let namespace = namespaceKey(ownerID: ownerID)
             var map = slotMap(ownerID: ownerID)
 
@@ -155,12 +160,17 @@ enum Theme {
             ownerID: String?,
             shouldAssignIfNeeded: Bool = true
         ) -> Slot? {
-            guard let slot = slot(for: instrumentLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+            guard let normalized = normalizedLabel(instrumentLabel) else { return nil }
+            guard let slot = slot(for: normalized, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
                 return nil
             }
-            let map = slotMap(ownerID: ownerID)
-            let distinctCount = Set(map.values).count
+
+            let distinctCount = effectiveVisibleSlotCount(ownerID: ownerID)
             guard distinctCount > 1 else { return .neutralAnchor }
+
+            if isPrimaryInstrumentLabel(normalized, ownerID: ownerID) {
+                return .coolDeep
+            }
             return slot
         }
 
@@ -214,7 +224,7 @@ enum Theme {
         }
 
         static func hasMultipleMappedInstruments(ownerID: String?) -> Bool {
-            Set(slotMap(ownerID: ownerID).values).count > 1
+            effectiveVisibleSlotCount(ownerID: ownerID) > 1
         }
 
         static func debugSlotMap(ownerID: String?) -> [String: Int] {
@@ -233,28 +243,97 @@ enum Theme {
 
         private static func slotMap(ownerID: String?) -> [String: Int] {
             let namespace = namespaceKey(ownerID: ownerID)
-            return UserDefaults.standard.dictionary(forKey: namespace) as? [String: Int] ?? [:]
+            let rawMap = UserDefaults.standard.dictionary(forKey: namespace) as? [String: Int] ?? [:]
+            let primaryLabel = normalizedPrimaryInstrumentLabel(ownerID: ownerID)
+            let sanitized = sanitizedSlotMap(rawMap, primaryLabel: primaryLabel)
+            if sanitized != rawMap {
+                UserDefaults.standard.set(sanitized, forKey: namespace)
+            }
+            return sanitized
+        }
+
+        private static func sanitizedSlotMap(_ rawMap: [String: Int], primaryLabel: String?) -> [String: Int] {
+            let orderedLabels = rawMap.keys.sorted { lhs, rhs in
+                let leftValue = rawMap[lhs] ?? Int.max
+                let rightValue = rawMap[rhs] ?? Int.max
+                if leftValue != rightValue { return leftValue < rightValue }
+                return lhs < rhs
+            }
+
+            var cleaned: [String: Int] = [:]
+            var pending: [String] = []
+            var usedVisibleSlots = Set<Int>()
+
+            for label in orderedLabels {
+                if label == primaryLabel { continue }
+                guard let rawValue = rawMap[label], let slot = Slot(rawValue: rawValue) else { continue }
+
+                switch slot {
+                case .neutralAnchor, .coolDeep:
+                    pending.append(label)
+                case .rose, .apricot, .sage:
+                    if usedVisibleSlots.contains(slot.rawValue) {
+                        pending.append(label)
+                    } else {
+                        cleaned[label] = slot.rawValue
+                        usedVisibleSlots.insert(slot.rawValue)
+                    }
+                }
+            }
+
+            for label in pending {
+                let nextSlot = nextAvailableSlot(from: cleaned)
+                cleaned[label] = nextSlot.rawValue
+            }
+
+            return cleaned
+        }
+
+        private static func normalizedPrimaryInstrumentLabel(ownerID: String?) -> String? {
+            let viewContext = PersistenceController.shared.container.viewContext
+            let request = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+            request.fetchLimit = 1
+
+            do {
+                if let profile = try viewContext.fetch(request).first {
+                    let name = profile.value(forKey: "primaryInstrument") as? String
+                    return normalizedLabel(name)
+                }
+            } catch {
+                return nil
+            }
+
+            return nil
+        }
+
+        private static func isPrimaryInstrumentLabel(_ normalizedLabel: String, ownerID: String?) -> Bool {
+            normalizedLabel == normalizedPrimaryInstrumentLabel(ownerID: ownerID)
+        }
+
+        private static func effectiveVisibleSlotCount(ownerID: String?) -> Int {
+            let mapCount = Set(slotMap(ownerID: ownerID).values).count
+            let primaryCount = normalizedPrimaryInstrumentLabel(ownerID: ownerID) == nil ? 0 : 1
+            return mapCount + primaryCount
         }
 
         private static let visibleAssignmentPriority: [Slot] = [
-            .coolDeep,
-            .warmOrganic,
-            .coolLight,
-            .softWarmLight
+            .rose,
+            .sage,
+            .apricot
         ]
 
         private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
-            let used = Set(map.values)
+            let usedVisibleSlots = visibleAssignmentPriority.filter { usedSlot in
+                Set(map.values).contains(usedSlot.rawValue)
+            }
 
-            for slot in visibleAssignmentPriority where !used.contains(slot.rawValue) {
+            for slot in visibleAssignmentPriority where !usedVisibleSlots.contains(slot) {
                 return slot
             }
 
-            for slot in Slot.allCases where !used.contains(slot.rawValue) {
-                return slot
-            }
-
-            return visibleAssignmentPriority.last ?? .coolLight
+            let usedCount = usedVisibleSlots.count
+            guard !visibleAssignmentPriority.isEmpty else { return .apricot }
+            return visibleAssignmentPriority[usedCount % visibleAssignmentPriority.count]
         }
 
         private static func paletteColor(for slot: Slot, scheme: ColorScheme) -> Color {
@@ -262,21 +341,21 @@ enum Theme {
             case (.neutralAnchor, _):
                 return Theme.Colors.surface(scheme)
             case (.coolDeep, .light):
-                return Color(red: 0.76, green: 0.80, blue: 0.84)
+                return Color(red: 0.70, green: 0.76, blue: 0.82)
             case (.coolDeep, .dark):
-                return Color(red: 0.31, green: 0.36, blue: 0.42)
-            case (.warmOrganic, .light):
-                return Color(red: 0.86, green: 0.82, blue: 0.76)
-            case (.warmOrganic, .dark):
-                return Color(red: 0.40, green: 0.35, blue: 0.30)
-            case (.softWarmLight, .light):
-                return Color(red: 0.90, green: 0.84, blue: 0.85)
-            case (.softWarmLight, .dark):
-                return Color(red: 0.42, green: 0.34, blue: 0.36)
-            case (.coolLight, .light):
-                return Color(red: 0.84, green: 0.87, blue: 0.88)
-            case (.coolLight, .dark):
-                return Color(red: 0.35, green: 0.39, blue: 0.41)
+                return Color(red: 0.31, green: 0.37, blue: 0.43)
+            case (.rose, .light):
+                return Color(red: 0.89, green: 0.81, blue: 0.84)
+            case (.rose, .dark):
+                return Color(red: 0.43, green: 0.34, blue: 0.38)
+            case (.apricot, .light):
+                return Color(red: 0.90, green: 0.82, blue: 0.75)
+            case (.apricot, .dark):
+                return Color(red: 0.45, green: 0.36, blue: 0.30)
+            case (.sage, .light):
+                return Color(red: 0.79, green: 0.85, blue: 0.80)
+            case (.sage, .dark):
+                return Color(red: 0.33, green: 0.40, blue: 0.35)
             }
         }
 
@@ -285,8 +364,8 @@ enum Theme {
             switch (strength, scheme) {
             case (.pickerStrong, .light): return 0.42
             case (.pickerStrong, .dark): return 0.34
-            case (.cardMedium, .light): return 0.26
-            case (.cardMedium, .dark): return 0.22
+            case (.cardMedium, .light): return 0.32
+            case (.cardMedium, .dark): return 0.24
             case (.cardMediumLight, .light): return 0.20
             case (.cardMediumLight, .dark): return 0.18
             case (.cardLight, .light): return 0.14
@@ -300,8 +379,8 @@ enum Theme {
             switch (strength, scheme) {
             case (.pickerStrong, .light): return 0.28
             case (.pickerStrong, .dark): return 0.24
-            case (.cardMedium, .light): return 0.18
-            case (.cardMedium, .dark): return 0.16
+            case (.cardMedium, .light): return 0.22
+            case (.cardMedium, .dark): return 0.18
             case (.cardMediumLight, .light): return 0.14
             case (.cardMediumLight, .dark): return 0.13
             case (.cardLight, .light): return 0.10
