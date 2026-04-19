@@ -256,10 +256,27 @@ ToolbarItem(placement: .cancellationAction) {
         }
 
         let loadedProfile = loadProfileOnly()
+        let availableNames = instrumentsForProfileNames()
         let persisted = (loadedProfile?.primaryInstrument ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        primaryInstrumentName = persisted.isEmpty
-            ? (instrumentsForProfileNames().first ?? "")
-            : persisted
+
+        let resolvedPrimary = {
+            guard !availableNames.isEmpty else { return "" }
+            guard !persisted.isEmpty else { return availableNames.first ?? "" }
+            return availableNames.contains(persisted) ? persisted : (availableNames.first ?? "")
+        }()
+
+        primaryInstrumentName = resolvedPrimary
+
+        guard let loadedProfile else { return }
+        guard loadedProfile.primaryInstrument != resolvedPrimary else { return }
+
+        loadedProfile.primaryInstrument = resolvedPrimary
+        do {
+            try moc.save()
+        } catch {
+            moc.rollback()
+            print("Instrument primary repair save failed: \(error)")
+        }
     }
 
     private func instrumentsForProfileNames() -> [String] {
