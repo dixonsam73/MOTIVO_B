@@ -365,6 +365,61 @@ struct PostRecordDetailsView: View {
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
+    private var effectiveInstrumentTintLabel: String? {
+        if let selectedName = instrument?.name,
+           let normalized = Theme.InstrumentTint.normalizedLabel(selectedName) {
+            return normalized
+        }
+
+        if hasMultipleInstruments,
+           let normalized = Theme.InstrumentTint.normalizedLabel(instrument?.name) {
+            return normalized
+        }
+
+        if let onlyName = instruments.first?.name,
+           let normalized = Theme.InstrumentTint.normalizedLabel(onlyName) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private var tintOwnerID: String? {
+        #if DEBUG
+        if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !override.isEmpty {
+            return override
+        }
+        #endif
+
+        if let persistenceID = PersistenceController.shared.currentUserID?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           !persistenceID.isEmpty {
+            return persistenceID
+        }
+
+        return nil
+    }
+
+    private var instrumentCardFillColor: Color {
+        Theme.InstrumentTint.surfaceFill(
+            for: effectiveInstrumentTintLabel,
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var instrumentCardStrokeColor: Color {
+        Theme.InstrumentTint.cardStroke(
+            for: effectiveInstrumentTintLabel,
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -401,7 +456,7 @@ struct PostRecordDetailsView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                        .cardSurface()
+                        .cardSurface(fillColor: instrumentCardFillColor, strokeColor: instrumentCardStrokeColor)
                     }
                     // Silent if exactly one instrument
 
