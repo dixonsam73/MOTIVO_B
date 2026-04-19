@@ -2626,7 +2626,9 @@ fileprivate struct SessionsRootView: View {
             let widthFraction: CGFloat = totalSeconds > 0 ? min(max(rawWidthFraction, 0.08), 1.0) : 0.0
 
             let rawDensityFraction = CGFloat(sessionCount) / CGFloat(maxSessionCount)
-            let densityFraction: CGFloat = sessionCount > 0 ? min(max(rawDensityFraction, 0.24), 1.0) : 0.0
+            let densityFraction: CGFloat = sessionCount > 0
+                ? min(rawDensityFraction, 1.0)
+                : 0.0
 
             return JournalYearMonthRowModel(
                 id: "calendar-year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
@@ -3244,8 +3246,9 @@ fileprivate struct JournalYearMonthRow: View {
 
     private var activeBarFill: Color {
         let baseOpacity: Double = colorScheme == .dark ? 0.105 : 0.03
-        let densityLift: Double = colorScheme == .dark ? 0.045 : 0.055
-        return Color.primary.opacity(baseOpacity + densityLift * Double(row.densityFraction))
+        let densityLift: Double = colorScheme == .dark ? 0.075 : 0.095
+        let adjustedDensity = pow(Double(row.densityFraction), 0.6)
+        return Color.primary.opacity(baseOpacity + densityLift * adjustedDensity)
     }
 
     private var activeBarStroke: Color {
