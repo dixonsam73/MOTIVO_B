@@ -98,6 +98,7 @@ enum Theme {
             case rose = 2
             case apricot = 3
             case sage = 4
+            case lavender = 5
         }
 
         enum Strength {
@@ -271,7 +272,7 @@ enum Theme {
                 switch slot {
                 case .neutralAnchor, .coolDeep:
                     pending.append(label)
-                case .rose, .apricot, .sage:
+                case .rose, .apricot, .sage, .lavender:
                     if usedVisibleSlots.contains(slot.rawValue) {
                         pending.append(label)
                     } else {
@@ -319,7 +320,8 @@ enum Theme {
         private static let visibleAssignmentPriority: [Slot] = [
             .rose,
             .sage,
-            .apricot
+            .apricot,
+            .lavender
         ]
 
         private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
@@ -332,7 +334,7 @@ enum Theme {
             }
 
             let usedCount = usedVisibleSlots.count
-            guard !visibleAssignmentPriority.isEmpty else { return .apricot }
+            guard !visibleAssignmentPriority.isEmpty else { return .lavender }
             return visibleAssignmentPriority[usedCount % visibleAssignmentPriority.count]
         }
 
@@ -356,6 +358,10 @@ enum Theme {
                 return Color(red: 0.79, green: 0.85, blue: 0.80)
             case (.sage, .dark):
                 return Color(red: 0.33, green: 0.40, blue: 0.35)
+            case (.lavender, .light):
+                return Color(red: 0.84, green: 0.81, blue: 0.88)
+            case (.lavender, .dark):
+                return Color(red: 0.38, green: 0.34, blue: 0.43)
             }
         }
 
