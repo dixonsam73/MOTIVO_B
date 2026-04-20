@@ -926,9 +926,11 @@ fileprivate struct SessionsRootView: View {
                                                             frozenFeedItems = renderFeedItems
                                                             pushSessionID = (session.value(forKey: "id") as? UUID)
                                                         }
-                                                        .cardSurface(
-                                                            fillColor: journalWeekCardFillColor(for: session),
-                                                            strokeColor: journalWeekCardStrokeColor(for: session)
+                                                        .modifier(
+                                                            JournalWeekLeadingTintCardModifier(
+                                                                tintColor: journalMonthBarAccentColor(for: session) ?? journalWeekCardFillColor(for: session),
+                                                                strokeColor: journalWeekCardStrokeColor(for: session)
+                                                            )
                                                         )
                                                         .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
                                                 }
@@ -3561,6 +3563,42 @@ fileprivate struct MonthBarTrailingBodyShape: Shape {
         return path
     }
 }
+
+fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
+    let tintColor: Color
+    let strokeColor: Color?
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(content: Content) -> some View {
+        let cardShape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
+        let resolvedStroke = strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        let leaderWidth: CGFloat = 22
+        let contentLeadingInset = Theme.Spacing.card + leaderWidth - 2
+
+        return content
+            .padding(.top, Theme.Spacing.card)
+            .padding(.trailing, Theme.Spacing.card)
+            .padding(.bottom, Theme.Spacing.card)
+            .padding(.leading, contentLeadingInset)
+            .background {
+                ZStack(alignment: .leading) {
+                    cardShape
+                        .fill(Theme.Colors.surface(colorScheme))
+
+                    MonthBarLeadingAccentShape(cornerRadius: Theme.Radius.card)
+                        .fill(tintColor.opacity(0.8))
+                        .frame(width: leaderWidth)
+                }
+            }
+            .clipShape(cardShape)
+            .overlay(
+                cardShape
+                    .stroke(resolvedStroke, lineWidth: 1)
+            )
+    }
+}
+
 
 fileprivate struct SessionRow: View {
     fileprivate enum JournalStyle {
