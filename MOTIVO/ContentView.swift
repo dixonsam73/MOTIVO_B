@@ -827,7 +827,13 @@ fileprivate struct SessionsRootView: View {
                             ContentViewKeyboardDismiss.dismiss()
                             #endif
                             withAnimation {
-                                proxy.scrollTo(topID, anchor: .top)
+                                if selectedScope == .mine,
+                                   selectedJournalLens == .month,
+                                   let firstMonthSection = journalYearSections(sessions: journalArchiveSessions).first {
+                                    proxy.scrollTo(journalMonthSectionAnchorID(for: firstMonthSection), anchor: .top)
+                                } else {
+                                    proxy.scrollTo(topID, anchor: .top)
+                                }
                             }
                         }
 
