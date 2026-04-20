@@ -138,7 +138,6 @@ struct FilterBar: View {
     let threadOptions: [String]
     let ensembles: [Ensemble]
 
-    @State private var showThreadPicker: Bool = false
 
     private var sortedEnsembles: [Ensemble] {
         ensembles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
@@ -249,17 +248,32 @@ struct FilterBar: View {
                     .padding(.horizontal, Theme.Spacing.card)
 
                 FilterCardRow(label: "Thread") {
-                    Button {
-                        #if canImport(UIKit)
-                        ContentViewKeyboardDismiss.dismiss()
-                        #endif
-                        showThreadPicker = true
+                    Menu {
+                        Button("Any") {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                            selectedThread = nil
+                        }
+                        ForEach(threadOptions, id: \.self) { thread in
+                            Button(thread) {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                                selectedThread = thread
+                            }
+                        }
                     } label: {
                         FilterSelectorValueControl(valueText: selectedThread ?? "Any")
                     }
-                    .buttonStyle(.plain)
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
                     .modifier(FilterSelectorTrailingControlStyle())
-                    .contentShape(Rectangle())
                 }
 
                 FilterCardDivider()
@@ -317,14 +331,6 @@ struct FilterBar: View {
                 #if canImport(UIKit)
                 ContentViewKeyboardDismiss.dismiss()
                 #endif
-            }
-            .sheet(isPresented: $showThreadPicker) {
-                ThreadPickerView(
-                    selectedThread: $selectedThread,
-                    title: "Thread",
-                    recentThreads: threadOptions,
-                    maxLength: 32
-                )
             }
         }
     }
