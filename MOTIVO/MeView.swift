@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260421_181500_meview_chart_palette_ranked
+// SCOPE: Replace MeView time-distribution chart segment and legend colors with a MeView-local analytical rank-based palette. No layout, logic, Theme, ContentView, or Journal tint changes.
+// SEARCH-TOKEN: 20260421_181500_meview_chart_palette_ranked
+
 // CHANGE-ID: 20260318_193200_meview_owner_scoped_local_analytics
 // SCOPE: Owner-scope MeView local analytics to the current local user ID while preserving backend fallback when no owner-local sessions exist. No UI/layout changes.
 
@@ -41,8 +45,8 @@ private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
     }
     guard !totals.isEmpty else { return [] }
     let sorted = totals.sorted { $0.value > $1.value }
-    let head = Array(sorted.prefix(4))
-    let tail = sorted.dropFirst(4)
+    let head = Array(sorted.prefix(6))
+    let tail = sorted.dropFirst(6)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -72,8 +76,8 @@ private func threadAnalytics(from sessions: [Session]) -> ThreadAnalyticsResult 
     let sorted = totals.sorted { $0.value > $1.value }
     let uniqueCount = totals.count
 
-    let head = Array(sorted.prefix(4))
-    let tail = sorted.dropFirst(4)
+    let head = Array(sorted.prefix(6))
+    let tail = sorted.dropFirst(6)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     let slices = otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -529,8 +533,8 @@ struct MeView: View {
     private func distributionSlices(from totals: [String: Int]) -> [ActivitySlice] {
         guard !totals.isEmpty else { return [] }
         let sorted = totals.sorted { $0.value > $1.value }
-        let head = Array(sorted.prefix(4))
-        let tail = sorted.dropFirst(4)
+        let head = Array(sorted.prefix(6))
+        let tail = sorted.dropFirst(6)
         let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
         let otherTotal = tail.reduce(0) { $0 + $1.value }
         return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -1007,12 +1011,30 @@ fileprivate struct TimeDistributionCard: View {
     }
 
 
-    // rank-based shades (index 0 = biggest slice)
-    private let opacities: [Double] = [1.00, 0.62, 0.36, 0.18, 0.08]
+    private static let meViewChartPalette: [Color] = [
+        Color(red: 58.0 / 255.0, green: 111.0 / 255.0, blue: 163.0 / 255.0),   // Blue
+        Color(red: 58.0 / 255.0, green: 181.0 / 255.0, blue: 132.0 / 255.0),   // Green
+        Color(red: 245.0 / 255.0, green: 156.0 / 255.0, blue: 28.0 / 255.0),   // Orange
+        Color(red: 164.0 / 255.0, green: 91.0 / 255.0, blue: 214.0 / 255.0),   // Purple
+        Color(red: 1.0, green: 107.0 / 255.0, blue: 87.0 / 255.0),             // Red            
+        Color(red: 1.0, green: 214.0 / 255.0, blue: 10.0 / 255.0),             // Yellow
+        Color(red: 1.0, green: 95.0 / 255.0, blue: 162.0 / 255.0)              // Pink
+    ]
 
-    private func opacityForIndex(_ i: Int) -> Double {
-        guard i < opacities.count else { return opacities.last ?? 0.12 }
-        return opacities[i]
+    private static let meViewChartFallback = Color(
+        red: 199.0 / 255.0,
+        green: 199.0 / 255.0,
+        blue: 204.0 / 255.0
+    ) // Grey fallback
+
+    private func chartColor(for slice: ActivitySlice, index: Int) -> Color {
+        if slice.name == "Other" {
+            return Self.meViewChartFallback
+        }
+        guard index < Self.meViewChartPalette.count else {
+            return Self.meViewChartFallback
+        }
+        return Self.meViewChartPalette[index]
     }
 
     private func percent(_ part: Int, of total: Int) -> Int {
@@ -1040,8 +1062,7 @@ fileprivate struct TimeDistributionCard: View {
                             ForEach(0..<slices.count, id: \.self) { i in
                                 let w = CGFloat(slices[i].seconds) / CGFloat(max(total, 1)) * geo.size.width
                                 Rectangle()
-                                    .foregroundStyle(.primary)     // system adaptive
-                                    .opacity(opacityForIndex(i))    // rank shade
+                                    .foregroundStyle(chartColor(for: slices[i], index: i))
                                     .frame(width: max(1, w), height: 12) // ensure visible slivers
                             }
                         }
@@ -1058,8 +1079,7 @@ fileprivate struct TimeDistributionCard: View {
                             HStack(spacing: 8) {
                                 Circle()
                                     .frame(width: 8, height: 8)
-                                    .foregroundStyle(.primary)
-                                    .opacity(opacityForIndex(i))
+                                    .foregroundStyle(chartColor(for: slices[i], index: i))
                                 Text(slices[i].name)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
