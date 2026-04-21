@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260419_190900_theme_primary_anchor_palette_7c2d
-// SCOPE: Refine shared instrument tint palette, reserve coolDeep as exclusive primary-instrument anchor, and slightly strengthen cardMedium tint application. No other UI/logic changes.
+// CHANGE-ID: 20260421_181500_theme_tint_mode_foundation_9f41
+// SCOPE: Add shared local tint-mode foundation (Auto / Instrument / Activity / Off), core activity tint mapping, shared custom activity tint, and resolved tint API. No view wiring yet. No visual changes to existing instrument tint behaviour.
 //
 //  Theme.swift
 //  MOTIVO
@@ -89,6 +89,161 @@ enum Theme {
         static var body: Font { .subheadline }
         // Meta text (uses secondary color via modifier; font size only here)
         static var meta: Font { .footnote }
+    }
+
+    enum TintMode: String, CaseIterable, Identifiable {
+        case auto
+        case instrument
+        case activity
+        case off
+
+        var id: String { rawValue }
+
+        var displayName: String {
+            switch self {
+            case .auto: return "Auto"
+            case .instrument: return "Instrument"
+            case .activity: return "Activity"
+            case .off: return "Off"
+            }
+        }
+    }
+
+    enum ResolvedTintSource {
+        case instrument
+        case activity
+        case off
+    }
+
+    struct ResolvedTint {
+        let source: ResolvedTintSource
+        let instrumentLabel: String?
+        let activityLabel: String?
+
+        var isDormant: Bool {
+            source == .off
+        }
+
+        func fill(
+            ownerID: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color {
+            switch source {
+            case .instrument:
+                return InstrumentTint.surfaceFill(
+                    for: instrumentLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    strength: strength,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                )
+            case .activity:
+                return ActivityTint.surfaceFill(
+                    for: activityLabel,
+                    scheme: scheme,
+                    strength: strength
+                )
+            case .off:
+                return Colors.surface(scheme)
+            }
+        }
+
+        func stroke(
+            ownerID: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color {
+            switch source {
+            case .instrument:
+                return InstrumentTint.cardStroke(
+                    for: instrumentLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    strength: strength,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                )
+            case .activity:
+                return ActivityTint.cardStroke(
+                    for: activityLabel,
+                    scheme: scheme,
+                    strength: strength
+                )
+            case .off:
+                return Colors.cardStroke(scheme)
+            }
+        }
+
+        func accent(
+            ownerID: String?,
+            scheme: ColorScheme,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color? {
+            switch source {
+            case .instrument:
+                return InstrumentTint.visibleAccentColor(
+                    for: instrumentLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                )
+            case .activity:
+                return ActivityTint.visibleAccentColor(
+                    for: activityLabel,
+                    scheme: scheme
+                )
+            case .off:
+                return nil
+            }
+        }
+    }
+
+    static func resolvedTintSource(
+        tintMode: TintMode,
+        activeInstrumentCount: Int,
+        activeActivityCount: Int
+    ) -> ResolvedTintSource {
+        switch tintMode {
+        case .off:
+            return .off
+
+        case .auto:
+            if activeInstrumentCount > 1 {
+                return .instrument
+            }
+            if activeInstrumentCount == 1 && activeActivityCount > 1 {
+                return .activity
+            }
+            return .off
+
+        case .instrument:
+            return activeInstrumentCount > 1 ? .instrument : .off
+
+        case .activity:
+            return activeActivityCount > 1 ? .activity : .off
+        }
+    }
+
+    static func resolvedTint(
+        instrument: String?,
+        activity: String?,
+        tintMode: TintMode,
+        activeInstrumentCount: Int,
+        activeActivityCount: Int
+    ) -> ResolvedTint {
+        let source = resolvedTintSource(
+            tintMode: tintMode,
+            activeInstrumentCount: activeInstrumentCount,
+            activeActivityCount: activeActivityCount
+        )
+
+        return ResolvedTint(
+            source: source,
+            instrumentLabel: instrument,
+            activityLabel: activity
+        )
     }
 
     enum InstrumentTint {
@@ -382,6 +537,226 @@ enum Theme {
         }
 
         private static func strokeBlendAmount(for strength: Strength, scheme: ColorScheme) -> CGFloat {
+            switch (strength, scheme) {
+            case (.pickerStrong, .light): return 0.28
+            case (.pickerStrong, .dark): return 0.24
+            case (.cardMedium, .light): return 0.22
+            case (.cardMedium, .dark): return 0.18
+            case (.cardMediumLight, .light): return 0.14
+            case (.cardMediumLight, .dark): return 0.13
+            case (.cardLight, .light): return 0.10
+            case (.cardLight, .dark): return 0.10
+            case (.monthBar, .light): return 0.16
+            case (.monthBar, .dark): return 0.14
+            }
+        }
+
+        private static func blendedSurface(base: Color, overlay: Color, amount: CGFloat) -> Color {
+            guard amount > 0 else { return base }
+
+            #if canImport(UIKit)
+            let baseUIColor = UIColor(base)
+            let overlayUIColor = UIColor(overlay)
+            return Color(uiColor: mix(base: baseUIColor, overlay: overlayUIColor, amount: amount))
+            #elseif canImport(AppKit)
+            let baseNSColor = NSColor(base)
+            let overlayNSColor = NSColor(overlay)
+            return Color(mix(base: baseNSColor, overlay: overlayNSColor, amount: amount))
+            #else
+            return overlay.opacity(amount)
+            #endif
+        }
+
+        #if canImport(UIKit)
+        private static func mix(base: UIColor, overlay: UIColor, amount: CGFloat) -> UIColor {
+            let clamped = max(0, min(1, amount))
+            var baseR: CGFloat = 0
+            var baseG: CGFloat = 0
+            var baseB: CGFloat = 0
+            var baseA: CGFloat = 0
+            var overlayR: CGFloat = 0
+            var overlayG: CGFloat = 0
+            var overlayB: CGFloat = 0
+            var overlayA: CGFloat = 0
+
+            guard base.getRed(&baseR, green: &baseG, blue: &baseB, alpha: &baseA),
+                  overlay.getRed(&overlayR, green: &overlayG, blue: &overlayB, alpha: &overlayA) else {
+                return base
+            }
+
+            return UIColor(
+                red: baseR + (overlayR - baseR) * clamped,
+                green: baseG + (overlayG - baseG) * clamped,
+                blue: baseB + (overlayB - baseB) * clamped,
+                alpha: baseA + (overlayA - baseA) * clamped
+            )
+        }
+        #endif
+
+        #if canImport(AppKit)
+        private static func mix(base: NSColor, overlay: NSColor, amount: CGFloat) -> NSColor {
+            let clamped = max(0, min(1, amount))
+            guard let baseRGB = base.usingColorSpace(.deviceRGB),
+                  let overlayRGB = overlay.usingColorSpace(.deviceRGB) else {
+                return base
+            }
+
+            return NSColor(
+                red: baseRGB.redComponent + (overlayRGB.redComponent - baseRGB.redComponent) * clamped,
+                green: baseRGB.greenComponent + (overlayRGB.greenComponent - baseRGB.greenComponent) * clamped,
+                blue: baseRGB.blueComponent + (overlayRGB.blueComponent - baseRGB.blueComponent) * clamped,
+                alpha: baseRGB.alphaComponent + (overlayRGB.alphaComponent - baseRGB.alphaComponent) * clamped
+            )
+        }
+        #endif
+    }
+
+    enum ActivityTint {
+        enum Slot {
+            case practice
+            case rehearsal
+            case lesson
+            case performance
+            case recording
+            case custom
+        }
+
+        private static let aliasMap: [String: String] = [
+            "practise": "practice",
+            "record": "recording",
+            "recorded": "recording",
+            "performance prep": "performance",
+            "rehearse": "rehearsal",
+            "lesson / coaching": "lesson",
+            "coaching": "lesson"
+        ]
+
+        static func normalizedLabel(_ label: String?) -> String? {
+            guard let label else { return nil }
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            let folded = trimmed
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .lowercased()
+
+            if let alias = aliasMap[folded] {
+                return alias
+            }
+            return folded
+        }
+
+        static func slot(for activityLabel: String?) -> Slot? {
+            guard let normalized = normalizedLabel(activityLabel) else { return nil }
+
+            switch normalized {
+            case "practice":
+                return .practice
+            case "rehearsal":
+                return .rehearsal
+            case "lesson":
+                return .lesson
+            case "performance":
+                return .performance
+            case "recording":
+                return .recording
+            default:
+                return .custom
+            }
+        }
+
+        static func surfaceFill(
+            for activityLabel: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength
+        ) -> Color {
+            let base = Theme.Colors.surface(scheme)
+            guard let slot = slot(for: activityLabel) else {
+                return base
+            }
+
+            return blendedSurface(
+                base: base,
+                overlay: paletteColor(for: slot, scheme: scheme),
+                amount: blendAmount(for: strength, scheme: scheme)
+            )
+        }
+
+        static func cardStroke(
+            for activityLabel: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength
+        ) -> Color {
+            let baseStroke = Theme.Colors.cardStroke(scheme)
+            guard let slot = slot(for: activityLabel) else {
+                return baseStroke
+            }
+
+            return blendedSurface(
+                base: baseStroke,
+                overlay: paletteColor(for: slot, scheme: scheme),
+                amount: strokeBlendAmount(for: strength, scheme: scheme)
+            )
+        }
+
+        static func visibleAccentColor(
+            for activityLabel: String?,
+            scheme: ColorScheme
+        ) -> Color? {
+            guard let slot = slot(for: activityLabel) else { return nil }
+            return paletteColor(for: slot, scheme: scheme)
+        }
+
+        private static func paletteColor(for slot: Slot, scheme: ColorScheme) -> Color {
+            switch (slot, scheme) {
+            case (.practice, .light):
+                return Color(red: 0.70, green: 0.76, blue: 0.82)   // coolDeep family
+            case (.practice, .dark):
+                return Color(red: 0.31, green: 0.37, blue: 0.43)
+
+            case (.rehearsal, .light):
+                return Color(red: 0.79, green: 0.85, blue: 0.80)   // sage family
+            case (.rehearsal, .dark):
+                return Color(red: 0.33, green: 0.40, blue: 0.35)
+
+            case (.lesson, .light):
+                return Color(red: 0.89, green: 0.81, blue: 0.84)   // rose family
+            case (.lesson, .dark):
+                return Color(red: 0.43, green: 0.34, blue: 0.38)
+
+            case (.performance, .light):
+                return Color(red: 0.90, green: 0.82, blue: 0.75)   // apricot family
+            case (.performance, .dark):
+                return Color(red: 0.45, green: 0.36, blue: 0.30)
+
+            case (.recording, .light):
+                return Color(red: 0.84, green: 0.81, blue: 0.88)   // lavender family
+            case (.recording, .dark):
+                return Color(red: 0.38, green: 0.34, blue: 0.43)
+
+            case (.custom, .light):
+                return Color(red: 0.80, green: 0.84, blue: 0.88)   // dedicated shared custom tint
+            case (.custom, .dark):
+                return Color(red: 0.34, green: 0.39, blue: 0.44)
+            }
+        }
+
+        private static func blendAmount(for strength: InstrumentTint.Strength, scheme: ColorScheme) -> CGFloat {
+            switch (strength, scheme) {
+            case (.pickerStrong, .light): return 0.42
+            case (.pickerStrong, .dark): return 0.34
+            case (.cardMedium, .light): return 0.32
+            case (.cardMedium, .dark): return 0.24
+            case (.cardMediumLight, .light): return 0.20
+            case (.cardMediumLight, .dark): return 0.18
+            case (.cardLight, .light): return 0.14
+            case (.cardLight, .dark): return 0.14
+            case (.monthBar, .light): return 0.24
+            case (.monthBar, .dark): return 0.20
+            }
+        }
+
+        private static func strokeBlendAmount(for strength: InstrumentTint.Strength, scheme: ColorScheme) -> CGFloat {
             switch (strength, scheme) {
             case (.pickerStrong, .light): return 0.28
             case (.pickerStrong, .dark): return 0.24

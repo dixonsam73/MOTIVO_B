@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260420_182400_ContentView_JournalYearMonthRowExtractionSafetyPass2_b61f
-// SCOPE: Extract JournalYearMonthRow into a separate file with no rendering, layout, spacing, navigation, data-flow, or behavior changes. Keep parent list composition, anchors, tap routing, and derived-data builders in ContentView.
-// SEARCH-TOKEN: 20260420_182400_ContentView_JournalYearMonthRowExtractionSafetyPass2_b61f
+// CHANGE-ID: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
+// SCOPE: Journal Year month-row tint source wiring only — preserve identical layout, spacing, typography, navigation, and behavior while switching leader tint from instrument-only to the shared resolved source passed from ContentView.
+// SEARCH-TOKEN: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
 
 import SwiftUI
 
@@ -57,12 +57,22 @@ struct JournalYearMonthRow: View {
     }
 
     private var leaderColor: Color? {
-        Theme.InstrumentTint.visibleAccentColor(
-            for: row.dominantInstrumentLabel,
-            ownerID: row.ownerUserID,
-            scheme: colorScheme,
-            shouldAssignIfNeeded: false
-        )
+        switch row.tintSource {
+        case .instrument:
+            return Theme.InstrumentTint.visibleAccentColor(
+                for: row.dominantInstrumentLabel,
+                ownerID: row.ownerUserID,
+                scheme: colorScheme,
+                shouldAssignIfNeeded: false
+            )
+        case .activity:
+            return Theme.ActivityTint.visibleAccentColor(
+                for: row.dominantActivityLabel,
+                scheme: colorScheme
+            )
+        case .off:
+            return nil
+        }
     }
 
     private var barHeight: CGFloat {

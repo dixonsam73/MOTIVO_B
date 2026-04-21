@@ -98,6 +98,7 @@ private struct PersistedTaskLine_PRDV_Stage1: Decodable {
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
+    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
 
     private var existingThreadOptions: [String] {
         let request: NSFetchRequest<Session> = Session.fetchRequest()
@@ -365,6 +366,10 @@ struct PostRecordDetailsView: View {
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
+    private var prdvTintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
+    }
+
     private var effectiveInstrumentTintLabel: String? {
         if let selectedName = instrument?.name,
            let normalized = Theme.InstrumentTint.normalizedLabel(selectedName) {
@@ -382,6 +387,25 @@ struct PostRecordDetailsView: View {
         }
 
         return nil
+    }
+
+    private var effectiveActivityTintLabel: String? {
+        let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let display = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+        return Theme.ActivityTint.normalizedLabel(display)
+    }
+
+    private var activeInstrumentCount: Int {
+        let distinct = Set(
+            instruments.compactMap { instrument in
+                Theme.InstrumentTint.normalizedLabel(instrument.name)
+            }
+        )
+        return distinct.count
+    }
+
+    private var activeActivityCount: Int {
+        effectiveActivityTintLabel == nil ? 0 : 1
     }
 
     private var tintOwnerID: String? {
@@ -402,9 +426,18 @@ struct PostRecordDetailsView: View {
         return nil
     }
 
+    private var resolvedTint: Theme.ResolvedTint {
+        Theme.resolvedTint(
+            instrument: effectiveInstrumentTintLabel,
+            activity: effectiveActivityTintLabel,
+            tintMode: prdvTintMode,
+            activeInstrumentCount: activeInstrumentCount,
+            activeActivityCount: activeActivityCount
+        )
+    }
+
     private var instrumentCardFillColor: Color {
-        Theme.InstrumentTint.surfaceFill(
-            for: effectiveInstrumentTintLabel,
+        resolvedTint.fill(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -412,8 +445,7 @@ struct PostRecordDetailsView: View {
     }
 
     private var instrumentCardStrokeColor: Color {
-        Theme.InstrumentTint.cardStroke(
-            for: effectiveInstrumentTintLabel,
+        resolvedTint.stroke(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium

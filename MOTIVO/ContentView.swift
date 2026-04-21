@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260420_182400_ContentView_JournalYearMonthRowExtractionSafetyPass2_b61f
-// SCOPE: ContentView only — extract JournalYearMonthRow into a separate file; keep identical UI, layout, spacing, typography, behavior, filtering, navigation, row actions, scrolling, anchors, and rendering output.
-// SEARCH-TOKEN: 20260420_182400_ContentView_JournalYearMonthRowExtractionSafetyPass2_b61f
+// CHANGE-ID: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
+// SCOPE: Journal tint resolver wiring only — owner-local Journal Week/Month/Year now resolve tint source through Theme.resolvedTint / resolvedTintSource, aligned with extracted Year month row file. No feed, layout, routing, spacing, or behavior changes.
+// SEARCH-TOKEN: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
 
 // CHANGE-ID: 20260420_165900_ContentView_FilterBarExtractionSafetyPass1_7f2a
 // SCOPE: ContentView only — extract the filter-card rendering cluster into a separate file with no behavior, spacing, navigation, data-flow, or visual changes. Keep all list, anchor, Journal, Feed, and row rendering logic in ContentView.
@@ -405,7 +405,9 @@ struct JournalYearMonthRowModel: Identifiable {
     let sessionCount: Int
     let metadataText: String?
     let dominantInstrumentLabel: String?
+    let dominantActivityLabel: String?
     let ownerUserID: String?
+    let tintSource: Theme.ResolvedTintSource
     let widthFraction: CGFloat
     let densityFraction: CGFloat
     let isFutureMonth: Bool
@@ -423,6 +425,7 @@ fileprivate struct SessionsRootView: View {
 
     @State private var showPublishSkipOversizeAlert = false
     @State private var publishSkipOversizeMessage = ""
+    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
 
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
@@ -961,8 +964,8 @@ fileprivate struct SessionsRootView: View {
                                                         }
                                                         .modifier(
                                                             JournalWeekLeadingTintCardModifier(
-                                                                tintColor: journalMonthBarAccentColor(for: session) ?? journalWeekCardFillColor(for: session),
-                                                                strokeColor: journalWeekCardStrokeColor(for: session)
+                                                                tintColor: journalMonthBarAccentColor(for: session, in: journalArchiveSessions) ?? journalWeekCardFillColor(for: session, in: journalArchiveSessions),
+                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalArchiveSessions)
                                                             )
                                                         )
                                                         .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
@@ -1050,9 +1053,9 @@ fileprivate struct SessionsRootView: View {
                                                         JournalArchiveRowContainerModifier(
                                                             lens: usesYearArchivePresentation ? .year : selectedJournalLens,
                                                             yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
-                                                            barFillColor: journalMonthBarFillColor(for: session),
-                                                            barStrokeColor: journalMonthBarStrokeColor(for: session),
-                                                            barAccentColor: journalMonthBarAccentColor(for: session),
+                                                            barFillColor: journalMonthBarFillColor(for: session, in: journalArchiveSessions),
+                                                            barStrokeColor: journalMonthBarStrokeColor(for: session, in: journalArchiveSessions),
+                                                            barAccentColor: journalMonthBarAccentColor(for: session, in: journalArchiveSessions),
                                                             barAccentWidth: 6
                                                         )
                                                     )
@@ -1921,6 +1924,10 @@ fileprivate struct SessionsRootView: View {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
+    private var journalTintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
+    }
+
     private func journalInstrumentLabel(for session: Session) -> String? {
         let explicitLabel = (session.value(forKey: "userInstrumentLabel") as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1937,6 +1944,21 @@ fileprivate struct SessionsRootView: View {
         return nil
     }
 
+    private func journalActivityLabel(for session: Session) -> String? {
+        let explicitLabel = (session.value(forKey: "userActivityLabel") as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let explicitLabel, !explicitLabel.isEmpty {
+            return explicitLabel
+        }
+
+        if let code = session.value(forKey: "activityType") as? Int16 {
+            let fallbackLabel = from(code).label.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fallbackLabel.isEmpty ? nil : fallbackLabel
+        }
+
+        return nil
+    }
+
     private func journalInstrumentOwnerID(for session: Session) -> String? {
         let ownerID = session.ownerUserID?
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1946,37 +1968,75 @@ fileprivate struct SessionsRootView: View {
         return effectiveUserID
     }
 
-    private func journalWeekCardFillColor(for session: Session) -> Color {
-        Theme.InstrumentTint.surfaceFill(
-            for: journalInstrumentLabel(for: session),
+    private func journalActiveInstrumentCount(in sessions: [Session]) -> Int {
+        Set(sessions.compactMap { Theme.InstrumentTint.normalizedLabel(journalInstrumentLabel(for: $0)) }).count
+    }
+
+    private func journalActiveActivityCount(in sessions: [Session]) -> Int {
+        Set(sessions.compactMap { Theme.ActivityTint.normalizedLabel(journalActivityLabel(for: $0)) }).count
+    }
+
+    private func journalResolvedTintSource(in sessions: [Session]) -> Theme.ResolvedTintSource {
+        Theme.resolvedTintSource(
+            tintMode: journalTintMode,
+            activeInstrumentCount: journalActiveInstrumentCount(in: sessions),
+            activeActivityCount: journalActiveActivityCount(in: sessions)
+        )
+    }
+
+    private func journalResolvedTint(for session: Session, in sessions: [Session]) -> Theme.ResolvedTint {
+        Theme.resolvedTint(
+            instrument: journalInstrumentLabel(for: session),
+            activity: journalActivityLabel(for: session),
+            tintMode: journalTintMode,
+            activeInstrumentCount: journalActiveInstrumentCount(in: sessions),
+            activeActivityCount: journalActiveActivityCount(in: sessions)
+        )
+    }
+
+    private func journalWeekCardFillColor(for session: Session, in sessions: [Session]) -> Color {
+        journalResolvedTint(for: session, in: sessions).fill(
             ownerID: journalInstrumentOwnerID(for: session),
             scheme: colorScheme,
             strength: .cardMedium
         )
     }
 
-    private func journalWeekCardStrokeColor(for session: Session) -> Color {
-        Theme.InstrumentTint.cardStroke(
-            for: journalInstrumentLabel(for: session),
+    private func journalWeekCardStrokeColor(for session: Session, in sessions: [Session]) -> Color {
+        journalResolvedTint(for: session, in: sessions).stroke(
             ownerID: journalInstrumentOwnerID(for: session),
             scheme: colorScheme,
             strength: .cardMedium
         )
     }
 
-    private func journalMonthBarFillColor(for session: Session) -> Color {
-        Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
-    }
-
-    private func journalMonthBarStrokeColor(for session: Session) -> Color {
-        Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
-    }
-
-    private func journalMonthBarAccentColor(for session: Session) -> Color? {
-        Theme.InstrumentTint.visibleAccentColor(
-            for: journalInstrumentLabel(for: session),
+    private func journalMonthBarFillColor(for session: Session, in sessions: [Session]) -> Color {
+        if journalResolvedTint(for: session, in: sessions).accent(
             ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme
+            scheme: colorScheme,
+            shouldAssignIfNeeded: false
+        ) != nil {
+            return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
+        }
+        return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
+    }
+
+    private func journalMonthBarStrokeColor(for session: Session, in sessions: [Session]) -> Color {
+        if journalResolvedTint(for: session, in: sessions).accent(
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            shouldAssignIfNeeded: false
+        ) != nil {
+            return Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
+        }
+        return Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
+    }
+
+    private func journalMonthBarAccentColor(for session: Session, in sessions: [Session]) -> Color? {
+        journalResolvedTint(for: session, in: sessions).accent(
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            shouldAssignIfNeeded: false
         )
     }
 
@@ -2613,6 +2673,10 @@ fileprivate struct SessionsRootView: View {
                 for: monthSessions,
                 totalSeconds: totalSeconds
             )
+            let dominantActivity = journalYearDominantActivity(
+                for: monthSessions,
+                totalSeconds: totalSeconds
+            )
             let metadataText = journalYearMetadataText(
                 for: monthSessions,
                 totalSeconds: totalSeconds,
@@ -2642,7 +2706,9 @@ fileprivate struct SessionsRootView: View {
                 sessionCount: sessionCount,
                 metadataText: metadataText,
                 dominantInstrumentLabel: dominantInstrument?.label,
+                dominantActivityLabel: dominantActivity?.label,
                 ownerUserID: rowOwnerUserID,
+                tintSource: journalResolvedTintSource(in: journalArchiveSessions),
                 widthFraction: widthFraction,
                 densityFraction: densityFraction,
                 isFutureMonth: calendar.component(.year, from: monthStart) == currentYear && monthStart > currentMonthStart,

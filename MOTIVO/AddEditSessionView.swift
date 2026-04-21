@@ -60,6 +60,10 @@
 // SCOPE: Scope A+B — Harden viewer URL population for staged audio/video + wire audio row controls
 // CHANGE-ID: 20251008_172540_aa2f1
 // SCOPE: Visual-only — tint add buttons to light grey; remove notes placeholder; hide empty attachments message
+// CHANGE-ID: 20260421_191200_AESV_TintResolver_6d2a
+// SCOPE: AESV — replace instrument-only metadata card tint path with shared tint resolver. No layout, flow, persistence, or non-tint logic changes.
+// SEARCH-TOKEN: 20260421_191200_AESV_TintResolver_6d2a
+
 //  AddEditSessionView.swift
 //  MOTIVO
 //
@@ -231,6 +235,7 @@ struct AddEditSessionView: View {
 
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
 
     // v7.9E — State circles (12-dot gradient, dark → light, drag select)
     private let stateDotsCount_edit: Int = 12
@@ -364,6 +369,10 @@ struct AddEditSessionView: View {
     private var hasOneInstrument: Bool { instruments.count == 1 }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
+    private var aesvTintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
+    }
+
     private var effectiveInstrumentTintLabel: String? {
         if let selectedName = instrument?.name,
            let normalized = Theme.InstrumentTint.normalizedLabel(selectedName) {
@@ -384,6 +393,25 @@ struct AddEditSessionView: View {
         return nil
     }
 
+    private var effectiveActivityTintLabel: String? {
+        let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let display = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+        return Theme.ActivityTint.normalizedLabel(display)
+    }
+
+    private var activeInstrumentCount: Int {
+        let distinct = Set(
+            instruments.compactMap { instrument in
+                Theme.InstrumentTint.normalizedLabel(instrument.name)
+            }
+        )
+        return distinct.count
+    }
+
+    private var activeActivityCount: Int {
+        effectiveActivityTintLabel == nil ? 0 : 1
+    }
+
     private var tintOwnerID: String? {
         #if DEBUG
         if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")?
@@ -402,9 +430,18 @@ struct AddEditSessionView: View {
         return nil
     }
 
+    private var resolvedTint: Theme.ResolvedTint {
+        Theme.resolvedTint(
+            instrument: effectiveInstrumentTintLabel,
+            activity: effectiveActivityTintLabel,
+            tintMode: aesvTintMode,
+            activeInstrumentCount: activeInstrumentCount,
+            activeActivityCount: activeActivityCount
+        )
+    }
+
     private var instrumentCardFillColor: Color {
-        Theme.InstrumentTint.surfaceFill(
-            for: effectiveInstrumentTintLabel,
+        resolvedTint.fill(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -412,8 +449,7 @@ struct AddEditSessionView: View {
     }
 
     private var instrumentCardStrokeColor: Color {
-        Theme.InstrumentTint.cardStroke(
-            for: effectiveInstrumentTintLabel,
+        resolvedTint.stroke(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260421_184800_SDV_ResolvedMetaTint
+// SCOPE: Owner-only visual tint on the existing SessionDetailView metadata card now routes through shared resolved tint (instrument/activity/off). No other surfaces changed.
+// SEARCH-TOKEN: 20260421_184800_SDV_ResolvedMetaTint
+
 // CHANGE-ID: 20260417_201100_SDV_OwnerInstrumentMetaTint
 // SCOPE: Owner-only visual tint on the existing SessionDetailView instrument/meta card; no other surfaces changed.
 // SEARCH-TOKEN: 20260417_201100_SDV_OwnerInstrumentMetaTint
@@ -120,6 +124,7 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
+    @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
 
     @ObservedObject private var commentsStore = CommentsStore.shared
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
@@ -879,6 +884,10 @@ return AttachmentViewerView(
         return metaLine
     }
 
+    private var tintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRaw) ?? .auto
+    }
+
     private var ownerInstrumentLabelForTint: String? {
         let direct = session.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let direct, !direct.isEmpty { return direct }
@@ -889,10 +898,84 @@ return AttachmentViewerView(
         return nil
     }
 
+    private var ownerActivityLabelForTint: String? {
+        let direct = session.userActivityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty { return direct }
+
+        if let raw = session.value(forKey: "activityType") as? Int16,
+           let type = SessionActivityType(rawValue: raw) {
+            let label = type.label.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !label.isEmpty { return label }
+        }
+
+        return nil
+    }
+
+    private var ownerLocalSessionsForTint: [Session] {
+        guard let owner = (session.ownerUserID ?? auth.currentUserID)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !owner.isEmpty else {
+            return [session]
+        }
+
+        let request: NSFetchRequest<Session> = Session.fetchRequest()
+        request.sortDescriptors = []
+        request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
+
+        do {
+            let fetched = try viewContext.fetch(request)
+            return fetched.isEmpty ? [session] : fetched
+        } catch {
+            return [session]
+        }
+    }
+
+    private var activeInstrumentCountForTint: Int {
+        let labels = ownerLocalSessionsForTint.compactMap { item -> String? in
+            let direct = item.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let direct, !direct.isEmpty {
+                return Theme.InstrumentTint.normalizedLabel(direct)
+            }
+
+            let related = item.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let related, !related.isEmpty {
+                return Theme.InstrumentTint.normalizedLabel(related)
+            }
+
+            return nil
+        }
+        return Set(labels).count
+    }
+
+    private var activeActivityCountForTint: Int {
+        let labels = ownerLocalSessionsForTint.compactMap { item -> String? in
+            let direct = item.userActivityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let direct, !direct.isEmpty {
+                return Theme.ActivityTint.normalizedLabel(direct)
+            }
+
+            if let raw = item.value(forKey: "activityType") as? Int16,
+               let type = SessionActivityType(rawValue: raw) {
+                return Theme.ActivityTint.normalizedLabel(type.label)
+            }
+
+            return nil
+        }
+        return Set(labels).count
+    }
+
+    private var resolvedMetaCardTint: Theme.ResolvedTint {
+        Theme.resolvedTint(
+            instrument: ownerInstrumentLabelForTint,
+            activity: ownerActivityLabelForTint,
+            tintMode: tintMode,
+            activeInstrumentCount: activeInstrumentCountForTint,
+            activeActivityCount: activeActivityCountForTint
+        )
+    }
+
     private var metaCardFillColor: Color {
         guard viewerIsOwner else { return Theme.Colors.surface(colorScheme) }
-        return Theme.InstrumentTint.surfaceFill(
-            for: ownerInstrumentLabelForTint,
+        return resolvedMetaCardTint.fill(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMediumLight
@@ -901,8 +984,7 @@ return AttachmentViewerView(
 
     private var metaCardStrokeColor: Color {
         guard viewerIsOwner else { return Theme.Colors.cardStroke(colorScheme) }
-        return Theme.InstrumentTint.cardStroke(
-            for: ownerInstrumentLabelForTint,
+        return resolvedMetaCardTint.stroke(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMediumLight

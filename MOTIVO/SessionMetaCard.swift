@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260417_214700_owner_local_tint_namespace_fix_91ac
-// SCOPE: Align SessionMetaCard owner-local instrument tint resolution with ContentView/SessionDetailView by using the local owner namespace for tint slot mapping only. No layout, typography, spacing, interaction, or logic changes outside card fill/stroke selection.
+// CHANGE-ID: 20260421_184700_session_meta_card_tint_resolver_52c1
+// SCOPE: Route SessionMetaCard owner-local tint through Theme.resolvedTint using the shared Tint Mode foundation. Preserve the same card surface, spacing, typography, and interaction. No UI or logic changes outside tint source resolution.
 
 import SwiftUI
 import CoreData
@@ -20,11 +20,16 @@ struct SessionMetaCard: View {
     let currentInstrumentName: String
     let activityLabel: String
 
+    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
 
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
+
+    private var sessionMetaTintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
+    }
 
     private var effectiveInstrumentLabel: String? {
         if let selectedName = instrument?.name,
@@ -43,6 +48,23 @@ struct SessionMetaCard: View {
         }
 
         return nil
+    }
+
+    private var effectiveActivityLabel: String? {
+        Theme.ActivityTint.normalizedLabel(activityLabel)
+    }
+
+    private var activeInstrumentCount: Int {
+        let distinct = Set(
+            instruments.compactMap { instrument in
+                Theme.InstrumentTint.normalizedLabel(instrument.name)
+            }
+        )
+        return distinct.count
+    }
+
+    private var activeActivityCount: Int {
+        effectiveActivityLabel == nil ? 0 : 1
     }
 
     /// Matches the owner-local namespace path used by the owner Journal/detail surfaces.
@@ -70,9 +92,18 @@ struct SessionMetaCard: View {
         return nil
     }
 
+    private var resolvedTint: Theme.ResolvedTint {
+        Theme.resolvedTint(
+            instrument: effectiveInstrumentLabel,
+            activity: effectiveActivityLabel,
+            tintMode: sessionMetaTintMode,
+            activeInstrumentCount: activeInstrumentCount,
+            activeActivityCount: activeActivityCount
+        )
+    }
+
     private var resolvedFillColor: Color {
-        Theme.InstrumentTint.surfaceFill(
-            for: effectiveInstrumentLabel,
+        resolvedTint.fill(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -80,8 +111,7 @@ struct SessionMetaCard: View {
     }
 
     private var resolvedStrokeColor: Color {
-        Theme.InstrumentTint.cardStroke(
-            for: effectiveInstrumentLabel,
+        resolvedTint.stroke(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
