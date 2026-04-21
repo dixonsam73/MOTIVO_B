@@ -200,6 +200,7 @@ struct SessionDetailView: View {
 
     // Added state for local saved interaction state
     @State private var isSavedLocal: Bool = false
+    @State private var cachedMetaCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
 
     private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
@@ -630,6 +631,16 @@ return AttachmentViewerView(
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             _refreshTick &+= 1
         }
+        .onAppear {
+            if viewerIsOwner {
+                recomputeMetaCardTintIfNeeded()
+            }
+        }
+        .onChange(of: tintModeRaw) { _, _ in
+            if viewerIsOwner {
+                recomputeMetaCardTintIfNeeded()
+            }
+        }
         .appBackground()
         // Added task to hydrate local saved state on sessionUUID change
         .task(id: sessionUUID) {
@@ -911,71 +922,80 @@ return AttachmentViewerView(
         return nil
     }
 
-    private var ownerLocalSessionsForTint: [Session] {
-        guard let owner = (session.ownerUserID ?? auth.currentUserID)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !owner.isEmpty else {
-            return [session]
+    private func normalizedInstrumentLabel(for item: Session) -> String? {
+        let direct = item.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty {
+            return Theme.InstrumentTint.normalizedLabel(direct)
         }
 
-        let request: NSFetchRequest<Session> = Session.fetchRequest()
-        request.sortDescriptors = []
-        request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
-
-        do {
-            let fetched = try viewContext.fetch(request)
-            return fetched.isEmpty ? [session] : fetched
-        } catch {
-            return [session]
+        let related = item.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let related, !related.isEmpty {
+            return Theme.InstrumentTint.normalizedLabel(related)
         }
+
+        return nil
     }
 
-    private var activeInstrumentCountForTint: Int {
-        let labels = ownerLocalSessionsForTint.compactMap { item -> String? in
-            let direct = item.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let direct, !direct.isEmpty {
-                return Theme.InstrumentTint.normalizedLabel(direct)
-            }
-
-            let related = item.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let related, !related.isEmpty {
-                return Theme.InstrumentTint.normalizedLabel(related)
-            }
-
-            return nil
+    private func normalizedActivityLabel(for item: Session) -> String? {
+        let direct = item.userActivityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty {
+            return Theme.ActivityTint.normalizedLabel(direct)
         }
-        return Set(labels).count
+
+        if let raw = item.value(forKey: "activityType") as? Int16,
+           let type = SessionActivityType(rawValue: raw) {
+            return Theme.ActivityTint.normalizedLabel(type.label)
+        }
+
+        return nil
     }
 
-    private var activeActivityCountForTint: Int {
-        let labels = ownerLocalSessionsForTint.compactMap { item -> String? in
-            let direct = item.userActivityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
-            if let direct, !direct.isEmpty {
-                return Theme.ActivityTint.normalizedLabel(direct)
-            }
+    private func recomputeMetaCardTintIfNeeded() {
+        guard viewerIsOwner else { return }
 
-            if let raw = item.value(forKey: "activityType") as? Int16,
-               let type = SessionActivityType(rawValue: raw) {
-                return Theme.ActivityTint.normalizedLabel(type.label)
-            }
+        let owner = (session.ownerUserID ?? auth.currentUserID)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-            return nil
+        let ownerSessions: [Session]
+        if let owner, !owner.isEmpty {
+            let request: NSFetchRequest<Session> = Session.fetchRequest()
+            request.sortDescriptors = []
+            request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
+
+            do {
+                let fetched = try viewContext.fetch(request)
+                ownerSessions = fetched.isEmpty ? [session] : fetched
+            } catch {
+                ownerSessions = [session]
+            }
+        } else {
+            ownerSessions = [session]
         }
-        return Set(labels).count
-    }
 
-    private var resolvedMetaCardTint: Theme.ResolvedTint {
-        Theme.resolvedTint(
+        var instrumentCounts: [String: Int] = [:]
+        var activityCounts: [String: Int] = [:]
+
+        for item in ownerSessions {
+            if let instrument = normalizedInstrumentLabel(for: item) {
+                instrumentCounts[instrument, default: 0] += 1
+            }
+            if let activity = normalizedActivityLabel(for: item) {
+                activityCounts[activity, default: 0] += 1
+            }
+        }
+
+        cachedMetaCardTint = Theme.resolvedTint(
             instrument: ownerInstrumentLabelForTint,
             activity: ownerActivityLabelForTint,
             tintMode: tintMode,
-            activeInstrumentCount: activeInstrumentCountForTint,
-            activeActivityCount: activeActivityCountForTint
+            instrumentCounts: instrumentCounts,
+            activityCounts: activityCounts
         )
     }
 
     private var metaCardFillColor: Color {
         guard viewerIsOwner else { return Theme.Colors.surface(colorScheme) }
-        return resolvedMetaCardTint.fill(
+        return cachedMetaCardTint.fill(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMediumLight
@@ -984,7 +1004,7 @@ return AttachmentViewerView(
 
     private var metaCardStrokeColor: Color {
         guard viewerIsOwner else { return Theme.Colors.cardStroke(colorScheme) }
-        return resolvedMetaCardTint.stroke(
+        return cachedMetaCardTint.stroke(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMediumLight

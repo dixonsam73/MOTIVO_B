@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260421_190800_ptv_session_meta_resolved_tint_handoff
+// SCOPE: Move SessionMetaCard tint meaning ownership into PracticeTimerView using bounded local-session recompute; SessionMetaCard becomes presentational only. No UI/layout/preload flow changes.
+
 // CHANGE-ID: 20260402_183500_tuner_visual_soften
 // SCOPE: Tuner visual-only refinement — soften tuner readout hierarchy and replace loud listening header with quiet placeholder. No audio, state, or behavioural changes.
 
@@ -128,6 +131,7 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
+    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
 
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
@@ -138,6 +142,7 @@ struct PracticeTimerView: View {
     @State private var isTunerOpen: Bool = false
     @State private var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
+    @State private var cachedSessionMetaTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -892,6 +897,7 @@ private func loadPracticeDefaultsIfNeeded() {
             loadUserActivities()
             applyPrimaryActivityRef()
             syncActivityChoiceFromState()
+            recomputeSessionMetaTint()
             do { try StagingStore.bootstrap() } catch { /* ignore */ }
         }
         .onAppear {
@@ -998,6 +1004,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 if (localEmpty && storeHas) || idsDiffer {
                     mirrorFromStagingStore()
                 }
+                recomputeSessionMetaTint()
             case .inactive, .background:
                 // Commit all buffered title edits before persisting snapshot
                 commitAllAudioTitleBuffersAndPersist()
@@ -1244,6 +1251,18 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
                 didCancelFromReview = false
             }
+
+            if oldValue == true && newValue == false {
+                recomputeSessionMetaTint()
+            }
+        }
+        .onChange(of: showManualAddSheet) { oldValue, newValue in
+            if oldValue == true && newValue == false {
+                recomputeSessionMetaTint()
+            }
+        }
+        .onChange(of: tintModeRawValue) { _, _ in
+            recomputeSessionMetaTint()
         }
         .onChange(of: activityChoice) { _, _ in
             // Clear current pad contents and auto-text mappings
@@ -1255,6 +1274,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
             // Persist snapshot so the pad survives suspends/resumes
             persistTasksSnapshot()
+            recomputeSessionMetaTint()
         }
         .onChange(of: instrumentIndex) { _, _ in
             // Switching instruments should swap the auto-fill template for the new Instrument×Activity context.
@@ -1263,6 +1283,7 @@ private func loadPracticeDefaultsIfNeeded() {
             autoTaskTexts.removeAll()
             loadPracticeDefaultsIfNeeded()
             persistTasksSnapshot()
+            recomputeSessionMetaTint()
         }
         .onChange(of: activity) { _, newValue in
             // Keep the tasks template in sync when the core activity changes from the Session sheet.
@@ -1377,7 +1398,8 @@ private func loadPracticeDefaultsIfNeeded() {
                     showInstrumentSheet: $showInstrumentSheet,
                     showActivitySheet: $showActivitySheet,
                     currentInstrumentName: currentInstrumentName(),
-                    activityLabel: activityDisplayName(for: activityChoice)
+                    activityLabel: activityDisplayName(for: activityChoice),
+                    resolvedTint: cachedSessionMetaTint
                 )
                 .hidden()
                 .allowsHitTesting(false)
@@ -1390,7 +1412,8 @@ private func loadPracticeDefaultsIfNeeded() {
                         showInstrumentSheet: $showInstrumentSheet,
                         showActivitySheet: $showActivitySheet,
                         currentInstrumentName: currentInstrumentName(),
-                        activityLabel: activityDisplayName(for: activityChoice)
+                        activityLabel: activityDisplayName(for: activityChoice),
+                        resolvedTint: cachedSessionMetaTint
                     )
                     .padding(.top, PracticeTimerCompositionUI.sessionMetaOpenTopBuffer)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -1817,6 +1840,78 @@ private var bottomActionSection: some View {
             return String(choice.dropFirst("custom:".count))
         }
         return SessionActivityType.practice.label
+    }
+
+    private func normalizedCurrentSessionMetaInstrumentLabel() -> String? {
+        Theme.InstrumentTint.normalizedLabel(currentInstrumentName())
+    }
+
+    private func normalizedCurrentSessionMetaActivityLabel() -> String? {
+        Theme.ActivityTint.normalizedLabel(activityDisplayName(for: activityChoice))
+    }
+
+    private func normalizedSessionInstrumentLabel(from session: Session) -> String? {
+        if let direct = session.value(forKey: "userInstrumentLabel") as? String,
+           let normalized = Theme.InstrumentTint.normalizedLabel(direct) {
+            return normalized
+        }
+
+        if let related = session.value(forKeyPath: "instrument.name") as? String,
+           let normalized = Theme.InstrumentTint.normalizedLabel(related) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private func normalizedSessionActivityLabel(from session: Session) -> String? {
+        if let direct = session.value(forKey: "userActivityLabel") as? String,
+           let normalized = Theme.ActivityTint.normalizedLabel(direct) {
+            return normalized
+        }
+
+        if let detail = session.value(forKey: "activityDetail") as? String,
+           let normalized = Theme.ActivityTint.normalizedLabel(detail) {
+            return normalized
+        }
+
+        let rawValue: Int16?
+        if let value = session.value(forKey: "activityType") as? Int16 {
+            rawValue = value
+        } else if let value = session.value(forKey: "activityType") as? NSNumber {
+            rawValue = value.int16Value
+        } else {
+            rawValue = nil
+        }
+
+        if let rawValue,
+           let activity = SessionActivityType(rawValue: rawValue),
+           let normalized = Theme.ActivityTint.normalizedLabel(activity.label) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private func recomputeSessionMetaTint() {
+        let request: NSFetchRequest<Session> = Session.fetchRequest()
+        let sessions = (try? viewContext.fetch(request)) ?? []
+
+        let instrumentCounts = Theme.usageCounts(
+            labels: sessions.compactMap { normalizedSessionInstrumentLabel(from: $0) }
+        )
+        let activityCounts = Theme.usageCounts(
+            labels: sessions.compactMap { normalizedSessionActivityLabel(from: $0) }
+        )
+        let tintMode = Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
+
+        cachedSessionMetaTint = Theme.resolvedTint(
+            instrument: normalizedCurrentSessionMetaInstrumentLabel(),
+            activity: normalizedCurrentSessionMetaActivityLabel(),
+            tintMode: tintMode,
+            instrumentCounts: instrumentCounts,
+            activityCounts: activityCounts
+        )
     }
 
     // MARK: - Apply choices / primary

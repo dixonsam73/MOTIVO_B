@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260421_181500_theme_tint_mode_foundation_9f41
-// SCOPE: Add shared local tint-mode foundation (Auto / Instrument / Activity / Off), core activity tint mapping, shared custom activity tint, and resolved tint API. No view wiring yet. No visual changes to existing instrument tint behaviour.
+// CHANGE-ID: 20260421_205300_theme_sticky_auto_foundation_e3a1
+// SCOPE: Restore shared tint-mode foundation and upgrade Auto tint selection to meaningful-variation + sticky resolution. No palette or visual treatment changes.
 //
 //  Theme.swift
 //  MOTIVO
@@ -36,58 +36,50 @@ enum Theme {
     }
 
     enum Radius {
-        // standard card corner radius
         static let card: CGFloat = 16
-        // control corner radius
         static let control: CGFloat = 12
     }
 
     enum Colors {
-        // Warm, paper-like grouped background (light); near-black grouped (dark)
         static func background(_ scheme: ColorScheme) -> Color {
             scheme == .dark
-            ? Color(red: 0.06, green: 0.06, blue: 0.07)           // ~#0F0F12
-            : Color(red: 0.96, green: 0.95, blue: 0.92)           // warm sand ~#F5F2EA
+            ? Color(red: 0.06, green: 0.06, blue: 0.07)
+            : Color(red: 0.96, green: 0.95, blue: 0.92)
         }
-        // Subtle surface for cards
+
         static func surface(_ scheme: ColorScheme) -> Color {
             scheme == .dark
-            ? Color(red: 0.12, green: 0.12, blue: 0.13)           // ~#1F1F22
-            : Color(red: 0.99, green: 0.99, blue: 0.97)           // off-white ~#FEFEF7
+            ? Color(red: 0.12, green: 0.12, blue: 0.13)
+            : Color(red: 0.99, green: 0.99, blue: 0.97)
         }
-        // Hairline stroke
+
         static func stroke(_ scheme: ColorScheme) -> Color {
             scheme == .dark
             ? Color.white.opacity(0.08)
             : Color.black.opacity(0.08)
         }
-        // Subtle 1pt divider for cards
+
         static func cardStroke(_ scheme: ColorScheme) -> Color {
             stroke(scheme)
         }
 
         static var accent: Color {
-            // Slate blue-grey accent for UI chrome
             Color(red: 0.32, green: 0.38, blue: 0.46)
         }
 
         static var primaryAction: Color {
-            // Original timer green for key actions
             Color(red: 0.16, green: 0.38, blue: 0.29)
         }
+
         static var secondaryText: Color {
             Color.primary.opacity(0.55)
         }
     }
 
     enum Text {
-        // Page title style
         static var pageTitle: Font { .title3.weight(.semibold) }
-        // Section header style (with subtle letter spacing ~0.2)
         static var sectionHeader: Font { .subheadline.weight(.semibold) }
-        // Body copy (~15 pt)
         static var body: Font { .subheadline }
-        // Meta text (uses secondary color via modifier; font size only here)
         static var meta: Font { .footnote }
     }
 
@@ -109,7 +101,7 @@ enum Theme {
         }
     }
 
-    enum ResolvedTintSource {
+    enum ResolvedTintSource: String {
         case instrument
         case activity
         case off
@@ -200,6 +192,124 @@ enum Theme {
         }
     }
 
+    struct VariationSummary {
+        let distinctCount: Int
+        let topCount: Int
+        let secondMostUsedCount: Int
+
+        var hasMeaningfulVariation: Bool {
+            secondMostUsedCount >= 2
+        }
+    }
+
+    private static let autoTintSourceDefaultsKey = "appSettings_autoResolvedTintSource"
+
+    static func normalizedDistinctCounts(_ rawCounts: [String: Int]) -> [String: Int] {
+        rawCounts.reduce(into: [String: Int]()) { partial, entry in
+            let trimmed = entry.key.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, entry.value > 0 else { return }
+            partial[trimmed, default: 0] += entry.value
+        }
+    }
+
+    static func usageCounts<S: Sequence>(labels: S) -> [String: Int] where S.Element == String? {
+        labels.reduce(into: [String: Int]()) { partial, label in
+            guard let label else { return }
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            partial[trimmed, default: 0] += 1
+        }
+    }
+
+    static func usageCounts<S: Sequence>(labels: S) -> [String: Int] where S.Element == String {
+        labels.reduce(into: [String: Int]()) { partial, label in
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return }
+            partial[trimmed, default: 0] += 1
+        }
+    }
+
+    static func variationSummary(from rawCounts: [String: Int]) -> VariationSummary {
+        let counts = normalizedDistinctCounts(rawCounts)
+        let sorted = counts.values.sorted(by: >)
+        return VariationSummary(
+            distinctCount: counts.count,
+            topCount: sorted.first ?? 0,
+            secondMostUsedCount: sorted.dropFirst().first ?? 0
+        )
+    }
+
+    static func meaningfulInstrumentVariation(from counts: [String: Int]) -> Bool {
+        variationSummary(from: counts).hasMeaningfulVariation
+    }
+
+    static func meaningfulActivityVariation(from counts: [String: Int]) -> Bool {
+        let summary = variationSummary(from: counts)
+        return summary.secondMostUsedCount >= 2 || summary.distinctCount >= 3
+    }
+
+    static func storedAutoTintSource() -> ResolvedTintSource? {
+        guard let rawValue = UserDefaults.standard.string(forKey: autoTintSourceDefaultsKey) else {
+            return nil
+        }
+        return ResolvedTintSource(rawValue: rawValue)
+    }
+
+    static func setStoredAutoTintSource(_ source: ResolvedTintSource?) {
+        let defaults = UserDefaults.standard
+        if let source {
+            defaults.set(source.rawValue, forKey: autoTintSourceDefaultsKey)
+        } else {
+            defaults.removeObject(forKey: autoTintSourceDefaultsKey)
+        }
+    }
+
+    static func resolvedAutoTintSource(
+        instrumentCounts: [String: Int],
+        activityCounts: [String: Int],
+        persistedSource: ResolvedTintSource? = nil,
+        persistResult: Bool = true
+    ) -> ResolvedTintSource {
+        let instrumentMeaningful = meaningfulInstrumentVariation(from: instrumentCounts)
+        let activityMeaningful = meaningfulActivityVariation(from: activityCounts)
+        let currentSource = persistedSource ?? storedAutoTintSource()
+
+        let resolved: ResolvedTintSource
+        switch currentSource {
+        case .instrument:
+            if instrumentMeaningful {
+                resolved = .instrument
+            } else if activityMeaningful {
+                resolved = .activity
+            } else {
+                resolved = .off
+            }
+
+        case .activity:
+            if activityMeaningful {
+                resolved = .activity
+            } else if instrumentMeaningful {
+                resolved = .instrument
+            } else {
+                resolved = .off
+            }
+
+        case .off, .none:
+            if instrumentMeaningful {
+                resolved = .instrument
+            } else if activityMeaningful {
+                resolved = .activity
+            } else {
+                resolved = .off
+            }
+        }
+
+        if persistResult {
+            setStoredAutoTintSource(resolved)
+        }
+        return resolved
+    }
+
     static func resolvedTintSource(
         tintMode: TintMode,
         activeInstrumentCount: Int,
@@ -208,7 +318,6 @@ enum Theme {
         switch tintMode {
         case .off:
             return .off
-
         case .auto:
             if activeInstrumentCount > 1 {
                 return .instrument
@@ -217,12 +326,34 @@ enum Theme {
                 return .activity
             }
             return .off
-
         case .instrument:
             return activeInstrumentCount > 1 ? .instrument : .off
-
         case .activity:
             return activeActivityCount > 1 ? .activity : .off
+        }
+    }
+
+    static func resolvedTintSource(
+        tintMode: TintMode,
+        instrumentCounts: [String: Int],
+        activityCounts: [String: Int],
+        persistedAutoSource: ResolvedTintSource? = nil,
+        persistAutoSource: Bool = true
+    ) -> ResolvedTintSource {
+        switch tintMode {
+        case .off:
+            return .off
+        case .instrument:
+            return meaningfulInstrumentVariation(from: instrumentCounts) ? .instrument : .off
+        case .activity:
+            return meaningfulActivityVariation(from: activityCounts) ? .activity : .off
+        case .auto:
+            return resolvedAutoTintSource(
+                instrumentCounts: instrumentCounts,
+                activityCounts: activityCounts,
+                persistedSource: persistedAutoSource,
+                persistResult: persistAutoSource
+            )
         }
     }
 
@@ -237,6 +368,30 @@ enum Theme {
             tintMode: tintMode,
             activeInstrumentCount: activeInstrumentCount,
             activeActivityCount: activeActivityCount
+        )
+
+        return ResolvedTint(
+            source: source,
+            instrumentLabel: instrument,
+            activityLabel: activity
+        )
+    }
+
+    static func resolvedTint(
+        instrument: String?,
+        activity: String?,
+        tintMode: TintMode,
+        instrumentCounts: [String: Int],
+        activityCounts: [String: Int],
+        persistedAutoSource: ResolvedTintSource? = nil,
+        persistAutoSource: Bool = true
+    ) -> ResolvedTint {
+        let source = resolvedTintSource(
+            tintMode: tintMode,
+            instrumentCounts: instrumentCounts,
+            activityCounts: activityCounts,
+            persistedAutoSource: persistedAutoSource,
+            persistAutoSource: persistAutoSource
         )
 
         return ResolvedTint(
@@ -710,32 +865,32 @@ enum Theme {
         private static func paletteColor(for slot: Slot, scheme: ColorScheme) -> Color {
             switch (slot, scheme) {
             case (.practice, .light):
-                return Color(red: 0.70, green: 0.76, blue: 0.82)   // coolDeep family
+                return Color(red: 0.70, green: 0.76, blue: 0.82)
             case (.practice, .dark):
                 return Color(red: 0.31, green: 0.37, blue: 0.43)
 
             case (.rehearsal, .light):
-                return Color(red: 0.79, green: 0.85, blue: 0.80)   // sage family
+                return Color(red: 0.79, green: 0.85, blue: 0.80)
             case (.rehearsal, .dark):
                 return Color(red: 0.33, green: 0.40, blue: 0.35)
 
             case (.lesson, .light):
-                return Color(red: 0.89, green: 0.81, blue: 0.84)   // rose family
+                return Color(red: 0.89, green: 0.81, blue: 0.84)
             case (.lesson, .dark):
                 return Color(red: 0.43, green: 0.34, blue: 0.38)
 
             case (.performance, .light):
-                return Color(red: 0.90, green: 0.82, blue: 0.75)   // apricot family
+                return Color(red: 0.90, green: 0.82, blue: 0.75)
             case (.performance, .dark):
                 return Color(red: 0.45, green: 0.36, blue: 0.30)
 
             case (.recording, .light):
-                return Color(red: 0.84, green: 0.81, blue: 0.88)   // lavender family
+                return Color(red: 0.84, green: 0.81, blue: 0.88)
             case (.recording, .dark):
                 return Color(red: 0.38, green: 0.34, blue: 0.43)
 
             case (.custom, .light):
-                return Color(red: 0.80, green: 0.84, blue: 0.88)   // dedicated shared custom tint
+                return Color(red: 0.80, green: 0.84, blue: 0.88)
             case (.custom, .dark):
                 return Color(red: 0.34, green: 0.39, blue: 0.44)
             }
@@ -888,7 +1043,6 @@ private struct CardSurfaceNonClipping: ViewModifier {
                             .stroke(resolvedStroke, lineWidth: 1)
                     )
             )
-            // NOTE: no clipShape here – the rounded rect is purely visual
     }
 }
 
@@ -916,7 +1070,6 @@ extension View {
         modifier(CardSurface(padding: padding, fillColor: fillColor, strokeColor: strokeColor))
     }
 
-    // New: card surface that does NOT clip its children (for popovers/overlays)
     func cardSurfaceNonClipping(padding: CGFloat? = nil) -> some View {
         modifier(CardSurfaceNonClipping(padding: padding))
     }

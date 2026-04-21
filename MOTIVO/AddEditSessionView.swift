@@ -236,6 +236,7 @@ struct AddEditSessionView: View {
     // Primary Activity persisted ref
     @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
+    @State private var cachedMetadataCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
     // v7.9E — State circles (12-dot gradient, dark → light, drag select)
     private let stateDotsCount_edit: Int = 12
@@ -399,19 +400,6 @@ struct AddEditSessionView: View {
         return Theme.ActivityTint.normalizedLabel(display)
     }
 
-    private var activeInstrumentCount: Int {
-        let distinct = Set(
-            instruments.compactMap { instrument in
-                Theme.InstrumentTint.normalizedLabel(instrument.name)
-            }
-        )
-        return distinct.count
-    }
-
-    private var activeActivityCount: Int {
-        effectiveActivityTintLabel == nil ? 0 : 1
-    }
-
     private var tintOwnerID: String? {
         #if DEBUG
         if let override = UserDefaults.standard.string(forKey: "Debug.currentUserIDOverride")?
@@ -430,18 +418,96 @@ struct AddEditSessionView: View {
         return nil
     }
 
-    private var resolvedTint: Theme.ResolvedTint {
-        Theme.resolvedTint(
-            instrument: effectiveInstrumentTintLabel,
-            activity: effectiveActivityTintLabel,
-            tintMode: aesvTintMode,
-            activeInstrumentCount: activeInstrumentCount,
-            activeActivityCount: activeActivityCount
-        )
+    private func normalizedInstrumentLabel(for item: Session) -> String? {
+        if let label = item.userInstrumentLabel,
+           let normalized = Theme.InstrumentTint.normalizedLabel(label) {
+            return normalized
+        }
+
+        if let instrument = item.instrument,
+           let name = instrument.name,
+           let normalized = Theme.InstrumentTint.normalizedLabel(name) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private func normalizedActivityLabel(for item: Session) -> String? {
+        let trimmedCustom = (item.userActivityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedCustom.isEmpty,
+           let normalized = Theme.ActivityTint.normalizedLabel(trimmedCustom) {
+            return normalized
+        }
+
+        if let activity = SessionActivityType(rawValue: item.activityType),
+           let normalized = Theme.ActivityTint.normalizedLabel(activity.label) {
+            return normalized
+        }
+
+        return nil
+    }
+
+    private func recomputeMetadataCardTintIfNeeded() {
+        let currentInstrument = effectiveInstrumentTintLabel
+        let currentActivity = effectiveActivityTintLabel
+
+        guard let ownerID = tintOwnerID else {
+            cachedMetadataCardTint = Theme.resolvedTint(
+                instrument: currentInstrument,
+                activity: currentActivity,
+                tintMode: aesvTintMode,
+                instrumentCounts: [:],
+                activityCounts: [:]
+            )
+            return
+        }
+
+        let request = NSFetchRequest<Session>(entityName: "Session")
+        request.predicate = NSPredicate(format: "ownerUserID == %@", ownerID)
+        request.fetchBatchSize = 256
+
+        do {
+            let sessions = try viewContext.fetch(request)
+
+            var instrumentCounts: [String: Int] = [:]
+            instrumentCounts.reserveCapacity(16)
+            var activityCounts: [String: Int] = [:]
+            activityCounts.reserveCapacity(16)
+
+            for item in sessions {
+                if let instrumentLabel = normalizedInstrumentLabel(for: item) {
+                    instrumentCounts[instrumentLabel, default: 0] += 1
+                }
+                if let activityLabel = normalizedActivityLabel(for: item) {
+                    activityCounts[activityLabel, default: 0] += 1
+                }
+            }
+
+            cachedMetadataCardTint = Theme.resolvedTint(
+                instrument: currentInstrument,
+                activity: currentActivity,
+                tintMode: aesvTintMode,
+                instrumentCounts: instrumentCounts,
+                activityCounts: activityCounts
+            )
+        } catch {
+            cachedMetadataCardTint = Theme.resolvedTint(
+                instrument: currentInstrument,
+                activity: currentActivity,
+                tintMode: aesvTintMode,
+                instrumentCounts: [:],
+                activityCounts: [:]
+            )
+        }
     }
 
     private var instrumentCardFillColor: Color {
-        resolvedTint.fill(
+        guard cachedMetadataCardTint.source == .instrument else {
+            return Theme.Colors.surface(colorScheme)
+        }
+
+        return cachedMetadataCardTint.fill(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -449,7 +515,35 @@ struct AddEditSessionView: View {
     }
 
     private var instrumentCardStrokeColor: Color {
-        resolvedTint.stroke(
+        guard cachedMetadataCardTint.source == .instrument else {
+            return Theme.Colors.cardStroke(colorScheme)
+        }
+
+        return cachedMetadataCardTint.stroke(
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var activityCardFillColor: Color {
+        guard cachedMetadataCardTint.source == .activity else {
+            return Theme.Colors.surface(colorScheme)
+        }
+
+        return cachedMetadataCardTint.fill(
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var activityCardStrokeColor: Color {
+        guard cachedMetadataCardTint.source == .activity else {
+            return Theme.Colors.cardStroke(colorScheme)
+        }
+
+        return cachedMetadataCardTint.stroke(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -563,6 +657,9 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
             // Ensure token is hidden in Notes whenever view appears
             stripFocusTokensFromNotes_edit()
         }
+        .onAppear {
+            recomputeMetadataCardTintIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: AttachmentPrivacy.didChangeNotification)) { _ in
             loadPrivacyMap()
         }
@@ -574,6 +671,18 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
         }
         .onChange(of: timestamp) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
         .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults_v2() }
+        .onChange(of: tintModeRawValue) {
+            recomputeMetadataCardTintIfNeeded()
+        }
+        .onChange(of: instrument) {
+            recomputeMetadataCardTintIfNeeded()
+        }
+        .onChange(of: activity) {
+            recomputeMetadataCardTintIfNeeded()
+        }
+        .onChange(of: selectedCustomName) {
+            recomputeMetadataCardTintIfNeeded()
+        }
             .onChange(of: isActivityDetailFocused) { oldValue, newValue in
                 if oldValue == false && newValue == true {
                     let trimmed = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -703,7 +812,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .accessibilityLabel("Activity")
                     .accessibilityIdentifier("picker.activity")
                 }
-                .cardSurface()
+                .cardSurface(fillColor: activityCardFillColor, strokeColor: activityCardStrokeColor)
 
                 // Activity description (short detail)
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {

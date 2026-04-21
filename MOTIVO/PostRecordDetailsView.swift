@@ -99,6 +99,8 @@ struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) private var viewContext
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
+    @State private var cachedInstrumentCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
+
 
     private var existingThreadOptions: [String] {
         let request: NSFetchRequest<Session> = Session.fetchRequest()
@@ -376,11 +378,6 @@ struct PostRecordDetailsView: View {
             return normalized
         }
 
-        if hasMultipleInstruments,
-           let normalized = Theme.InstrumentTint.normalizedLabel(instrument?.name) {
-            return normalized
-        }
-
         if let onlyName = instruments.first?.name,
            let normalized = Theme.InstrumentTint.normalizedLabel(onlyName) {
             return normalized
@@ -393,19 +390,6 @@ struct PostRecordDetailsView: View {
         let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
         let display = trimmedCustom.isEmpty ? activity.label : trimmedCustom
         return Theme.ActivityTint.normalizedLabel(display)
-    }
-
-    private var activeInstrumentCount: Int {
-        let distinct = Set(
-            instruments.compactMap { instrument in
-                Theme.InstrumentTint.normalizedLabel(instrument.name)
-            }
-        )
-        return distinct.count
-    }
-
-    private var activeActivityCount: Int {
-        effectiveActivityTintLabel == nil ? 0 : 1
     }
 
     private var tintOwnerID: String? {
@@ -426,18 +410,78 @@ struct PostRecordDetailsView: View {
         return nil
     }
 
-    private var resolvedTint: Theme.ResolvedTint {
-        Theme.resolvedTint(
+    private func normalizedInstrumentLabel(for item: Session) -> String? {
+        let direct = item.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty {
+            return Theme.InstrumentTint.normalizedLabel(direct)
+        }
+
+        let related = item.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let related, !related.isEmpty {
+            return Theme.InstrumentTint.normalizedLabel(related)
+        }
+
+        return nil
+    }
+
+    private func normalizedActivityLabel(for item: Session) -> String? {
+        let direct = item.userActivityLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty {
+            return Theme.ActivityTint.normalizedLabel(direct)
+        }
+
+        if let raw = item.value(forKey: "activityType") as? Int16,
+           let type = SessionActivityType(rawValue: raw) {
+            return Theme.ActivityTint.normalizedLabel(type.label)
+        }
+
+        return nil
+    }
+
+    private func recomputeInstrumentCardTintIfNeeded() {
+        let owner = tintOwnerID?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let ownerSessions: [Session]
+        if let owner, !owner.isEmpty {
+            let request: NSFetchRequest<Session> = Session.fetchRequest()
+            request.sortDescriptors = []
+            request.predicate = NSPredicate(format: "ownerUserID == %@", owner)
+
+            do {
+                ownerSessions = try viewContext.fetch(request)
+            } catch {
+                ownerSessions = []
+            }
+        } else {
+            ownerSessions = []
+        }
+
+        var instrumentCounts: [String: Int] = [:]
+        var activityCounts: [String: Int] = [:]
+
+        for item in ownerSessions {
+            if let instrument = normalizedInstrumentLabel(for: item) {
+                instrumentCounts[instrument, default: 0] += 1
+            }
+            if let activity = normalizedActivityLabel(for: item) {
+                activityCounts[activity, default: 0] += 1
+            }
+        }
+
+        cachedInstrumentCardTint = Theme.resolvedTint(
             instrument: effectiveInstrumentTintLabel,
             activity: effectiveActivityTintLabel,
             tintMode: prdvTintMode,
-            activeInstrumentCount: activeInstrumentCount,
-            activeActivityCount: activeActivityCount
+            instrumentCounts: instrumentCounts,
+            activityCounts: activityCounts
         )
     }
 
     private var instrumentCardFillColor: Color {
-        resolvedTint.fill(
+        guard cachedInstrumentCardTint.source == .instrument else {
+            return Theme.Colors.surface(colorScheme)
+        }
+        return cachedInstrumentCardTint.fill(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -445,7 +489,32 @@ struct PostRecordDetailsView: View {
     }
 
     private var instrumentCardStrokeColor: Color {
-        resolvedTint.stroke(
+        guard cachedInstrumentCardTint.source == .instrument else {
+            return Theme.Colors.cardStroke(colorScheme)
+        }
+        return cachedInstrumentCardTint.stroke(
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var activityCardFillColor: Color {
+        guard cachedInstrumentCardTint.source == .activity else {
+            return Theme.Colors.surface(colorScheme)
+        }
+        return cachedInstrumentCardTint.fill(
+            ownerID: tintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+    }
+
+    private var activityCardStrokeColor: Color {
+        guard cachedInstrumentCardTint.source == .activity else {
+            return Theme.Colors.cardStroke(colorScheme)
+        }
+        return cachedInstrumentCardTint.stroke(
             ownerID: tintOwnerID,
             scheme: colorScheme,
             strength: .cardMedium
@@ -515,7 +584,7 @@ struct PostRecordDetailsView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .cardSurface()
+                    .cardSurface(fillColor: activityCardFillColor, strokeColor: activityCardStrokeColor)
 
                     // ---------- Activity description ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -715,9 +784,13 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             }
             .onAppear {
                 loadDraftIsPublicIfNeeded()
+                recomputeInstrumentCardTintIfNeeded()
             }
             .onChange(of: includeTasksInNotes) { _ in
                 syncCompletedTasksIntoVisibleNotes()
+            }
+            .onChange(of: tintModeRawValue) { _, _ in
+                recomputeInstrumentCardTintIfNeeded()
             }
             .onChange(of: isPublic) { _ in
                 persistDraftIsPublic()
@@ -965,8 +1038,17 @@ isPrivate: { url in
                 syncActivityChoiceFromState()
                 loadDraftIfAvailable()
             }
-            .onChange(of: instrument) { _, _ in refreshAutoTitleIfNeeded() }
-            .onChange(of: activity) { _, _ in maybeUpdateActivityDetailFromDefaults() }
+            .onChange(of: instrument) { _, _ in
+                refreshAutoTitleIfNeeded()
+                recomputeInstrumentCardTintIfNeeded()
+            }
+            .onChange(of: activity) { _, _ in
+                maybeUpdateActivityDetailFromDefaults()
+                recomputeInstrumentCardTintIfNeeded()
+            }
+            .onChange(of: selectedCustomName) { _, _ in
+                recomputeInstrumentCardTintIfNeeded()
+            }
             .onChange(of: isActivityDetailFocused) { oldValue, newValue in
                 handleActivityDetailFocusChange(oldValue: oldValue, newValue: newValue)
             }

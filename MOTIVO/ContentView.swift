@@ -1968,19 +1968,27 @@ fileprivate struct SessionsRootView: View {
         return effectiveUserID
     }
 
-    private func journalActiveInstrumentCount(in sessions: [Session]) -> Int {
-        Set(sessions.compactMap { Theme.InstrumentTint.normalizedLabel(journalInstrumentLabel(for: $0)) }).count
+    private func journalInstrumentCounts(in sessions: [Session]) -> [String: Int] {
+        Theme.usageCounts(
+            labels: sessions.compactMap {
+                Theme.InstrumentTint.normalizedLabel(journalInstrumentLabel(for: $0))
+            }
+        )
     }
 
-    private func journalActiveActivityCount(in sessions: [Session]) -> Int {
-        Set(sessions.compactMap { Theme.ActivityTint.normalizedLabel(journalActivityLabel(for: $0)) }).count
+    private func journalActivityCounts(in sessions: [Session]) -> [String: Int] {
+        Theme.usageCounts(
+            labels: sessions.compactMap {
+                Theme.ActivityTint.normalizedLabel(journalActivityLabel(for: $0))
+            }
+        )
     }
 
     private func journalResolvedTintSource(in sessions: [Session]) -> Theme.ResolvedTintSource {
         Theme.resolvedTintSource(
             tintMode: journalTintMode,
-            activeInstrumentCount: journalActiveInstrumentCount(in: sessions),
-            activeActivityCount: journalActiveActivityCount(in: sessions)
+            instrumentCounts: journalInstrumentCounts(in: sessions),
+            activityCounts: journalActivityCounts(in: sessions)
         )
     }
 
@@ -1989,8 +1997,8 @@ fileprivate struct SessionsRootView: View {
             instrument: journalInstrumentLabel(for: session),
             activity: journalActivityLabel(for: session),
             tintMode: journalTintMode,
-            activeInstrumentCount: journalActiveInstrumentCount(in: sessions),
-            activeActivityCount: journalActiveActivityCount(in: sessions)
+            instrumentCounts: journalInstrumentCounts(in: sessions),
+            activityCounts: journalActivityCounts(in: sessions)
         )
     }
 

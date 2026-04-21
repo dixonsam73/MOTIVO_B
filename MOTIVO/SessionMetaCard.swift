@@ -1,5 +1,5 @@
 // CHANGE-ID: 20260421_184700_session_meta_card_tint_resolver_52c1
-// SCOPE: Route SessionMetaCard owner-local tint through Theme.resolvedTint using the shared Tint Mode foundation. Preserve the same card surface, spacing, typography, and interaction. No UI or logic changes outside tint source resolution.
+// SCOPE: Make SessionMetaCard presentational-only for owner-local tint rendering. Tint meaning is resolved in PracticeTimerView and passed in. Preserve the same card surface, spacing, typography, and interaction.
 
 import SwiftUI
 import CoreData
@@ -19,53 +19,18 @@ struct SessionMetaCard: View {
     @Binding var showActivitySheet: Bool
     let currentInstrumentName: String
     let activityLabel: String
+    let resolvedTint: Theme.ResolvedTint
 
-    @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
 
     private var hasNoInstruments: Bool { instruments.isEmpty }
     private var hasMultipleInstruments: Bool { instruments.count > 1 }
 
-    private var sessionMetaTintMode: Theme.TintMode {
-        Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
-    }
 
-    private var effectiveInstrumentLabel: String? {
-        if let selectedName = instrument?.name,
-           let normalized = Theme.InstrumentTint.normalizedLabel(selectedName) {
-            return normalized
-        }
 
-        if hasMultipleInstruments,
-           let normalized = Theme.InstrumentTint.normalizedLabel(currentInstrumentName) {
-            return normalized
-        }
 
-        if let onlyName = instruments.first?.name,
-           let normalized = Theme.InstrumentTint.normalizedLabel(onlyName) {
-            return normalized
-        }
 
-        return nil
-    }
-
-    private var effectiveActivityLabel: String? {
-        Theme.ActivityTint.normalizedLabel(activityLabel)
-    }
-
-    private var activeInstrumentCount: Int {
-        let distinct = Set(
-            instruments.compactMap { instrument in
-                Theme.InstrumentTint.normalizedLabel(instrument.name)
-            }
-        )
-        return distinct.count
-    }
-
-    private var activeActivityCount: Int {
-        effectiveActivityLabel == nil ? 0 : 1
-    }
 
     /// Matches the owner-local namespace path used by the owner Journal/detail surfaces.
     private var tintOwnerID: String? {
@@ -92,15 +57,6 @@ struct SessionMetaCard: View {
         return nil
     }
 
-    private var resolvedTint: Theme.ResolvedTint {
-        Theme.resolvedTint(
-            instrument: effectiveInstrumentLabel,
-            activity: effectiveActivityLabel,
-            tintMode: sessionMetaTintMode,
-            activeInstrumentCount: activeInstrumentCount,
-            activeActivityCount: activeActivityCount
-        )
-    }
 
     private var resolvedFillColor: Color {
         resolvedTint.fill(
