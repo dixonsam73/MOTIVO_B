@@ -4750,7 +4750,12 @@ fileprivate struct RemotePostRowTwin: View {
         let d = postDescription.trimmingCharacters(in: .whitespacesAndNewlines)
         if d.isEmpty {
             return [timeStr, dateStr].joined(separator: ", ")
-        } else if isUsingDefaultDescription {
+        }
+
+        let titleAlreadyContainsActivity = feedTitle
+            .range(of: activityName, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+
+        if titleAlreadyContainsActivity {
             return [instrumentName, timeStr, dateStr].joined(separator: ", ")
         } else {
             return [instrumentName, activityName, timeStr, dateStr].joined(separator: ", ")

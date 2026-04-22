@@ -75,7 +75,12 @@ enum SessionActivity {
         let d = description(for: session).trimmingCharacters(in: .whitespacesAndNewlines)
         if d.isEmpty {
             return [timeStr, dateStr].joined(separator: ", ")
-        } else if isUsingDefaultDescription(for: session) {
+        }
+
+        let titleAlreadyContainsActivity = feedTitle(for: session)
+            .range(of: activityLabel, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+
+        if titleAlreadyContainsActivity {
             return [instrumentName, timeStr, dateStr].joined(separator: ", ")
         } else {
             return [instrumentName, activityLabel, timeStr, dateStr].joined(separator: ", ")
