@@ -80,8 +80,10 @@ struct JournalYearMonthRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: leaderGapToContent) {
-            leaderLane
+        HStack(alignment: .top, spacing: leaderColor == nil ? 0 : leaderGapToContent) {
+            if leaderColor != nil {
+                leaderLane
+            }
 
             VStack(alignment: .leading, spacing: 0) {
                 Text(row.monthLabel)

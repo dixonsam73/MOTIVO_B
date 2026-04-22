@@ -965,7 +965,8 @@ fileprivate struct SessionsRootView: View {
                                                         .modifier(
                                                             JournalWeekLeadingTintCardModifier(
                                                                 tintColor: journalMonthBarAccentColor(for: session, in: journalArchiveSessions) ?? journalWeekCardFillColor(for: session, in: journalArchiveSessions),
-                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalArchiveSessions)
+                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalArchiveSessions),
+                                                                showsLeadingTint: journalResolvedTintSource(in: journalArchiveSessions) != .off
                                                             )
                                                         )
                                                         .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
@@ -3014,6 +3015,7 @@ fileprivate struct AttachmentCountBadge: View {
 fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
     let tintColor: Color
     let strokeColor: Color?
+    let showsLeadingTint: Bool
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -3021,7 +3023,7 @@ fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
         let cardShape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         let resolvedStroke = strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         let leaderWidth: CGFloat = 22
-        let contentLeadingInset = Theme.Spacing.card + leaderWidth - 2
+        let contentLeadingInset = Theme.Spacing.card + (showsLeadingTint ? leaderWidth - 2 : 0)
 
         return content
             .padding(.top, Theme.Spacing.card)
@@ -3033,9 +3035,11 @@ fileprivate struct JournalWeekLeadingTintCardModifier: ViewModifier {
                     cardShape
                         .fill(Theme.Colors.surface(colorScheme))
 
-                    MonthBarLeadingAccentShape(cornerRadius: Theme.Radius.card)
-                        .fill(tintColor.opacity(0.8))
-                        .frame(width: leaderWidth)
+                    if showsLeadingTint {
+                        MonthBarLeadingAccentShape(cornerRadius: Theme.Radius.card)
+                            .fill(tintColor.opacity(0.8))
+                            .frame(width: leaderWidth)
+                    }
                 }
             }
             .clipShape(cardShape)
