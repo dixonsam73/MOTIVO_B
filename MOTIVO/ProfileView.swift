@@ -178,6 +178,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
      @AppStorage("appSettings_showTasksPad") private var showTasksPad: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
+    @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
 
 @FocusState private var isNameFocused: Bool
 @FocusState private var isLocationFocused: Bool
@@ -257,6 +258,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
+     @State private var showTintModeSelection: Bool = false
  
      var body: some View {
          modalsAndAlerts(
@@ -290,6 +292,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 }
                 .navigationDestination(isPresented: $showAboutEtudes) {
                     AboutEtudesView()
+                }
+                .navigationDestination(isPresented: $showTintModeSelection) {
+                    TintModeSelectionView()
                 }
                 .appBackground()
             }
@@ -614,6 +619,19 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                          .padding(.leading, 16)
                  }
 
+                 Button { showTintModeSelection = true } label: {
+                     navigationRow(title: "Tint Mode", value: currentTintMode.displayName)
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
+
                  Button { showTasksManager = true } label: {
                      navigationRow(title: "Tasks")
                  }
@@ -896,12 +914,27 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              primaryActivityChoice = normalizedPrimaryActivityRef()
          }
      }
+
+     private var currentTintMode: Theme.TintMode {
+         Theme.TintMode(rawValue: tintModeRaw) ?? .auto
+     }
  
-     private func navigationRow(title: String) -> some View {
-         HStack {
+     private func navigationRow(title: String, value: String? = nil) -> some View {
+         HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
              Text(title)
                  .foregroundStyle(.primary)
-             Spacer()
+
+             Spacer(minLength: Theme.Spacing.l)
+
+             if let value {
+                 Text(value)
+                     .font(Theme.Text.body)
+                     .foregroundStyle(.primary)
+                     .lineLimit(1)
+                     .minimumScaleFactor(0.9)
+                     .truncationMode(.tail)
+             }
+
              Image(systemName: "chevron.right")
                  .font(.footnote.weight(.semibold))
                  .padding(6)
