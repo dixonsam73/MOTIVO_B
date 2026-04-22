@@ -161,7 +161,7 @@ struct BackendSessionDetailView: View {
 
     private var headerLine: String {
         let line = headerTitle
-        let parts = line.split(separator: ":", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+        let parts = line.split(separator: "·", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
         guard parts.count == 2 else { return line }
         let instrument = parts[0]
         let activity = parts[1]

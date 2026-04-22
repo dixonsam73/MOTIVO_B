@@ -21,7 +21,7 @@ enum SessionActivity {
     // Header title: "<Instrument> : <ActivityName>"
     static func headerTitle(for session: NSManagedObject) -> String {
         let instrumentName = (session.value(forKeyPath: "instrument.name") as? String)?.trimmedNonEmpty() ?? "Instrument"
-        return "\(instrumentName) : \(name(for: session))"
+        return "\(instrumentName) · \(name(for: session))"
     }
 
     // Crumb line: "N min • <Instrument> • <ActivityName>"
