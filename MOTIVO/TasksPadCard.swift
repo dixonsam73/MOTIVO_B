@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
 
 struct TasksPadCard: View {
     @Binding var showTasksPad: Bool
@@ -21,10 +22,13 @@ struct TasksPadCard: View {
     let onImportTasks: () -> Void
 
     @State private var draggedTaskID: UUID? = nil
+    @State private var suppressAutoClearForLineID: UUID? = nil
+    @State private var ignoreNextTapForLineID: UUID? = nil
 
     private let dragHandleWidth: CGFloat = 20
     private let deleteIconWidth: CGFloat = 20
     private let dragDeleteSpacing: CGFloat = 16
+    private let contextTextLeadingInset: CGFloat = 6
 
     private var rightControlZoneWidth: CGFloat {
         dragHandleWidth + dragDeleteSpacing + deleteIconWidth
@@ -125,9 +129,6 @@ struct TasksPadCard: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-            } else {
-                Color.clear
-                    .frame(width: 28, height: 28)
             }
 
             taskTextArea(line)
@@ -184,24 +185,44 @@ struct TasksPadCard: View {
         .disableAutocorrection(true)
         .focused(focusedTaskID, equals: line.wrappedValue.id)
         .onTapGesture {
+            if ignoreNextTapForLineID == line.wrappedValue.id {
+                ignoreNextTapForLineID = nil
+                focusedTaskID.wrappedValue = nil
+                return
+            }
             focusedTaskID.wrappedValue = line.wrappedValue.id
         }
         .onChange(of: focusedTaskID.wrappedValue) { _, newFocus in
             if newFocus == line.wrappedValue.id {
-                if let auto = autoTaskTexts[line.wrappedValue.id], line.wrappedValue.text == auto {
+                let shouldSuppressAutoClear = (suppressAutoClearForLineID == line.wrappedValue.id)
+
+                if !shouldSuppressAutoClear,
+                   let auto = autoTaskTexts[line.wrappedValue.id],
+                   line.wrappedValue.text == auto {
                     line.wrappedValue.text = ""
                 }
+
+                suppressAutoClearForLineID = nil
                 onPersistSnapshot()
             }
         }
         .font(line.wrappedValue.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
+        .padding(.leading, line.wrappedValue.type == .context ? contextTextLeadingInset : 0)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
-        .contextMenu {
-            Button(line.wrappedValue.type == .task ? "Context" : "Task") {
-                onToggleLineType(line.wrappedValue.id)
-            }
-        }
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .onEnded { _ in
+                    suppressAutoClearForLineID = line.wrappedValue.id
+                    ignoreNextTapForLineID = line.wrappedValue.id
+                    focusedTaskID.wrappedValue = nil
+
+                    let generator = UIImpactFeedbackGenerator(style: .light)
+                    generator.prepare()
+                    onToggleLineType(line.wrappedValue.id)
+                    generator.impactOccurred(intensity: 0.7)
+                }
+        )
     }
 
     private var collapsedHeader: some View {

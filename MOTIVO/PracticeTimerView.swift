@@ -892,6 +892,13 @@ private func loadPracticeDefaultsIfNeeded() {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline) // like Profile (centered, less shouty)
         .appBackground()
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                if showTasksPad, focusedTaskID != nil {
+                    focusedTaskID = nil
+                }
+            }
+        )
         .confirmationDialog("Imported tasks", isPresented: $showTaskImportReplaceAppendDialog, titleVisibility: .visible) {
             Button("Replace current tasks") {
                 applyPendingImportedTasks(appending: false)
