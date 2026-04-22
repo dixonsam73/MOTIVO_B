@@ -3058,6 +3058,11 @@ fileprivate struct SessionRow: View {
         case yearCompact
     }
 
+    private struct JournalNotesPreviewLine: Hashable {
+        let text: String
+        let isBullet: Bool
+    }
+
     @ObservedObject var session: Session
     let scope: FeedScope
     let journalStyle: JournalStyle
@@ -3229,27 +3234,81 @@ fileprivate struct SessionRow: View {
         .joined(separator: " · ")
     }
 
-    private var notesPreviewText: String? {
+    private var journalNotesPreviewLines: [JournalNotesPreviewLine] {
         let trimmed = (session.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard !trimmed.isEmpty else { return [] }
 
         let bulletChars = CharacterSet(charactersIn: "•◦▪▫●○■□-–—*·")
-        let normalizedLines = trimmed
-            .components(separatedBy: .newlines)
-            .map { line -> String in
-                var value = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                while let scalar = value.unicodeScalars.first, bulletChars.contains(scalar) {
-                    value = String(value.unicodeScalars.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                return value
+
+        func stripBulletPrefix(from line: String) -> String {
+            var value = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            while let scalar = value.unicodeScalars.first, bulletChars.contains(scalar) {
+                value = String(value.unicodeScalars.dropFirst()).trimmingCharacters(in: .whitespacesAndNewlines)
             }
+            return value
+        }
+
+        func isBulletLine(_ line: String) -> Bool {
+            guard let scalar = line.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.first else {
+                return false
+            }
+            return bulletChars.contains(scalar)
+        }
+
+        let rawLines = trimmed
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        let flattened = normalizedLines.joined(separator: " ")
-            .replacingOccurrences(of: #"\s+"#, with: " ", options: .regularExpression)
+        var parsed: [JournalNotesPreviewLine] = []
+        var index = 0
+
+        while index < rawLines.count {
+            let line = rawLines[index]
+            let cleaned = stripBulletPrefix(from: line)
+            guard !cleaned.isEmpty else {
+                index += 1
+                continue
+            }
+
+            if !isBulletLine(line) {
+                var nextIndex = index + 1
+                var foundBulletBlock = false
+                while nextIndex < rawLines.count {
+                    let candidate = rawLines[nextIndex]
+                    if isBulletLine(candidate) {
+                        foundBulletBlock = true
+                        nextIndex += 1
+                    } else {
+                        break
+                    }
+                }
+
+                if foundBulletBlock {
+                    parsed.append(JournalNotesPreviewLine(text: cleaned, isBullet: false))
+                    index = nextIndex
+                    continue
+                }
+
+                parsed.append(JournalNotesPreviewLine(text: cleaned, isBullet: false))
+                index += 1
+                continue
+            }
+
+            parsed.append(JournalNotesPreviewLine(text: cleaned, isBullet: true))
+            index += 1
+        }
+
+        return Array(parsed.prefix(3))
+    }
+
+    private var notesPreviewAccessibilityText: String? {
+        let summary = journalNotesPreviewLines
+            .map { $0.text }
+            .joined(separator: ". ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return flattened.isEmpty ? nil : flattened
+        return summary.isEmpty ? nil : summary
     }
 
     private var accessibilitySummary: String {
@@ -3267,8 +3326,8 @@ fileprivate struct SessionRow: View {
         if scope != .mine, let dt = dateTimeLine {
             parts.append(dt)
         }
-        if scope == .mine, journalStyle == .standard, let notesPreviewText {
-            parts.append(notesPreviewText)
+        if scope == .mine, journalStyle == .standard, let notesPreviewAccessibilityText {
+            parts.append(notesPreviewAccessibilityText)
         }
         return parts.joined(separator: ". ")
     }
@@ -3641,14 +3700,19 @@ fileprivate struct SessionRow: View {
                             .accessibilityIdentifier("row.subtitle")
                     }
 
-                    if showsJournalNotesPreview, let notesPreviewText {
-                        Text(notesPreviewText)
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
-                            .lineLimit(2)
-                            .padding(.top, metaLine.isEmpty ? 4 : 6)
-                            .accessibilityLabel("Notes preview")
-                            .accessibilityIdentifier("row.notesPreview")
+                    if showsJournalNotesPreview, !journalNotesPreviewLines.isEmpty {
+                        VStack(alignment: .leading, spacing: 2) {
+                            ForEach(Array(journalNotesPreviewLines.enumerated()), id: \.offset) { _, line in
+                                Text(line.isBullet ? "• \(line.text)" : line.text)
+                                    .font(Theme.Text.body)
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                            }
+                        }
+                        .padding(.top, metaLine.isEmpty ? 4 : 6)
+                        .accessibilityLabel("Notes preview")
+                        .accessibilityIdentifier("row.notesPreview")
                     }
                 } else {
                     // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
