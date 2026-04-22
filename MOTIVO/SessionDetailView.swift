@@ -535,7 +535,6 @@ return AttachmentViewerView(
                     let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
                     if isOwner {
                         Button("Edit") {
-                            editWasPresented = true
                             showEdit = true
                         }
                     }
@@ -545,13 +544,11 @@ return AttachmentViewerView(
         // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
         .fullScreenCover(isPresented: $showEdit) {
             // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
-            AddEditSessionView(session: session)
-        }
-        .onChange(of: showEdit) { _, newValue in
-            if newValue == false {
-                // Editor dismissed; if no save occurred, stop auto-pop behavior
-                // We will also clear this flag on successful save when we dismiss below
-                // (handled by the context change observer)
+            AddEditSessionView(session: session) {
+                showEdit = false
+                DispatchQueue.main.async {
+                    dismiss()
+                }
             }
         }
         .sheet(isPresented: $isShowingPreview) {
@@ -599,7 +596,6 @@ return AttachmentViewerView(
             Button("Cancel", role: .cancel) { }
         }
         
-        .id(_refreshTick)
         .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextObjectsDidChange)) { note in
             func touchesThisSession(_ set: Set<NSManagedObject>?) -> Bool {
                 guard let set = set else { return false }
@@ -618,15 +614,6 @@ return AttachmentViewerView(
                 _refreshTick &+= 1
             }
 
-            // If the edit sheet was (or is) presented and this session was updated, pop back to ContentView
-            if editWasPresented && (touchesThisSession(updated) || touchesThisSession(inserted)) {
-                editWasPresented = false
-                // Ensure the edit sheet is closed, then dismiss this detail view
-                showEdit = false
-                DispatchQueue.main.async {
-                    dismiss()
-                }
-            }
         }
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             _refreshTick &+= 1
