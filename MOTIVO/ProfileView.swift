@@ -591,7 +591,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
     }
 
      private var sessionSetupSection: some View {
-         Section(header: Text("Session Setup").sectionHeader()) {
+         Section(header: Text("Settings").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showInstrumentManager = true } label: {
                      navigationRow(title: "Instruments")

@@ -48,6 +48,10 @@ struct AboutEtudesView: View {
                     Text("Your Journal is a private, time-based archive of all your sessions, organised by week, month, or year.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
+                    
+                    Text("As patterns emerge in your practice, the Journal can subtly reflect them with colour. When there’s a clear signal, differences are highlighted; when there isn’t, it remains neutral. This can be customised in Settings.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
 
                     Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll see what they’ve chosen to share.")
                         .font(Theme.Text.body)
