@@ -91,6 +91,19 @@ private enum PracticeTimerCompositionUI {
     static let sessionMetaOpenTopBuffer: CGFloat = Theme.Spacing.s + 2
 }
 
+
+enum TaskLineType: String, Codable {
+    case task
+    case context
+}
+
+struct TaskLine: Identifiable, Codable {
+    var id: UUID = UUID()
+    var text: String
+    var isDone: Bool = false
+    var type: TaskLineType = .task
+}
+
 struct PracticeTimerView: View {
     enum PresentationMode {
         case sheet
@@ -276,11 +289,6 @@ struct PracticeTimerView: View {
     @State var showTaskImportScanSheet: Bool = false
     @State var pendingImportedTaskLines: [String] = []
     @State var stagedImportedTaskLinesAfterPasteDismiss: [String] = []
-    struct TaskLine: Identifiable {
-        let id: UUID = UUID()
-        var text: String
-        var isDone: Bool = false
-    }
     @State var taskLines: [TaskLine] = []
     @State var autoTaskTexts: [UUID: String] = [:]
 
@@ -315,7 +323,7 @@ struct PracticeTimerView: View {
 
         if let decoded = try? JSONDecoder().decode([String].self, from: data) {
             print("[PracticeTimer] Loaded default tasks from legacy defaults key")
-            let mapped = decoded.map { TaskLine(text: $0, isDone: false) }
+            let mapped = decoded.map { TaskLine(text: $0, isDone: false, type: .task) }
             self.taskLines = mapped
             autoTaskTexts.removeAll()
             for line in mapped {
@@ -345,6 +353,23 @@ struct PracticeTimerView: View {
         return "core:0"
     }
 
+    private func decodeTypedTaskPresetLines(from data: Data) -> [TaskLine]? {
+        guard let decoded = try? JSONDecoder().decode([SerializedTaskTemplateLine].self, from: data) else {
+            return nil
+        }
+
+        let mapped = decoded.map {
+            TaskLine(
+                text: $0.text,
+                isDone: false,
+                type: $0.type
+            )
+        }
+
+        return mapped.isEmpty ? nil : mapped
+    }
+
+
     /// Per-activity default tasks loader (core + custom), with optional Instrument×Activity overrides.
 /// Uses keys:
 ///   activity tasks:  "practiceTasks_v1::<ownerScope>::<activityRef>"
@@ -353,6 +378,27 @@ struct PracticeTimerView: View {
 ///   inst+activity toggle: "practiceTasks_autofill_enabled::<ownerScope>::<activityRef>::inst:<instrumentUUID>"
 ///
 /// Also migrates old practice-only lists from "practiceTasks_v1::<ownerScope>" on first use.
+private struct SerializedTaskTemplateLine: Codable {
+    let text: String
+    let type: TaskLineType
+
+    init(text: String, type: TaskLineType = .task) {
+        self.text = text
+        self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case text
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        text = try container.decode(String.self, forKey: .text)
+        type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
+    }
+}
+
 private func loadPracticeDefaultsIfNeeded() {
     let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
     let activityRef = currentActivityRefForTasks()
@@ -382,7 +428,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
     // Helper to apply a loaded template and update tracking flags
     func applyTemplate(_ strings: [String]) {
-        let mapped = strings.map { TaskLine(text: $0, isDone: false) }
+        let mapped = strings.map { TaskLine(text: $0, isDone: false, type: .task) }
         self.taskLines = mapped
         autoTaskTexts.removeAll()
         for line in mapped {
@@ -431,6 +477,18 @@ private func loadPracticeDefaultsIfNeeded() {
     guard toggleValue else { return }
 
     // 1a) Preferred: per-activity template already exists.
+    if let data = defaults.data(forKey: tasksKey),
+       let decoded = decodeTypedTaskPresetLines(from: data) {
+        self.taskLines = decoded
+        autoTaskTexts.removeAll()
+        for line in decoded {
+            autoTaskTexts[line.id] = line.text
+        }
+        lastDefaultsActivityRef = contextKey
+        userClearedTasksForCurrentContext = false
+        return
+    }
+
     if let arr = defaults.array(forKey: tasksKey) as? [String] {
         applyTemplate(arr)
         return
@@ -442,12 +500,16 @@ private func loadPracticeDefaultsIfNeeded() {
         if let legacyArr = defaults.array(forKey: legacyKey) as? [String] {
             applyTemplate(legacyArr)
             // Persist into the per-activity slot for next time.
-            defaults.set(legacyArr, forKey: tasksKey)
+            if let data = try? JSONEncoder().encode(legacyArr.map { SerializedTaskTemplateLine(text: $0, type: .task) }) {
+                defaults.set(data, forKey: tasksKey)
+            }
         } else {
             // Very old global data path (no ownerScope).
             if let arr = defaults.array(forKey: "practiceTasks_v1") as? [String] {
                 applyTemplate(arr)
-                defaults.set(arr, forKey: tasksKey)
+                if let data = try? JSONEncoder().encode(arr.map { SerializedTaskTemplateLine(text: $0, type: .task) }) {
+                    defaults.set(data, forKey: tasksKey)
+                }
             }
         }
     }
@@ -458,6 +520,7 @@ private func loadPracticeDefaultsIfNeeded() {
     private func composeNotesString() -> String? {
         // Keep only non-empty lines (trimmed)
         let nonEmpty = taskLines
+            .filter { $0.type == .task }
             .map { (done: $0.isDone, text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines)) }
             .filter { !$0.text.isEmpty }
 
@@ -471,7 +534,7 @@ private func loadPracticeDefaultsIfNeeded() {
     // Uses the same boolean flag that drives the checkbox in the task pad.
     func composeCompletedTasksNotesString() -> String? {
         let trimmedCompleted = taskLines
-            .filter { $0.isDone }
+            .filter { $0.type == .task && $0.isDone }
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
@@ -500,7 +563,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
 
         // Create a new empty line directly after the current one
-        let newLine = TaskLine(text: "")
+        let newLine = TaskLine(text: "", isDone: false, type: .task)
         let insertIndex = taskLines.index(after: idx)
         taskLines.insert(newLine, at: insertIndex)
 
@@ -512,15 +575,31 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private func addEmptyTaskLine() {
-        taskLines.append(TaskLine(text: ""))
+        taskLines.append(TaskLine(text: "", isDone: false, type: .task))
         persistTasksSnapshot()
     }
     private func toggleDone(_ id: UUID) {
-        if let idx = taskLines.firstIndex(where: { $0.id == id }) {
+        if let idx = taskLines.firstIndex(where: { $0.id == id }),
+           taskLines[idx].type == .task {
             taskLines[idx].isDone.toggle()
             persistTasksSnapshot()
         }
     }
+
+    private func toggleTaskLineType(_ id: UUID) {
+        guard let idx = taskLines.firstIndex(where: { $0.id == id }) else { return }
+
+        switch taskLines[idx].type {
+        case .task:
+            taskLines[idx].type = .context
+            taskLines[idx].isDone = false
+        case .context:
+            taskLines[idx].type = .task
+        }
+
+        persistTasksSnapshot()
+    }
+
     private func deleteLine(_ id: UUID) {
         taskLines.removeAll { $0.id == id }
         autoTaskTexts.removeValue(forKey: id)
@@ -1726,6 +1805,7 @@ private var bottomActionSection: some View {
                 focusedTaskID: $focusedTaskID,
                 tasksAccent: tasksAccent,
                 onToggleDone: { id in toggleDone(id) },
+                onToggleLineType: { id in toggleTaskLineType(id) },
                 onDeleteLine: { id in deleteLine(id) },
                 onClearAll: { clearAllTasks() },
                 onAddEmptyLine: { addEmptyTaskLine() },
@@ -2340,7 +2420,7 @@ private var bottomActionSection: some View {
         // Restore task pad contents
         if let taskData = d.data(forKey: TimerDefaultsKey.taskLines.rawValue),
            let decoded = try? JSONDecoder().decode([SerializedTaskLine].self, from: taskData) {
-            self.taskLines = decoded.map { TaskLine(text: $0.text, isDone: $0.isDone) }
+            self.taskLines = decoded.map { TaskLine(text: $0.text, isDone: ($0.type == .task ? $0.isDone : false), type: $0.type) }
             // Rebuild stable IDs by mapping original ids to new TaskLine ids in autoTaskTexts
             var remappedAuto: [UUID:String] = [:]
             if let autoData = d.data(forKey: TimerDefaultsKey.autoTaskTexts.rawValue),
@@ -2412,12 +2492,35 @@ private var bottomActionSection: some View {
         let id: UUID
         let text: String
         let isDone: Bool
+        let type: TaskLineType
+
+        init(id: UUID, text: String, isDone: Bool, type: TaskLineType = .task) {
+            self.id = id
+            self.text = text
+            self.isDone = isDone
+            self.type = type
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case text
+            case isDone
+            case type
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(UUID.self, forKey: .id)
+            text = try container.decode(String.self, forKey: .text)
+            isDone = try container.decode(Bool.self, forKey: .isDone)
+            type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
+        }
     }
 
     func persistTasksSnapshot() {
         let d = UserDefaults.standard
         let encoder = JSONEncoder()
-        let payload: [SerializedTaskLine] = taskLines.map { SerializedTaskLine(id: $0.id, text: $0.text, isDone: $0.isDone) }
+        let payload: [SerializedTaskLine] = taskLines.map { SerializedTaskLine(id: $0.id, text: $0.text, isDone: ($0.type == .task ? $0.isDone : false), type: $0.type) }
         if let data = try? encoder.encode(payload) {
             d.set(data, forKey: TimerDefaultsKey.taskLines.rawValue)
         }

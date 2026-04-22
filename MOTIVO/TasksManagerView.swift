@@ -53,7 +53,7 @@ struct TasksManagerView: View {
     @Environment(\.editMode) private var editMode
 
     @State private var selectedActivityRef: String = "core:0"
-    @State private var items: [String] = []
+    @State private var items: [TaskTemplateLine] = []
     @State private var newItemText: String = ""
     @State private var autofillEnabled: Bool = true
     @State private var userActivities: [UserActivity] = []
@@ -66,7 +66,7 @@ struct TasksManagerView: View {
     @State private var showSaveCurrentTaskSetPrompt: Bool = false
     @State private var showDefaultTaskSetSheet: Bool = false
     @State private var pastedImportText: String = ""
-    @State private var importDraftItems: [String] = []
+    @State private var importDraftItems: [TaskTemplateLine] = []
     @State private var importDraftTaskSetName: String = ""
     @State private var importDraftLines: [EditableImportedTaskLine] = []
     @State private var draggedImportLineID: UUID? = nil
@@ -84,7 +84,43 @@ struct TasksManagerView: View {
 
     @State private var selectedInstrumentID: UUID? = nil
 
+    private enum TaskLineType: String, Codable {
+        case task
+        case context
+    }
+
+    private struct TaskTemplateLine: Codable, Identifiable, Equatable {
+        let id: UUID
+        var text: String
+        var type: TaskLineType
+
+        init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
+            self.id = id
+            self.text = text
+            self.type = type
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case id
+            case text
+            case type
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+            text = try container.decode(String.self, forKey: .text)
+            type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
+        }
+    }
+
     private struct SavedTaskSet: Codable, Identifiable, Equatable {
+        let id: UUID
+        var name: String
+        var items: [TaskTemplateLine]
+    }
+
+    private struct LegacySavedTaskSet: Codable {
         let id: UUID
         var name: String
         var items: [String]
@@ -128,6 +164,43 @@ struct TasksManagerView: View {
 
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
     private var legacyToggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
+
+    private func normalizedTaskTemplateLines(from strings: [String]) -> [TaskTemplateLine] {
+        strings
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .map { TaskTemplateLine(text: $0, type: .task) }
+    }
+
+    private func normalizedTaskTemplateLines(from typedLines: [TaskTemplateLine]) -> [TaskTemplateLine] {
+        typedLines
+            .map {
+                TaskTemplateLine(
+                    id: $0.id,
+                    text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    type: $0.type
+                )
+            }
+            .filter { !$0.text.isEmpty }
+    }
+
+    private func textItems(from typedLines: [TaskTemplateLine]) -> [String] {
+        normalizedTaskTemplateLines(from: typedLines).map(\.text)
+    }
+
+    private func loadTypedTaskTemplateLines(forKey key: String, defaults: UserDefaults) -> [TaskTemplateLine]? {
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([TaskTemplateLine].self, from: data) {
+            let normalized = normalizedTaskTemplateLines(from: decoded)
+            return normalized.isEmpty ? [] : normalized
+        }
+
+        if let arr = defaults.array(forKey: key) as? [String] {
+            return normalizedTaskTemplateLines(from: arr)
+        }
+
+        return nil
+    }
 
     private var allActivityRefs: [String] {
         var result: [String] = []
@@ -340,7 +413,7 @@ struct TasksManagerView: View {
 
                 Section(header: Text("Your Tasks").sectionHeader()) {
                     ForEach(items.indices, id: \.self) { index in
-                        Text(items[index])
+                        Text(items[index].text)
                             .font(Theme.Text.body)
                     }
                     .onDelete(perform: delete)
@@ -387,115 +460,12 @@ struct TasksManagerView: View {
                 )
             }
 .sheet(isPresented: $showTaskImportPasteSheet) {
-                NavigationStack {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 12) {
-                            HStack(alignment: .center, spacing: 12) {
-                                Text("Add tasks")
-                                    .sectionHeader()
-
-                                Spacer()
-
-                                Button {
-                                    guard let pasted = UIPasteboard.general.string,
-                                          pasted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
-                                    else { return }
-
-                                    suppressImportedRawTextObserver = true
-                                    pastedImportText = pasted
-                                    suppressImportedRawTextObserver = false
-                                    handleImportedRawTextChanged(oldValue: "", newValue: pasted)
-                                } label: {
-                                    Text("Paste")
-                                        .font(Theme.Text.body.weight(.semibold))
-                                        .foregroundStyle(.primary)
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                                .fill(Color.secondary.opacity(0.12))
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-
-                            VStack(alignment: .leading, spacing: 0) {
-                                if !importDraftLines.isEmpty {
-                                    ForEach($importDraftLines) { $line in
-                                        importedTaskDraftRow($line)
-                                            .onDrop(
-                                                of: [UTType.text],
-                                                delegate: ImportedTaskDraftLineDropDelegate(
-                                                    targetID: line.id,
-                                                    draftLines: $importDraftLines,
-                                                    draggedLineID: $draggedImportLineID
-                                                )
-                                            )
-
-                                        if line.id != importDraftLines.last?.id {
-                                            Divider()
-                                        }
-                                    }
-                                }
-
-                                if !importDraftLines.isEmpty && !pastedImportText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Divider()
-                                        .padding(.vertical, 8)
-                                }
-
-                                TextEditor(text: $pastedImportText)
-                                    .frame(minHeight: importDraftLines.isEmpty ? 140 : 44)
-                                    .font(Theme.Text.body)
-                                    .scrollContentBackground(.hidden)
-                                    .onChange(of: pastedImportText) { oldValue, newValue in
-                                        handleImportedRawTextChanged(oldValue: oldValue, newValue: newValue)
-                                    }
-                            }
-                            .cardSurface()
-
-                            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                                Text("Task set name")
-                                    .sectionHeader()
-                                TextField("Task set name", text: $importDraftTaskSetName)
-                                    .font(Theme.Text.body)
-                                    .textInputAutocapitalization(.words)
-                                    .padding(.horizontal, 14)
-                                    .frame(height: 44)
-                                    .cardSurface()
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.top, 8)
-                        .padding(.bottom, 24)
-                    }
-                    .scrollDismissesKeyboard(.interactively)
-                    .simultaneousGesture(TapGesture().onEnded { dismissImportedTaskKeyboard() })
-                    .navigationTitle("")
-                                        .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Cancel") {
-                                showTaskImportPasteSheet = false
-                            }
-                            .foregroundStyle(Theme.Colors.accent)
-                        }
-
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Save task set") {
-                                saveImportedTaskSetFromDraft()
-                            }
-                            .foregroundStyle(Theme.Colors.accent)
-                            .disabled(importDraftItems.isEmpty)
-                        }
-                    }
-                    .appBackground()
-                }
+                taskImportPasteSheet
             }
             .sheet(isPresented: $showTaskImportScanSheet) {
-                TasksManagerImportScanSheet {
-                    recognizedText in
+                TasksManagerImportScanSheet { recognizedText in
                     let parsed = Self.parseImportedTaskLines(from: recognizedText)
-                    importDraftItems = parsed
+                    importDraftItems = normalizedTaskTemplateLines(from: parsed)
                     importDraftLines = parsed.map { EditableImportedTaskLine(text: $0) }
                     importDraftTaskSetName = defaultImportedTaskSetName(from: parsed)
                     pastedImportText = ""
@@ -505,76 +475,7 @@ struct TasksManagerView: View {
                 .ignoresSafeArea()
             }
             .sheet(isPresented: $showDefaultTaskSetSheet) {
-                NavigationStack {
-                    Form {
-                        Section {
-                            HStack(spacing: Theme.Spacing.m) {
-                                Button {
-                                    selectedTaskSetID = nil
-                                    draftTaskSetName = ""
-                                    saveTaskSetSelectionAndItems()
-                                    showDefaultTaskSetSheet = false
-                                } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: selectedTaskSetID == nil ? "checkmark.circle.fill" : "circle")
-                                            .foregroundStyle(Theme.Colors.accent)
-                                        Text("Current list")
-                                            .font(Theme.Text.body)
-                                            .foregroundStyle(.primary)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                Spacer(minLength: 0)
-                            }
-                        }
-
-                        if !savedTaskSets.isEmpty {
-                            Section {
-                                ForEach(savedTaskSets) { set in
-                                    HStack(spacing: Theme.Spacing.m) {
-                                        Button {
-                                            selectTaskSet(set.id)
-                                            showDefaultTaskSetSheet = false
-                                        } label: {
-                                            HStack(spacing: 10) {
-                                                Image(systemName: selectedTaskSetID == set.id ? "checkmark.circle.fill" : "circle")
-                                                    .foregroundStyle(Theme.Colors.accent)
-                                                Text(set.name)
-                                                    .font(Theme.Text.body)
-                                                    .foregroundStyle(.primary)
-                                                    .lineLimit(1)
-                                            }
-                                            .contentShape(Rectangle())
-                                        }
-                                        .buttonStyle(.plain)
-
-                                        Spacer(minLength: 0)
-
-                                        Button {
-                                            deleteTaskSet(set.id)
-                                        } label: {
-                                            Image(systemName: "trash")
-                                                .font(.body)
-                                                .foregroundStyle(.primary)
-                                        }
-                                        .buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .navigationTitle("")
-                                        .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("Done") {
-                                showDefaultTaskSetSheet = false
-                            }
-                            .foregroundStyle(Theme.Colors.accent)
-                        }
-                    }
-                    .appBackground()
-                }
+                defaultTaskSetSheet
             }
             .alert("Save task set", isPresented: $showSaveCurrentTaskSetPrompt) {
                 TextField("Task set name", text: $draftTaskSetName)
@@ -605,10 +506,211 @@ struct TasksManagerView: View {
         }
     }
 
+    private var taskImportPasteSheet: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    importPasteHeader
+                    importDraftEditorCard
+                    importTaskSetNameSection
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .onTapGesture {
+                dismissImportedTaskKeyboard()
+            }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        showTaskImportPasteSheet = false
+                    }
+                    .foregroundStyle(Theme.Colors.accent)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save task set") {
+                        saveImportedTaskSetFromDraft()
+                    }
+                    .foregroundStyle(Theme.Colors.accent)
+                    .disabled(importDraftItems.isEmpty)
+                }
+            }
+            .appBackground()
+        }
+    }
+
+    private var importPasteHeader: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Text("Add tasks")
+                .sectionHeader()
+
+            Spacer()
+
+            Button(action: pasteImportedTasksFromClipboard) {
+                Text("Paste")
+                    .font(Theme.Text.body.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(importPasteButtonBackground)
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var importPasteButtonBackground: some View {
+        RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
+            .fill(Color.secondary.opacity(0.12))
+    }
+
+    private var importDraftEditorCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !importDraftLines.isEmpty {
+                ForEach($importDraftLines) { $line in
+                    importedTaskDraftRow($line)
+                        .onDrop(
+                            of: [UTType.text],
+                            delegate: ImportedTaskDraftLineDropDelegate(
+                                targetID: line.id,
+                                draftLines: $importDraftLines,
+                                draggedLineID: $draggedImportLineID
+                            )
+                        )
+
+                    if line.id != importDraftLines.last?.id {
+                        Divider()
+                    }
+                }
+            }
+
+            if !importDraftLines.isEmpty && !pastedImportText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Divider()
+                    .padding(.vertical, 8)
+            }
+
+            TextEditor(text: $pastedImportText)
+                .frame(minHeight: importDraftLines.isEmpty ? 140 : 44)
+                .font(Theme.Text.body)
+                .scrollContentBackground(.hidden)
+                .onChange(of: pastedImportText) { oldValue, newValue in
+                    handleImportedRawTextChanged(oldValue: oldValue, newValue: newValue)
+                }
+        }
+        .cardSurface()
+    }
+
+    private var importTaskSetNameSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Task set name")
+                .sectionHeader()
+            TextField("Task set name", text: $importDraftTaskSetName)
+                .font(Theme.Text.body)
+                .textInputAutocapitalization(.words)
+                .padding(.horizontal, 14)
+                .frame(height: 44)
+                .cardSurface()
+        }
+    }
+
+    private var defaultTaskSetSheet: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack(spacing: Theme.Spacing.m) {
+                        Button {
+                            selectedTaskSetID = nil
+                            draftTaskSetName = ""
+                            saveTaskSetSelectionAndItems()
+                            showDefaultTaskSetSheet = false
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: selectedTaskSetID == nil ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(Theme.Colors.accent)
+                                Text("Current list")
+                                    .font(Theme.Text.body)
+                                    .foregroundStyle(.primary)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                if !savedTaskSets.isEmpty {
+                    Section {
+                        ForEach(savedTaskSets) { set in
+                            defaultTaskSetRow(set)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") {
+                        showDefaultTaskSetSheet = false
+                    }
+                    .foregroundStyle(Theme.Colors.accent)
+                }
+            }
+            .appBackground()
+        }
+    }
+
+    private func defaultTaskSetRow(_ set: SavedTaskSet) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Button {
+                selectTaskSet(set.id)
+                showDefaultTaskSetSheet = false
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: selectedTaskSetID == set.id ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(Theme.Colors.accent)
+                    Text(set.name)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Spacer(minLength: 0)
+
+            Button {
+                deleteTaskSet(set.id)
+            } label: {
+                Image(systemName: "trash")
+                    .font(.body)
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func pasteImportedTasksFromClipboard() {
+        #if canImport(UIKit)
+        guard let pasted = UIPasteboard.general.string else { return }
+        let trimmed = pasted.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+
+        suppressImportedRawTextObserver = true
+        pastedImportText = pasted
+        suppressImportedRawTextObserver = false
+        handleImportedRawTextChanged(oldValue: "", newValue: pasted)
+        #endif
+    }
+
     private func addItem() {
         let trimmed = newItemText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        items.append(trimmed)
+        items.append(TaskTemplateLine(text: trimmed, type: .task))
         newItemText = ""
         saveItems()
     }
@@ -637,13 +739,13 @@ struct TasksManagerView: View {
         }
 
         if let selectedTaskSet {
-            items = selectedTaskSet.items
+            items = normalizedTaskTemplateLines(from: selectedTaskSet.items)
             draftTaskSetName = selectedTaskSet.name
-        } else if let arr = defaults.array(forKey: tasksKey) as? [String] {
-            items = arr
+        } else if let typed = loadTypedTaskTemplateLines(forKey: tasksKey, defaults: defaults) {
+            items = typed
             draftTaskSetName = ""
-        } else if let legacyArr = defaults.array(forKey: legacyTasksKey) as? [String] {
-            items = legacyArr
+        } else if let typedLegacy = loadTypedTaskTemplateLines(forKey: legacyTasksKey, defaults: defaults) {
+            items = typedLegacy
             draftTaskSetName = ""
         } else {
             items = []
@@ -660,12 +762,17 @@ struct TasksManagerView: View {
     }
 
     private func saveItems() {
+        let normalizedItems = normalizedTaskTemplateLines(from: items)
+
         if let selectedID = selectedTaskSetID,
            let index = savedTaskSets.firstIndex(where: { $0.id == selectedID }) {
-            savedTaskSets[index].items = items
+            savedTaskSets[index].items = normalizedItems
             saveSavedTaskSets()
         }
-        UserDefaults.standard.set(items, forKey: tasksKey)
+
+        if let data = try? JSONEncoder().encode(normalizedItems) {
+            UserDefaults.standard.set(data, forKey: tasksKey)
+        }
     }
 
     private func saveToggle() {
@@ -687,10 +794,8 @@ struct TasksManagerView: View {
         func merge(_ sets: [SavedTaskSet]) {
             for set in sets {
                 let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                let normalizedItems = set.items
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-                let contentSignature = trimmedName.lowercased() + "||" + normalizedItems.joined(separator: "\u{241E}").lowercased()
+                let normalizedItems = normalizedTaskTemplateLines(from: set.items)
+                let contentSignature = trimmedName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
 
                 if seenIDs.contains(set.id) || seenContentSignatures.contains(contentSignature) {
                     continue
@@ -698,20 +803,30 @@ struct TasksManagerView: View {
 
                 seenIDs.insert(set.id)
                 seenContentSignatures.insert(contentSignature)
-                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: normalizedItems) : trimmedName, items: normalizedItems))
+                merged.append(SavedTaskSet(id: set.id, name: trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: normalizedItems)) : trimmedName, items: normalizedItems))
             }
         }
 
-        if let data = defaults.data(forKey: globalTaskSetsKey),
-           let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
-            merge(decoded)
+        if let data = defaults.data(forKey: globalTaskSetsKey) {
+            if let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
+                merge(decoded)
+            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSet].self, from: data) {
+                merge(legacyDecoded.map { SavedTaskSet(id: $0.id, name: $0.name, items: normalizedTaskTemplateLines(from: $0.items)) })
+            }
         }
 
         let legacyKeys = legacyTaskSetKeysForMigration()
         for key in legacyKeys {
-            guard let data = defaults.data(forKey: key),
-                  let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) else { continue }
-            merge(decoded)
+            guard let data = defaults.data(forKey: key) else { continue }
+
+            if let decoded = try? JSONDecoder().decode([SavedTaskSet].self, from: data) {
+                merge(decoded)
+                continue
+            }
+
+            if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSet].self, from: data) {
+                merge(legacyDecoded.map { SavedTaskSet(id: $0.id, name: $0.name, items: normalizedTaskTemplateLines(from: $0.items)) })
+            }
         }
 
         if let data = try? JSONEncoder().encode(merged) {
@@ -755,7 +870,7 @@ struct TasksManagerView: View {
         guard let set = savedTaskSets.first(where: { $0.id == id }) else { return }
         selectedTaskSetID = set.id
         draftTaskSetName = set.name
-        items = set.items
+        items = normalizedTaskTemplateLines(from: set.items)
         saveTaskSetSelectionAndItems()
     }
 
@@ -763,11 +878,17 @@ struct TasksManagerView: View {
         let defaults = UserDefaults.standard
         if let selectedTaskSet {
             defaults.set(selectedTaskSet.id.uuidString, forKey: defaultTaskSetIDKey)
-            defaults.set(selectedTaskSet.items, forKey: tasksKey)
-            items = selectedTaskSet.items
+            let normalizedItems = normalizedTaskTemplateLines(from: selectedTaskSet.items)
+            if let data = try? JSONEncoder().encode(normalizedItems) {
+                defaults.set(data, forKey: tasksKey)
+            }
+            items = normalizedItems
         } else {
             defaults.removeObject(forKey: defaultTaskSetIDKey)
-            defaults.set(items, forKey: tasksKey)
+            let normalizedItems = normalizedTaskTemplateLines(from: items)
+            if let data = try? JSONEncoder().encode(normalizedItems) {
+                defaults.set(data, forKey: tasksKey)
+            }
         }
     }
 
@@ -783,15 +904,15 @@ struct TasksManagerView: View {
     }
 
     private func saveCurrentItemsAsTaskSet() {
-        draftTaskSetName = defaultImportedTaskSetName(from: items)
+        draftTaskSetName = defaultImportedTaskSetName(from: textItems(from: items))
         showSaveCurrentTaskSetPrompt = true
     }
 
     private func commitSaveCurrentItemsAsTaskSet() {
         let trimmedName = draftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: items) : trimmedName
+        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: items)) : trimmedName
         let finalName = uniqueTaskSetName(from: baseName)
-        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: items)
+        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: items))
         savedTaskSets.append(newSet)
         saveSavedTaskSets()
         selectTaskSet(newSet.id)
@@ -804,9 +925,9 @@ struct TasksManagerView: View {
         guard !cleanedItems.isEmpty else { return }
 
         let trimmedName = importDraftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: cleanedItems) : trimmedName
+        let baseName = trimmedName.isEmpty ? defaultImportedTaskSetName(from: textItems(from: cleanedItems)) : trimmedName
         let finalName = uniqueTaskSetName(from: baseName)
-        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: cleanedItems)
+        let newSet = SavedTaskSet(id: UUID(), name: finalName, items: normalizedTaskTemplateLines(from: cleanedItems))
         savedTaskSets.append(newSet)
         saveSavedTaskSets()
         selectTaskSet(newSet.id)
@@ -887,8 +1008,8 @@ struct TasksManagerView: View {
         importDraftLines.append(contentsOf: parsed.map { EditableImportedTaskLine(text: $0) })
         syncImportDraftItemsFromLines()
 
-        if importDraftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importDraftTaskSetName == defaultImportedTaskSetName(from: importDraftItems) {
-            importDraftTaskSetName = defaultImportedTaskSetName(from: importDraftItems)
+        if importDraftTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || importDraftTaskSetName == defaultImportedTaskSetName(from: textItems(from: importDraftItems)) {
+            importDraftTaskSetName = defaultImportedTaskSetName(from: textItems(from: importDraftItems))
         }
 
         suppressImportedRawTextObserver = true
@@ -902,6 +1023,7 @@ struct TasksManagerView: View {
         importDraftItems = importDraftLines
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
+            .map { TaskTemplateLine(text: $0, type: .task) }
     }
 
     private func dismissImportedTaskKeyboard() {
@@ -924,7 +1046,7 @@ struct TasksManagerView: View {
 
     private func uniqueTaskSetName(from baseName: String) -> String {
         let trimmed = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
-        let seed = trimmed.isEmpty ? defaultImportedTaskSetName(from: items) : trimmed
+        let seed = trimmed.isEmpty ? defaultImportedTaskSetName(from: textItems(from: items)) : trimmed
         let existingNames = Set(savedTaskSets.map { $0.name.lowercased() })
 
         if !existingNames.contains(seed.lowercased()) {

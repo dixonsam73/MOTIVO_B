@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 struct TasksPadCard: View {
     @Binding var showTasksPad: Bool
-    @Binding var taskLines: [PracticeTimerView.TaskLine]
+    @Binding var taskLines: [TaskLine]
     @Binding var autoTaskTexts: [UUID: String]
 
     let focusedTaskID: FocusState<UUID?>.Binding
@@ -11,6 +11,7 @@ struct TasksPadCard: View {
 
     // Callbacks back into PracticeTimerView for behaviour/persistence
     let onToggleDone: (UUID) -> Void
+    let onToggleLineType: (UUID) -> Void
     let onDeleteLine: (UUID) -> Void
     let onClearAll: () -> Void
     let onAddEmptyLine: () -> Void
@@ -24,9 +25,11 @@ struct TasksPadCard: View {
     private let dragHandleWidth: CGFloat = 20
     private let deleteIconWidth: CGFloat = 20
     private let dragDeleteSpacing: CGFloat = 16
+
     private var rightControlZoneWidth: CGFloat {
         dragHandleWidth + dragDeleteSpacing + deleteIconWidth
     }
+
     private var hasAnyTaskLines: Bool {
         !taskLines.isEmpty
     }
@@ -44,8 +47,6 @@ struct TasksPadCard: View {
     @ViewBuilder
     private var expandedPad: some View {
         VStack(alignment: .leading, spacing: 8) {
-       
-
             VStack(alignment: .leading, spacing: 0) {
                 ForEach($taskLines) { $line in
                     taskRow($line)
@@ -112,49 +113,24 @@ struct TasksPadCard: View {
     }
 
     @ViewBuilder
-    private func taskRow(_ line: Binding<PracticeTimerView.TaskLine>) -> some View {
+    private func taskRow(_ line: Binding<TaskLine>) -> some View {
         HStack(spacing: 6) {
-            Button {
-                onToggleDone(line.wrappedValue.id)
-            } label: {
-                Image(systemName: line.wrappedValue.isDone ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(tasksAccent)
-                    .frame(width: 28, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            TextField(
-                "Task",
-                text: Binding(
-                    get: { line.wrappedValue.text },
-                    set: { newValue in
-                        if newValue.contains("\n") {
-                            let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
-                            line.wrappedValue.text = cleaned
-                            onHandleReturn(line.wrappedValue.id)
-                        } else {
-                            line.wrappedValue.text = newValue
-                            onPersistSnapshot()
-                        }
-                    }
-                ),
-                axis: .vertical
-            )
-            .textFieldStyle(.plain)
-            .disableAutocorrection(true)
-            .focused(focusedTaskID, equals: line.wrappedValue.id)
-            .onTapGesture {
-                focusedTaskID.wrappedValue = line.wrappedValue.id
-            }
-            .onChange(of: focusedTaskID.wrappedValue) { _, newFocus in
-                if newFocus == line.wrappedValue.id {
-                    if let auto = autoTaskTexts[line.wrappedValue.id], line.wrappedValue.text == auto {
-                        line.wrappedValue.text = ""
-                    }
-                    onPersistSnapshot()
+            if line.wrappedValue.type == .task {
+                Button {
+                    onToggleDone(line.wrappedValue.id)
+                } label: {
+                    Image(systemName: line.wrappedValue.isDone ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(tasksAccent)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+            } else {
+                Color.clear
+                    .frame(width: 28, height: 28)
             }
+
+            taskTextArea(line)
 
             Spacer(minLength: 8)
 
@@ -165,7 +141,7 @@ struct TasksPadCard: View {
                     .contentShape(Rectangle())
                     .onDrag {
                         draggedTaskID = line.wrappedValue.id
-                        return NSItemProvider(object: NSString(string: line.wrappedValue.id.uuidString))
+                        return NSItemProvider(object: line.wrappedValue.id.uuidString as NSString)
                     }
                     .accessibilityLabel("Reorder task")
 
@@ -182,7 +158,50 @@ struct TasksPadCard: View {
             .frame(width: rightControlZoneWidth, alignment: .trailing)
         }
         .padding(.vertical, 1)
+    }
+
+    @ViewBuilder
+    private func taskTextArea(_ line: Binding<TaskLine>) -> some View {
+        TextField(
+            line.wrappedValue.type == .context ? "Context" : "Task",
+            text: Binding(
+                get: { line.wrappedValue.text },
+                set: { newValue in
+                    if newValue.contains("\n") {
+                        let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
+                        line.wrappedValue.text = cleaned
+                        onPersistSnapshot()
+                        onHandleReturn(line.wrappedValue.id)
+                    } else {
+                        line.wrappedValue.text = newValue
+                        onPersistSnapshot()
+                    }
+                }
+            ),
+            axis: .vertical
+        )
+        .textFieldStyle(.plain)
+        .disableAutocorrection(true)
+        .focused(focusedTaskID, equals: line.wrappedValue.id)
+        .onTapGesture {
+            focusedTaskID.wrappedValue = line.wrappedValue.id
+        }
+        .onChange(of: focusedTaskID.wrappedValue) { _, newFocus in
+            if newFocus == line.wrappedValue.id {
+                if let auto = autoTaskTexts[line.wrappedValue.id], line.wrappedValue.text == auto {
+                    line.wrappedValue.text = ""
+                }
+                onPersistSnapshot()
+            }
+        }
+        .font(line.wrappedValue.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
+        .contextMenu {
+            Button(line.wrappedValue.type == .task ? "Context" : "Task") {
+                onToggleLineType(line.wrappedValue.id)
+            }
+        }
     }
 
     private var collapsedHeader: some View {
@@ -211,7 +230,7 @@ struct TasksPadCard: View {
 
 private struct TaskLineDropDelegate: DropDelegate {
     let targetID: UUID
-    @Binding var taskLines: [PracticeTimerView.TaskLine]
+    @Binding var taskLines: [TaskLine]
     @Binding var draggedTaskID: UUID?
     let onPersistSnapshot: () -> Void
 

@@ -86,10 +86,38 @@ private struct AttachmentViewerRequest: Identifiable {
     let audioURLs: [URL]
 }
 
+private enum TaskLineType_PRDV_Stage1: String, Decodable {
+    case task
+    case context
+}
+
 private struct PersistedTaskLine_PRDV_Stage1: Decodable {
     let id: UUID
     let text: String
     let isDone: Bool
+    let type: TaskLineType_PRDV_Stage1
+
+    init(id: UUID, text: String, isDone: Bool, type: TaskLineType_PRDV_Stage1 = .task) {
+        self.id = id
+        self.text = text
+        self.isDone = isDone
+        self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case text
+        case isDone
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        text = try container.decode(String.self, forKey: .text)
+        isDone = try container.decode(Bool.self, forKey: .isDone)
+        type = try container.decodeIfPresent(TaskLineType_PRDV_Stage1.self, forKey: .type) ?? .task
+    }
 }
 
 
@@ -1741,13 +1769,28 @@ isPrivate: { url in
             return nil
         }
 
-        let trimmedCompleted = decoded
-            .filter { $0.isDone }
+        let contextLines = decoded
+            .filter { $0.type == .context }
             .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        guard !trimmedCompleted.isEmpty else { return nil }
-        return trimmedCompleted.map { "• \($0)" }.joined(separator: "\n")
+        let trimmedCompletedTasks = decoded
+            .filter { $0.type == .task && $0.isDone }
+            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        var blocks: [String] = []
+
+        if !contextLines.isEmpty {
+            blocks.append("Worked on: " + contextLines.joined(separator: ", "))
+        }
+
+        if !trimmedCompletedTasks.isEmpty {
+            blocks.append(trimmedCompletedTasks.map { "• \($0)" }.joined(separator: "\n"))
+        }
+
+        guard !blocks.isEmpty else { return nil }
+        return blocks.joined(separator: "\n")
     }
 
     private func notesIncludingCompletedTasksIfNeeded() -> String {
