@@ -83,7 +83,7 @@ enum SessionActivity {
         if titleAlreadyContainsActivity {
             return [instrumentName, timeStr, dateStr].joined(separator: ", ")
         } else {
-            return [instrumentName, activityLabel, timeStr, dateStr].joined(separator: ", ")
+            return ["\(instrumentName) · \(activityLabel)", timeStr, dateStr].joined(separator: ", ")
         }
     }
 
