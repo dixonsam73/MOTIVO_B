@@ -1769,28 +1769,38 @@ isPrivate: { url in
             return nil
         }
 
-        let contextLines = decoded
-            .filter { $0.type == .context }
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        var output = ""
+        var lastEmittedType: TaskLineType_PRDV_Stage1? = nil
 
-        let trimmedCompletedTasks = decoded
-            .filter { $0.type == .task && $0.isDone }
-            .map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+        for line in decoded {
+            let trimmed = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
 
-        var blocks: [String] = []
+            let formattedLine: String
+            switch line.type {
+            case .context:
+                formattedLine = trimmed
+            case .task:
+                guard line.isDone else { continue }
+                formattedLine = "• \(trimmed)"
+            }
 
-        if !contextLines.isEmpty {
-            blocks.append("Worked on: " + contextLines.joined(separator: ", "))
+            if output.isEmpty {
+                output = formattedLine
+            } else {
+                switch (lastEmittedType, line.type) {
+                case (.task?, .context):
+                    output += "\n\n" + formattedLine
+                default:
+                    output += "\n" + formattedLine
+                }
+            }
+
+            lastEmittedType = line.type
         }
 
-        if !trimmedCompletedTasks.isEmpty {
-            blocks.append(trimmedCompletedTasks.map { "• \($0)" }.joined(separator: "\n"))
-        }
-
-        guard !blocks.isEmpty else { return nil }
-        return blocks.joined(separator: "\n")
+        let trimmedOutput = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmedOutput.isEmpty ? nil : trimmedOutput
     }
 
     private func notesIncludingCompletedTasksIfNeeded() -> String {
