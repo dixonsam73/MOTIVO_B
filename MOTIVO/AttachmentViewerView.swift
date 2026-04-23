@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260423_162500_AVV_MediaControlsRefined
+// SCOPE: AttachmentViewerView media player polish — unify AirPlay chrome with other floating controls, keep portrait trayless controls, move landscape video controls onto the viewer background surface, and remove duplicate paused-state play button from the video transport row. No playback/scrub/routing logic changes.
+// SEARCH-TOKEN: 20260423_162500_AVV_MediaControlsRefined
+
 // CHANGE-ID: 20260224_072759_AESVReplaceFix_Option1_AVVDeferredUpgrade
 // SCOPE: AVV Replace (deferred) auto-upgrades to persisted replace when original attachment is in Documents, preventing tmp URLs from being persisted by AESV. No UI/backend/schema changes.
 // SEARCH-TOKEN: 20260224_072759_AESVReplaceFix_Option1_AVVDeferredUpgrade
@@ -49,6 +53,10 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+
+// CHANGE-ID: 20260423_175900_AVV_VideoPlacementDensityFix
+// SCOPE: AttachmentViewerView VideoPage layout correction only — use viewer orientation to drive dense mode, keep paused and playing video in one shared placement container, prevent portrait top-pinning for landscape-shot video, and tighten landscape video chrome so the video surface dominates. Audio and playback logic unchanged.
+// SEARCH-TOKEN: 20260423_175900_AVV_VideoPlacementDensityFix
 
 // CHANGE-ID: 20260201_170000_AttachmentPlaybackRouteFix
 // SCOPE: Fix AttachmentViewer audio playback to respect current output route (e.g., AirPods) by using .playback without speaker override.
@@ -1464,6 +1472,7 @@ private struct VideoPage: View {
     @State private var isMuted: Bool = false
     @State private var poster: UIImage? = nil
     @State private var playRequested: Bool = false
+    @State private var videoAspectRatio: CGFloat? = nil
 
     // Added state and observers tracking
     @State private var isPlayingState: Bool = false
@@ -1481,58 +1490,31 @@ private struct VideoPage: View {
     @State private var itemStatusObserver: NSKeyValueObservation? = nil
 
     var body: some View {
-        ZStack {
-            ZStack {
-                Group {
-                    if let poster {
-                        Image(uiImage: poster)
-                            .resizable()
-                            .scaledToFit()
-                    } else {
-                        Image(systemName: "film")
-                            .imageScale(.large)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .task(id: url) { await generatePoster() }
+        GeometryReader { proxy in
+            let isLandscapeViewer = proxy.size.width > proxy.size.height
+            let aspectRatio = max(videoAspectRatio ?? 16.0 / 9.0, 0.1)
+            let useDenseLandscapeChrome = isLandscapeViewer
+            let controlCompact = useDenseLandscapeChrome
+            let controlsSpacing: CGFloat = useDenseLandscapeChrome ? 0 : 8
+            let transportHeight: CGFloat = useDenseLandscapeChrome ? 36 : 64
+            let horizontalPadding: CGFloat = useDenseLandscapeChrome ? Theme.Spacing.xs : Theme.Spacing.l
+            let bottomPadding: CGFloat = useDenseLandscapeChrome ? 6 : Theme.Spacing.l
+            let transportButtonSpacing: CGFloat = useDenseLandscapeChrome ? 10 : 16
+            let interSectionSpacing: CGFloat = useDenseLandscapeChrome ? 4 : 10
+            let mediaTopInset: CGFloat = useDenseLandscapeChrome ? 6 : 18
+            let mediaBottomInset: CGFloat = useDenseLandscapeChrome ? 4 : 14
 
-                if let player {
-                    PlayerContainerView(player: player)
-                        .onDisappear { player.pause() }
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                if overlayTapGuard { return }
-                togglePlayPauseFromBackgroundTap()
-            }
+            VStack(spacing: 0) {
+                videoPlacementContainer(
+                    aspectRatio: aspectRatio,
+                    isLandscapeViewer: isLandscapeViewer
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.top, mediaTopInset)
+                .padding(.bottom, mediaBottomInset)
+                .layoutPriority(1)
 
-            // Play overlay
-            Button(action: {
-                // Guard against simultaneous background tap handling
-                overlayTapGuard = true
-                defer {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { overlayTapGuard = false }
-                }
-                requestPlay()
-            }) {
-                ZStack {
-                    Circle()
-                        .fill(.ultraThinMaterial)
-                        .frame(width: 56, height: 56)
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 20, weight: .semibold))
-                }
-            }
-            .buttonStyle(.plain)
-            .opacity(isPlayingState ? 0 : 1)
-            .accessibilityLabel("Play video")
-
-            // Bottom transport bar (unified)
-            VStack(spacing: 8) {
-                Spacer()
-                // Slider row
-                VStack(spacing: 8) {
+                VStack(spacing: controlsSpacing) {
                     Slider(
                         value: Binding(
                             get: {
@@ -1543,7 +1525,6 @@ private struct VideoPage: View {
                             },
                             set: { newValue in
                                 currentTime = newValue
-                                // Realtime scrubbing: seek player as the slider moves
                                 if let player {
                                     let cm = CMTime(
                                         seconds: max(0, min(newValue, duration)),
@@ -1567,84 +1548,53 @@ private struct VideoPage: View {
                         }
                     )
                     .tint(Theme.Colors.accent)
+
+                    ZStack {
+                        HStack {
+                            mediaControlButton(compact: controlCompact, action: { toggleMute() }) {
+                                Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+
+                            Spacer(minLength: 0)
+
+                            routePickerControl(compact: controlCompact)
+                        }
+
+                        HStack(spacing: transportButtonSpacing) {
+                            mediaControlButton(compact: controlCompact, action: { seek(by: -10) }) {
+                                Image(systemName: "gobackward.10")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+
+                            if isPlayingState {
+                                mediaControlButton(compact: controlCompact, action: { togglePlayPause() }) {
+                                    Image(systemName: "pause.fill")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                            } else {
+                                Color.clear
+                                    .frame(width: controlCompact ? 36 : 40, height: controlCompact ? 36 : 40)
+                            }
+
+                            mediaControlButton(compact: controlCompact, action: { seek(by: 10) }) {
+                                Image(systemName: "goforward.10")
+                                    .font(.system(size: 17, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .frame(height: transportHeight)
                 }
-                // Transport controls row
-                HStack(spacing: 16) {
-                    // Speaker (mute/unmute)
-                    Button(action: { toggleMute() }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                            Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    // Back 10s
-                    Button(action: { seek(by: -10) }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                            Image(systemName: "gobackward.10")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    // Play/Pause
-                    Button(action: { togglePlayPause() }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                            Image(systemName: isPlayingState ? "pause.fill" : "play.fill")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    // Forward 10s
-                    Button(action: { seek(by: 10) }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
-                            Image(systemName: "goforward.10")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    // AirPlay
-                    RoutePickerView()
-                        .frame(width: 28, height: 28)
-                }
-                .padding(.horizontal, Theme.Spacing.l)
-                .padding(.bottom, Theme.Spacing.m)
-                .background(
-                    Color.clear.cardSurface()
-                        .ignoresSafeArea(edges: .bottom)
-                )
+                .padding(.top, interSectionSpacing)
+                .padding(.horizontal, horizontalPadding)
+                .padding(.bottom, bottomPadding)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onChange(of: onRequestStopAll) { _, _ in
             if let until = ignoreStopBroadcastUntil, Date() < until {
@@ -1661,6 +1611,71 @@ private struct VideoPage: View {
             }
             removeTimeObservation()
             stopObservingPlayer()
+        }
+    }
+
+    @ViewBuilder
+    private func videoPlacementContainer(aspectRatio: CGFloat, isLandscapeViewer: Bool) -> some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: isLandscapeViewer ? 0 : 0)
+
+            videoSurface(aspectRatio: aspectRatio)
+                .frame(maxWidth: .infinity)
+
+            Spacer(minLength: isLandscapeViewer ? 0 : 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func videoSurface(aspectRatio: CGFloat) -> some View {
+        ZStack {
+            Group {
+                if let poster {
+                    Image(uiImage: poster)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Image(systemName: "film")
+                        .imageScale(.large)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .task(id: url) { await generatePoster() }
+
+            if let player {
+                PlayerContainerView(player: player)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onDisappear { player.pause() }
+            }
+
+            if !isPlayingState {
+                Button(action: {
+                    overlayTapGuard = true
+                    defer {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { overlayTapGuard = false }
+                    }
+                    requestPlay()
+                }) {
+                    ZStack {
+                        Circle()
+                            .fill(.ultraThinMaterial)
+                            .frame(width: 56, height: 56)
+                        Image(systemName: "play.fill")
+                            .font(.system(size: 20, weight: .semibold))
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Play video")
+            }
+        }
+        .aspectRatio(aspectRatio, contentMode: .fit)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if overlayTapGuard { return }
+            togglePlayPauseFromBackgroundTap()
         }
     }
 
@@ -1697,9 +1712,29 @@ private struct VideoPage: View {
     private func generatePoster() async {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
+                let asset = AVAsset(url: url)
+                var resolvedAspectRatio: CGFloat? = nil
+                if let track = asset.tracks(withMediaType: .video).first {
+                    let transformed = track.naturalSize.applying(track.preferredTransform)
+                    let size = CGSize(width: abs(transformed.width), height: abs(transformed.height))
+                    if size.width > 0, size.height > 0 {
+                        resolvedAspectRatio = size.width / size.height
+                    }
+                }
+
                 let img = AttachmentStore.generateVideoPoster(url: url)
+                if resolvedAspectRatio == nil, let img {
+                    let size = img.size
+                    if size.width > 0, size.height > 0 {
+                        resolvedAspectRatio = size.width / size.height
+                    }
+                }
+
                 DispatchQueue.main.async {
                     self.poster = img
+                    if let resolvedAspectRatio {
+                        self.videoAspectRatio = resolvedAspectRatio
+                    }
                     cont.resume()
                 }
             }
@@ -1837,6 +1872,41 @@ private struct VideoPage: View {
         )
         player.seek(to: cm, toleranceBefore: .zero, toleranceAfter: .zero)
     }
+
+    @ViewBuilder
+    private func mediaControlButton<Label: View>(compact: Bool = false, action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
+        let buttonSize: CGFloat = compact ? 36 : 40
+
+        return Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                label()
+            }
+            .frame(width: buttonSize, height: buttonSize)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func routePickerControl(compact: Bool = false) -> some View {
+        let buttonSize: CGFloat = compact ? 36 : 40
+        let iconSize: CGFloat = compact ? 18 : 20
+
+        ZStack {
+            Circle()
+                .fill(.thinMaterial)
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+
+            RoutePickerView()
+                .frame(width: iconSize, height: iconSize)
+        }
+        .frame(width: buttonSize, height: buttonSize)
+        .contentShape(Circle())
+    }
+
 }
 
 private struct RoutePickerView: UIViewRepresentable {
@@ -2180,7 +2250,6 @@ private struct AudioPage: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .safeAreaInset(edge: .bottom) {
             VStack(spacing: 8) {
-                // Slider row
                 VStack(spacing: 8) {
                     Slider(
                         value: Binding(
@@ -2213,126 +2282,79 @@ private struct AudioPage: View {
                     .tint(Theme.Colors.accent)
                 }
 
-                // Transport controls row
-                HStack(spacing: 16) {
-                    // Speaker (mute/unmute)
-                    Button(action: { toggleMute() }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                ZStack {
+                    HStack {
+                        mediaControlButton(action: { toggleMute() }) {
                             Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
+
+                        Spacer(minLength: 0)
+
+                        routePickerControl()
                     }
-                    .buttonStyle(.plain)
 
-                    Spacer()
-
-                    // Back 10s
-                    Button(action: { jump(by: -10) }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                    HStack(spacing: 16) {
+                        mediaControlButton(action: { jump(by: -10) }) {
                             Image(systemName: "gobackward.10")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
 
-                    // Play/Pause
-                    Button(action: {
-                        if isPlaybackPlaying {
-                            // Manual pause: preserve position (no reset).
-                            if isRemoteURL {
-                                remoteController.pause()
-                            } else {
-                                audioController.pause()
-                            }
-                            audioCurrentTime = playbackCurrentTime
-                            stopWaveform()
-                            isAnyPlayerActive = false
-                        } else {
-                            // Play / resume.
-                            if isRemoteURL {
-                                // toggle() will prepare+play on first use, and play() when paused.
-                                remoteController.toggle(url: url)
-                                audioDuration = playbackDuration
-                                isAnyPlayerActive = true
-                                startWaveform()
-                            } else {
-                                // Resume if we already have a prepared player; otherwise start fresh.
-                                if audioController.canResume {
-                                    // If we're at start, ensure waveform is hard-left before animation begins.
-                                    if audioCurrentTime <= 0.0001 {
-                                        resetWaveformToStart()
-                                        audioController.setCurrentTime(0)
-                                    }
-                                    audioController.resume()
+                        mediaControlButton(action: {
+                            if isPlaybackPlaying {
+                                if isRemoteURL {
+                                    remoteController.pause()
                                 } else {
-                                    guard let resolvedURL = resolveAudioURL(url) else { return }
-                                    // Starting fresh always begins at time 0 and
-                                    // hard-left waveform.
-                                    resetWaveformToStart()
-                                    audioController.play(url: resolvedURL)
+                                    audioController.pause()
                                 }
+                                audioCurrentTime = playbackCurrentTime
+                                stopWaveform()
+                                isAnyPlayerActive = false
+                            } else {
+                                if isRemoteURL {
+                                    remoteController.toggle(url: url)
+                                    audioDuration = playbackDuration
+                                    isAnyPlayerActive = true
+                                    startWaveform()
+                                } else {
+                                    if audioController.canResume {
+                                        if audioCurrentTime <= 0.0001 {
+                                            resetWaveformToStart()
+                                            audioController.setCurrentTime(0)
+                                        }
+                                        audioController.resume()
+                                    } else {
+                                        guard let resolvedURL = resolveAudioURL(url) else { return }
+                                        resetWaveformToStart()
+                                        audioController.play(url: resolvedURL)
+                                    }
 
-                                audioDuration = playbackDuration
-                                isAnyPlayerActive = true
-                                startWaveform()
+                                    audioDuration = playbackDuration
+                                    isAnyPlayerActive = true
+                                    startWaveform()
+                                }
                             }
-                        }
-                    }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                        }) {
                             Image(systemName: isPlaybackPlaying ? "pause.fill" : "play.fill")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
-                    }
-                    .buttonStyle(.plain)
 
-                    // Forward 10s
-                    Button(action: { jump(by: 10) }) {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                        mediaControlButton(action: { jump(by: 10) }) {
                             Image(systemName: "goforward.10")
                                 .font(.system(size: 17, weight: .semibold))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .frame(width: 40, height: 40)
-                        .contentShape(Circle())
                     }
-                    .buttonStyle(.plain)
-
-                    Spacer()
-
-                    // AirPlay
-                    RoutePickerView()
-                        .frame(width: 28, height: 28)
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 64)
                 .padding(.horizontal, Theme.Spacing.l)
-                .padding(.bottom, Theme.Spacing.m)
-                .background(
-                    Color.clear.cardSurface()
-                        .ignoresSafeArea(edges: .bottom)
-                )
+                .padding(.bottom, Theme.Spacing.l)
             }
         }
-
         .contentShape(Rectangle())
         .onAppear {
             audioController.onNaturalEnd = {
@@ -2357,13 +2379,41 @@ private struct AudioPage: View {
             isAnyPlayerActive = false
         }
         .onReceive(Timer.publish(every: 0.1, on: .main, in: .common).autoconnect()) { _ in
-            // Keep scrubber in sync even if play-state lags; only freeze while scrubbing.
             if !isScrubbing && (audioController.canResume || remoteController.canResume) {
                 let dur = playbackDuration
                 if dur.isFinite && dur > 0 { audioDuration = dur }
                 audioCurrentTime = playbackCurrentTime
             }
         }
+    }
+
+    @ViewBuilder
+    private func mediaControlButton<Label: View>(action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
+        Button(action: action) {
+            ZStack {
+                Circle()
+                    .fill(.thinMaterial)
+                    .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+                label()
+            }
+            .frame(width: 40, height: 40)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func routePickerControl() -> some View {
+        ZStack {
+            Circle()
+                .fill(.thinMaterial)
+                .shadow(color: .black.opacity(0.15), radius: 2, y: 1)
+
+            RoutePickerView()
+                .frame(width: 20, height: 20)
+        }
+        .frame(width: 40, height: 40)
+        .contentShape(Circle())
     }
 
     private func resolveAudioURL(_ src: URL) -> URL? {
