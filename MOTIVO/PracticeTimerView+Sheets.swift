@@ -391,16 +391,22 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 showTaskImportScanSheet = false
             },
             onConfirm: { imported in
-                beginImportedTaskFlow(with: imported)
+                beginImportedTaskFlow(with: imported.map { TaskLine(text: $0, isDone: false, type: .task) })
                 showTaskImportScanSheet = false
             }
         )
     }
 
-    func beginImportedTaskFlow(with imported: [String]) {
+    func beginImportedTaskFlow(with imported: [TaskLine]) {
         let cleaned = imported
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .map {
+                TaskLine(
+                    text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    isDone: false,
+                    type: $0.type
+                )
+            }
+            .filter { !$0.text.isEmpty }
 
         guard !cleaned.isEmpty else { return }
 
@@ -419,26 +425,27 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
 
     func applyPendingImportedTasks(appending: Bool) {
         let importedTaskLines = pendingImportedTaskLines
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
+            .map {
+                TaskLine(
+                    text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    isDone: false,
+                    type: $0.type
+                )
+            }
+            .filter { !$0.text.isEmpty }
 
         guard !importedTaskLines.isEmpty else {
             pendingImportedTaskLines.removeAll()
             return
         }
 
-        let mapped = importedTaskLines.map { TaskLine(text: $0, isDone: false) }
-
-        if appending {
-            taskLines.append(contentsOf: mapped)
-        } else {
-            taskLines = mapped
+        applyTaskLinesSafely(importedTaskLines, appending: appending) {
+            autoTaskTexts.removeAll()
+            userClearedTasksForCurrentContext = false
+            unlinkTaskSetForLoadedOrImportedList()
+            persistTasksSnapshot()
+            pendingImportedTaskLines.removeAll()
         }
-
-        autoTaskTexts.removeAll()
-        userClearedTasksForCurrentContext = false
-        persistTasksSnapshot()
-        pendingImportedTaskLines.removeAll()
     }
 
     static func parseImportedTaskLines(from rawText: String) -> [String] {
@@ -457,7 +464,38 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
     }
 }
 
-private struct GlobalSavedTaskSet: Codable, Identifiable, Equatable {
+private struct SavedTaskSetPickerLine: Codable, Identifiable, Equatable {
+    let id: UUID
+    var text: String
+    var type: TaskLineType
+
+    init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
+        self.id = id
+        self.text = text
+        self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case text
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        text = try container.decode(String.self, forKey: .text)
+        type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
+    }
+}
+
+private struct SavedTaskSetPickerRecord: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var items: [SavedTaskSetPickerLine]
+}
+
+private struct LegacySavedTaskSetPickerRecord: Codable {
     let id: UUID
     var name: String
     var items: [String]
@@ -473,9 +511,9 @@ private enum TaskImportSourceOption: String, Identifiable, CaseIterable {
 
 private struct TaskImportSourceSheet: View {
     let onClose: () -> Void
-    let onConfirmImportedLines: ([String]) -> Void
+    let onConfirmImportedLines: ([TaskLine]) -> Void
 
-    @State private var savedTaskSets: [GlobalSavedTaskSet] = []
+    @State private var savedTaskSets: [SavedTaskSetPickerRecord] = []
     @State private var activeOption: TaskImportSourceOption? = nil
 
     var body: some View {
@@ -531,7 +569,7 @@ private struct TaskImportSourceSheet: View {
                         },
                         onSelect: { selectedSet in
                             activeOption = nil
-                            onConfirmImportedLines(selectedSet.items)
+                            onConfirmImportedLines(selectedSet.items.map { TaskLine(text: $0.text, isDone: false, type: $0.type) })
                         }
                     )
                 case .pasteOrType:
@@ -543,7 +581,7 @@ private struct TaskImportSourceSheet: View {
                         },
                         onConfirm: { imported in
                             activeOption = nil
-                            onConfirmImportedLines(imported)
+                            onConfirmImportedLines(imported.map { TaskLine(text: $0, isDone: false, type: .task) })
                         }
                     )
                 case .scan:
@@ -554,7 +592,7 @@ private struct TaskImportSourceSheet: View {
                         },
                         onConfirm: { imported in
                             activeOption = nil
-                            onConfirmImportedLines(imported)
+                            onConfirmImportedLines(imported.map { TaskLine(text: $0, isDone: false, type: .task) })
                         }
                     )
                 }
@@ -585,11 +623,70 @@ private struct TaskImportSourceSheet: View {
         .opacity(isEnabled ? 1.0 : 0.6)
     }
 
-    private func loadAllSavedTaskSets() -> [GlobalSavedTaskSet] {
+    private func loadAllSavedTaskSets() -> [SavedTaskSetPickerRecord] {
         let defaults = UserDefaults.standard
-        let decoder = JSONDecoder()
 
-        var mergedByID: [UUID: GlobalSavedTaskSet] = [:]
+        let ownerScope: String = {
+            if let id = PersistenceController.shared.currentUserID,
+               !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                return id
+            }
+            return "device"
+        }()
+
+        let globalTaskSetsKey = "practiceTasks_saved_sets_v2::" + ownerScope
+
+        var merged: [SavedTaskSetPickerRecord] = []
+        var seenIDs = Set<UUID>()
+        var seenContentSignatures = Set<String>()
+
+        func normalizedLines(from lines: [SavedTaskSetPickerLine]) -> [SavedTaskSetPickerLine] {
+            lines
+                .map {
+                    SavedTaskSetPickerLine(
+                        id: $0.id,
+                        text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        type: $0.type
+                    )
+                }
+                .filter { !$0.text.isEmpty }
+        }
+
+        func merge(_ sets: [SavedTaskSetPickerRecord]) {
+            for set in sets {
+                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedItems = normalizedLines(from: set.items)
+                guard !normalizedItems.isEmpty else { continue }
+
+                let fallbackName = normalizedItems.first?.text ?? "Saved task set"
+                let finalName = trimmedName.isEmpty ? fallbackName : trimmedName
+                let contentSignature = finalName.lowercased() + "||" + normalizedItems.map { $0.type.rawValue + ":" + $0.text.lowercased() }.joined(separator: "\u{241E}")
+
+                if seenIDs.contains(set.id) || seenContentSignatures.contains(contentSignature) {
+                    continue
+                }
+
+                seenIDs.insert(set.id)
+                seenContentSignatures.insert(contentSignature)
+                merged.append(SavedTaskSetPickerRecord(id: set.id, name: finalName, items: normalizedItems))
+            }
+        }
+
+        if let data = defaults.data(forKey: globalTaskSetsKey) {
+            if let decoded = try? JSONDecoder().decode([SavedTaskSetPickerRecord].self, from: data) {
+                merge(decoded)
+            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPickerRecord].self, from: data) {
+                merge(
+                    legacyDecoded.map {
+                        SavedTaskSetPickerRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            items: $0.items.map { SavedTaskSetPickerLine(text: $0, type: .task) }
+                        )
+                    }
+                )
+            }
+        }
 
         for (key, value) in defaults.dictionaryRepresentation() {
             guard key.hasSuffix("::saved_sets_v1") else { continue }
@@ -603,37 +700,36 @@ private struct TaskImportSourceSheet: View {
                 data = nil
             }
 
-            guard let data,
-                  let decoded = try? decoder.decode([GlobalSavedTaskSet].self, from: data) else { continue }
+            guard let data else { continue }
 
-            for set in decoded {
-                let cleanedItems = set.items
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
+            if let decoded = try? JSONDecoder().decode([SavedTaskSetPickerRecord].self, from: data) {
+                merge(decoded)
+                continue
+            }
 
-                guard cleanedItems.isEmpty == false else { continue }
-
-                let cleanedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard cleanedName.isEmpty == false else { continue }
-
-                mergedByID[set.id] = GlobalSavedTaskSet(
-                    id: set.id,
-                    name: cleanedName,
-                    items: cleanedItems
+            if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPickerRecord].self, from: data) {
+                merge(
+                    legacyDecoded.map {
+                        SavedTaskSetPickerRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            items: $0.items.map { SavedTaskSetPickerLine(text: $0, type: .task) }
+                        )
+                    }
                 )
             }
         }
 
-        return mergedByID.values.sorted {
+        return merged.sorted {
             $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
     }
 }
 
 private struct TaskImportSavedSetPickerSheet: View {
-    let savedTaskSets: [GlobalSavedTaskSet]
+    let savedTaskSets: [SavedTaskSetPickerRecord]
     let onCancel: () -> Void
-    let onSelect: (GlobalSavedTaskSet) -> Void
+    let onSelect: (SavedTaskSetPickerRecord) -> Void
 
     var body: some View {
         NavigationStack {

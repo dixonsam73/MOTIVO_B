@@ -287,10 +287,14 @@ struct PracticeTimerView: View {
     @State var showTaskImportReplaceAppendDialog: Bool = false
     @State var showTaskImportPasteSheet: Bool = false
     @State var showTaskImportScanSheet: Bool = false
-    @State var pendingImportedTaskLines: [String] = []
-    @State var stagedImportedTaskLinesAfterPasteDismiss: [String] = []
+    @State var pendingImportedTaskLines: [TaskLine] = []
+    @State var stagedImportedTaskLinesAfterPasteDismiss: [TaskLine] = []
     @State var taskLines: [TaskLine] = []
     @State var autoTaskTexts: [UUID: String] = [:]
+    @State private var linkedSavedTaskSetID: UUID? = nil
+    @State private var linkedSavedTaskSetIsDirty: Bool = false
+    @State private var showSaveTaskSetPrompt: Bool = false
+    @State private var draftSavedTaskSetName: String = ""
 
     // NEW: track explicit clears so we don't auto-refill
     @State var userClearedTasksForCurrentContext: Bool = false
@@ -333,6 +337,7 @@ struct PracticeTimerView: View {
             // Treat this as the Practice template context
             lastDefaultsActivityRef = "core:0"
             userClearedTasksForCurrentContext = false
+            unlinkTaskSetForLoadedOrImportedList()
         }
     }
 
@@ -399,6 +404,44 @@ private struct SerializedTaskTemplateLine: Codable {
     }
 }
 
+
+private struct SavedTaskSetPadLine: Codable, Identifiable, Equatable {
+    let id: UUID
+    var text: String
+    var type: TaskLineType
+
+    init(id: UUID = UUID(), text: String, type: TaskLineType = .task) {
+        self.id = id
+        self.text = text
+        self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case text
+        case type
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+        text = try container.decode(String.self, forKey: .text)
+        type = try container.decodeIfPresent(TaskLineType.self, forKey: .type) ?? .task
+    }
+}
+
+private struct SavedTaskSetPadRecord: Codable, Identifiable, Equatable {
+    let id: UUID
+    var name: String
+    var items: [SavedTaskSetPadLine]
+}
+
+private struct LegacySavedTaskSetPadRecord: Codable {
+    let id: UUID
+    var name: String
+    var items: [String]
+}
+
 private func loadPracticeDefaultsIfNeeded() {
     let ownerScope: String = PersistenceController.shared.currentUserID ?? "device"
     let activityRef = currentActivityRefForTasks()
@@ -436,6 +479,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         lastDefaultsActivityRef = contextKey
         userClearedTasksForCurrentContext = false
+        unlinkTaskSetForLoadedOrImportedList()
     }
 
     // 0) Preferred path (when instrument is selected): Instrument×Activity template.
@@ -486,6 +530,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         lastDefaultsActivityRef = contextKey
         userClearedTasksForCurrentContext = false
+        unlinkTaskSetForLoadedOrImportedList()
         return
     }
 
@@ -517,6 +562,239 @@ private func loadPracticeDefaultsIfNeeded() {
 
 
 // END TASKS DEFAULTS PATCH
+
+    private var taskSetOwnerScope: String {
+        if let id = PersistenceController.shared.currentUserID,
+           !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return id
+        }
+        return "device"
+    }
+
+    private var globalTaskSetsKey: String {
+        "practiceTasks_saved_sets_v2::" + taskSetOwnerScope
+    }
+
+    private var currentTaskSetContextKeySuffix: String {
+        guard let instrumentID = instrument?.id?.uuidString else { return "" }
+        return "::inst:" + instrumentID
+    }
+
+    private var currentContextTaskSetsKey: String {
+        let ownerScope = taskSetOwnerScope
+        let activityRef = currentActivityRefForTasks()
+        return "practiceTasks_v1::" + ownerScope + "::" + activityRef + currentTaskSetContextKeySuffix + "::saved_sets_v1"
+    }
+
+    private func normalizedSavedTaskSetLines(from lines: [TaskLine]) -> [SavedTaskSetPadLine] {
+        lines
+            .map {
+                SavedTaskSetPadLine(
+                    id: $0.id,
+                    text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    type: $0.type
+                )
+            }
+            .filter { !$0.text.isEmpty }
+    }
+
+    private var hasSavableTaskSetLines: Bool {
+        !normalizedSavedTaskSetLines(from: taskLines).isEmpty
+    }
+
+    private var isTaskSetCurrentlySaved: Bool {
+        linkedSavedTaskSetID != nil && !linkedSavedTaskSetIsDirty && hasSavableTaskSetLines
+    }
+
+    private var taskSetSaveButtonTitle: String {
+        isTaskSetCurrentlySaved ? "Saved" : "Save list"
+    }
+
+    private var isTaskSetSaveButtonDisabled: Bool {
+        hasSavableTaskSetLines == false || isTaskSetCurrentlySaved
+    }
+
+    private func markLinkedTaskSetDirty(resetLink: Bool = false) {
+        if resetLink {
+            linkedSavedTaskSetID = nil
+        }
+        if linkedSavedTaskSetID != nil || hasSavableTaskSetLines {
+            linkedSavedTaskSetIsDirty = true
+        }
+    }
+
+    private func clearLinkedTaskSetState() {
+        linkedSavedTaskSetID = nil
+        linkedSavedTaskSetIsDirty = false
+        draftSavedTaskSetName = ""
+    }
+
+    private func loadPadSavedTaskSets() -> [SavedTaskSetPadRecord] {
+        let defaults = UserDefaults.standard
+        var merged: [SavedTaskSetPadRecord] = []
+
+        func normalize(_ lines: [SavedTaskSetPadLine]) -> [SavedTaskSetPadLine] {
+            lines
+                .map {
+                    SavedTaskSetPadLine(
+                        id: $0.id,
+                        text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                        type: $0.type
+                    )
+                }
+                .filter { !$0.text.isEmpty }
+        }
+
+        func merge(_ sets: [SavedTaskSetPadRecord]) {
+            for set in sets {
+                let trimmedName = set.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedItems = normalize(set.items)
+                guard !normalizedItems.isEmpty else { continue }
+
+                if let existingIndex = merged.firstIndex(where: { $0.id == set.id }) {
+                    merged[existingIndex].name = trimmedName.isEmpty ? merged[existingIndex].name : trimmedName
+                    merged[existingIndex].items = normalizedItems
+                } else {
+                    merged.append(
+                        SavedTaskSetPadRecord(
+                            id: set.id,
+                            name: trimmedName.isEmpty ? defaultSavedTaskSetName(from: normalizedItems.map(\.text)) : trimmedName,
+                            items: normalizedItems
+                        )
+                    )
+                }
+            }
+        }
+
+        if let data = defaults.data(forKey: globalTaskSetsKey) {
+            if let decoded = try? JSONDecoder().decode([SavedTaskSetPadRecord].self, from: data) {
+                merge(decoded)
+            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPadRecord].self, from: data) {
+                merge(
+                    legacyDecoded.map {
+                        SavedTaskSetPadRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            items: $0.items.map { SavedTaskSetPadLine(text: $0, type: .task) }
+                        )
+                    }
+                )
+            }
+        }
+
+        if let data = defaults.data(forKey: currentContextTaskSetsKey) {
+            if let decoded = try? JSONDecoder().decode([SavedTaskSetPadRecord].self, from: data) {
+                merge(decoded)
+            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPadRecord].self, from: data) {
+                merge(
+                    legacyDecoded.map {
+                        SavedTaskSetPadRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            items: $0.items.map { SavedTaskSetPadLine(text: $0, type: .task) }
+                        )
+                    }
+                )
+            }
+        }
+
+        return merged
+    }
+
+    private func savePadSavedTaskSets(_ sets: [SavedTaskSetPadRecord]) {
+        if let data = try? JSONEncoder().encode(sets) {
+            let defaults = UserDefaults.standard
+            defaults.set(data, forKey: globalTaskSetsKey)
+            defaults.set(data, forKey: currentContextTaskSetsKey)
+        }
+    }
+
+    private func uniqueSavedTaskSetName(from baseName: String, existingSets: [SavedTaskSetPadRecord]) -> String {
+        let trimmed = baseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let seed = trimmed.isEmpty ? defaultSavedTaskSetName(from: normalizedSavedTaskSetLines(from: taskLines).map(\.text)) : trimmed
+        let existingNames = Set(existingSets.map { $0.name.lowercased() })
+
+        if !existingNames.contains(seed.lowercased()) {
+            return seed
+        }
+
+        var counter = 2
+        while true {
+            let candidate = "\(seed) (\(counter))"
+            if !existingNames.contains(candidate.lowercased()) {
+                return candidate
+            }
+            counter += 1
+        }
+    }
+
+    private func defaultSavedTaskSetName(from lines: [String]) -> String {
+        if let first = lines.first?.trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
+            return first
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: Date())
+    }
+
+    private func beginTaskSetSaveFlow() {
+        guard hasSavableTaskSetLines else { return }
+
+        if linkedSavedTaskSetID == nil {
+            draftSavedTaskSetName = defaultSavedTaskSetName(from: normalizedSavedTaskSetLines(from: taskLines).map(\.text))
+            showSaveTaskSetPrompt = true
+        } else {
+            saveCurrentPadIntoLinkedTaskSet()
+        }
+    }
+
+    private func commitNewTaskSetFromPrompt() {
+        let normalizedItems = normalizedSavedTaskSetLines(from: taskLines)
+        guard !normalizedItems.isEmpty else { return }
+
+        var sets = loadPadSavedTaskSets()
+        let trimmedName = draftSavedTaskSetName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseName = trimmedName.isEmpty ? defaultSavedTaskSetName(from: normalizedItems.map(\.text)) : trimmedName
+        let finalName = uniqueSavedTaskSetName(from: baseName, existingSets: sets)
+        let newSet = SavedTaskSetPadRecord(id: UUID(), name: finalName, items: normalizedItems)
+
+        sets.append(newSet)
+        savePadSavedTaskSets(sets)
+
+        linkedSavedTaskSetID = newSet.id
+        linkedSavedTaskSetIsDirty = false
+        draftSavedTaskSetName = newSet.name
+        showSaveTaskSetPrompt = false
+    }
+
+    private func saveCurrentPadIntoLinkedTaskSet() {
+        let normalizedItems = normalizedSavedTaskSetLines(from: taskLines)
+        guard !normalizedItems.isEmpty else { return }
+
+        if linkedSavedTaskSetID == nil {
+            beginTaskSetSaveFlow()
+            return
+        }
+
+        var sets = loadPadSavedTaskSets()
+        if let linkedID = linkedSavedTaskSetID,
+           let index = sets.firstIndex(where: { $0.id == linkedID }) {
+            sets[index].items = normalizedItems
+            savePadSavedTaskSets(sets)
+            linkedSavedTaskSetIsDirty = false
+        } else {
+            linkedSavedTaskSetID = nil
+            beginTaskSetSaveFlow()
+        }
+    }
+
+    func unlinkTaskSetForLoadedOrImportedList() {
+        linkedSavedTaskSetID = nil
+        linkedSavedTaskSetIsDirty = false
+        draftSavedTaskSetName = ""
+    }
+
     private func composeNotesString() -> String? {
         // Keep only non-empty lines (trimmed)
         let nonEmpty = taskLines
@@ -548,6 +826,7 @@ private func loadPracticeDefaultsIfNeeded() {
         userClearedTasksForCurrentContext = false
         lastDefaultsActivityRef = nil
         showTasksPad = false
+        clearLinkedTaskSetState()
         persistTasksSnapshot()
     }
 
@@ -566,6 +845,7 @@ private func loadPracticeDefaultsIfNeeded() {
         let newLine = TaskLine(text: "", isDone: false, type: .task)
         let insertIndex = taskLines.index(after: idx)
         taskLines.insert(newLine, at: insertIndex)
+        markLinkedTaskSetDirty()
 
         // Persist once after the updates
         persistTasksSnapshot()
@@ -576,12 +856,35 @@ private func loadPracticeDefaultsIfNeeded() {
 
     private func addEmptyTaskLine() {
         taskLines.append(TaskLine(text: "", isDone: false, type: .task))
+        markLinkedTaskSetDirty()
         persistTasksSnapshot()
+    }
+
+    func applyTaskLinesSafely(_ newTaskLines: [TaskLine], appending: Bool, completion: (() -> Void)? = nil) {
+        let performMutation = {
+            if appending {
+                taskLines.append(contentsOf: newTaskLines)
+            } else {
+                taskLines = newTaskLines
+            }
+            completion?()
+        }
+
+        let hadActiveTaskFocus = focusedTaskID != nil
+        if hadActiveTaskFocus {
+            focusedTaskID = nil
+            DispatchQueue.main.async {
+                performMutation()
+            }
+        } else {
+            performMutation()
+        }
     }
     private func toggleDone(_ id: UUID) {
         if let idx = taskLines.firstIndex(where: { $0.id == id }),
            taskLines[idx].type == .task {
             taskLines[idx].isDone.toggle()
+            markLinkedTaskSetDirty()
             persistTasksSnapshot()
         }
     }
@@ -597,6 +900,7 @@ private func loadPracticeDefaultsIfNeeded() {
             taskLines[idx].type = .task
         }
 
+        markLinkedTaskSetDirty()
         persistTasksSnapshot()
     }
 
@@ -610,6 +914,7 @@ private func loadPracticeDefaultsIfNeeded() {
             showTasksPad = false
         }
 
+        markLinkedTaskSetDirty(resetLink: true)
         persistTasksSnapshot()
     }
 
@@ -618,6 +923,7 @@ private func loadPracticeDefaultsIfNeeded() {
         userClearedTasksForCurrentContext = true
         taskLines.removeAll()
         autoTaskTexts.removeAll()
+        markLinkedTaskSetDirty(resetLink: true)
         persistTasksSnapshot()
     }
     
@@ -922,6 +1228,17 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .sheet(isPresented: $showTaskImportScanSheet) {
             taskImportScanSheet
+        }
+        .alert("Save list", isPresented: $showSaveTaskSetPrompt) {
+            TextField("List name", text: $draftSavedTaskSetName)
+            Button("Save") {
+                commitNewTaskSetFromPrompt()
+            }
+            Button("Cancel", role: .cancel) {
+                draftSavedTaskSetName = ""
+            }
+        } message: {
+            Text("Save the current list as a reusable task set.")
         }
         // Single, unified prefetch path to avoid duplicate first-paint work
         .task {
@@ -1818,12 +2135,21 @@ private var bottomActionSection: some View {
                 onAddEmptyLine: { addEmptyTaskLine() },
                 onHandleReturn: { id in handleTaskReturn(for: id) },
                 onPersistSnapshot: { persistTasksSnapshot() },
+                onMarkTaskSetDirty: { resetLink in
+                    markLinkedTaskSetDirty(resetLink: resetLink)
+                },
+                saveListButtonTitle: taskSetSaveButtonTitle,
+                isSaveListDisabled: isTaskSetSaveButtonDisabled,
+                onSaveList: {
+                    beginTaskSetSaveFlow()
+                },
                 onExpand: {
                     loadPracticeDefaultsIfNeeded()
                     loadDefaultTasksIfNeeded()
                     persistTasksSnapshot()
                 },
                 onImportTasks: {
+                    unlinkTaskSetForLoadedOrImportedList()
                     showTaskImportPasteSheet = true
                 }
             )

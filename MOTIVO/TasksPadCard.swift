@@ -18,6 +18,10 @@ struct TasksPadCard: View {
     let onAddEmptyLine: () -> Void
     let onHandleReturn: (UUID) -> Void
     let onPersistSnapshot: () -> Void
+    let onMarkTaskSetDirty: (Bool) -> Void
+    let saveListButtonTitle: String
+    let isSaveListDisabled: Bool
+    let onSaveList: () -> Void
     let onExpand: () -> Void
     let onImportTasks: () -> Void
 
@@ -60,7 +64,8 @@ struct TasksPadCard: View {
                                 targetID: line.id,
                                 taskLines: $taskLines,
                                 draggedTaskID: $draggedTaskID,
-                                onPersistSnapshot: onPersistSnapshot
+                                onPersistSnapshot: onPersistSnapshot,
+                                onMarkTaskSetDirty: onMarkTaskSetDirty
                             )
                         )
                 }
@@ -89,19 +94,34 @@ struct TasksPadCard: View {
             HStack(alignment: .center, spacing: 12) {
                 Button(action: { onAddEmptyLine() }) {
                     HStack(spacing: 4) {
-                        Image(systemName: "plus")
+                        Text("+")
                         Text("Add line")
                     }
                     .foregroundStyle(tasksAccent.opacity(0.95))
                 }
+                .buttonStyle(.plain)
+
+                Spacer(minLength: 8)
+
+                Button(action: { onSaveList() }) {
+                    Text(saveListButtonTitle)
+                        .foregroundStyle(
+                            isSaveListDisabled
+                            ? Theme.Colors.secondaryText.opacity(0.72)
+                            : tasksAccent.opacity(0.95)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(isSaveListDisabled)
+                .accessibilityLabel(saveListButtonTitle)
 
                 Spacer(minLength: 8)
 
                 Button(action: {
                     onImportTasks()
                 }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus")
+                    HStack(spacing: 4) {
+                        Text("+")
                         Text("Import task set")
                     }
                     .foregroundStyle(tasksAccent.opacity(0.95))
@@ -114,6 +134,14 @@ struct TasksPadCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.top, 2)
         .padding(.bottom, 12)
+        .onChange(of: taskLines.map(\.id)) { _, newIDs in
+            guard let focusedID = focusedTaskID.wrappedValue else { return }
+            guard newIDs.contains(focusedID) == false else { return }
+
+            focusedTaskID.wrappedValue = nil
+            ignoreNextTapForLineID = nil
+            suppressAutoClearForLineID = nil
+        }
     }
 
     @ViewBuilder
@@ -171,10 +199,12 @@ struct TasksPadCard: View {
                     if newValue.contains("\n") {
                         let cleaned = newValue.replacingOccurrences(of: "\n", with: "")
                         line.wrappedValue.text = cleaned
+                        onMarkTaskSetDirty(false)
                         onPersistSnapshot()
                         onHandleReturn(line.wrappedValue.id)
                     } else {
                         line.wrappedValue.text = newValue
+                        onMarkTaskSetDirty(false)
                         onPersistSnapshot()
                     }
                 }
@@ -254,6 +284,7 @@ private struct TaskLineDropDelegate: DropDelegate {
     @Binding var taskLines: [TaskLine]
     @Binding var draggedTaskID: UUID?
     let onPersistSnapshot: () -> Void
+    let onMarkTaskSetDirty: (Bool) -> Void
 
     func dropEntered(info: DropInfo) {
         guard let draggedTaskID,
@@ -279,6 +310,7 @@ private struct TaskLineDropDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         draggedTaskID = nil
+        onMarkTaskSetDirty(false)
         onPersistSnapshot()
         return true
     }
