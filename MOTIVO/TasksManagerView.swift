@@ -41,6 +41,7 @@ private struct ImportedTaskDraftLineDropDelegate: DropDelegate {
     }
 }
 
+
 #if canImport(VisionKit)
 import VisionKit
 #endif
@@ -50,7 +51,6 @@ struct TasksManagerView: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(\.managedObjectContext) private var viewContext
-    @Environment(\.editMode) private var editMode
 
     @State private var selectedActivityRef: String = "core:0"
     @State private var items: [TaskTemplateLine] = []
@@ -72,6 +72,12 @@ struct TasksManagerView: View {
     @State private var draggedImportLineID: UUID? = nil
     @State private var suppressImportedRawTextObserver: Bool = false
     @FocusState private var focusedImportLineID: UUID?
+    @FocusState private var focusedManagerLineID: UUID?
+    @State private var ignoreNextManagerTapLineID: UUID? = nil
+
+    private let managerDeleteIconWidth: CGFloat = 20
+    private let managerDragDeleteSpacing: CGFloat = 16
+    private let managerContextTextLeadingInset: CGFloat = 6
 
     @FetchRequest(
         entity: Instrument.entity(),
@@ -84,12 +90,12 @@ struct TasksManagerView: View {
 
     @State private var selectedInstrumentID: UUID? = nil
 
-    private enum TaskLineType: String, Codable {
+    fileprivate enum TaskLineType: String, Codable {
         case task
         case context
     }
 
-    private struct TaskTemplateLine: Codable, Identifiable, Equatable {
+    fileprivate struct TaskTemplateLine: Codable, Identifiable, Equatable {
         let id: UUID
         var text: String
         var type: TaskLineType
@@ -114,13 +120,13 @@ struct TasksManagerView: View {
         }
     }
 
-    private struct SavedTaskSet: Codable, Identifiable, Equatable {
+    fileprivate struct SavedTaskSet: Codable, Identifiable, Equatable {
         let id: UUID
         var name: String
         var items: [TaskTemplateLine]
     }
 
-    private struct LegacySavedTaskSet: Codable {
+    fileprivate struct LegacySavedTaskSet: Codable {
         let id: UUID
         var name: String
         var items: [String]
@@ -280,6 +286,88 @@ struct TasksManagerView: View {
         !shouldShowInstrumentSelector
     }
 
+    private func managerLineTextBinding(for lineID: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                items.first(where: { $0.id == lineID })?.text ?? ""
+            },
+            set: { newValue in
+                guard let index = items.firstIndex(where: { $0.id == lineID }) else { return }
+                items[index].text = newValue
+                saveItems()
+            }
+        )
+    }
+
+    private func toggleManagerLineType(_ lineID: UUID) {
+        guard let index = items.firstIndex(where: { $0.id == lineID }) else { return }
+        items[index].type = (items[index].type == .task) ? .context : .task
+        saveItems()
+
+        #if canImport(UIKit)
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.7)
+        #endif
+    }
+
+
+
+    @ViewBuilder
+    private func managerTaskRow(for line: TaskTemplateLine) -> some View {
+        HStack(spacing: 6) {
+            managerTaskTextArea(for: line)
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: managerDragDeleteSpacing) {
+                Button(role: .destructive) {
+                    deleteManagerLine(line.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                        .frame(width: managerDeleteIconWidth, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(width: managerDeleteIconWidth, alignment: .trailing)
+        }
+        .padding(.vertical, 1)
+    }
+
+    @ViewBuilder
+    private func managerTaskTextArea(for line: TaskTemplateLine) -> some View {
+        TextField(
+            line.type == .context ? "Context" : "Task",
+            text: managerLineTextBinding(for: line.id)
+        )
+        .textFieldStyle(.plain)
+        .font(line.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
+        .disableAutocorrection(true)
+        .textInputAutocapitalization(.sentences)
+        .focused($focusedManagerLineID, equals: line.id)
+        .onTapGesture {
+            if ignoreNextManagerTapLineID == line.id {
+                ignoreNextManagerTapLineID = nil
+                focusedManagerLineID = nil
+                return
+            }
+            focusedManagerLineID = line.id
+        }
+        .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: 0.35)
+                .onEnded { _ in
+                    ignoreNextManagerTapLineID = line.id
+                    dismissManagerKeyboard()
+                    toggleManagerLineType(line.id)
+                }
+        )
+    }
+
     @ViewBuilder
     private var selectorSectionContent: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -412,14 +500,19 @@ struct TasksManagerView: View {
                 }
 
                 Section(header: Text("Your Tasks").sectionHeader()) {
-                    ForEach(items.indices, id: \.self) { index in
-                        Text(items[index].text)
-                            .font(Theme.Text.body)
+                    ForEach(items) { line in
+                        managerTaskRow(for: line)
                     }
-                    .onDelete(perform: delete)
-                    .onMove(perform: move)
+                    .onMove(perform: moveManagerLines)
                 }
             }
+            .scrollDismissesKeyboard(.interactively)
+            .environment(\.editMode, .constant(.active))
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    dismissManagerKeyboard()
+                }
+            )
             .navigationTitle("")
                         .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -715,13 +808,8 @@ struct TasksManagerView: View {
         saveItems()
     }
 
-    private func delete(at offsets: IndexSet) {
-        items.remove(atOffsets: offsets)
-        saveItems()
-    }
-
-    private func move(from source: IndexSet, to destination: Int) {
-        items.move(fromOffsets: source, toOffset: destination)
+    private func deleteManagerLine(_ lineID: UUID) {
+        items.removeAll { $0.id == lineID }
         saveItems()
     }
 
@@ -1029,6 +1117,20 @@ struct TasksManagerView: View {
     private func dismissImportedTaskKeyboard() {
         focusedImportLineID = nil
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
+    private func dismissManagerKeyboard() {
+        focusedManagerLineID = nil
+        ignoreNextManagerTapLineID = nil
+        #if canImport(UIKit)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        #endif
+    }
+
+    private func moveManagerLines(from source: IndexSet, to destination: Int) {
+        dismissManagerKeyboard()
+        items.move(fromOffsets: source, toOffset: destination)
+        saveItems()
     }
 
     private func deleteTaskSet(_ id: UUID) {
