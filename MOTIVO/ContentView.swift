@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260424_131500_ContentView_StableTintCorpus_NoAutoPersist_7d2a
+// SCOPE: ContentView tint decision wiring only - use an unfiltered owner-local tint corpus for Journal Week/Month/Year tint source decisions and prevent render-time Auto tint persistence. Preserve all filtering, layout, navigation, row rendering, and palette behavior.
+// SEARCH-TOKEN: 20260424_131500_ContentView_StableTintCorpus_NoAutoPersist_7d2a
+
 // CHANGE-ID: 20260424_103000_ContentView_LocalVideoPosterCache_9f3a
 // SCOPE: ContentView only - add an in-memory cache for local video attachment posters used by Journal row previews; preserve existing layout, navigation, feed behavior, and thumbnail generation logic.
 // SEARCH-TOKEN: 20260424_103000_ContentView_LocalVideoPosterCache_9f3a
@@ -1084,9 +1088,9 @@ fileprivate struct SessionsRootView: View {
                                                         JournalArchiveRowContainerModifier(
                                                             lens: usesYearArchivePresentation ? .year : selectedJournalLens,
                                                             yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
-                                                            barFillColor: journalMonthBarFillColor(for: session, in: journalArchiveSessions),
-                                                            barStrokeColor: journalMonthBarStrokeColor(for: session, in: journalArchiveSessions),
-                                                            barAccentColor: journalMonthBarAccentColor(for: session, in: journalArchiveSessions),
+                                                            barFillColor: journalMonthBarFillColor(for: session, in: journalTintContextSessions),
+                                                            barStrokeColor: journalMonthBarStrokeColor(for: session, in: journalTintContextSessions),
+                                                            barAccentColor: journalMonthBarAccentColor(for: session, in: journalTintContextSessions),
                                                             barAccentWidth: 6
                                                         )
                                                     )
@@ -2019,7 +2023,8 @@ fileprivate struct SessionsRootView: View {
         Theme.resolvedTintSource(
             tintMode: journalTintMode,
             instrumentCounts: journalInstrumentCounts(in: sessions),
-            activityCounts: journalActivityCounts(in: sessions)
+            activityCounts: journalActivityCounts(in: sessions),
+            persistAutoSource: false
         )
     }
 
@@ -2029,7 +2034,8 @@ fileprivate struct SessionsRootView: View {
             activity: journalActivityLabel(for: session),
             tintMode: journalTintMode,
             instrumentCounts: journalInstrumentCounts(in: sessions),
-            activityCounts: journalActivityCounts(in: sessions)
+            activityCounts: journalActivityCounts(in: sessions),
+            persistAutoSource: false
         )
     }
 
@@ -2565,41 +2571,15 @@ fileprivate struct SessionsRootView: View {
         return baseSessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
     }
 
-    private var journalWeekTintContextSessions: [Session] {
+    private var journalTintContextSessions: [Session] {
         guard selectedScope == .mine, let uid = effectiveUserID else { return journalArchiveSessions }
+        return Array(sessions)
+            .filter { $0.ownerUserID == uid }
+            .sorted { journalDate(for: $0) > journalDate(for: $1) }
+    }
 
-        var out = Array(sessions).filter { $0.ownerUserID == uid }
-
-        if let inst = selectedInstrument {
-            let id = inst.objectID
-            let targetName = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let targetNorm = targetName.lowercased()
-
-            out = out.filter { s in
-                if s.instrument?.objectID == id { return true }
-
-                let label = ((s.value(forKey: "userInstrumentLabel") as? String) ?? "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .lowercased()
-                return !targetNorm.isEmpty && label == targetNorm
-            }
-        }
-
-        switch selectedActivity {
-        case .any:
-            break
-        case .core(let act):
-            out = out.filter { ($0.value(forKey: "activityType") as? Int16) == act.rawValue }
-        case .custom(let name):
-            out = out.filter { s in
-                let label = (s.value(forKey: "userActivityLabel") as? String) ?? ""
-                let detail = (s.value(forKey: "activityDetail") as? String) ?? ""
-                return label.caseInsensitiveCompare(name) == .orderedSame ||
-                       detail.caseInsensitiveCompare(name) == .orderedSame
-            }
-        }
-
-        return out.sorted { journalDate(for: $0) > journalDate(for: $1) }
+    private var journalWeekTintContextSessions: [Session] {
+        journalTintContextSessions
     }
 
     private var journalCurrentPeriodSessions: [Session] {
@@ -2788,7 +2768,7 @@ fileprivate struct SessionsRootView: View {
                 dominantInstrumentLabel: dominantInstrument?.label,
                 dominantActivityLabel: dominantActivity?.label,
                 ownerUserID: rowOwnerUserID,
-                tintSource: journalResolvedTintSource(in: journalArchiveSessions),
+                tintSource: journalResolvedTintSource(in: journalTintContextSessions),
                 widthFraction: widthFraction,
                 densityFraction: densityFraction,
                 isFutureMonth: calendar.component(.year, from: monthStart) == currentYear && monthStart > currentMonthStart,

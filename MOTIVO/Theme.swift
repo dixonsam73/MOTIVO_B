@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260421_205300_theme_sticky_auto_foundation_e3a1
-// SCOPE: Restore shared tint-mode foundation and upgrade Auto tint selection to meaningful-variation + sticky resolution. No palette or visual treatment changes.
+// CHANGE-ID: 20260424_135500_Theme_AutoTintStrongInstrumentOverride
+// SCOPE: Refine Auto tint sticky logic so overwhelmingly stronger instrument variation can reclaim stale activity selection. No palette or visual treatment changes.
 //
 //  Theme.swift
 //  MOTIVO
@@ -196,6 +196,7 @@ enum Theme {
         let distinctCount: Int
         let topCount: Int
         let secondMostUsedCount: Int
+        let totalCount: Int
 
         var hasMeaningfulVariation: Bool {
             secondMostUsedCount >= 2
@@ -235,7 +236,8 @@ enum Theme {
         return VariationSummary(
             distinctCount: counts.count,
             topCount: sorted.first ?? 0,
-            secondMostUsedCount: sorted.dropFirst().first ?? 0
+            secondMostUsedCount: sorted.dropFirst().first ?? 0,
+            totalCount: sorted.reduce(0, +)
         )
     }
 
@@ -246,6 +248,24 @@ enum Theme {
     static func meaningfulActivityVariation(from counts: [String: Int]) -> Bool {
         let summary = variationSummary(from: counts)
         return summary.secondMostUsedCount >= 2 || summary.distinctCount >= 3
+    }
+
+    static func instrumentVariationStronglyOutweighsActivity(
+        instrumentCounts: [String: Int],
+        activityCounts: [String: Int]
+    ) -> Bool {
+        let instrumentSummary = variationSummary(from: instrumentCounts)
+        let activitySummary = variationSummary(from: activityCounts)
+
+        guard instrumentSummary.hasMeaningfulVariation else { return false }
+        guard instrumentSummary.distinctCount >= 3 else { return false }
+        guard instrumentSummary.secondMostUsedCount >= 3 else { return false }
+        guard activitySummary.totalCount > 0 else { return true }
+
+        let activityDominance = Double(activitySummary.topCount) / Double(activitySummary.totalCount)
+        let instrumentSpreadClearlyStronger = instrumentSummary.secondMostUsedCount >= max(3, activitySummary.secondMostUsedCount * 3)
+
+        return activityDominance >= 0.85 && instrumentSpreadClearlyStronger
     }
 
     static func storedAutoTintSource() -> ResolvedTintSource? {
@@ -286,7 +306,12 @@ enum Theme {
             }
 
         case .activity:
-            if activityMeaningful {
+            if instrumentMeaningful && instrumentVariationStronglyOutweighsActivity(
+                instrumentCounts: instrumentCounts,
+                activityCounts: activityCounts
+            ) {
+                resolved = .instrument
+            } else if activityMeaningful {
                 resolved = .activity
             } else if instrumentMeaningful {
                 resolved = .instrument
