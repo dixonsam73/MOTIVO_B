@@ -54,6 +54,10 @@ import SwiftUI
 import AVKit
 import AVFoundation
 
+// CHANGE-ID: 20260424_161900_AVV_ImmersiveChromeRevealFix
+// SCOPE: AttachmentViewerView immersive video playback follow-up only — fade top viewer chrome with immersive playback chrome and make full immersive video surface tap-to-reveal controls. Non-immersive video, audio, playback logic, and attachment actions unchanged.
+// SEARCH-TOKEN: 20260424_161900_AVV_ImmersiveChromeRevealFix
+
 // CHANGE-ID: 20260423_175900_AVV_VideoPlacementDensityFix
 // SCOPE: AttachmentViewerView VideoPage layout correction only — use viewer orientation to drive dense mode, keep paused and playing video in one shared placement container, prevent portrait top-pinning for landscape-shot video, and tighten landscape video chrome so the video surface dominates. Audio and playback logic unchanged.
 // SEARCH-TOKEN: 20260423_175900_AVV_VideoPlacementDensityFix
@@ -98,6 +102,8 @@ struct AttachmentViewerView: View {
     @State private var trimURL: URL? = nil
     @State private var trimKind: AttachmentKind? = nil
     @State private var mediaMutationTick: Int = 0
+    @State private var immersivePlaybackChromeVisible: Bool = true
+    @State private var isImmersiveVideoPlaybackActive: Bool = false
 
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
     @State private var tempFilesToCleanup: Set<URL> = []
@@ -552,6 +558,8 @@ private func currentURL() -> URL? {
                             attachment: media[i],
                             isAnyPlayerActive: $isAnyPlayerActive,
                             onRequestStopAll: $stopAllPlayersToggle,
+                            immersivePlaybackChromeVisible: $immersivePlaybackChromeVisible,
+                            isImmersiveVideoPlaybackActive: $isImmersiveVideoPlaybackActive,
                             background: themeBackground,
                             audioURLs: audioURLs,
                             audioTitles: audioTitles,
@@ -610,6 +618,8 @@ private func currentURL() -> URL? {
                     prefetchNeighbors(around: clamped)
                     // Stop any playing media when page changes
                     stopAllPlayersToggle.toggle()
+                    immersivePlaybackChromeVisible = true
+                    isImmersiveVideoPlaybackActive = false
                     if media.indices.contains(clamped) {
                         let url = media[clamped].url
                         cachedURL = url
@@ -919,8 +929,10 @@ private func currentURL() -> URL? {
 
                 Spacer()
             }
+            .opacity((isImmersiveVideoPlaybackActive && !immersivePlaybackChromeVisible) ? 0 : 1)
+            .allowsHitTesting(!(isImmersiveVideoPlaybackActive && !immersivePlaybackChromeVisible))
+            .animation(.easeInOut(duration: 0.22), value: immersivePlaybackChromeVisible)
             .zIndex(2) // ensure buttons are above the pager
-            .allowsHitTesting(true)
         }
         .onAppear {
             // CHANGE-ID: 20260201_170000_AttachmentPlaybackRouteFix
@@ -1362,6 +1374,8 @@ private struct MediaPage: View {
     let attachment: AttachmentViewerView.MediaAttachment
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
+    @Binding var immersivePlaybackChromeVisible: Bool
+    @Binding var isImmersiveVideoPlaybackActive: Bool
     var background: Color
     let audioURLs: [URL]
     let audioTitles: [String]?
@@ -1400,6 +1414,8 @@ private struct MediaPage: View {
                     url: effectiveURL(original),
                     isAnyPlayerActive: $isAnyPlayerActive,
                     onRequestStopAll: $onRequestStopAll,
+                    immersivePlaybackChromeVisible: $immersivePlaybackChromeVisible,
+                    isImmersiveVideoPlaybackActive: $isImmersiveVideoPlaybackActive,
                     onFailure: { markFailed(original, "Video failed to load") }
                 )
             case .audio:
@@ -1467,6 +1483,8 @@ private struct VideoPage: View {
     let url: URL
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
+    @Binding var immersivePlaybackChromeVisible: Bool
+    @Binding var isImmersiveVideoPlaybackActive: Bool
     var onFailure: (() -> Void)? = nil
     @State private var player: AVPlayer? = nil
     @State private var isMuted: Bool = false
@@ -1488,11 +1506,14 @@ private struct VideoPage: View {
     @State private var isScrubbing: Bool = false
     @State private var timeObserverToken: Any? = nil
     @State private var itemStatusObserver: NSKeyValueObservation? = nil
+    @State private var chromeHideWorkItem: DispatchWorkItem? = nil
 
     var body: some View {
         GeometryReader { proxy in
             let isLandscapeViewer = proxy.size.width > proxy.size.height
             let aspectRatio = max(videoAspectRatio ?? 16.0 / 9.0, 0.1)
+            let isLandscapeAsset = aspectRatio > 1.05
+            let shouldUseImmersiveVideoPlayback = isLandscapeViewer && isLandscapeAsset && isPlayingState
             let useDenseLandscapeChrome = isLandscapeViewer
             let controlCompact = useDenseLandscapeChrome
             let controlsSpacing: CGFloat = useDenseLandscapeChrome ? 0 : 8
@@ -1504,97 +1525,55 @@ private struct VideoPage: View {
             let mediaTopInset: CGFloat = useDenseLandscapeChrome ? 6 : 18
             let mediaBottomInset: CGFloat = useDenseLandscapeChrome ? 4 : 14
 
-            VStack(spacing: 0) {
-                videoPlacementContainer(
-                    aspectRatio: aspectRatio,
-                    isLandscapeViewer: isLandscapeViewer
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(.top, mediaTopInset)
-                .padding(.bottom, mediaBottomInset)
-                .layoutPriority(1)
-
-                VStack(spacing: controlsSpacing) {
-                    Slider(
-                        value: Binding(
-                            get: {
-                                min(
-                                    max(currentTime, 0),
-                                    duration > 0 ? duration : 0
-                                )
-                            },
-                            set: { newValue in
-                                currentTime = newValue
-                                if let player {
-                                    let cm = CMTime(
-                                        seconds: max(0, min(newValue, duration)),
-                                        preferredTimescale: CMTimeScale(NSEC_PER_SEC)
-                                    )
-                                    player.seek(
-                                        to: cm,
-                                        toleranceBefore: .zero,
-                                        toleranceAfter: .zero
-                                    )
-                                }
-                            }
-                        ),
-                        in: 0...(duration > 0 ? duration : 1),
-                        onEditingChanged: { began in
-                            if began {
-                                isScrubbing = true
-                            } else {
-                                commitSeek()
-                            }
-                        }
+            Group {
+                if shouldUseImmersiveVideoPlayback {
+                    immersiveVideoPlaybackLayout(
+                        aspectRatio: aspectRatio,
+                        controlCompact: controlCompact,
+                        transportButtonSpacing: transportButtonSpacing
                     )
-                    .tint(Theme.Colors.accent)
+                } else {
+                    VStack(spacing: 0) {
+                        videoPlacementContainer(
+                            aspectRatio: aspectRatio,
+                            isLandscapeViewer: isLandscapeViewer
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .padding(.top, mediaTopInset)
+                        .padding(.bottom, mediaBottomInset)
+                        .layoutPriority(1)
 
-                    ZStack {
-                        HStack {
-                            mediaControlButton(compact: controlCompact, action: { toggleMute() }) {
-                                Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-
-                            Spacer(minLength: 0)
-
-                            routePickerControl(compact: controlCompact)
-                        }
-
-                        HStack(spacing: transportButtonSpacing) {
-                            mediaControlButton(compact: controlCompact, action: { seek(by: -10) }) {
-                                Image(systemName: "gobackward.10")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-
-                            if isPlayingState {
-                                mediaControlButton(compact: controlCompact, action: { togglePlayPause() }) {
-                                    Image(systemName: "pause.fill")
-                                        .font(.system(size: 17, weight: .semibold))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                }
-                            } else {
-                                Color.clear
-                                    .frame(width: controlCompact ? 36 : 40, height: controlCompact ? 36 : 40)
-                            }
-
-                            mediaControlButton(compact: controlCompact, action: { seek(by: 10) }) {
-                                Image(systemName: "goforward.10")
-                                    .font(.system(size: 17, weight: .semibold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                        }
+                        videoTransportControls(
+                            controlCompact: controlCompact,
+                            controlsSpacing: controlsSpacing,
+                            transportHeight: transportHeight,
+                            transportButtonSpacing: transportButtonSpacing,
+                            revealsImmersiveChrome: false
+                        )
+                        .padding(.top, interSectionSpacing)
+                        .padding(.horizontal, horizontalPadding)
+                        .padding(.bottom, bottomPadding)
                     }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: transportHeight)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .padding(.top, interSectionSpacing)
-                .padding(.horizontal, horizontalPadding)
-                .padding(.bottom, bottomPadding)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onChange(of: shouldUseImmersiveVideoPlayback) { _, isImmersive in
+                isImmersiveVideoPlaybackActive = isImmersive
+                if isImmersive {
+                    revealPlaybackChrome(shouldAutoHide: true)
+                } else {
+                    cancelChromeHide()
+                    immersivePlaybackChromeVisible = true
+                }
+            }
+            .onChange(of: isPlayingState) { _, isPlaying in
+                if shouldUseImmersiveVideoPlayback && isPlaying {
+                    revealPlaybackChrome(shouldAutoHide: true)
+                } else if !isPlaying {
+                    cancelChromeHide()
+                    immersivePlaybackChromeVisible = true
+                }
+            }
         }
         .onChange(of: onRequestStopAll) { _, _ in
             if let until = ignoreStopBroadcastUntil, Date() < until {
@@ -1605,12 +1584,158 @@ private struct VideoPage: View {
         }
         .onDisappear {
             // Stop playback and reset to start so revisiting begins from the beginning
+            cancelChromeHide()
+            immersivePlaybackChromeVisible = true
+            isImmersiveVideoPlaybackActive = false
             stop()
             if let player {
                 player.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
             }
             removeTimeObservation()
             stopObservingPlayer()
+        }
+    }
+
+    @ViewBuilder
+    private func immersiveVideoPlaybackLayout(
+        aspectRatio: CGFloat,
+        controlCompact: Bool,
+        transportButtonSpacing: CGFloat
+    ) -> some View {
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                Spacer(minLength: 18)
+
+                videoSurface(aspectRatio: aspectRatio, allowsBackgroundToggle: false)
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            videoTransportControls(
+                controlCompact: controlCompact,
+                controlsSpacing: 4,
+                transportHeight: 36,
+                transportButtonSpacing: transportButtonSpacing,
+                revealsImmersiveChrome: true
+            )
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.bottom, 10)
+            .opacity(immersivePlaybackChromeVisible ? 1 : 0)
+            .allowsHitTesting(immersivePlaybackChromeVisible)
+            .animation(.easeInOut(duration: 0.22), value: immersivePlaybackChromeVisible)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            revealPlaybackChrome(shouldAutoHide: true)
+        }
+    }
+    @ViewBuilder
+    private func videoTransportControls(
+        controlCompact: Bool,
+        controlsSpacing: CGFloat,
+        transportHeight: CGFloat,
+        transportButtonSpacing: CGFloat,
+        revealsImmersiveChrome: Bool
+    ) -> some View {
+        VStack(spacing: controlsSpacing) {
+            Slider(
+                value: Binding(
+                    get: {
+                        min(
+                            max(currentTime, 0),
+                            duration > 0 ? duration : 0
+                        )
+                    },
+                    set: { newValue in
+                        currentTime = newValue
+                        if let player {
+                            let cm = CMTime(
+                                seconds: max(0, min(newValue, duration)),
+                                preferredTimescale: CMTimeScale(NSEC_PER_SEC)
+                            )
+                            player.seek(
+                                to: cm,
+                                toleranceBefore: .zero,
+                                toleranceAfter: .zero
+                            )
+                        }
+                    }
+                ),
+                in: 0...(duration > 0 ? duration : 1),
+                onEditingChanged: { began in
+                    if began {
+                        isScrubbing = true
+                        if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: false) }
+                    } else {
+                        commitSeek()
+                        if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+                    }
+                }
+            )
+            .tint(Theme.Colors.accent)
+            .onTapGesture {
+                if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+            }
+
+            ZStack {
+                HStack {
+                    mediaControlButton(compact: controlCompact, action: {
+                        if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+                        toggleMute()
+                    }) {
+                        Image(systemName: isMuted ? "speaker.slash" : "speaker.wave.2.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+
+                    Spacer(minLength: 0)
+
+                    routePickerControl(compact: controlCompact)
+                        .onTapGesture {
+                            if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+                        }
+                }
+
+                HStack(spacing: transportButtonSpacing) {
+                    mediaControlButton(compact: controlCompact, action: {
+                        if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+                        seek(by: -10)
+                    }) {
+                        Image(systemName: "gobackward.10")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+
+                    if isPlayingState {
+                        mediaControlButton(compact: controlCompact, action: {
+                            if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: false) }
+                            togglePlayPause()
+                        }) {
+                            Image(systemName: "pause.fill")
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    } else {
+                        Color.clear
+                            .frame(width: controlCompact ? 36 : 40, height: controlCompact ? 36 : 40)
+                    }
+
+                    mediaControlButton(compact: controlCompact, action: {
+                        if revealsImmersiveChrome { revealPlaybackChrome(shouldAutoHide: true) }
+                        seek(by: 10)
+                    }) {
+                        Image(systemName: "goforward.10")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: transportHeight)
         }
     }
 
@@ -1628,7 +1753,7 @@ private struct VideoPage: View {
     }
 
     @ViewBuilder
-    private func videoSurface(aspectRatio: CGFloat) -> some View {
+    private func videoSurface(aspectRatio: CGFloat, allowsBackgroundToggle: Bool = true) -> some View {
         ZStack {
             Group {
                 if let poster {
@@ -1648,7 +1773,6 @@ private struct VideoPage: View {
             if let player {
                 PlayerContainerView(player: player)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onDisappear { player.pause() }
             }
 
             if !isPlayingState {
@@ -1672,11 +1796,24 @@ private struct VideoPage: View {
             }
         }
         .aspectRatio(aspectRatio, contentMode: .fit)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if overlayTapGuard { return }
-            togglePlayPauseFromBackgroundTap()
+    }
+
+    private func revealPlaybackChrome(shouldAutoHide: Bool) {
+        cancelChromeHide()
+        immersivePlaybackChromeVisible = true
+        guard shouldAutoHide, isPlayingState else { return }
+        let workItem = DispatchWorkItem {
+            if isPlayingState {
+                immersivePlaybackChromeVisible = false
+            }
         }
+        chromeHideWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
+    }
+
+    private func cancelChromeHide() {
+        chromeHideWorkItem?.cancel()
+        chromeHideWorkItem = nil
     }
 
     private func requestPlay() {
@@ -1696,12 +1833,15 @@ private struct VideoPage: View {
         player.seek(to: current, toleranceBefore: .zero, toleranceAfter: .zero)
         player.play()
         isAnyPlayerActive = true
+        revealPlaybackChrome(shouldAutoHide: true)
     }
 
     private func stop() {
         player?.pause()
         isAnyPlayerActive = false
         isPlayingState = false
+        cancelChromeHide()
+        immersivePlaybackChromeVisible = true
     }
 
     private func toggleMute() {
@@ -1748,9 +1888,12 @@ private struct VideoPage: View {
         if (player?.rate ?? 0) == 0 {
             player?.play()
             isAnyPlayerActive = true
+            revealPlaybackChrome(shouldAutoHide: true)
         } else {
             player?.pause()
             isAnyPlayerActive = false
+            cancelChromeHide()
+            immersivePlaybackChromeVisible = true
         }
         player?.isMuted = isMuted
         isPlayingState = ((player?.rate ?? 0) > 0)
