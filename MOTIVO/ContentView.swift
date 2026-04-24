@@ -215,6 +215,9 @@
 // SCOPE: Soften the permanent Journal/Feed mode selector styling and tighten its spacing to the summary card without changing selector logic, layout structure, filters, or behavior.
 // SEARCH-TOKEN: 20260323_162900_ContentView_ModeSelectorSoftening_5d1a
 import SwiftUI
+// CHANGE-ID: 20260424_122000_ContentView_FilterIconActiveIndicator_a8c4
+// SCOPE: ContentView only — add a subtle active-filter visual state to the collapsed filter icon while preserving all filter logic, row rendering, tint resolution, navigation, and backend behavior.
+// SEARCH-TOKEN: 20260424_122000_ContentView_FilterIconActiveIndicator_a8c4
 
 
 #if canImport(UIKit)
@@ -443,6 +446,7 @@ fileprivate struct SessionsRootView: View {
     let backendUserID: String?
 
     @State private var filtersExpanded = false
+    @State private var filterIconPulse = false
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
@@ -778,7 +782,29 @@ fileprivate struct SessionsRootView: View {
                         HStack(alignment: .center, spacing: Theme.Spacing.inline) {
                             Image(systemName: "slider.horizontal.3")
                                 .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .foregroundStyle(filterHeaderIndicatorActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                                .scaleEffect(
+                                    filterHeaderIndicatorActive
+                                    ? (filterIconPulse ? 0.88 : 1.10)
+                                    : 1.0
+                                )
+                                .opacity(
+                                    filterHeaderIndicatorActive
+                                    ? (filterIconPulse ? 0.9 : 1.0)
+                                    : 1.0
+                                )
+                                .animation(
+                                    filterHeaderIndicatorActive
+                                        ? .easeInOut(duration: 1.35).repeatForever(autoreverses: true)
+                                        : .default,
+                                    value: filterHeaderIndicatorActive
+                                )
+                                .onAppear {
+                                    filterIconPulse = filterHeaderIndicatorActive
+                                }
+                                .onChange(of: filterHeaderIndicatorActive) { _, isActive in
+                                    filterIconPulse = isActive
+                                }
 
                             Spacer(minLength: 0)
 
@@ -2494,6 +2520,10 @@ fileprivate struct SessionsRootView: View {
 
     private var hasAnyJournalContent: Bool {
         sessions.isEmpty == false
+    }
+
+    private var filterHeaderIndicatorActive: Bool {
+        hasExplicitFeedNarrowing && !filtersExpanded
     }
 
     private var hasExplicitFeedNarrowing: Bool {
