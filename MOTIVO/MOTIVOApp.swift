@@ -251,6 +251,7 @@ struct MOTIVOApp: App {
                         }
                     }
                 }
+                .preferredColorScheme(.light)
         }
     }
 }
