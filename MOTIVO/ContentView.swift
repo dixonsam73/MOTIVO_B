@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260424_103000_ContentView_LocalVideoPosterCache_9f3a
+// SCOPE: ContentView only - add an in-memory cache for local video attachment posters used by Journal row previews; preserve existing layout, navigation, feed behavior, and thumbnail generation logic.
+// SEARCH-TOKEN: 20260424_103000_ContentView_LocalVideoPosterCache_9f3a
+
 // CHANGE-ID: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
 // SCOPE: Journal tint resolver wiring only — owner-local Journal Week/Month/Year now resolve tint source through Theme.resolvedTint / resolvedTintSource, aligned with extracted Year month row file. No feed, layout, routing, spacing, or behavior changes.
 // SEARCH-TOKEN: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
@@ -3943,6 +3947,30 @@ fileprivate struct SessionRow: View {
     }
 }
 
+#if canImport(UIKit)
+fileprivate enum LocalAttachmentVideoPosterCache {
+    private static let cache = NSCache<NSString, UIImage>()
+
+    static func cachedPoster(for attachment: Attachment, url: URL?) -> UIImage? {
+        cache.object(forKey: cacheKey(for: attachment, url: url))
+    }
+
+    static func store(_ image: UIImage, for attachment: Attachment, url: URL?) {
+        cache.setObject(image, forKey: cacheKey(for: attachment, url: url))
+    }
+
+    private static func cacheKey(for attachment: Attachment, url: URL?) -> NSString {
+        if !attachment.objectID.isTemporaryID {
+            return ("localVideoPoster|" + attachment.objectID.uriRepresentation().absoluteString) as NSString
+        }
+        if let url {
+            return ("localVideoPoster|" + url.absoluteString) as NSString
+        }
+        return ("localVideoPoster|" + ObjectIdentifier(attachment).debugDescription) as NSString
+    }
+}
+#endif
+
 fileprivate struct VideoOrIconTile: View {
     let attachment: Attachment
     @State private var poster: UIImage? = nil
@@ -3951,9 +3979,12 @@ fileprivate struct VideoOrIconTile: View {
         let kind = attachmentKind(attachment)
         ZStack(alignment: .center) {
             if kind == "video" {
+                let url = attachmentFileURL(attachment)
+                let displayPoster = poster ?? LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url)
+
                 ZStack(alignment: .center) {
-                    if let poster {
-                        Image(uiImage: poster)
+                    if let displayPoster {
+                        Image(uiImage: displayPoster)
                             .resizable()
                             .scaledToFill()
                             .frame(width: 64, height: 64)
@@ -3969,7 +4000,7 @@ fileprivate struct VideoOrIconTile: View {
                         .shadow(radius: 2)
                 }
                 .task {
-                    if poster == nil, let url = attachmentFileURL(attachment) {
+                    if poster == nil, let url {
                         await loadPoster(url)
                     }
                 }
@@ -3998,10 +4029,18 @@ fileprivate struct VideoOrIconTile: View {
     }
 
     private func loadPoster(_ url: URL) async {
+        if let cached = LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url) {
+            poster = cached
+            return
+        }
+
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 DispatchQueue.main.async {
+                    if let img {
+                        LocalAttachmentVideoPosterCache.store(img, for: attachment, url: url)
+                    }
                     self.poster = img
                     continuation.resume()
                 }
@@ -4025,9 +4064,12 @@ fileprivate struct SingleAttachmentPreview: View {
                     .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
             } else if kind == "video" {
+                let url = attachmentFileURL(attachment)
+                let displayPoster = poster ?? LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url)
+
                 ZStack(alignment: .center) {
-                    if let poster {
-                        Image(uiImage: poster)
+                    if let displayPoster {
+                        Image(uiImage: displayPoster)
                             .resizable()
                             .scaledToFill()
                             .frame(width: size, height: size)
@@ -4043,7 +4085,7 @@ fileprivate struct SingleAttachmentPreview: View {
                         .shadow(radius: 2)
                 }
                 .task {
-                    if poster == nil, let url = attachmentFileURL(attachment) { await loadPoster(url) }
+                    if poster == nil, let url { await loadPoster(url) }
                 }
                 .frame(width: size, height: size)
                 .background(Color.secondary.opacity(0.08))
@@ -4073,10 +4115,18 @@ fileprivate struct SingleAttachmentPreview: View {
     }
 
     private func loadPoster(_ url: URL) async {
+        if let cached = LocalAttachmentVideoPosterCache.cachedPoster(for: attachment, url: url) {
+            poster = cached
+            return
+        }
+
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generateVideoPoster(url: url)
                 DispatchQueue.main.async {
+                    if let img {
+                        LocalAttachmentVideoPosterCache.store(img, for: attachment, url: url)
+                    }
                     self.poster = img
                     continuation.resume()
                 }
