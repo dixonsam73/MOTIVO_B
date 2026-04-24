@@ -1,4 +1,4 @@
-// CHANGE-ID: 20260423_162500_AVV_MediaControlsRefined
+// CHANGE-ID: 20260423_162500_AVV_MediaControlsRefinedx
 // SCOPE: AttachmentViewerView media player polish — unify AirPlay chrome with other floating controls, keep portrait trayless controls, move landscape video controls onto the viewer background surface, and remove duplicate paused-state play button from the video transport row. No playback/scrub/routing logic changes.
 // SEARCH-TOKEN: 20260423_162500_AVV_MediaControlsRefined
 
