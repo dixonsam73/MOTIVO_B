@@ -968,9 +968,9 @@ fileprivate struct SessionsRootView: View {
                                                         }
                                                         .modifier(
                                                             JournalWeekLeadingTintCardModifier(
-                                                                tintColor: journalMonthBarAccentColor(for: session, in: journalArchiveSessions) ?? journalWeekCardFillColor(for: session, in: journalArchiveSessions),
-                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalArchiveSessions),
-                                                                showsLeadingTint: journalResolvedTintSource(in: journalArchiveSessions) != .off
+                                                                tintColor: journalMonthBarAccentColor(for: session, in: journalWeekTintContextSessions) ?? journalWeekCardFillColor(for: session, in: journalWeekTintContextSessions),
+                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalWeekTintContextSessions),
+                                                                showsLeadingTint: journalResolvedTintSource(in: journalWeekTintContextSessions) != .off
                                                             )
                                                         )
                                                         .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
@@ -2533,6 +2533,43 @@ fileprivate struct SessionsRootView: View {
         let baseSessions = filteredSessions
         guard selectedScope == .mine else { return baseSessions }
         return baseSessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
+    }
+
+    private var journalWeekTintContextSessions: [Session] {
+        guard selectedScope == .mine, let uid = effectiveUserID else { return journalArchiveSessions }
+
+        var out = Array(sessions).filter { $0.ownerUserID == uid }
+
+        if let inst = selectedInstrument {
+            let id = inst.objectID
+            let targetName = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let targetNorm = targetName.lowercased()
+
+            out = out.filter { s in
+                if s.instrument?.objectID == id { return true }
+
+                let label = ((s.value(forKey: "userInstrumentLabel") as? String) ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                return !targetNorm.isEmpty && label == targetNorm
+            }
+        }
+
+        switch selectedActivity {
+        case .any:
+            break
+        case .core(let act):
+            out = out.filter { ($0.value(forKey: "activityType") as? Int16) == act.rawValue }
+        case .custom(let name):
+            out = out.filter { s in
+                let label = (s.value(forKey: "userActivityLabel") as? String) ?? ""
+                let detail = (s.value(forKey: "activityDetail") as? String) ?? ""
+                return label.caseInsensitiveCompare(name) == .orderedSame ||
+                       detail.caseInsensitiveCompare(name) == .orderedSame
+            }
+        }
+
+        return out.sorted { journalDate(for: $0) > journalDate(for: $1) }
     }
 
     private var journalCurrentPeriodSessions: [Session] {

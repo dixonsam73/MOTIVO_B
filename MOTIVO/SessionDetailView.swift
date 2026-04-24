@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260424_124500_SDV_ActivityTintCardRouting
+// SCOPE: Owner-only activity tint now routes to the activity description card when that card contains the visible activity label; instrument tint behaviour unchanged.
+// SEARCH-TOKEN: 20260424_124500_SDV_ActivityTintCardRouting
+
 // CHANGE-ID: 20260421_184800_SDV_ResolvedMetaTint
 // SCOPE: Owner-only visual tint on the existing SessionDetailView metadata card now routes through shared resolved tint (instrument/activity/off). No other surfaces changed.
 // SEARCH-TOKEN: 20260421_184800_SDV_ResolvedMetaTint
@@ -657,7 +661,7 @@ return AttachmentViewerView(
                     Text(activityDescriptionText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                .cardSurface()
+                .cardSurface(fillColor: activityDescriptionCardFillColor, strokeColor: activityDescriptionCardStrokeColor)
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -980,8 +984,39 @@ return AttachmentViewerView(
         )
     }
 
+    private var activityTintBelongsOnDescriptionCard: Bool {
+        guard viewerIsOwner else { return false }
+        guard cachedMetaCardTint.source == .activity else { return false }
+        guard let activity = cachedMetaCardTint.activityLabel?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !activity.isEmpty else { return false }
+
+        let description = activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !description.isEmpty else { return false }
+
+        return description.range(of: activity, options: [.caseInsensitive, .diacriticInsensitive]) != nil
+    }
+
+    private var activityDescriptionCardFillColor: Color {
+        guard activityTintBelongsOnDescriptionCard else { return Theme.Colors.surface(colorScheme) }
+        return cachedMetaCardTint.fill(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var activityDescriptionCardStrokeColor: Color {
+        guard activityTintBelongsOnDescriptionCard else { return Theme.Colors.cardStroke(colorScheme) }
+        return cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
     private var metaCardFillColor: Color {
         guard viewerIsOwner else { return Theme.Colors.surface(colorScheme) }
+        guard !activityTintBelongsOnDescriptionCard else { return Theme.Colors.surface(colorScheme) }
         return cachedMetaCardTint.fill(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
@@ -991,6 +1026,7 @@ return AttachmentViewerView(
 
     private var metaCardStrokeColor: Color {
         guard viewerIsOwner else { return Theme.Colors.cardStroke(colorScheme) }
+        guard !activityTintBelongsOnDescriptionCard else { return Theme.Colors.cardStroke(colorScheme) }
         return cachedMetaCardTint.stroke(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
