@@ -245,6 +245,56 @@ struct AddEditSessionView: View {
     @State private var hoverDotIndex_edit: Int? = nil        // transient during drag
     @State private var dragX_edit: CGFloat? = nil            // live finger x
     @State private var lastHapticDot_edit: Int? = nil        // per-dot haptic throttle
+    @State private var liveFocusProgress_edit: CGFloat? = nil
+
+    private let focusSnapCount_edit: Int = 10
+
+    private func storedFocusValue_edit(forVisualFocusValue visualValue: Int) -> Int {
+        FocusCircleView.storedFocusValue(forVisualFocusValue: visualValue)
+    }
+
+    private func visualFocusValue_edit(forStoredFocusValue storedValue: Int?) -> Int? {
+        FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue)
+    }
+
+    private func updateFocusFromTrack_edit(locationX: CGFloat, width: CGFloat) {
+        guard width > 0 else { return }
+
+        let clampedX = max(0, min(locationX, width))
+        let progress = clampedX / width
+        let visualValue = visualFocusValue_edit(forProgress: progress)
+        let storedValue = storedFocusValue_edit(forVisualFocusValue: visualValue)
+
+        liveFocusProgress_edit = progress
+        selectedDotIndex_edit = storedValue
+
+        if lastHapticDot_edit != visualValue {
+            lastHapticDot_edit = visualValue
+            #if canImport(UIKit)
+            UISelectionFeedbackGenerator().selectionChanged()
+            #endif
+        }
+    }
+
+    private func visualFocusValue_edit(forProgress progress: CGFloat) -> Int {
+        max(1, min(focusSnapCount_edit, Int(round(progress * CGFloat(focusSnapCount_edit - 1))) + 1))
+    }
+
+    private func progressForVisualFocusValue_edit(_ visualValue: Int?) -> CGFloat? {
+        guard let visualValue else { return nil }
+        return CGFloat(max(1, min(focusSnapCount_edit, visualValue)) - 1) / CGFloat(focusSnapCount_edit - 1)
+    }
+
+    private func settleFocusTrackAfterDrag_edit() {
+        let snappedProgress = progressForVisualFocusValue_edit(visualFocusValue_edit(forStoredFocusValue: selectedDotIndex_edit))
+        withAnimation(.easeOut(duration: 0.16)) {
+            liveFocusProgress_edit = snappedProgress
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            liveFocusProgress_edit = nil
+        }
+    }
 
     /// DARK → LIGHT across the row (left→right). Use textPrimary so it reads in dark mode.
     private func opacityForDot_edit(_ i: Int) -> Double {
@@ -1452,107 +1502,88 @@ private var instrumentPicker: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Focus").sectionHeader()
 
-            GeometryReader { geo in
-                let totalWidth = geo.size.width
-                let spacing: CGFloat = 8
-                let count = stateDotsCount_edit
-                let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
-                let step = diameter + spacing
+            VStack(spacing: Theme.Spacing.s) {
+                FocusCircleView(
+                    normalizedFocus: liveFocusProgress_edit ?? progressForVisualFocusValue_edit(visualFocusValue_edit(forStoredFocusValue: selectedDotIndex_edit)),
+                    size: 74
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 2)
 
-                // Drag gesture: per-dot haptic + snap to zone; faster mapping
-                let drag = DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        // Clamp within the actual occupied width of the dot strip so extremes are reachable
-                        let totalWidthUsed = diameter * CGFloat(count) + spacing * CGFloat(count - 1)
-                        let x = max(0, min(value.location.x, totalWidthUsed))
+                GeometryReader { geo in
+                    let width = geo.size.width
+                    let visualValue = visualFocusValue_edit(forStoredFocusValue: selectedDotIndex_edit)
+                    let progress = liveFocusProgress_edit ?? progressForVisualFocusValue_edit(visualValue)
+                    let knobSize: CGFloat = 18
+                    let knobX = progress.map { min(max($0 * width, knobSize * 0.5), width - knobSize * 0.5) }
 
-                        dragX_edit = x
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(FocusCircleView.baseFocusColor.opacity(0.08))
+                            .frame(height: 5)
+                            .frame(maxWidth: .infinity)
 
-                        // Map x to nearest dot center across [0, totalWidthUsed]
-                        let projected = (x / max(1, totalWidthUsed)) * CGFloat(count - 1)
-                        let idx = Int(round(projected))
-                        let clamped = max(0, min(count - 1, idx))
+                        if let progress {
+                            Capsule()
+                                .fill(FocusCircleView.baseFocusColor.opacity(0.105))
+                                .frame(width: max(0, width * progress), height: 5)
+                        }
 
-                        hoverDotIndex_edit = clamped
-                        selectedDotIndex_edit = clamped  // single source of truth
-
-                        // Per-dot haptic
-                        if lastHapticDot_edit != clamped {
-                            lastHapticDot_edit = clamped
-                            #if canImport(UIKit)
-                            UISelectionFeedbackGenerator().selectionChanged()
-                            #endif
+                        if let knobX {
+                            Circle()
+                                .fill(FocusCircleView.baseFocusColor.opacity(0.34))
+                                .overlay(
+                                    Circle()
+                                        .stroke(FocusCircleView.baseFocusColor.opacity(0.15), lineWidth: 1)
+                                )
+                                .frame(width: knobSize, height: knobSize)
+                                .position(x: knobX, y: 18)
+                                .accessibilityHidden(true)
                         }
                     }
-                    .onEnded { _ in
-                        dragX_edit = nil
-                        hoverDotIndex_edit = nil
-                    }
-
-                HStack(spacing: spacing) {
-                    ForEach(0..<count, id: \.self) { i in
-                        let isRinged = (i == selectedDotIndex_edit)
-
-                        // Proximity bloom under finger
-                        let hoverScale: CGFloat = {
-                            guard let x = dragX_edit else { return 1.0 }
-                            let cx = CGFloat(i) * step + diameter * 0.5
-                            let distance = abs(cx - x)
-                            let proximity = max(0, 1 - (distance / (step * 1.5)))
-                            return 1.0 + (0.24 * proximity) // up to +24%
-                        }()
-
-                        // Persistent emphasis for selected zone center
-                        let selectedBase: CGFloat = isRinged ? 1.18 : 1.0
-                        let finalScale = selectedBase * hoverScale
-
-                        Circle()
-                            // Adaptive fill: black in light mode, white in dark mode, using centralized opacity ramp
-                            .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
-                            // Hairline outline on every dot for guaranteed contrast
-                            .overlay(
-                                Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
-                            )
-                            // Adaptive ring for the selected index
-                            .overlay(
-                                Group {
-                                    if isRinged {
-                                        Circle().stroke(
-                                            FocusDotStyle.ringColor(for: colorScheme),
-                                            lineWidth: FocusDotStyle.ringWidth
-                                        )
-                                    }
-                                }
-                            )
-                            .frame(width: diameter, height: diameter)
-                            .scaleEffect(finalScale)
-                            .animation(.easeOut(duration: 0.06), value: finalScale)
-                            .contentShape(Rectangle())
-                            .onTapGesture {
-                                selectedDotIndex_edit = (selectedDotIndex_edit == i) ? nil : i
-                                #if canImport(UIKit)
-                                UISelectionFeedbackGenerator().selectionChanged()
-                                #endif
+                    .frame(height: 36)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { value in
+                                updateFocusFromTrack_edit(locationX: value.location.x, width: width)
                             }
-                            .accessibilityLabel({
-                                let bucket: String
-                                switch i / 3 {
-                                case 0: bucket = "Searching"
-                                case 1: bucket = "Working"
-                                case 2: bucket = "Flowing"
-                                default: bucket = "Breakthrough"
-                                }
-                                return isRinged ? "\(bucket), selected" : bucket
-                            }())
+                            .onEnded { _ in
+                                settleFocusTrackAfterDrag_edit()
+                                lastHapticDot_edit = nil
+                            }
+                    )
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Focus")
+                    .accessibilityValue(visualValue.map { "\($0) of 10" } ?? "Unset")
+                    .accessibilityAdjustableAction { direction in
+                        let currentVisual = visualFocusValue_edit(forStoredFocusValue: selectedDotIndex_edit) ?? 5
+                        let nextVisual: Int
+                        switch direction {
+                        case .increment:
+                            nextVisual = min(focusSnapCount_edit, currentVisual + 1)
+                        case .decrement:
+                            nextVisual = max(1, currentVisual - 1)
+                        @unknown default:
+                            return
+                        }
+                        selectedDotIndex_edit = storedFocusValue_edit(forVisualFocusValue: nextVisual)
+                        liveFocusProgress_edit = progressForVisualFocusValue_edit(nextVisual)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .gesture(drag)
+                .frame(height: 36)
+
+                HStack {
+                    Text("Unfocused")
+                    Spacer()
+                    Text("Focused")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .opacity(0.72)
             }
-            .frame(height: 48)    // half-height feel
-            .padding(.vertical, 2)
         }
-        .cardSurface()
+        .cardSurface(padding: Theme.Spacing.m)
     }
 
     // MARK: - Data hydration
