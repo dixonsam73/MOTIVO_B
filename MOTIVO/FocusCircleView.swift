@@ -1,7 +1,12 @@
 import SwiftUI
+import UIKit
 
 struct FocusCircleView: View {
     static let baseFocusColor = Color(red: 0.33, green: 0.45, blue: 0.58)
+
+    private static let lowFocusColor = Color(red: 0.45, green: 0.50, blue: 0.56)
+    private static let highFocusColor = Color(red: 0.25, green: 0.38, blue: 0.52)
+    private static let useFocusColorModulation = true
 
     let storedFocusValue: Int?
     let normalizedOverride: CGFloat?
@@ -28,8 +33,8 @@ struct FocusCircleView: View {
             .fill(
                 RadialGradient(
                     colors: [
-                        Self.baseFocusColor.opacity(renderOpacity),
-                        Self.baseFocusColor.opacity(renderEdgeOpacity)
+                        renderColor.opacity(renderOpacity),
+                        renderColor.opacity(renderEdgeOpacity)
                     ],
                     center: .center,
                     startRadius: 0,
@@ -83,6 +88,19 @@ struct FocusCircleView: View {
         normalizedFocus ?? 0.0
     }
 
+    private var renderColor: Color {
+        guard Self.useFocusColorModulation else {
+            return Self.baseFocusColor
+        }
+
+        guard normalizedFocus != nil else {
+            return Self.lowFocusColor
+        }
+
+        let colorProgress = pow(resolvedFocus, 0.85)
+        return Self.mixColor(Self.lowFocusColor, Self.highFocusColor, colorProgress)
+    }
+
     private var renderBlur: CGFloat {
         guard normalizedFocus != nil else { return 3.8 }
         let clarity = pow(resolvedFocus, 0.66)
@@ -116,5 +134,32 @@ struct FocusCircleView: View {
 
     private static func lerp(_ start: CGFloat, _ end: CGFloat, _ t: CGFloat) -> CGFloat {
         start + (end - start) * t
+    }
+
+    private static func mixColor(_ start: Color, _ end: Color, _ t: CGFloat) -> Color {
+        let clamped = max(0, min(1, t))
+
+        let startUIColor = UIColor(start)
+        let endUIColor = UIColor(end)
+
+        var sr: CGFloat = 0
+        var sg: CGFloat = 0
+        var sb: CGFloat = 0
+        var sa: CGFloat = 0
+
+        var er: CGFloat = 0
+        var eg: CGFloat = 0
+        var eb: CGFloat = 0
+        var ea: CGFloat = 0
+
+        startUIColor.getRed(&sr, green: &sg, blue: &sb, alpha: &sa)
+        endUIColor.getRed(&er, green: &eg, blue: &eb, alpha: &ea)
+
+        return Color(
+            red: Double(lerp(sr, er, clamped)),
+            green: Double(lerp(sg, eg, clamped)),
+            blue: Double(lerp(sb, eb, clamped)),
+            opacity: Double(lerp(sa, ea, clamped))
+        )
     }
 }
