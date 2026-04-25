@@ -1,3 +1,8 @@
+// CHANGE-ID: 20260425_173420_meview_highest_focus_delayed_reveal
+// CHANGE-ID: 20260425_174850_highest_focus_reveal_timing
+// SCOPE: MeView-only presentation polish: match Highest focus mini FocusCircle reveal pace to the main Focus animation and reset/replay that secondary reveal after range changes. No analytics, layout hierarchy, FocusCircleView, Theme, Core Data, backend, or navigation changes.
+// SEARCH-TOKEN: 20260425_173420_meview_highest_focus_delayed_reveal
+
 // CHANGE-ID: 20260425_171120_meview_quality_insight_label_tint_polish
 // SCOPE: MeView-only polish for quality insight cards: clearer focus-specific titles, remove secondary avg-focus/time metadata, and tint only the card matching the active tint source. No analytics, layout hierarchy, navigation, Theme, SDV/BSDV, backend, or existing non-target card changes.
 // SEARCH-TOKEN: 20260425_171120_meview_quality_insight_label_tint_polish
@@ -168,6 +173,10 @@ struct MeView: View {
     @State private var avgFocus: Double? = nil
     @State private var animatedFocus: Double = 0
     @State private var didRunFocusInitialAnimation = false
+    @State private var showHighestFocusCircle = false
+    @State private var animatedHighestFocusCircle: CGFloat = 0
+    @State private var didScheduleHighestFocusCircleReveal = false
+    @State private var highestFocusCircleRevealToken = 0
     @State private var topInstrumentByTime: (name: String, seconds: Int)? = nil
     @State private var topActivityByTime: (name: String, seconds: Int)? = nil
     @State private var instrumentTintCounts: [String: Int] = [:]
@@ -203,7 +212,11 @@ struct MeView: View {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 selectedInsightSession = insight.session
                             } label: {
-                                HighestFocusInsightCard(insight: insight)
+                                HighestFocusInsightCard(
+                                    insight: insight,
+                                    normalizedFocus: animatedHighestFocusCircle,
+                                    showsFocusCircle: showHighestFocusCircle
+                                )
                             }
                             .buttonStyle(InsightCardButtonStyle())
                         }
@@ -295,7 +308,10 @@ struct MeView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { Task { await reload() } }
-        .onChange(of: range) { _, _ in Task { await reload() } }
+        .onChange(of: range) { _, _ in
+            resetHighestFocusCircleReveal()
+            Task { await reload() }
+        }
         .onChange(of: auth.backendUserID) { _, _ in Task { await reload() } }
         .onChange(of: avgFocus) { _, newValue in
             updateFocusCircleTargetAfterInitialAppearance(newValue)
@@ -339,17 +355,48 @@ struct MeView: View {
 
         DispatchQueue.main.async {
             animateFocusCircle(to: target)
+            scheduleHighestFocusCircleRevealIfNeeded()
         }
     }
 
     private func updateFocusCircleTargetAfterInitialAppearance(_ average: Double?) {
         guard didRunFocusInitialAnimation, let average else { return }
         animateFocusCircle(to: normalizedFocusValue(for: average))
+        scheduleHighestFocusCircleRevealIfNeeded()
     }
 
     private func animateFocusCircle(to target: Double) {
         withAnimation(.easeOut(duration: 5.0)) {
             animatedFocus = target
+        }
+    }
+
+    private func resetHighestFocusCircleReveal() {
+        highestFocusCircleRevealToken += 1
+        didScheduleHighestFocusCircleReveal = false
+
+        withAnimation(.easeOut(duration: 3.5)) {
+            showHighestFocusCircle = false
+        }
+    }
+
+    private func scheduleHighestFocusCircleRevealIfNeeded() {
+        guard didScheduleHighestFocusCircleReveal == false else { return }
+        guard let insight = highestFocusSession else { return }
+
+        didScheduleHighestFocusCircleReveal = true
+
+        let revealToken = highestFocusCircleRevealToken
+        let target = CGFloat(insight.normalizedFocus)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.55) {
+            guard revealToken == highestFocusCircleRevealToken else { return }
+
+            animatedHighestFocusCircle = 0
+            withAnimation(.easeOut(duration: 5.0)) {
+                showHighestFocusCircle = true
+                animatedHighestFocusCircle = target
+            }
         }
     }
 
@@ -489,6 +536,8 @@ struct MeView: View {
         } else {
             bestActivityFocus = nil
         }
+
+        scheduleHighestFocusCircleRevealIfNeeded()
     }
 
     @MainActor
@@ -1378,6 +1427,8 @@ fileprivate struct FirstSessionCard: View {
 
 fileprivate struct HighestFocusInsightCard: View {
     let insight: FocusInsightSession
+    let normalizedFocus: CGFloat
+    let showsFocusCircle: Bool
 
     private static let df: DateFormatter = {
         let df = DateFormatter()
@@ -1406,8 +1457,13 @@ fileprivate struct HighestFocusInsightCard: View {
 
             Spacer(minLength: Theme.Spacing.s)
 
-            FocusCircleView(normalizedFocus: CGFloat(insight.normalizedFocus), size: 42)
-                .accessibilityHidden(true)
+            FocusCircleView(
+                normalizedFocus: normalizedFocus,
+                size: 42
+            )
+            .opacity(showsFocusCircle ? 1 : 0)
+            .scaleEffect(showsFocusCircle ? 1.0 : 0.95)
+            .accessibilityHidden(true)
         }
         .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
