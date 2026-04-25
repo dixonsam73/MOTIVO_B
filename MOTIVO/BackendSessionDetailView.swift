@@ -343,7 +343,7 @@ struct BackendSessionDetailView: View {
             }()
 
             if let dot = focusDotIndex {
-                FocusSectionCard(dotIndex: dot, colorScheme: colorScheme)
+                FocusSectionCard(dotIndex: dot)
             }
 
             attachmentsCard()
@@ -924,74 +924,21 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
 
 private struct FocusSectionCard: View {
     let dotIndex: Int
-    let colorScheme: ColorScheme
-
-    private let count: Int = 12
-    private let spacing: CGFloat = 8
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Focus").sectionHeader()
-            FocusDotStripView(dotIndex: dotIndex, count: count, spacing: spacing, colorScheme: colorScheme)
-                .frame(height: 44)
-                .accessibilityLabel(Text(bucketLabel(for: dotIndex)))
+            HStack {
+                Spacer(minLength: 0)
+                FocusCircleView(storedFocusValue: dotIndex, size: 36)
+                    .accessibilityLabel("Focus")
+                    .offset(y: -4)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
         }
         .cardSurface(padding: Theme.Spacing.m)
-    }
-
-    private func bucketLabel(for dot: Int) -> String {
-        switch (dot / 3) {
-        case 0: return "State: Searching"
-        case 1: return "State: Working"
-        case 2: return "State: Flowing"
-        default: return "State: Breakthrough"
-        }
-    }
-}
-
-private struct FocusDotStripView: View {
-    let dotIndex: Int
-    let count: Int
-    let spacing: CGFloat
-    let colorScheme: ColorScheme
-
-    var body: some View {
-        GeometryReader { geo in
-            let totalWidth = geo.size.width
-            let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(max(0, count - 1))) / CGFloat(max(1, count))))
-            let ringDot = max(0, min(count - 1, dotIndex))
-
-            HStack(spacing: spacing) {
-                ForEach(0..<count, id: \.self) { i in
-                    dotView(index: i, ringDot: ringDot, diameter: diameter)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-    }
-
-    @ViewBuilder
-    private func dotView(index i: Int, ringDot: Int, diameter: CGFloat) -> some View {
-        let isRinged = (i == ringDot)
-        let baseScale: CGFloat = isRinged ? 1.18 : 1.0
-
-        Circle()
-            .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
-            .overlay(Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth))
-            .overlay(ringOverlay(isRinged: isRinged))
-            .frame(width: diameter, height: diameter)
-            .scaleEffect(baseScale)
-            .accessibilityHidden(true)
-    }
-
-    @ViewBuilder
-    private func ringOverlay(isRinged: Bool) -> some View {
-        if isRinged {
-            Circle().stroke(
-                FocusDotStyle.ringColor(for: colorScheme),
-                lineWidth: FocusDotStyle.ringWidth
-            )
-        }
     }
 }
 
