@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260425_181500_meview_session_moment_tint_cards
+// SCOPE: MeView-only visual polish: apply the active tint source to Longest session and First logged session cards using each card's concrete session. No analytics, layout, navigation, Theme, Core Data, backend, or other card changes.
+// SEARCH-TOKEN: 20260425_181500_meview_session_moment_tint_cards
+
 // CHANGE-ID: 20260425_173420_meview_highest_focus_delayed_reveal
 // CHANGE-ID: 20260425_174850_highest_focus_reveal_timing
 // SCOPE: MeView-only presentation polish: match Highest focus mini FocusCircle reveal pace to the main Focus animation and reset/replay that secondary reveal after range changes. No analytics, layout hierarchy, FocusCircleView, Theme, Core Data, backend, or navigation changes.
@@ -215,7 +219,9 @@ struct MeView: View {
                                 HighestFocusInsightCard(
                                     insight: insight,
                                     normalizedFocus: animatedHighestFocusCircle,
-                                    showsFocusCircle: showHighestFocusCircle
+                                    showsFocusCircle: showHighestFocusCircle,
+                                    fillColor: sessionMomentCardFillColor(for: insight.session),
+                                    strokeColor: sessionMomentCardStrokeColor(for: insight.session)
                                 )
                             }
                             .buttonStyle(InsightCardButtonStyle())
@@ -252,11 +258,23 @@ struct MeView: View {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 selectedInsightSession = target
                             } label: {
-                                LongestSessionCard(range: range, seconds: longest, date: d)
+                                LongestSessionCard(
+                                    range: range,
+                                    seconds: longest,
+                                    date: d,
+                                    fillColor: sessionMomentCardFillColor(for: target),
+                                    strokeColor: sessionMomentCardStrokeColor(for: target)
+                                )
                             }
                             .buttonStyle(InsightCardButtonStyle())
                         } else {
-                            LongestSessionCard(range: range, seconds: longest, date: d)
+                            LongestSessionCard(
+                                range: range,
+                                seconds: longest,
+                                date: d,
+                                fillColor: sessionMomentCardFillColor(for: longestSession),
+                                strokeColor: sessionMomentCardStrokeColor(for: longestSession)
+                            )
                         }
                     }
                     if let first = firstSessionDate {
@@ -265,11 +283,21 @@ struct MeView: View {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 selectedInsightSession = target
                             } label: {
-                                FirstSessionCard(range: range, date: first)
+                                FirstSessionCard(
+                                    range: range,
+                                    date: first,
+                                    fillColor: sessionMomentCardFillColor(for: target),
+                                    strokeColor: sessionMomentCardStrokeColor(for: target)
+                                )
                             }
                             .buttonStyle(InsightCardButtonStyle())
                         } else {
-                            FirstSessionCard(range: range, date: first)
+                            FirstSessionCard(
+                                range: range,
+                                date: first,
+                                fillColor: sessionMomentCardFillColor(for: firstSession),
+                                strokeColor: sessionMomentCardStrokeColor(for: firstSession)
+                            )
                         }
                     }
                     if uniqueActivityCount > 1 {
@@ -778,6 +806,47 @@ struct MeView: View {
 
     private var topInstrumentCardStrokeColor: Color? {
         topInstrumentCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private func sessionMomentCardTint(for session: Session?) -> Theme.ResolvedTint? {
+        guard let session else { return nil }
+
+        switch topWinnerActiveTintSource {
+        case .instrument:
+            guard let label = instrumentLabel(for: session) else { return nil }
+            return Theme.ResolvedTint(
+                source: .instrument,
+                instrumentLabel: label,
+                activityLabel: nil
+            )
+        case .activity:
+            let label = SessionActivity.name(for: session as NSManagedObject)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard label.isEmpty == false else { return nil }
+            return Theme.ResolvedTint(
+                source: .activity,
+                instrumentLabel: nil,
+                activityLabel: label
+            )
+        case .off:
+            return nil
+        }
+    }
+
+    private func sessionMomentCardFillColor(for session: Session?) -> Color? {
+        sessionMomentCardTint(for: session)?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private func sessionMomentCardStrokeColor(for session: Session?) -> Color? {
+        sessionMomentCardTint(for: session)?.stroke(
             ownerID: topWinnerTintOwnerID,
             scheme: colorScheme,
             strength: .cardMediumLight
@@ -1348,9 +1417,27 @@ fileprivate struct AverageSessionCard: View {
 }
 
 fileprivate struct LongestSessionCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let range: StatsRange
     let seconds: Int64
     let date: Date
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        range: StatsRange,
+        seconds: Int64,
+        date: Date,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.range = range
+        self.seconds = seconds
+        self.date = date
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     private static let dfNoYear: DateFormatter = {
         let df = DateFormatter()
@@ -1377,14 +1464,34 @@ fileprivate struct LongestSessionCard: View {
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
     }
 }
 
 
 fileprivate struct FirstSessionCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let range: StatsRange
     let date: Date
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        range: StatsRange,
+        date: Date,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.range = range
+        self.date = date
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     private static let dfNoYear: DateFormatter = {
         let df = DateFormatter()
@@ -1420,15 +1527,37 @@ fileprivate struct FirstSessionCard: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
     }
 }
 
 
 fileprivate struct HighestFocusInsightCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let insight: FocusInsightSession
     let normalizedFocus: CGFloat
     let showsFocusCircle: Bool
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        insight: FocusInsightSession,
+        normalizedFocus: CGFloat,
+        showsFocusCircle: Bool,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.insight = insight
+        self.normalizedFocus = normalizedFocus
+        self.showsFocusCircle = showsFocusCircle
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     private static let df: DateFormatter = {
         let df = DateFormatter()
@@ -1465,7 +1594,11 @@ fileprivate struct HighestFocusInsightCard: View {
             .scaleEffect(showsFocusCircle ? 1.0 : 0.95)
             .accessibilityHidden(true)
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Highest focus: \(insight.title), \(StatsHelper.formatDuration(insight.seconds))")
     }
