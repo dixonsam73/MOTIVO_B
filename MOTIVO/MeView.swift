@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260425_163420_meview_top_winner_tint_cards_build_fix
+// SCOPE: MeView-only build fix: keep Top activity / Top instrument tinting, restore StreaksCard neutral card surface. No UI, analytics, Theme, SDV, Core Data, or backend changes.
+// SEARCH-TOKEN: 20260425_163420_meview_top_winner_tint_cards_build_fix
+
+// CHANGE-ID: 20260425_161500_meview_top_winner_tint_cards
+// SCOPE: MeView-only: tint Top activity / Top instrument winner card backgrounds according to active Theme tint source. No analytics, layout, SDV, Theme, Core Data, or backend changes.
+// SEARCH-TOKEN: 20260425_161500_meview_top_winner_tint_cards
+
 // CHANGE-ID: 20260425_112000_meview_focus_card_subtitle_removal
 // SCOPE: MeView Focus card polish only: remove subtitle copy and rebalance internal Focus card spacing. No analytics, animation, rendering, Core Data, backend, or other card changes.
 // SEARCH-TOKEN: 20260425_112000_meview_focus_card_subtitle_removal
@@ -108,7 +116,9 @@ private func totalSessionsCount(in sessions: [Session]) -> Int { sessions.count 
 
 struct MeView: View {
     @Environment(\.managedObjectContext) private var ctx
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
+    @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
     @State private var range: StatsRange = .total
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var avgSessionSeconds: Int64? = nil
@@ -131,6 +141,8 @@ struct MeView: View {
     @State private var didRunFocusInitialAnimation = false
     @State private var topInstrumentByTime: (name: String, seconds: Int)? = nil
     @State private var topActivityByTime: (name: String, seconds: Int)? = nil
+    @State private var instrumentTintCounts: [String: Int] = [:]
+    @State private var activityTintCounts: [String: Int] = [:]
     @State private var timeDistributionSlices: [ActivitySlice] = []
     @State private var threadDistributionSlices: [ActivitySlice] = []
     @State private var instrumentDistributionSlices: [ActivitySlice] = []
@@ -184,7 +196,12 @@ struct MeView: View {
                     }
                     if uniqueActivityCount > 1 {
                         TimeDistributionCard(title: "Time by activity", slices: timeDistributionSlices)
-                        TopTimeWinnerCard(title: "Top activity", winner: topActivityByTime)
+                        TopTimeWinnerCard(
+                            title: "Top activity",
+                            winner: topActivityByTime,
+                            fillColor: topActivityCardFillColor,
+                            strokeColor: topActivityCardStrokeColor
+                        )
                     }
                     if threadUniqueCountInRange >= 2 {
                         TimeDistributionCard(title: "Time by thread", slices: threadDistributionSlices)
@@ -196,7 +213,12 @@ struct MeView: View {
                         TimeDistributionCard(title: "Time by instrument", slices: instrumentDistributionSlices)
                     }
                     if topInstrumentByTime != nil {
-                        TopTimeWinnerCard(title: "Top instrument", winner: topInstrumentByTime)
+                        TopTimeWinnerCard(
+                            title: "Top instrument",
+                            winner: topInstrumentByTime,
+                            fillColor: topInstrumentCardFillColor,
+                            strokeColor: topInstrumentCardStrokeColor
+                        )
                     }
                 }
             }
@@ -348,6 +370,11 @@ struct MeView: View {
             let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             return label.isEmpty ? nil : label
         }
+        activityTintCounts = categoryCounts(from: sessionsInRange) { s in
+            let raw = SessionActivity.name(for: s as NSManagedObject)
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : label
+        }
         uniqueActivityCount = activityTotals.count
         topActivityByTime = topDurationWinner(from: activityTotals)
         avgSessionSeconds = sessionStats.count > 0 ? Int64(sessionStats.seconds) / Int64(sessionStats.count) : nil
@@ -364,6 +391,9 @@ struct MeView: View {
         threadUniqueCountInRange = threadStats.uniqueCount
         topThread = threadStats.top
         let instrumentTotals = categoryTotals(from: sessionsInRange) { s in
+            instrumentLabel(for: s)
+        }
+        instrumentTintCounts = categoryCounts(from: sessionsInRange) { s in
             instrumentLabel(for: s)
         }
         instrumentUniqueCountInRange = instrumentTotals.count
@@ -409,10 +439,12 @@ struct MeView: View {
         uniqueActivityCount = snapshot.activityDistribution.count
         timeDistributionSlices = snapshot.activityDistribution.map { ActivitySlice(name: $0.label, seconds: $0.seconds) }
         topActivityByTime = snapshot.activityDistribution.first.map { (name: $0.label, seconds: $0.seconds) }
+        activityTintCounts = Dictionary(uniqueKeysWithValues: snapshot.activityDistribution.map { ($0.label, max(0, $0.seconds)) })
 
         instrumentUniqueCountInRange = snapshot.instrumentDistribution.count
         instrumentDistributionSlices = snapshot.instrumentDistribution.map { ActivitySlice(name: $0.label, seconds: $0.seconds) }
         topInstrumentByTime = snapshot.instrumentDistribution.first.map { (name: $0.label, seconds: $0.seconds) }
+        instrumentTintCounts = Dictionary(uniqueKeysWithValues: snapshot.instrumentDistribution.map { ($0.label, max(0, $0.seconds)) })
 
         threadDistributionSlices = []
         threadUniqueCountInRange = 0
@@ -449,6 +481,74 @@ struct MeView: View {
         let persisted = (PersistenceController.shared.currentUserID ?? "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return persisted.isEmpty ? nil : persisted
+    }
+
+    private var tintMode: Theme.TintMode {
+        Theme.TintMode(rawValue: tintModeRaw) ?? .auto
+    }
+
+    private var topWinnerTintOwnerID: String? {
+        canonicalLocalOwnerUserID ?? canonicalBackendOwnerUserID
+    }
+
+    private var topActivityCardTint: Theme.ResolvedTint? {
+        guard let winner = topActivityByTime else { return nil }
+        let tint = Theme.resolvedTint(
+            instrument: nil,
+            activity: winner.name,
+            tintMode: tintMode,
+            instrumentCounts: instrumentTintCounts,
+            activityCounts: activityTintCounts,
+            persistedAutoSource: Theme.storedAutoTintSource(),
+            persistAutoSource: false
+        )
+        return tint.source == .activity ? tint : nil
+    }
+
+    private var topInstrumentCardTint: Theme.ResolvedTint? {
+        guard let winner = topInstrumentByTime else { return nil }
+        let tint = Theme.resolvedTint(
+            instrument: winner.name,
+            activity: nil,
+            tintMode: tintMode,
+            instrumentCounts: instrumentTintCounts,
+            activityCounts: activityTintCounts,
+            persistedAutoSource: Theme.storedAutoTintSource(),
+            persistAutoSource: false
+        )
+        return tint.source == .instrument ? tint : nil
+    }
+
+    private var topActivityCardFillColor: Color? {
+        topActivityCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var topActivityCardStrokeColor: Color? {
+        topActivityCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var topInstrumentCardFillColor: Color? {
+        topInstrumentCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var topInstrumentCardStrokeColor: Color? {
+        topInstrumentCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
     }
 
     private func backendBestStreakRange(from dates: [Date]) -> (start: Date, end: Date)? {
@@ -636,6 +736,17 @@ struct MeView: View {
             totals[trimmed, default: 0] += secs
         }
         return totals
+    }
+
+    private func categoryCounts(from sessions: [Session], label: (Session) -> String?) -> [String: Int] {
+        var counts: [String: Int] = [:]
+        for s in sessions {
+            guard let raw = label(s) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            counts[trimmed, default: 0] += 1
+        }
+        return counts
     }
 
     private func distributionSlices(from totals: [String: Int]) -> [ActivitySlice] {
@@ -970,8 +1081,24 @@ fileprivate struct FirstSessionCard: View {
 
 
 fileprivate struct TopTimeWinnerCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let title: String
     let winner: (name: String, seconds: Int)?
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        title: String,
+        winner: (name: String, seconds: Int)?,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.title = title
+        self.winner = winner
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -994,7 +1121,11 @@ fileprivate struct TopTimeWinnerCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-.cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
