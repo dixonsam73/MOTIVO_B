@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260425_164850_meview_top_winner_tint_source_fix
+// SCOPE: MeView-only tint-source correction: Top activity / Top instrument cards use the active semantic tint source without requiring range-local variation. No layout, analytics, Theme, SDV, Core Data, or backend changes.
+// SEARCH-TOKEN: 20260425_164850_meview_top_winner_tint_source_fix
+
 // CHANGE-ID: 20260425_163420_meview_top_winner_tint_cards_build_fix
 // SCOPE: MeView-only build fix: keep Top activity / Top instrument tinting, restore StreaksCard neutral card surface. No UI, analytics, Theme, SDV, Core Data, or backend changes.
 // SEARCH-TOKEN: 20260425_163420_meview_top_winner_tint_cards_build_fix
@@ -491,32 +495,66 @@ struct MeView: View {
         canonicalLocalOwnerUserID ?? canonicalBackendOwnerUserID
     }
 
+    private var topWinnerActiveTintSource: Theme.ResolvedTintSource {
+        switch tintMode {
+        case .off:
+            return .off
+        case .instrument:
+            return .instrument
+        case .activity:
+            return .activity
+        case .auto:
+            if let storedSource = Theme.storedAutoTintSource(), storedSource != .off {
+                return storedSource
+            }
+
+            let globalInstrumentCounts = categoryCounts(from: allSessions) { s in
+                instrumentLabel(for: s)
+            }
+            let globalActivityCounts = categoryCounts(from: allSessions) { s in
+                let raw = SessionActivity.name(for: s as NSManagedObject)
+                let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return label.isEmpty ? nil : label
+            }
+
+            if globalInstrumentCounts.isEmpty == false || globalActivityCounts.isEmpty == false {
+                return Theme.resolvedTintSource(
+                    tintMode: .auto,
+                    instrumentCounts: globalInstrumentCounts,
+                    activityCounts: globalActivityCounts,
+                    persistedAutoSource: nil,
+                    persistAutoSource: false
+                )
+            }
+
+            return Theme.resolvedTintSource(
+                tintMode: .auto,
+                instrumentCounts: instrumentTintCounts,
+                activityCounts: activityTintCounts,
+                persistedAutoSource: nil,
+                persistAutoSource: false
+            )
+        }
+    }
+
     private var topActivityCardTint: Theme.ResolvedTint? {
         guard let winner = topActivityByTime else { return nil }
-        let tint = Theme.resolvedTint(
-            instrument: nil,
-            activity: winner.name,
-            tintMode: tintMode,
-            instrumentCounts: instrumentTintCounts,
-            activityCounts: activityTintCounts,
-            persistedAutoSource: Theme.storedAutoTintSource(),
-            persistAutoSource: false
+        guard topWinnerActiveTintSource == .activity else { return nil }
+        return Theme.ResolvedTint(
+            source: .activity,
+            instrumentLabel: nil,
+            activityLabel: winner.name
         )
-        return tint.source == .activity ? tint : nil
     }
 
     private var topInstrumentCardTint: Theme.ResolvedTint? {
         guard let winner = topInstrumentByTime else { return nil }
-        let tint = Theme.resolvedTint(
-            instrument: winner.name,
-            activity: nil,
-            tintMode: tintMode,
-            instrumentCounts: instrumentTintCounts,
-            activityCounts: activityTintCounts,
-            persistedAutoSource: Theme.storedAutoTintSource(),
-            persistAutoSource: false
+        guard topWinnerActiveTintSource == .instrument else { return nil }
+        return Theme.ResolvedTint(
+            source: .instrument,
+            instrumentLabel: winner.name,
+            activityLabel: nil
         )
-        return tint.source == .instrument ? tint : nil
     }
 
     private var topActivityCardFillColor: Color? {
