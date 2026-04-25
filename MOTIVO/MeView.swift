@@ -1,3 +1,15 @@
+// CHANGE-ID: 20260425_112000_meview_focus_card_subtitle_removal
+// SCOPE: MeView Focus card polish only: remove subtitle copy and rebalance internal Focus card spacing. No analytics, animation, rendering, Core Data, backend, or other card changes.
+// SEARCH-TOKEN: 20260425_112000_meview_focus_card_subtitle_removal
+
+// CHANGE-ID: 20260425_113000_meview_focus_circle_first_appearance_polish
+// SCOPE: MeView-only Focus Circle first-appearance animation plus layout reposition/tightening. FocusCircleView, analytics, Core Data, and backend unchanged.
+// SEARCH-TOKEN: 20260425_113000_meview_focus_circle_first_appearance_polish
+
+// CHANGE-ID: 20260425_110500_meview_focus_circle_data_repair
+// SCOPE: Restore MeView FocusCircle summary and repair local/backend focus aggregation using duration-weighted stored focus values. MeView only.
+// SEARCH-TOKEN: 20260425_110500_meview_focus_circle_data_repair
+
 // CHANGE-ID: 20260421_181500_meview_chart_palette_ranked
 // SCOPE: Replace MeView time-distribution chart segment and legend colors with a MeView-local analytical rank-based palette. No layout, logic, Theme, ContentView, or Journal tint changes.
 // SEARCH-TOKEN: 20260421_181500_meview_chart_palette_ranked
@@ -115,6 +127,8 @@ struct MeView: View {
 
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
+    @State private var animatedFocus: Double = 0
+    @State private var didRunFocusInitialAnimation = false
     @State private var topInstrumentByTime: (name: String, seconds: Int)? = nil
     @State private var topActivityByTime: (name: String, seconds: Int)? = nil
     @State private var timeDistributionSlices: [ActivitySlice] = []
@@ -131,6 +145,12 @@ struct MeView: View {
                 rangePickerHeader
                 // Full-width Time card with date range header
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range, firstSessionDate: firstSessionDate))
+                if let avgFocus {
+                    FocusCard(normalizedFocus: animatedFocus)
+                        .onAppear {
+                            triggerFocusCircleAnimationIfNeeded(targetAverage: avgFocus)
+                        }
+                }
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
                     if let avg = avgSessionSeconds {
@@ -148,9 +168,6 @@ struct MeView: View {
                         } else {
                             LongestSessionCard(range: range, seconds: longest, date: d)
                         }
-                    }
-                    if avgFocus != nil {
-                        FocusCard(average: avgFocus)
                     }
                     if let first = firstSessionDate {
                         if let target = firstSession {
@@ -193,6 +210,9 @@ struct MeView: View {
         .onAppear { Task { await reload() } }
         .onChange(of: range) { _, _ in Task { await reload() } }
         .onChange(of: auth.backendUserID) { _, _ in Task { await reload() } }
+        .onChange(of: avgFocus) { _, newValue in
+            updateFocusCircleTargetAfterInitialAppearance(newValue)
+        }
         .appBackground()
         .background {
             NavigationLink(
@@ -212,6 +232,37 @@ struct MeView: View {
                 EmptyView()
             }
             .hidden()
+        }
+    }
+
+    private func normalizedFocusValue(for average: Double) -> Double {
+        let clampedVisualValue = max(1.0, min(10.0, average))
+        return (clampedVisualValue - 1.0) / 9.0
+    }
+    private func triggerFocusCircleAnimationIfNeeded(targetAverage: Double) {
+        let target = normalizedFocusValue(for: targetAverage)
+
+        guard didRunFocusInitialAnimation == false else {
+            animateFocusCircle(to: target)
+            return
+        }
+
+        didRunFocusInitialAnimation = true
+        animatedFocus = 0
+
+        DispatchQueue.main.async {
+            animateFocusCircle(to: target)
+        }
+    }
+
+    private func updateFocusCircleTargetAfterInitialAppearance(_ average: Double?) {
+        guard didRunFocusInitialAnimation, let average else { return }
+        animateFocusCircle(to: normalizedFocusValue(for: average))
+    }
+
+    private func animateFocusCircle(to target: Double) {
+        withAnimation(.easeOut(duration: 5.0)) {
+            animatedFocus = target
         }
     }
 
@@ -267,8 +318,8 @@ struct MeView: View {
             bestStreakRangeText = nil
         }
         let (start, end) = StatsHelper.dateBounds(for: range)
-        avgFocus = averageFocus(start: start, end: end, ownerUserID: ownerUserID)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end, ownerUserID: ownerUserID)
+        avgFocus = averageFocus(from: sessionsInRange)
         var longestSecs: Int64 = 0
         var longestDate: Date? = nil
         var longestFound: Session? = nil
@@ -333,7 +384,7 @@ struct MeView: View {
         let snapshot = StatsHelper.buildBackendStatsSnapshot(posts: allOwnerPosts, range: range, ownerUserID: canonicalOwnerUserID)
         sessionStats = snapshot.stats
         avgSessionSeconds = snapshot.stats.count > 0 ? Int64(snapshot.stats.seconds) / Int64(snapshot.stats.count) : nil
-        avgFocus = snapshot.averageEffort
+        avgFocus = backendAverageFocus(from: snapshot.filteredPosts)
 
         if let longest = snapshot.longestPost,
            let date = StatsHelper.analyticsDate(for: longest) {
@@ -453,53 +504,105 @@ struct MeView: View {
         do { return try ctx.fetch(req) } catch { return [] }
     }
 
-    // MARK: - Focus (from notes)
-    private func averageFocus(start: Date?, end: Date?, ownerUserID: String?) -> Double? {
-        let sessions = fetchSessions(limit: nil, start: start, end: end, ownerUserID: ownerUserID)
-        guard !sessions.isEmpty else { return nil }
-        var total = 0.0
-        var count = 0.0
-        for s in sessions {
-            if let v = focusFromNotes(for: s) ?? focusFromAttributes(for: s) {
-                total += v; count += 1
-            }
+    // MARK: - Focus (duration-weighted visual average)
+    private func averageFocus(from sessions: [Session]) -> Double? {
+        guard sessions.isEmpty == false else { return nil }
+
+        var weightedTotal = 0.0
+        var durationTotal = 0.0
+
+        for session in sessions {
+            guard let storedValue = storedFocusValue(for: session),
+                  let visualValue = FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue) else { continue }
+
+            let duration = sessionDurationSeconds(for: session)
+            guard duration > 0 else { continue }
+
+            weightedTotal += Double(visualValue) * duration
+            durationTotal += duration
         }
-        guard count > 0 else { return nil }
-        return total / count
+
+        guard durationTotal > 0 else { return nil }
+        return weightedTotal / durationTotal
     }
 
-    /// Parse "FocusDotIndex: n" from Session.notes; fallback "StateIndex: n" mapped to center dots (0..3 → 1,4,7,10)
-    private func focusFromNotes(for s: Session) -> Double? {
+    private func backendAverageFocus(from posts: [BackendPost]) -> Double? {
+        guard posts.isEmpty == false else { return nil }
+
+        var weightedTotal = 0.0
+        var durationTotal = 0.0
+
+        for post in posts {
+            guard let storedValue = post.effort,
+                  storedValue != 5,
+                  let visualValue = FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue),
+                  let durationSeconds = post.durationSeconds,
+                  durationSeconds > 0 else { continue }
+
+            weightedTotal += Double(visualValue) * Double(durationSeconds)
+            durationTotal += Double(durationSeconds)
+        }
+
+        guard durationTotal > 0 else { return nil }
+        return weightedTotal / durationTotal
+    }
+
+    /// Parse legacy focus tokens from Session.notes. Current saved values should come from attributes first.
+    private func focusFromNotes(for s: Session) -> Int? {
         let attrs = s.entity.attributesByName
         guard attrs["notes"] != nil else { return nil }
         guard let notes = s.value(forKey: "notes") as? String, !notes.isEmpty else { return nil }
+
         if let n = extractInt(after: "FocusDotIndex:", in: notes), (0...11).contains(n) {
-            return Double(n)
+            return n == 5 ? nil : n
         }
+
         if let n = extractInt(after: "StateIndex:", in: notes), (0...3).contains(n) {
-            let centers = [1,4,7,10]
-            return Double(centers[n])
+            let visualCenters = [1, 4, 7, 10]
+            return FocusCircleView.storedFocusValue(forVisualFocusValue: visualCenters[n])
         }
+
         return nil
     }
 
-    /// Fallback: try attributes like focusDotIndex/focusIndex/focus/stateIndex if they exist
-    private func focusFromAttributes(for s: Session) -> Double? {
+    /// Current focus source: stored mood first, effort fallback. Legacy focus attributes remain as final fallback.
+    private func focusFromAttributes(for s: Session) -> Int? {
         let attrs = s.entity.attributesByName
-        let preferred = ["focusDotIndex","focusIndex","focus","stateIndex"]
-        for key in preferred {
-            if attrs[key] != nil {
-                if let v = numericValue(for: key, in: s) { return clamp011(v) }
+        let preferred = ["mood", "effort", "focusDotIndex", "focusIndex", "focus", "stateIndex"]
+
+        for key in preferred where attrs[key] != nil {
+            if let value = numericValue(for: key, in: s),
+               let storedValue = clampedStoredFocusValue(value) {
+                return storedValue
             }
         }
-        if let k = attrs.keys.first(where: { $0.lowercased().contains("focus") }),
-           let v = numericValue(for: k, in: s) { return clamp011(v) }
+
+        if let key = attrs.keys.first(where: { $0.lowercased().contains("focus") }),
+           let value = numericValue(for: key, in: s),
+           let storedValue = clampedStoredFocusValue(value) {
+            return storedValue
+        }
+
         return nil
+    }
+
+    private func storedFocusValue(for session: Session) -> Int? {
+        focusFromAttributes(for: session) ?? focusFromNotes(for: session)
+    }
+
+    private func sessionDurationSeconds(for session: Session) -> Double {
+        if let n = session.value(forKey: "durationSeconds") as? NSNumber { return max(0.0, n.doubleValue) }
+        if let i = session.value(forKey: "durationSeconds") as? Int { return max(0.0, Double(i)) }
+        if let d = session.value(forKey: "durationSeconds") as? Double { return max(0.0, d) }
+        if let i16 = session.value(forKey: "durationSeconds") as? Int16 { return max(0.0, Double(i16)) }
+        if let i32 = session.value(forKey: "durationSeconds") as? Int32 { return max(0.0, Double(i32)) }
+        if let i64 = session.value(forKey: "durationSeconds") as? Int64 { return max(0.0, Double(i64)) }
+        return 0.0
     }
 
     private func extractInt(after token: String, in text: String) -> Int? {
-        guard let r = text.range(of: token) else { return nil }
-        let tail = text[r.upperBound...]
+        guard let range = text.range(of: token) else { return nil }
+        let tail = text[range.upperBound...]
         let line = tail.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
         return Int(line.trimmingCharacters(in: .whitespacesAndNewlines))
     }
@@ -514,7 +617,12 @@ struct MeView: View {
         return nil
     }
 
-    private func clamp011(_ v: Double) -> Double { max(0.0, min(11.0, v)) }
+    private func clampedStoredFocusValue(_ value: Double) -> Int? {
+        guard value.isFinite else { return nil }
+        let rounded = Int(round(value))
+        guard (0...11).contains(rounded), rounded != 5 else { return nil }
+        return rounded
+    }
 
     // MARK: - Time-based category helpers
     private func categoryTotals(from sessions: [Session], label: (Session) -> String?) -> [String: Int] {
@@ -750,29 +858,25 @@ fileprivate struct StreaksCard: View {
         .accessibilityLabel("Streaks: current \(current) days, best \(best) days")
     }
 }
-
 fileprivate struct FocusCard: View {
-    let average: Double?
+    let normalizedFocus: Double
+
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: 4) {
             Text("Focus").sectionHeader()
-            if let avg = average {
-                Text("Average").font(.caption).foregroundStyle(.secondary)
-                // Round to nearest dot index 0...11
-                let index = Int(round(avg))
-                FocusDots(value: avg, highlightedIndex: index)
-                    .padding(.top, 6)
-                    .accessibilityHidden(true)
-            } else {
-                Text("No focus data in this period.").font(.subheadline).foregroundStyle(.secondary)
-            }
+
+            FocusCircleView(normalizedFocus: CGFloat(normalizedFocus), size: 86)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, -3)
+                .padding(.bottom, 19)
+                .accessibilityHidden(true)
         }
-.frame(maxWidth: .infinity, alignment: .leading)
-.cardSurface(padding: Theme.Spacing.m)
-        .accessibilityLabel(average != nil ? "Focus average" : "No focus data")
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .cardSurface(padding: Theme.Spacing.s)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Focus")
     }
 }
-
 
 fileprivate struct AverageSessionCard: View {
     let seconds: Int64
@@ -864,64 +968,6 @@ fileprivate struct FirstSessionCard: View {
     }
 }
 
-
-fileprivate struct FocusDots: View {
-    @Environment(\.colorScheme) private var colorScheme
-
-    let value: Double
-    let highlightedIndex: Int?
-
-    private let dotCount = 12
-
-    /// DARK → LIGHT across the row (left→right), to match Focus field cards elsewhere
-    private func opacityForDot(_ i: Int) -> Double {
-        let start: Double = 0.95   // darker (more opaque) on the left
-        let end:   Double = 0.15   // lighter (less opaque) on the right
-        guard dotCount > 1 else { return start }
-        let t = Double(i) / Double(dotCount - 1)
-        return start + (end - start) * t
-    }
-
-    var body: some View {
-        GeometryReader { geo in
-            let totalWidth = geo.size.width
-            let spacing: CGFloat = 8
-            let count = dotCount
-            // Compute diameter so dots + spacings fill available width (with sensible caps)
-            let diameter = max(14, min(32, (totalWidth - spacing * CGFloat(count - 1)) / CGFloat(count)))
-            let ringDot = max(0, min(count - 1, (highlightedIndex ?? Int(round(value)))))
-
-            HStack(spacing: spacing) {
-                ForEach(0..<count, id: \.self) { i in
-                    let isRinged = (i == ringDot)
-                    let baseScale: CGFloat = isRinged ? 1.18 : 1.0
-                    Circle()
-                        .fill(FocusDotStyle.fillColor(index: i, total: count, colorScheme: colorScheme))
-                        // Hairline outline for guaranteed contrast on all dots
-                        .overlay(
-                            Circle().stroke(FocusDotStyle.hairlineColor, lineWidth: FocusDotStyle.hairlineWidth)
-                        )
-                        // Adaptive ring for the selected/average index
-                        .overlay(
-                            Group {
-                                if i == ringDot {
-                                    Circle().stroke(
-                                        FocusDotStyle.ringColor(for: colorScheme),
-                                        lineWidth: FocusDotStyle.ringWidth
-                                    )
-                                }
-                            }
-                        )
-                        .frame(width: diameter, height: diameter)
-                        .scaleEffect(baseScale)
-                        .accessibilityHidden(true)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(height: 44)
-    }
-}
 
 fileprivate struct TopTimeWinnerCard: View {
     let title: String
@@ -1016,7 +1062,7 @@ fileprivate struct TimeDistributionCard: View {
         Color(red: 58.0 / 255.0, green: 181.0 / 255.0, blue: 132.0 / 255.0),   // Green
         Color(red: 245.0 / 255.0, green: 156.0 / 255.0, blue: 28.0 / 255.0),   // Orange
         Color(red: 164.0 / 255.0, green: 91.0 / 255.0, blue: 214.0 / 255.0),   // Purple
-        Color(red: 1.0, green: 107.0 / 255.0, blue: 87.0 / 255.0),             // Red            
+        Color(red: 1.0, green: 107.0 / 255.0, blue: 87.0 / 255.0),             // Red
         Color(red: 1.0, green: 214.0 / 255.0, blue: 10.0 / 255.0),             // Yellow
         Color(red: 1.0, green: 95.0 / 255.0, blue: 162.0 / 255.0)              // Pink
     ]
