@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260425_171120_meview_quality_insight_label_tint_polish
+// SCOPE: MeView-only polish for quality insight cards: clearer focus-specific titles, remove secondary avg-focus/time metadata, and tint only the card matching the active tint source. No analytics, layout hierarchy, navigation, Theme, SDV/BSDV, backend, or existing non-target card changes.
+// SEARCH-TOKEN: 20260425_171120_meview_quality_insight_label_tint_polish
+
+// CHANGE-ID: 20260425_170300_meview_quality_insights
+// SCOPE: MeView-only quality insights layer below Focus card: highest focus session plus duration-weighted best thread/instrument/activity focus cards. No Theme, SDV/BSDV, backend schema, PublishService, or existing card changes.
+// SEARCH-TOKEN: 20260425_170300_meview_quality_insights
+
 // CHANGE-ID: 20260425_164850_meview_top_winner_tint_source_fix
 // SCOPE: MeView-only tint-source correction: Top activity / Top instrument cards use the active semantic tint source without requiring range-local variation. No layout, analytics, Theme, SDV, Core Data, or backend changes.
 // SEARCH-TOKEN: 20260425_164850_meview_top_winner_tint_source_fix
@@ -57,6 +65,23 @@ private func baselineCardMinHeight(for hSizeClass: UserInterfaceSizeClass?) -> C
 }
 
 private struct ActivitySlice { let name: String; let seconds: Int }
+
+private let qualityInsightMinimumDurationSeconds: Double = 300
+
+private struct FocusInsightSession {
+    let session: Session
+    let title: String
+    let date: Date?
+    let seconds: Int
+    let normalizedFocus: Double
+}
+
+private struct FocusCategoryInsight {
+    let name: String
+    let averageFocus: Double
+    let seconds: Int
+    let sessionCount: Int
+}
 
 private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
     var totals: [String: Int] = [:]
@@ -154,6 +179,10 @@ struct MeView: View {
     @State private var instrumentUniqueCountInRange: Int = 0
     @State private var topThread: (name: String, seconds: Int)? = nil
     @State private var uniqueActivityCount: Int = 0
+    @State private var highestFocusSession: FocusInsightSession? = nil
+    @State private var bestThreadFocus: FocusCategoryInsight? = nil
+    @State private var bestInstrumentFocus: FocusCategoryInsight? = nil
+    @State private var bestActivityFocus: FocusCategoryInsight? = nil
 
     var body: some View {
         ScrollView {
@@ -166,6 +195,38 @@ struct MeView: View {
                         .onAppear {
                             triggerFocusCircleAnimationIfNeeded(targetAverage: avgFocus)
                         }
+                }
+                if hasQualityInsights {
+                    AdaptiveGrid {
+                        if let insight = highestFocusSession {
+                            Button {
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                selectedInsightSession = insight.session
+                            } label: {
+                                HighestFocusInsightCard(insight: insight)
+                            }
+                            .buttonStyle(InsightCardButtonStyle())
+                        }
+                        if let insight = bestThreadFocus {
+                            BestFocusCategoryInsightCard(title: "Most focused thread", insight: insight)
+                        }
+                        if let insight = bestInstrumentFocus {
+                            BestFocusCategoryInsightCard(
+                                title: "Most focused instrument",
+                                insight: insight,
+                                fillColor: bestInstrumentFocusCardFillColor,
+                                strokeColor: bestInstrumentFocusCardStrokeColor
+                            )
+                        }
+                        if let insight = bestActivityFocus {
+                            BestFocusCategoryInsightCard(
+                                title: "Most focused activity",
+                                insight: insight,
+                                fillColor: bestActivityFocusCardFillColor,
+                                strokeColor: bestActivityFocusCardStrokeColor
+                            )
+                        }
+                    }
                 }
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
@@ -403,6 +464,31 @@ struct MeView: View {
         instrumentUniqueCountInRange = instrumentTotals.count
         instrumentDistributionSlices = distributionSlices(from: instrumentTotals)
         topInstrumentByTime = topDurationWinner(from: instrumentTotals)
+
+        highestFocusSession = highestFocusInsight(from: sessionsInRange)
+        bestThreadFocus = bestFocusCategoryInsight(from: sessionsInRange, requiresMultipleEligibleGroups: true) { session in
+            let raw = session.value(forKey: "threadLabel") as? String
+            let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+
+        if hasMeaningfulInstrumentVariation(in: allSessions, fallbackSessions: sessionsInRange) {
+            bestInstrumentFocus = bestFocusCategoryInsight(from: sessionsInRange, requiresMultipleEligibleGroups: false) { session in
+                instrumentLabel(for: session)
+            }
+        } else {
+            bestInstrumentFocus = nil
+        }
+
+        if hasMeaningfulActivityVariation(in: allSessions, fallbackSessions: sessionsInRange) {
+            bestActivityFocus = bestFocusCategoryInsight(from: sessionsInRange, requiresMultipleEligibleGroups: false) { session in
+                let raw = SessionActivity.name(for: session as NSManagedObject)
+                let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return label.isEmpty ? nil : label
+            }
+        } else {
+            bestActivityFocus = nil
+        }
     }
 
     @MainActor
@@ -453,6 +539,10 @@ struct MeView: View {
         threadDistributionSlices = []
         threadUniqueCountInRange = 0
         topThread = nil
+        highestFocusSession = nil
+        bestThreadFocus = nil
+        bestInstrumentFocus = nil
+        bestActivityFocus = nil
 
         currentStreakValue = StatsHelper.backendCurrentStreakDays(from: snapshot.filteredPosts)
         bestStreakValue = StatsHelper.backendBestStreakDays(from: snapshot.filteredPosts)
@@ -535,6 +625,62 @@ struct MeView: View {
                 persistAutoSource: false
             )
         }
+    }
+
+    private var hasQualityInsights: Bool {
+        highestFocusSession != nil || bestThreadFocus != nil || bestInstrumentFocus != nil || bestActivityFocus != nil
+    }
+
+    private var bestInstrumentFocusCardTint: Theme.ResolvedTint? {
+        guard let insight = bestInstrumentFocus else { return nil }
+        guard topWinnerActiveTintSource == .instrument else { return nil }
+        return Theme.ResolvedTint(
+            source: .instrument,
+            instrumentLabel: insight.name,
+            activityLabel: nil
+        )
+    }
+
+    private var bestActivityFocusCardTint: Theme.ResolvedTint? {
+        guard let insight = bestActivityFocus else { return nil }
+        guard topWinnerActiveTintSource == .activity else { return nil }
+        return Theme.ResolvedTint(
+            source: .activity,
+            instrumentLabel: nil,
+            activityLabel: insight.name
+        )
+    }
+
+    private var bestInstrumentFocusCardFillColor: Color? {
+        bestInstrumentFocusCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var bestInstrumentFocusCardStrokeColor: Color? {
+        bestInstrumentFocusCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var bestActivityFocusCardFillColor: Color? {
+        bestActivityFocusCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var bestActivityFocusCardStrokeColor: Color? {
+        bestActivityFocusCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
     }
 
     private var topActivityCardTint: Theme.ResolvedTint? {
@@ -662,6 +808,118 @@ struct MeView: View {
 
         guard durationTotal > 0 else { return nil }
         return weightedTotal / durationTotal
+    }
+
+    private func highestFocusInsight(from sessions: [Session]) -> FocusInsightSession? {
+        var best: (session: Session, visualFocus: Double, duration: Double, date: Date?)?
+
+        for session in sessions {
+            let duration = sessionDurationSeconds(for: session)
+            guard duration >= qualityInsightMinimumDurationSeconds,
+                  let storedValue = storedFocusValue(for: session),
+                  let visualValue = FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue) else { continue }
+
+            let candidate = (session: session, visualFocus: Double(visualValue), duration: duration, date: session.value(forKey: "timestamp") as? Date)
+            if let current = best {
+                if candidate.visualFocus > current.visualFocus {
+                    best = candidate
+                } else if candidate.visualFocus == current.visualFocus {
+                    if candidate.duration > current.duration {
+                        best = candidate
+                    } else if candidate.duration == current.duration,
+                              (candidate.date ?? .distantPast) > (current.date ?? .distantPast) {
+                        best = candidate
+                    }
+                }
+            } else {
+                best = candidate
+            }
+        }
+
+        guard let best else { return nil }
+        let title = (best.session.value(forKey: "title") as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return FocusInsightSession(
+            session: best.session,
+            title: (title?.isEmpty == false ? title : nil) ?? "Session",
+            date: best.date,
+            seconds: Int(best.duration),
+            normalizedFocus: max(0.0, min(1.0, best.visualFocus / 11.0))
+        )
+    }
+
+    private func bestFocusCategoryInsight(
+        from sessions: [Session],
+        requiresMultipleEligibleGroups: Bool,
+        label: (Session) -> String?
+    ) -> FocusCategoryInsight? {
+        struct Bucket {
+            var weightedTotal: Double = 0
+            var durationTotal: Double = 0
+            var sessionCount: Int = 0
+        }
+
+        var buckets: [String: Bucket] = [:]
+
+        for session in sessions {
+            guard let raw = label(session) else { continue }
+            let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.isEmpty == false,
+                  let storedValue = storedFocusValue(for: session),
+                  let visualValue = FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue) else { continue }
+
+            let duration = sessionDurationSeconds(for: session)
+            guard duration >= qualityInsightMinimumDurationSeconds else { continue }
+
+            var bucket = buckets[trimmed, default: Bucket()]
+            bucket.weightedTotal += Double(visualValue) * duration
+            bucket.durationTotal += duration
+            bucket.sessionCount += 1
+            buckets[trimmed] = bucket
+        }
+
+        let eligible = buckets.compactMap { entry -> FocusCategoryInsight? in
+            let bucket = entry.value
+            guard bucket.durationTotal > 0 else { return nil }
+            return FocusCategoryInsight(
+                name: entry.key,
+                averageFocus: bucket.weightedTotal / bucket.durationTotal,
+                seconds: Int(bucket.durationTotal),
+                sessionCount: bucket.sessionCount
+            )
+        }
+
+        guard eligible.count >= (requiresMultipleEligibleGroups ? 2 : 1) else { return nil }
+        return eligible.sorted { lhs, rhs in
+            if lhs.averageFocus != rhs.averageFocus { return lhs.averageFocus > rhs.averageFocus }
+            if lhs.seconds != rhs.seconds { return lhs.seconds > rhs.seconds }
+            return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
+        }.first
+    }
+
+    private func hasMeaningfulInstrumentVariation(in sessions: [Session], fallbackSessions: [Session]) -> Bool {
+        let counts = meaningfulCounts(primary: sessions, fallback: fallbackSessions) { session in
+            instrumentLabel(for: session)
+        }
+        let sortedCounts = counts.values.sorted(by: >)
+        guard sortedCounts.count >= 2 else { return false }
+        return sortedCounts.dropFirst().first ?? 0 >= 2
+    }
+
+    private func hasMeaningfulActivityVariation(in sessions: [Session], fallbackSessions: [Session]) -> Bool {
+        let counts = meaningfulCounts(primary: sessions, fallback: fallbackSessions) { session in
+            let raw = SessionActivity.name(for: session as NSManagedObject)
+            let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            return label.isEmpty ? nil : label
+        }
+        let sortedCounts = counts.values.sorted(by: >)
+        guard sortedCounts.count >= 2 else { return false }
+        return (sortedCounts.dropFirst().first ?? 0) >= 2 || sortedCounts.count >= 3
+    }
+
+    private func meaningfulCounts(primary: [Session], fallback: [Session], label: (Session) -> String?) -> [String: Int] {
+        let primaryCounts = categoryCounts(from: primary, label: label)
+        if primaryCounts.isEmpty == false { return primaryCounts }
+        return categoryCounts(from: fallback, label: label)
     }
 
     private func backendAverageFocus(from posts: [BackendPost]) -> Double? {
@@ -1117,6 +1375,91 @@ fileprivate struct FirstSessionCard: View {
     }
 }
 
+
+fileprivate struct HighestFocusInsightCard: View {
+    let insight: FocusInsightSession
+
+    private static let df: DateFormatter = {
+        let df = DateFormatter()
+        df.locale = .current
+        df.timeZone = .current
+        df.dateFormat = "EEE d MMM · HH:mm"
+        return df
+    }()
+
+    var body: some View {
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Highest focus").sectionHeader()
+                Text(insight.title)
+                    .font(.body).bold()
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Text(detailText)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            Spacer(minLength: Theme.Spacing.s)
+
+            FocusCircleView(normalizedFocus: CGFloat(insight.normalizedFocus), size: 42)
+                .accessibilityHidden(true)
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Highest focus: \(insight.title), \(StatsHelper.formatDuration(insight.seconds))")
+    }
+
+    private var detailText: String {
+        let duration = StatsHelper.formatDuration(insight.seconds)
+        guard let date = insight.date else { return duration }
+        return "\(Self.df.string(from: date)) · \(duration)"
+    }
+}
+
+fileprivate struct BestFocusCategoryInsightCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let title: String
+    let insight: FocusCategoryInsight
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        title: String,
+        insight: FocusCategoryInsight,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.title = title
+        self.insight = insight
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text(title).sectionHeader()
+            Text(insight.name)
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.tail)
+
+        }
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title): \(insight.name)")
+    }
+}
 
 fileprivate struct TopTimeWinnerCard: View {
     @Environment(\.colorScheme) private var colorScheme
