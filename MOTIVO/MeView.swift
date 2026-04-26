@@ -1744,16 +1744,37 @@ fileprivate struct EmergingThreadCard: View {
 fileprivate struct ReturnPatternCard: View {
     let insight: ReturnPatternInsight
 
+    private var subtitleText: String? {
+        switch insight {
+        case .everyDay, .every1to2Days, .every2to3Days, .everyFewDays:
+            return "Sessions tend to happen at similar intervals"
+        case .varies:
+            return "Sessions happen at varied intervals"
+        case .insufficientData:
+            return nil
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Between sessions").sectionHeader()
+            Text("Practice rhythm").sectionHeader()
             Text(insight.valueText)
                 .font(.body).bold()
                 .foregroundStyle(Color.primary.opacity(0.85))
+
+            if let subtitleText {
+                Text(subtitleText)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
         }
         .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Between sessions: \(insight.valueText)")
+        .accessibilityLabel(
+            subtitleText != nil
+            ? "Practice rhythm: \(insight.valueText). \(subtitleText!)"
+            : "Practice rhythm: \(insight.valueText)"
+        )
     }
 }
 
