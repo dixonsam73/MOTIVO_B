@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260426_205900_meview_local_insights_preserve
+// SCOPE: MeView-only fix: keep interpretive insights additive/local by computing them from available local owner sessions and preventing backend fallback from clearing them when local sessions exist. No existing analytics, UI, Theme, Core Data, backend, or card behaviour changes.
+// SEARCH-TOKEN: 20260426_205900_meview_local_insights_preserve
+
+// CHANGE-ID: 20260426_204000_meview_interpretive_insights
+// SCOPE: MeView-only integration of local insight cards from InsightEngine: Emerging thread, Return pattern, and Session shape after the quality cluster. No Theme, tint, Core Data, backend, or existing analytics/card behaviour changes.
+// SEARCH-TOKEN: 20260426_204000_meview_interpretive_insights
+
 // CHANGE-ID: 20260426_111900_meview_focus_initial_zero_reveal
 // SCOPE: MeView-only Focus card initial reveal polish: start the main Focus circle hidden/from zero on first page appearance, then preserve existing range-to-range value animation. No analytics, layout hierarchy, FocusCircleView, Theme, Core Data, backend, or navigation changes.
 // SEARCH-TOKEN: 20260426_111900_meview_focus_initial_zero_reveal
@@ -201,6 +209,7 @@ struct MeView: View {
     @State private var bestThreadFocus: FocusCategoryInsight? = nil
     @State private var bestInstrumentFocus: FocusCategoryInsight? = nil
     @State private var bestActivityFocus: FocusCategoryInsight? = nil
+    @State private var insights: MeViewInsights? = nil
 
     var body: some View {
         ScrollView {
@@ -255,6 +264,19 @@ struct MeView: View {
                         }
                     }
                 }
+if hasVisibleInterpretiveInsights {
+    AdaptiveGrid {
+        if let emerging = insights?.emergingThread {
+            EmergingThreadCard(insight: emerging)
+        }
+        if let returnPattern = insights?.returnPattern, returnPattern != .insufficientData {
+            ReturnPatternCard(insight: returnPattern)
+        }
+        if let sessionShape = insights?.sessionShape, sessionShape != .insufficientData {
+            SessionShapeCard(insight: sessionShape)
+        }
+    }
+}
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
                     if let avg = avgSessionSeconds {
@@ -504,6 +526,7 @@ struct MeView: View {
         }
         let (start, end) = StatsHelper.dateBounds(for: range)
         let sessionsInRange = fetchSessions(limit: nil, start: start, end: end, ownerUserID: ownerUserID)
+        insights = InsightEngine.insights(from: sessionsInRange)
         avgFocus = averageFocus(from: sessionsInRange)
         var longestSecs: Int64 = 0
         var longestDate: Date? = nil
@@ -593,6 +616,14 @@ struct MeView: View {
 
     @MainActor
     private func applyBackendAnalytics(posts: [BackendPost], ownerUserID: String) {
+        let localOwnerUserID = canonicalLocalOwnerUserID
+        let localAllSessions = fetchSessions(limit: nil, start: nil, end: nil, ownerUserID: localOwnerUserID)
+        if localAllSessions.isEmpty == false {
+            let localStats = (try? StatsHelper.fetchStats(in: ctx, range: range, ownerUserID: localOwnerUserID)) ?? .init(count: 0, seconds: 0)
+            applyLocalAnalytics(localStats: localStats, allSessions: localAllSessions, ownerUserID: localOwnerUserID)
+            return
+        }
+
         isBackendAnalyticsMode = true
         allSessions = []
 
@@ -643,6 +674,7 @@ struct MeView: View {
         bestThreadFocus = nil
         bestInstrumentFocus = nil
         bestActivityFocus = nil
+        insights = nil // InsightEngine remains local-only; backend-only fallback keeps interpretive cards silent.
 
         currentStreakValue = StatsHelper.backendCurrentStreakDays(from: snapshot.filteredPosts)
         bestStreakValue = StatsHelper.backendBestStreakDays(from: snapshot.filteredPosts)
@@ -729,6 +761,13 @@ struct MeView: View {
 
     private var hasQualityInsights: Bool {
         highestFocusSession != nil || bestThreadFocus != nil || bestInstrumentFocus != nil || bestActivityFocus != nil
+    }
+
+    private var hasVisibleInterpretiveInsights: Bool {
+        guard let insights else { return false }
+        return insights.emergingThread != nil ||
+            insights.returnPattern != .insufficientData ||
+            insights.sessionShape != .insufficientData
     }
 
     private var bestInstrumentFocusCardTint: Theme.ResolvedTint? {
@@ -1673,6 +1712,73 @@ fileprivate struct BestFocusCategoryInsightCard: View {
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(title): \(insight.name)")
+    }
+}
+
+
+fileprivate struct EmergingThreadCard: View {
+    let insight: EmergingThreadInsight
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Emerging thread").sectionHeader()
+            Text(insight.name)
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Text("Showing up more recently")
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Emerging thread: \(insight.name), showing up more recently")
+    }
+}
+
+fileprivate struct ReturnPatternCard: View {
+    let insight: ReturnPatternInsight
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Return pattern").sectionHeader()
+            Text(insight.valueText)
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Return pattern: \(insight.valueText)")
+    }
+}
+
+fileprivate struct SessionShapeCard: View {
+    let insight: SessionShapeInsight
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Session shape").sectionHeader()
+            Text(insight.valueText)
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+            if let subtitle = insight.subtitleText {
+                Text(subtitle)
+                    .font(Theme.Text.meta)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if let subtitle = insight.subtitleText {
+            return "Session shape: \(insight.valueText), \(subtitle)"
+        } else {
+            return "Session shape: \(insight.valueText)"
+        }
     }
 }
 
