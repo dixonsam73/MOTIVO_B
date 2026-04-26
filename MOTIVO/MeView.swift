@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260426_111900_meview_focus_initial_zero_reveal
+// SCOPE: MeView-only Focus card initial reveal polish: start the main Focus circle hidden/from zero on first page appearance, then preserve existing range-to-range value animation. No analytics, layout hierarchy, FocusCircleView, Theme, Core Data, backend, or navigation changes.
+// SEARCH-TOKEN: 20260426_111900_meview_focus_initial_zero_reveal
+
 // CHANGE-ID: 20260425_181500_meview_session_moment_tint_cards
 // SCOPE: MeView-only visual polish: apply the active tint source to Longest session and First logged session cards using each card's concrete session. No analytics, layout, navigation, Theme, Core Data, backend, or other card changes.
 // SEARCH-TOKEN: 20260425_181500_meview_session_moment_tint_cards
@@ -176,6 +180,7 @@ struct MeView: View {
     @State private var allSessions: [Session] = []
     @State private var avgFocus: Double? = nil
     @State private var animatedFocus: Double = 0
+    @State private var showFocusCircle = false
     @State private var didRunFocusInitialAnimation = false
     @State private var showHighestFocusCircle = false
     @State private var animatedHighestFocusCircle: CGFloat = 0
@@ -204,10 +209,13 @@ struct MeView: View {
                 // Full-width Time card with date range header
                 TimeCard(seconds: sessionStats.seconds, count: sessionStats.count, range: $range, dateRange: dateWindowSubtitle(for: range, firstSessionDate: firstSessionDate))
                 if let avgFocus {
-                    FocusCard(normalizedFocus: animatedFocus)
-                        .onAppear {
-                            triggerFocusCircleAnimationIfNeeded(targetAverage: avgFocus)
-                        }
+                    FocusCard(
+                        normalizedFocus: animatedFocus,
+                        showsFocusCircle: showFocusCircle
+                    )
+                    .onAppear {
+                        triggerFocusCircleAnimationIfNeeded(targetAverage: avgFocus)
+                    }
                 }
                 if hasQualityInsights {
                     AdaptiveGrid {
@@ -336,6 +344,9 @@ struct MeView: View {
         .navigationTitle("")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { Task { await reload() } }
+        .onDisappear {
+            resetFocusCircleInitialReveal()
+        }
         .onChange(of: range) { _, _ in
             resetHighestFocusCircleReveal()
             Task { await reload() }
@@ -380,9 +391,13 @@ struct MeView: View {
 
         didRunFocusInitialAnimation = true
         animatedFocus = 0
+        showFocusCircle = false
 
         DispatchQueue.main.async {
-            animateFocusCircle(to: target)
+            withAnimation(.easeOut(duration: 5.0)) {
+                showFocusCircle = true
+                animatedFocus = target
+            }
             scheduleHighestFocusCircleRevealIfNeeded()
         }
     }
@@ -397,6 +412,12 @@ struct MeView: View {
         withAnimation(.easeOut(duration: 5.0)) {
             animatedFocus = target
         }
+    }
+
+    private func resetFocusCircleInitialReveal() {
+        didRunFocusInitialAnimation = false
+        showFocusCircle = false
+        animatedFocus = 0
     }
 
     private func resetHighestFocusCircleReveal() {
@@ -1385,12 +1406,15 @@ fileprivate struct StreaksCard: View {
 }
 fileprivate struct FocusCard: View {
     let normalizedFocus: Double
+    let showsFocusCircle: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Focus").sectionHeader()
 
             FocusCircleView(normalizedFocus: CGFloat(normalizedFocus), size: 86)
+                .opacity(showsFocusCircle ? 1 : 0)
+                .scaleEffect(showsFocusCircle ? 1.0 : 0.95)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .padding(.top, -3)
                 .padding(.bottom, 19)
