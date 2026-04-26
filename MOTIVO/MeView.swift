@@ -346,6 +346,7 @@ struct MeView: View {
         .onAppear { Task { await reload() } }
         .onDisappear {
             resetFocusCircleInitialReveal()
+            resetHighestFocusCircleReveal()
         }
         .onChange(of: range) { _, _ in
             resetHighestFocusCircleReveal()
@@ -423,6 +424,7 @@ struct MeView: View {
     private func resetHighestFocusCircleReveal() {
         highestFocusCircleRevealToken += 1
         didScheduleHighestFocusCircleReveal = false
+        animatedHighestFocusCircle = 0
 
         withAnimation(.easeOut(duration: 3.5)) {
             showHighestFocusCircle = false
