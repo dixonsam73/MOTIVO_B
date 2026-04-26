@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260426_205900_meview_local_insights_preserve
-// SCOPE: MeView-only fix: keep interpretive insights additive/local by computing them from available local owner sessions and preventing backend fallback from clearing them when local sessions exist. No existing analytics, UI, Theme, Core Data, backend, or card behaviour changes.
-// SEARCH-TOKEN: 20260426_205900_meview_local_insights_preserve
+// CHANGE-ID: 20260426_211300_meview_practice_window
+// SCOPE: MeView-only polish for interpretive insight cards: copy updates and neutral Practice window card. No existing analytics, layout patterns, Theme, Core Data, backend, tint, or unrelated card behaviour changes.
+// SEARCH-TOKEN: 20260426_211300_meview_practice_window
 
 // CHANGE-ID: 20260426_204000_meview_interpretive_insights
 // SCOPE: MeView-only integration of local insight cards from InsightEngine: Emerging thread, Return pattern, and Session shape after the quality cluster. No Theme, tint, Core Data, backend, or existing analytics/card behaviour changes.
@@ -271,6 +271,9 @@ if hasVisibleInterpretiveInsights {
         }
         if let returnPattern = insights?.returnPattern, returnPattern != .insufficientData {
             ReturnPatternCard(insight: returnPattern)
+        }
+        if let practiceWindow = insights?.practiceWindow, practiceWindow != .insufficientData {
+            PracticeWindowCard(insight: practiceWindow)
         }
         if let sessionShape = insights?.sessionShape, sessionShape != .insufficientData {
             SessionShapeCard(insight: sessionShape)
@@ -767,6 +770,7 @@ if hasVisibleInterpretiveInsights {
         guard let insights else { return false }
         return insights.emergingThread != nil ||
             insights.returnPattern != .insufficientData ||
+            insights.practiceWindow != .insufficientData ||
             insights.sessionShape != .insufficientData
     }
 
@@ -1727,13 +1731,13 @@ fileprivate struct EmergingThreadCard: View {
                 .foregroundStyle(Color.primary.opacity(0.85))
                 .lineLimit(1)
                 .truncationMode(.tail)
-            Text("Showing up more recently")
+            Text("More regular in your practice")
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
         .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Emerging thread: \(insight.name), showing up more recently")
+        .accessibilityLabel("Emerging thread: \(insight.name), more regular in your practice")
     }
 }
 
@@ -1742,14 +1746,54 @@ fileprivate struct ReturnPatternCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Return pattern").sectionHeader()
+            Text("Between sessions").sectionHeader()
             Text(insight.valueText)
                 .font(.body).bold()
                 .foregroundStyle(Color.primary.opacity(0.85))
         }
         .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Return pattern: \(insight.valueText)")
+        .accessibilityLabel("Between sessions: \(insight.valueText)")
+    }
+}
+
+fileprivate struct PracticeWindowCard: View {
+    let insight: PracticeWindowInsight
+
+    private var subtitleText: String? {
+        switch insight {
+        case .mornings, .afternoons, .evenings:
+            return "Most sessions happen around this time"
+        case .spreadThroughDay:
+            return "No time of day stands out"
+        case .insufficientData:
+            return nil
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Practice window").sectionHeader()
+            Text(insight.valueText)
+                .font(.body).bold()
+                .foregroundStyle(Color.primary.opacity(0.85))
+            if let subtitleText {
+                Text(subtitleText)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+        }
+        .cardSurface(padding: Theme.Spacing.m)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibilityText)
+    }
+
+    private var accessibilityText: String {
+        if let subtitleText {
+            return "Practice window: \(insight.valueText). \(subtitleText)"
+        } else {
+            return "Practice window: \(insight.valueText)"
+        }
     }
 }
 

@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260426_203900_meview_insight_engine
-// SCOPE: Local-only MeView insight interpretation engine for Emerging thread, Return pattern, and Session shape. No UI, backend, Core Data schema, Theme, or analytics changes.
-// SEARCH-TOKEN: 20260426_203900_meview_insight_engine
+// CHANGE-ID: 20260426_211300_meview_practice_window
+// SCOPE: Add local-only Practice window insight and polish interpretive insight copy. No UI, backend, Core Data schema, Theme, or analytics changes.
+// SEARCH-TOKEN: 20260426_211300_meview_practice_window
 
 import Foundation
 import CoreData
@@ -8,6 +8,7 @@ import CoreData
 struct MeViewInsights {
     var emergingThread: EmergingThreadInsight?
     var returnPattern: ReturnPatternInsight
+    var practiceWindow: PracticeWindowInsight
     var sessionShape: SessionShapeInsight
 }
 
@@ -40,6 +41,29 @@ enum ReturnPatternInsight: Equatable {
         }
     }
 }
+enum PracticeWindowInsight: Equatable {
+    case mornings
+    case afternoons
+    case evenings
+    case spreadThroughDay
+    case insufficientData
+
+    var valueText: String {
+        switch self {
+        case .mornings:
+            return "Mornings"
+        case .afternoons:
+            return "Afternoons"
+        case .evenings:
+            return "Evenings"
+        case .spreadThroughDay:
+            return "Spread throughout the day"
+        case .insufficientData:
+            return ""
+        }
+    }
+}
+
 
 enum SessionShapeInsight: Equatable {
     case consistent
@@ -94,6 +118,7 @@ enum InsightEngine {
         return MeViewInsights(
             emergingThread: emergingThread(from: datedSessions),
             returnPattern: returnPattern(from: datedSessions),
+            practiceWindow: practiceWindow(from: datedSessions),
             sessionShape: sessionShape(from: datedSessions)
         )
     }
@@ -103,6 +128,39 @@ private struct DatedSession {
     let date: Date
     let durationSeconds: Double
     let threadLabel: String?
+}
+
+private enum PracticeWindowBucket: Hashable {
+    case morning
+    case afternoon
+    case evening
+
+    init(hour: Int) {
+        switch hour {
+        case 5..<12:
+            self = .morning
+        case 12..<17:
+            self = .afternoon
+        default:
+            self = .evening
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .morning: return 0
+        case .afternoon: return 1
+        case .evening: return 2
+        }
+    }
+
+    var insight: PracticeWindowInsight {
+        switch self {
+        case .morning: return .mornings
+        case .afternoon: return .afternoons
+        case .evening: return .evenings
+        }
+    }
 }
 
 private extension InsightEngine {
@@ -173,6 +231,40 @@ private extension InsightEngine {
             return .varies
         }
     }
+
+static func practiceWindow(from sessions: [DatedSession]) -> PracticeWindowInsight {
+    guard sessions.count >= 6 else { return .insufficientData }
+
+    var counts: [PracticeWindowBucket: Int] = [:]
+    for session in sessions {
+        let hour = Calendar.current.component(.hour, from: session.date)
+        counts[PracticeWindowBucket(hour: hour), default: 0] += 1
+    }
+
+    let total = counts.values.reduce(0, +)
+    guard total >= 6 else { return .insufficientData }
+
+    let orderedCounts = counts.sorted { lhs, rhs in
+        if lhs.value != rhs.value { return lhs.value > rhs.value }
+        return lhs.key.sortOrder < rhs.key.sortOrder
+    }
+    guard let top = orderedCounts.first else { return .insufficientData }
+
+    let topShare = Double(top.value) / Double(total)
+    if top.value >= 4, topShare >= 0.55 {
+        return top.key.insight
+    }
+
+    let meaningfulBuckets = counts.filter { _, count in
+        Double(count) / Double(total) >= 0.25
+    }
+
+    if total >= 8, meaningfulBuckets.count >= 2, topShare <= 0.50 {
+        return .spreadThroughDay
+    }
+
+    return .insufficientData
+}
 
     static func sessionShape(from sessions: [DatedSession]) -> SessionShapeInsight {
         let durations = sessions.map(\.durationSeconds).filter { $0 > 0 }
