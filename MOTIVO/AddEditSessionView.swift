@@ -392,6 +392,16 @@ struct AddEditSessionView: View {
         }
     }
 
+    /// Preselect from the structural Session.effort value when no note token exists.
+    private func preselectFocusFromSessionEffortIfNeeded_edit(_ session: Session?) {
+        guard selectedDotIndex_edit == nil else { return }
+        guard let session else { return }
+        guard session.entity.attributesByName.keys.contains("effort") else { return }
+
+        let effortDot = Int(session.effort)
+        selectedDotIndex_edit = (effortDot == 5) ? nil : effortDot
+    }
+
     /// Apply/replace the FocusDotIndex line before saving
     private func applyFocusToNotesBeforeSave_edit() {
         // Notes must remain user-entered text only.
@@ -1605,6 +1615,7 @@ private var instrumentPicker: some View {
             }
             // Preselect focus from notes before stripping token so the dots reflect persisted state
             preselectFocusFromNotesIfNeeded_edit()
+            preselectFocusFromSessionEffortIfNeeded_edit(s)
             // Ensure the token is not visible in the Notes UI on edit hydrate
             stripFocusTokensFromNotes_edit()
 
