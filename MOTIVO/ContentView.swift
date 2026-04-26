@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260426_184250_PeoplePulseCancelFix_a81f
+// SCOPE: Cancel People notification pulse in-place when unseen People notifications clear; preserve existing single-icon notification behaviour
+// SEARCH-TOKEN: 20260426_184250_PeoplePulseCancelFix_a81f
+
+// CHANGE-ID: 20260426_180020_PeoplePulseRestartFix_9f4c
+// SCOPE: Restart People notification icon pulse on feed re-entry/relaunch when unseen items already exist; no layout/navigation/store changes
+// SEARCH-TOKEN: 20260426_180020_PeoplePulseRestartFix_9f4c
+
 // CHANGE-ID: 20260424_131500_ContentView_StableTintCorpus_NoAutoPersist_7d2a
 // SCOPE: ContentView tint decision wiring only - use an unfiltered owner-local tint corpus for Journal Week/Month/Year tint source decisions and prevent render-time Auto tint persistence. Preserve all filtering, layout, navigation, row rendering, and palette behavior.
 // SEARCH-TOKEN: 20260424_131500_ContentView_StableTintCorpus_NoAutoPersist_7d2a
@@ -1420,20 +1428,26 @@ fileprivate struct SessionsRootView: View {
                                         .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                         .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                                    Image(systemName: "person.2")
-                                        .font(.system(size: 19, weight: .regular))
-                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                    TimelineView(.animation(paused: !peopleNotificationActive)) { timeline in
+                                        let pulseProgress = peopleNotificationActive
+                                            ? (sin(timeline.date.timeIntervalSinceReferenceDate * (Double.pi / 1.35)) + 1.0) / 2.0
+                                            : 1.0
+                                        let pulseScale = peopleNotificationActive
+                                            ? (0.88 + (0.22 * pulseProgress))
+                                            : 1.0
+                                        let pulseOpacity = peopleNotificationActive
+                                            ? (0.9 + (0.1 * pulseProgress))
+                                            : 1.0
+
+                                        Image(systemName: "person.2")
+                                            .font(.system(size: 19, weight: .regular))
+                                            .foregroundStyle(peopleNotificationActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                                            .scaleEffect(pulseScale)
+                                            .opacity(pulseOpacity)
+                                    }
                                 }
                                 .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                                 .contentShape(Circle())
-
-                                // Subtle "+" indicator for incoming follow requests (outside the pill)
-                                if (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread {
-                                    Text("+")
-                                        .font(Theme.Text.body)
-                                        .foregroundStyle(Theme.Colors.secondaryText)
-                                        .offset(x: 8, y: -8)
-                                }
                             }
                         }
                         .contentShape(Rectangle())
@@ -1552,8 +1566,7 @@ fileprivate struct SessionsRootView: View {
             }
             .onChange(of: showPeople) { _, isPresented in
                 guard isPresented == false else { return }
-                let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
-                Task { await performAutoReturnRefreshBundle(scopeKey: scopeKey) }
+                Task { await performPeopleReturnNotificationRefreshBundle() }
             }
 
 // Debounce lifecycle
@@ -1639,6 +1652,15 @@ fileprivate struct SessionsRootView: View {
         await MainActor.run {
             refreshStats()
         }
+    }
+
+    private func performPeopleReturnNotificationRefreshBundle() async {
+        // PeopleView is the modal surface that clears People notifications.
+        // Refresh this ContentView's notification stores immediately on return,
+        // without the feed-pop suppression/debounce used for general feed refreshes.
+        await followStore.refreshFromBackendIfPossible()
+        await sharedWithYouStore.refreshUnreadShares()
+        await unreadCommentsStore.refresh(force: true)
     }
 
     private func performAutoReturnRefreshBundle(scopeKey: String) async {
@@ -2459,6 +2481,10 @@ fileprivate struct SessionsRootView: View {
 
     private var filterHeaderIndicatorActive: Bool {
         hasExplicitFeedNarrowing && !filtersExpanded
+    }
+
+    private var peopleNotificationActive: Bool {
+        (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread
     }
 
     private var hasExplicitFeedNarrowing: Bool {
