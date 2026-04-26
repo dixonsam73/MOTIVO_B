@@ -1517,8 +1517,11 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
 
                 let all: [BackendPost]
                 if normalized == "all" {
-                    // Phase 9C: server already enforces owner/follow visibility via RLS.
-                    all = rawPosts
+                    // Defence-in-depth: followers must never render owner-private posts even if backend policy regresses.
+                    all = rawPosts.filter {
+                        let postOwner = ($0.ownerUserID ?? "").lowercased()
+                        return postOwner == ownerLower || $0.isPublic == true
+                    }
                 } else {
                     all = mine
                 }
