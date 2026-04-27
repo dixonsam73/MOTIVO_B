@@ -1,3 +1,14 @@
+// CHANGE-ID: 20260427_131430_pr_ss_visibility_delay_fix
+// SCOPE: MeView-only refinement for PracticeRhythmGlyph and SessionShapeGlyph visibility gating: require meaningful viewport visibility before triggering/coordinating animation delay so scrolled-into-view glyphs use the local delay. No insight logic, layout, Theme, Focus cards, or other MeView cards changed.
+// SEARCH-TOKEN: 20260427_131430_pr_ss_visibility_delay_fix
+// CHANGE-ID: 20260427_125650_session_shape_glyph_polish
+// SCOPE: MeView-only Session Shape glyph polish: adjust vertical optical centering, compress stroke-height contrast, and soften opacity. No insight logic, animation behaviour, card layout, Theme, PracticeRhythm, backend, Core Data, or unrelated UI changed.
+// SEARCH-TOKEN: 20260427_125650_session_shape_glyph_polish
+
+// CHANGE-ID: 20260427_121800_session_shape_stroke_glyph
+// SCOPE: MeView-only Session Shape glyph: add a restrained 4-stroke variability glyph with PracticeRhythm-style visibility gating and settle animation. No insight logic, Theme, PracticeRhythm, backend, Core Data, or unrelated cards changed.
+// SEARCH-TOKEN: 20260427_121800_session_shape_stroke_glyph
+
 // CHANGE-ID: 20260427_113000_practice_rhythm_dual_delay_visibility_gate
 // SCOPE: MeView-only PracticeRhythmGlyph polish: visibility-gate the settle animation and use coordinated delay only when the glyph was visible on the initial frame; use short local delay when reached by scroll. No insight logic, card layout, copy, Theme, backend, Core Data, or unrelated cards changed.
 // SEARCH-TOKEN: 20260427_111500_practice_rhythm_visibility_gated_settle
@@ -1906,7 +1917,11 @@ private struct PracticeRhythmGlyph: View {
         let screenBounds = UIScreen.main.bounds
         let verticalMargin: CGFloat = 24
         let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
-        return frame.intersects(visibleBounds)
+        let intersection = frame.intersection(visibleBounds)
+        guard !intersection.isNull, intersection.height > 0 else { return false }
+
+        let visibleRatio = intersection.height / frame.height
+        return visibleRatio >= 0.72
     }
 
     private func settleIfNeeded(force: Bool = false, useFocusSequenceDelay: Bool = false) {
@@ -2055,20 +2070,203 @@ fileprivate struct PracticeWindowCard: View {
     }
 }
 
+// CHANGE-ID: 20260427_125650_session_shape_glyph_polish
+private struct SessionShapeGlyph: View {
+    let shape: SessionShapeInsight
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var settleProgress: CGFloat = 0
+    @State private var hasAnimated = false
+    @State private var isVisibleEnough = false
+    @State private var hasResolvedInitialVisibility = false
+    @State private var wasVisibleOnInitialFrame = false
+
+    private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
+    private let minimumHeight: CGFloat = 0.08
+
+    private var heights: [CGFloat] {
+        switch shape {
+        case .consistent:
+            return [0.66, 0.66, 0.66, 0.66]
+        case .mostlyConsistent:
+            return [0.74, 0.69, 0.63, 0.56]
+        case .mixed:
+            return [0.62, 0.88, 0.54, 0.74]
+        case .wideRanging:
+            return [0.36, 0.84, 0.52, 0.95]
+        case .insufficientData:
+            return []
+        }
+    }
+    var body: some View {
+        SessionShapeGlyphCanvas(
+            minimumHeight: minimumHeight,
+            finalHeights: heights,
+            progress: settleProgress,
+            glyphColor: glyphColor
+        )
+        .frame(width: 108, height: 56)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: SessionShapeGlyphFramePreferenceKey.self,
+                    value: proxy.frame(in: .global)
+                )
+            }
+        )
+        .accessibilityHidden(true)
+        .onAppear {
+            if reduceMotion {
+                settleIfNeeded(force: true)
+            }
+        }
+        .onPreferenceChange(SessionShapeGlyphFramePreferenceKey.self) { frame in
+            let visible = isFrameVisibleEnough(frame)
+            isVisibleEnough = visible
+
+            if !hasResolvedInitialVisibility {
+                hasResolvedInitialVisibility = true
+                wasVisibleOnInitialFrame = visible
+            }
+
+            guard visible else { return }
+            settleIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
+        }
+        .onChange(of: shape) { _, _ in
+            resetAndSettle()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            settleIfNeeded(force: true)
+        }
+    }
+
+    private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
+        guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
+
+        let screenBounds = UIScreen.main.bounds
+        let verticalMargin: CGFloat = 24
+        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        let intersection = frame.intersection(visibleBounds)
+        guard !intersection.isNull, intersection.height > 0 else { return false }
+
+        let visibleRatio = intersection.height / frame.height
+        return visibleRatio >= 0.72
+    }
+
+    private func settleIfNeeded(force: Bool = false, useFocusSequenceDelay: Bool = false) {
+        guard force || !hasAnimated else { return }
+
+        if reduceMotion {
+            hasAnimated = true
+            settleProgress = 1
+            return
+        }
+
+        guard force || isVisibleEnough else { return }
+
+        hasAnimated = true
+        let delay = useFocusSequenceDelay ? 5.1 : 0.35
+        withAnimation(.easeOut(duration: 4.0).delay(delay)) {
+            settleProgress = 1
+        }
+    }
+
+    private func resetAndSettle() {
+        if reduceMotion {
+            hasAnimated = true
+            settleProgress = 1
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            hasAnimated = false
+            settleProgress = 0
+        }
+
+        DispatchQueue.main.async {
+            settleIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
+        }
+    }
+}
+
+private struct SessionShapeGlyphFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+private struct SessionShapeGlyphCanvas: View, Animatable {
+    let minimumHeight: CGFloat
+    let finalHeights: [CGFloat]
+    var progress: CGFloat
+    let glyphColor: Color
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    private var renderedHeights: [CGFloat] {
+        finalHeights.map { finalHeight in
+            minimumHeight + ((finalHeight - minimumHeight) * progress)
+        }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let renderedHeights = self.renderedHeights
+            guard renderedHeights.count == 4 else { return }
+
+            let availableHeight = max(size.height - 6, 1)
+            let insetX: CGFloat = 8
+            let availableWidth = max(size.width - (insetX * 2), 1)
+            let spacing = availableWidth / 3
+            let centerY = size.height / 2
+            let lineWidth: CGFloat = 4.5
+            let opacity = 0.42 + (0.28 * progress)
+
+            for index in renderedHeights.indices {
+                let x = insetX + (CGFloat(index) * spacing)
+                let strokeHeight = availableHeight * renderedHeights[index]
+                var path = Path()
+                path.move(to: CGPoint(x: x, y: centerY - (strokeHeight / 2)))
+                path.addLine(to: CGPoint(x: x, y: centerY + (strokeHeight / 2)))
+
+                context.stroke(
+                    path,
+                    with: .color(glyphColor.opacity(opacity)),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+            }
+        }
+    }
+}
+
 fileprivate struct SessionShapeCard: View {
     let insight: SessionShapeInsight
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Session shape").sectionHeader()
-            Text(insight.valueText)
-                .font(.body).bold()
-                .foregroundStyle(Color.primary.opacity(0.85))
-            if let subtitle = insight.subtitleText {
-                Text(subtitle)
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Session shape").sectionHeader()
+                Text(insight.valueText)
+                    .font(.body).bold()
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                if let subtitle = insight.subtitleText {
+                    Text(subtitle)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
             }
+
+            Spacer(minLength: Theme.Spacing.s)
+
+            SessionShapeGlyph(shape: insight)
+                .padding(.trailing, Theme.Spacing.s)
         }
         .cardSurface(padding: Theme.Spacing.m)
         .accessibilityElement(children: .combine)
