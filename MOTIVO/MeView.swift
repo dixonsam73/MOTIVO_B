@@ -1804,7 +1804,7 @@ fileprivate struct ReturnPatternCard: View {
     }
 }
 
-// CHANGE-ID: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
+// CHANGE-ID: 20260427_104000_practice_rhythm_glyph_timing_polish
 private struct PracticeRhythmGlyph: View {
     let insight: ReturnPatternInsight
 
@@ -1881,7 +1881,7 @@ private struct PracticeRhythmGlyph: View {
         }
 
         hasSettled = true
-        withAnimation(.easeOut(duration: 0.65).delay(0.08)) {
+        withAnimation(.easeOut(duration: 4.5).delay(5.1)) {
             settleProgress = 1
         }
     }
