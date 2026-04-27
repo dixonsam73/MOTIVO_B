@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260427_201500_meview_interpretive_insights_nonlazy
+// SCOPE: MeView-only stability fix: render interpretive insight cards in a non-lazy local stack so visible cards remain stable while scrolling. No insight logic, card copy, existing analytics, backend, Theme, Core Data, or unrelated UI changes.
+// SEARCH-TOKEN: 20260427_201500_meview_interpretive_insights_nonlazy
+
 // CHANGE-ID: 20260426_211300_meview_practice_window
 // SCOPE: MeView-only polish for interpretive insight cards: copy updates and neutral Practice window card. No existing analytics, layout patterns, Theme, Core Data, backend, tint, or unrelated card behaviour changes.
 // SEARCH-TOKEN: 20260426_211300_meview_practice_window
@@ -264,21 +268,8 @@ struct MeView: View {
                         }
                     }
                 }
-if hasVisibleInterpretiveInsights {
-    AdaptiveGrid {
-        if let emerging = insights?.emergingThread {
-            EmergingThreadCard(insight: emerging)
-        }
-        if let returnPattern = insights?.returnPattern, returnPattern != .insufficientData {
-            ReturnPatternCard(insight: returnPattern)
-        }
-        if let practiceWindow = insights?.practiceWindow, practiceWindow != .insufficientData {
-            PracticeWindowCard(insight: practiceWindow)
-        }
-        if let sessionShape = insights?.sessionShape, sessionShape != .insufficientData {
-            SessionShapeCard(insight: sessionShape)
-        }
-    }
+if let insights, hasVisibleInterpretiveInsights {
+    InterpretiveInsightsStack(insights: insights)
 }
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
@@ -1332,6 +1323,27 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Theme.Spacing.section)], spacing: Theme.Spacing.section) { content() }
+    }
+}
+
+fileprivate struct InterpretiveInsightsStack: View {
+    let insights: MeViewInsights
+
+    var body: some View {
+        VStack(spacing: Theme.Spacing.section) {
+            if let emerging = insights.emergingThread {
+                EmergingThreadCard(insight: emerging)
+            }
+            if insights.returnPattern != .insufficientData {
+                ReturnPatternCard(insight: insights.returnPattern)
+            }
+            if insights.practiceWindow != .insufficientData {
+                PracticeWindowCard(insight: insights.practiceWindow)
+            }
+            if insights.sessionShape != .insufficientData {
+                SessionShapeCard(insight: insights.sessionShape)
+            }
+        }
     }
 }
 
