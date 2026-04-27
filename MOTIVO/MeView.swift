@@ -1769,16 +1769,25 @@ fileprivate struct ReturnPatternCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Practice rhythm").sectionHeader()
-            Text(insight.valueText)
-                .font(.body).bold()
-                .foregroundStyle(Color.primary.opacity(0.85))
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Practice rhythm").sectionHeader()
+                Text(insight.valueText)
+                    .font(.body).bold()
+                    .foregroundStyle(Color.primary.opacity(0.85))
 
-            if let subtitleText {
-                Text(subtitleText)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+
+            Spacer(minLength: Theme.Spacing.s)
+
+            if insight != .insufficientData {
+                PracticeRhythmGlyph(insight: insight)
+                    .padding(.trailing, Theme.Spacing.s)
             }
         }
         .cardSurface(padding: Theme.Spacing.m)
@@ -1788,6 +1797,89 @@ fileprivate struct ReturnPatternCard: View {
             ? "Practice rhythm: \(insight.valueText). \(subtitleText!)"
             : "Practice rhythm: \(insight.valueText)"
         )
+    }
+}
+
+// CHANGE-ID: 20260427_225800_practice_rhythm_glyph_visual_tune
+private struct PracticeRhythmGlyph: View {
+    let insight: ReturnPatternInsight
+
+    private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
+
+    private var positions: [CGFloat] {
+        switch insight {
+        case .everyDay:
+            return [0.0, 2.0, 4.0, 6.0]
+        case .every1to2Days:
+            return [0.0, 1.6, 3.5, 5.1]
+        case .every2to3Days:
+            return [0.0, 1.2, 3.4, 6.0]
+        case .everyFewDays:
+            return [0.0, 2.9, 3.9, 6.3]
+        case .varies:
+            return [0.0, 1.2, 3.8, 6.3]
+        case .insufficientData:
+            return []
+        }
+    }
+
+    private var adjustedPositions: [CGFloat] {
+        let minimumGap: CGFloat = 1.15
+        var adjusted = positions
+
+        guard adjusted.count > 1 else { return adjusted }
+
+        for index in 1..<adjusted.count {
+            let gap = adjusted[index] - adjusted[index - 1]
+            if gap < minimumGap {
+                adjusted[index] = adjusted[index - 1] + minimumGap
+            }
+        }
+
+        return adjusted
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let renderedPositions = adjustedPositions
+            guard renderedPositions.count == 4 else { return }
+
+            let inset: CGFloat = 7
+            let availableWidth = max(size.width - (inset * 2), 1)
+            let scale = availableWidth / 6.3
+            let y = size.height / 2
+            let radius: CGFloat = 6
+
+            var connector = Path()
+            for index in 0..<(renderedPositions.count - 1) {
+                let x1 = inset + (renderedPositions[index] * scale) + radius
+                let x2 = inset + (renderedPositions[index + 1] * scale) - radius
+
+                let minConnectorLength: CGFloat = radius * 2.2
+                guard (x2 - x1) > minConnectorLength else { continue }
+
+                connector.move(to: CGPoint(x: x1, y: y))
+                connector.addLine(to: CGPoint(x: x2, y: y))
+            }
+
+            context.stroke(
+                connector,
+                with: .color(glyphColor.opacity(0.38)),
+                style: StrokeStyle(lineWidth: 1, lineCap: .round, dash: [2, 3])
+            )
+
+            for position in renderedPositions {
+                let x = inset + (position * scale)
+                let rect = CGRect(x: x - radius, y: y - radius, width: radius * 2, height: radius * 2)
+                context.stroke(
+                    Path(ellipseIn: rect),
+                    with: .color(glyphColor.opacity(0.72)),
+                    lineWidth: 1.75
+                )
+            }
+        }
+        .frame(width: 108, height: 26)
+        .accessibilityHidden(true)
     }
 }
 
