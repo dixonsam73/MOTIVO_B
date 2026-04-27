@@ -136,6 +136,7 @@ struct SessionDetailView: View {
     let session: Session
 
     @State private var showEdit = false
+    @State private var shouldDismissAfterEditSave = false
     @State private var editWasPresented: Bool = false
     @State private var showDeleteConfirm = false
     @State private var previewURL: URL?
@@ -549,10 +550,15 @@ return AttachmentViewerView(
         .fullScreenCover(isPresented: $showEdit) {
             // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
             AddEditSessionView(session: session) {
+                shouldDismissAfterEditSave = true
                 showEdit = false
-                DispatchQueue.main.async {
-                    dismiss()
-                }
+            }
+        }
+        .onChange(of: showEdit) { _, isPresented in
+            guard !isPresented, shouldDismissAfterEditSave else { return }
+            shouldDismissAfterEditSave = false
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.20) {
+                dismiss()
             }
         }
         .sheet(isPresented: $isShowingPreview) {
