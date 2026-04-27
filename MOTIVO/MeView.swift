@@ -1064,6 +1064,8 @@ if hasVisibleInterpretiveInsights {
         let eligible = buckets.compactMap { entry -> FocusCategoryInsight? in
             let bucket = entry.value
             guard bucket.durationTotal > 0 else { return nil }
+            guard bucket.sessionCount >= 2 else { return nil }
+
             return FocusCategoryInsight(
                 name: entry.key,
                 averageFocus: bucket.weightedTotal / bucket.durationTotal,
@@ -1071,7 +1073,6 @@ if hasVisibleInterpretiveInsights {
                 sessionCount: bucket.sessionCount
             )
         }
-
         guard eligible.count >= (requiresMultipleEligibleGroups ? 2 : 1) else { return nil }
         return eligible.sorted { lhs, rhs in
             if lhs.averageFocus != rhs.averageFocus { return lhs.averageFocus > rhs.averageFocus }
