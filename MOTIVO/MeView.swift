@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
+// SCOPE: MeView-only fix for PracticeRhythmGlyph settle animation: drive Canvas through an Animatable wrapper and defer insight-change settle until after the reset frame. No insight logic, card layout, copy, Theme, backend, Core Data, or unrelated cards changed.
+// SEARCH-TOKEN: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
+
 // CHANGE-ID: 20260427_201500_meview_interpretive_insights_nonlazy
 // SCOPE: MeView-only stability fix: render interpretive insight cards in a non-lazy local stack so visible cards remain stable while scrolling. No insight logic, card copy, existing analytics, backend, Theme, Core Data, or unrelated UI changes.
 // SEARCH-TOKEN: 20260427_201500_meview_interpretive_insights_nonlazy
@@ -1800,9 +1804,13 @@ fileprivate struct ReturnPatternCard: View {
     }
 }
 
-// CHANGE-ID: 20260427_225800_practice_rhythm_glyph_visual_tune
+// CHANGE-ID: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
 private struct PracticeRhythmGlyph: View {
     let insight: ReturnPatternInsight
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var hasSettled = false
+    @State private var settleProgress: CGFloat = 0
 
     private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
 
@@ -1839,9 +1847,87 @@ private struct PracticeRhythmGlyph: View {
         return adjusted
     }
 
+    private var startPositions: [CGFloat] {
+        [1.425, 2.575, 3.725, 4.875]
+    }
+
+    var body: some View {
+        PracticeRhythmGlyphCanvas(
+            startPositions: startPositions,
+            finalPositions: adjustedPositions,
+            progress: settleProgress,
+            glyphColor: glyphColor
+        )
+        .frame(width: 108, height: 26)
+        .accessibilityHidden(true)
+        .onAppear {
+            settleIfNeeded()
+        }
+        .onChange(of: insight) { _, _ in
+            resetAndSettle()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            settleIfNeeded(force: true)
+        }
+    }
+
+    private func settleIfNeeded(force: Bool = false) {
+        guard force || !hasSettled else { return }
+
+        if reduceMotion {
+            hasSettled = true
+            settleProgress = 1
+            return
+        }
+
+        hasSettled = true
+        withAnimation(.easeOut(duration: 0.65).delay(0.08)) {
+            settleProgress = 1
+        }
+    }
+
+    private func resetAndSettle() {
+        if reduceMotion {
+            hasSettled = true
+            settleProgress = 1
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            hasSettled = false
+            settleProgress = 0
+        }
+
+        DispatchQueue.main.async {
+            settleIfNeeded()
+        }
+    }
+}
+
+private struct PracticeRhythmGlyphCanvas: View, Animatable {
+    let startPositions: [CGFloat]
+    let finalPositions: [CGFloat]
+    var progress: CGFloat
+    let glyphColor: Color
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    private var renderedPositions: [CGFloat] {
+        guard finalPositions.count == startPositions.count else { return finalPositions }
+
+        return zip(startPositions, finalPositions).map { start, end in
+            start + ((end - start) * progress)
+        }
+    }
+
     var body: some View {
         Canvas { context, size in
-            let renderedPositions = adjustedPositions
+            let renderedPositions = self.renderedPositions
             guard renderedPositions.count == 4 else { return }
 
             let inset: CGFloat = 7
@@ -1878,11 +1964,8 @@ private struct PracticeRhythmGlyph: View {
                 )
             }
         }
-        .frame(width: 108, height: 26)
-        .accessibilityHidden(true)
     }
 }
-
 fileprivate struct PracticeWindowCard: View {
     let insight: PracticeWindowInsight
 
