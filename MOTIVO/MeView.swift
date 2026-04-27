@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260427_113000_practice_rhythm_dual_delay_visibility_gate
+// SCOPE: MeView-only PracticeRhythmGlyph polish: visibility-gate the settle animation and use coordinated delay only when the glyph was visible on the initial frame; use short local delay when reached by scroll. No insight logic, card layout, copy, Theme, backend, Core Data, or unrelated cards changed.
+// SEARCH-TOKEN: 20260427_111500_practice_rhythm_visibility_gated_settle
+
 // CHANGE-ID: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
 // SCOPE: MeView-only fix for PracticeRhythmGlyph settle animation: drive Canvas through an Animatable wrapper and defer insight-change settle until after the reset frame. No insight logic, card layout, copy, Theme, backend, Core Data, or unrelated cards changed.
 // SEARCH-TOKEN: 20260427_102600_practice_rhythm_glyph_settle_animation_fix
@@ -1804,13 +1808,16 @@ fileprivate struct ReturnPatternCard: View {
     }
 }
 
-// CHANGE-ID: 20260427_104000_practice_rhythm_glyph_timing_polish
+// CHANGE-ID: 20260427_113000_practice_rhythm_dual_delay_visibility_gate
 private struct PracticeRhythmGlyph: View {
     let insight: ReturnPatternInsight
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hasSettled = false
     @State private var settleProgress: CGFloat = 0
+    @State private var isVisibleEnough = false
+    @State private var hasResolvedInitialVisibility = false
+    @State private var wasVisibleOnInitialFrame = false
 
     private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
 
@@ -1859,9 +1866,31 @@ private struct PracticeRhythmGlyph: View {
             glyphColor: glyphColor
         )
         .frame(width: 108, height: 26)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PracticeRhythmGlyphFramePreferenceKey.self,
+                    value: proxy.frame(in: .global)
+                )
+            }
+        )
         .accessibilityHidden(true)
         .onAppear {
-            settleIfNeeded()
+            if reduceMotion {
+                settleIfNeeded(force: true)
+            }
+        }
+        .onPreferenceChange(PracticeRhythmGlyphFramePreferenceKey.self) { frame in
+            let visible = isFrameVisibleEnough(frame)
+            isVisibleEnough = visible
+
+            if !hasResolvedInitialVisibility {
+                hasResolvedInitialVisibility = true
+                wasVisibleOnInitialFrame = visible
+            }
+
+            guard visible else { return }
+            settleIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
         }
         .onChange(of: insight) { _, _ in
             resetAndSettle()
@@ -1871,7 +1900,16 @@ private struct PracticeRhythmGlyph: View {
         }
     }
 
-    private func settleIfNeeded(force: Bool = false) {
+    private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
+        guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
+
+        let screenBounds = UIScreen.main.bounds
+        let verticalMargin: CGFloat = 24
+        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        return frame.intersects(visibleBounds)
+    }
+
+    private func settleIfNeeded(force: Bool = false, useFocusSequenceDelay: Bool = false) {
         guard force || !hasSettled else { return }
 
         if reduceMotion {
@@ -1880,8 +1918,11 @@ private struct PracticeRhythmGlyph: View {
             return
         }
 
+        guard force || isVisibleEnough else { return }
+
         hasSettled = true
-        withAnimation(.easeOut(duration: 4.5).delay(5.1)) {
+        let delay = useFocusSequenceDelay ? 5.1 : 0.35
+        withAnimation(.easeOut(duration: 4.5).delay(delay)) {
             settleProgress = 1
         }
     }
@@ -1901,8 +1942,16 @@ private struct PracticeRhythmGlyph: View {
         }
 
         DispatchQueue.main.async {
-            settleIfNeeded()
+            settleIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
         }
+    }
+}
+
+private struct PracticeRhythmGlyphFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
     }
 }
 
