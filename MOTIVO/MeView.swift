@@ -1,3 +1,15 @@
+// CHANGE-ID: 20260427_214700_practice_window_dot_line_optical_parity
+// SCOPE: MeView-only PracticeWindowGlyph visual polish: optically extend line, retune dot positions, slow dot fade to Focus circle pace. No gating, layout, insight logic, or other cards changed.
+// SEARCH-TOKEN: 20260427_214700_practice_window_dot_line_optical_parity
+// CHANGE-ID: 20260427_213900_practice_window_dot_line_visual_parity
+// SCOPE: MeView-only PracticeWindowGlyph visual polish: SessionShape width model, single line plus optional dot, spread line-only, no gating/layout/insight/other-card changes.
+// SEARCH-TOKEN: 20260427_213900_practice_window_dot_line_visual_parity
+// CHANGE-ID: 20260427_212900_practice_window_dot_line_glyph
+// SCOPE: MeView-only Practice Window glyph replacement: remove haze/band drawing and render a fixed dot-on-line glyph with existing visibility-gated dual-delay fade. No insight logic, copy, card layout, Theme, backend, Core Data, or other cards changed.
+// SEARCH-TOKEN: 20260427_212900_practice_window_dot_line_glyph
+// CHANGE-ID: 20260427_214500_practice_window_gradient_peak_polish
+// SCOPE: MeView-only PracticeWindowGlyphCanvas polish: align width model, increase band height, tighten/read peak, remove spread peak. No animation, gating, enum, layout, insight logic, Theme, backend, Core Data, or other cards changed.
+// SEARCH-TOKEN: 20260427_214500_practice_window_gradient_peak_polish
 // CHANGE-ID: 20260427_131430_pr_ss_visibility_delay_fix
 // SCOPE: MeView-only refinement for PracticeRhythmGlyph and SessionShapeGlyph visibility gating: require meaningful viewport visibility before triggering/coordinating animation delay so scrolled-into-view glyphs use the local delay. No insight logic, layout, Theme, Focus cards, or other MeView cards changed.
 // SEARCH-TOKEN: 20260427_131430_pr_ss_visibility_delay_fix
@@ -2045,15 +2057,24 @@ fileprivate struct PracticeWindowCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Practice window").sectionHeader()
-            Text(insight.valueText)
-                .font(.body).bold()
-                .foregroundStyle(Color.primary.opacity(0.85))
-            if let subtitleText {
-                Text(subtitleText)
-                    .font(.footnote)
-                    .foregroundStyle(Theme.Colors.secondaryText)
+        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                Text("Practice window").sectionHeader()
+                Text(insight.valueText)
+                    .font(.body).bold()
+                    .foregroundStyle(Color.primary.opacity(0.85))
+                if let subtitleText {
+                    Text(subtitleText)
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                }
+            }
+
+            Spacer(minLength: Theme.Spacing.s)
+
+            if insight != .insufficientData {
+                PracticeWindowGlyph(insight: insight)
+                    .padding(.trailing, Theme.Spacing.s)
             }
         }
         .cardSurface(padding: Theme.Spacing.m)
@@ -2070,7 +2091,194 @@ fileprivate struct PracticeWindowCard: View {
     }
 }
 
-// CHANGE-ID: 20260427_125650_session_shape_glyph_polish
+// CHANGE-ID: 20260427_212900_practice_window_dot_line_glyph
+private struct PracticeWindowGlyph: View {
+    let insight: PracticeWindowInsight
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var revealProgress: CGFloat = 0
+    @State private var hasAnimated = false
+    @State private var isVisibleEnough = false
+    @State private var hasResolvedInitialVisibility = false
+    @State private var wasVisibleOnInitialFrame = false
+
+    private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
+
+    var body: some View {
+        PracticeWindowGlyphCanvas(
+            insight: insight,
+            progress: revealProgress,
+            glyphColor: glyphColor
+        )
+        .frame(width: 108, height: 34)
+        .background(
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: PracticeWindowGlyphFramePreferenceKey.self,
+                    value: proxy.frame(in: .global)
+                )
+            }
+        )
+        .accessibilityHidden(true)
+        .onAppear {
+            if reduceMotion {
+                revealIfNeeded(force: true)
+            }
+        }
+        .onPreferenceChange(PracticeWindowGlyphFramePreferenceKey.self) { frame in
+            let visible = isFrameVisibleEnough(frame)
+            isVisibleEnough = visible
+
+            if !hasResolvedInitialVisibility {
+                hasResolvedInitialVisibility = true
+                wasVisibleOnInitialFrame = visible
+            }
+
+            guard visible else { return }
+            revealIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
+        }
+        .onChange(of: insight) { _, _ in
+            resetAndReveal()
+        }
+        .onChange(of: reduceMotion) { _, _ in
+            revealIfNeeded(force: true)
+        }
+    }
+
+    private func isFrameVisibleEnough(_ frame: CGRect) -> Bool {
+        guard !frame.isNull, frame.width > 0, frame.height > 0 else { return false }
+
+        let screenBounds = UIScreen.main.bounds
+        let verticalMargin: CGFloat = 24
+        let visibleBounds = screenBounds.insetBy(dx: 0, dy: verticalMargin)
+        let intersection = frame.intersection(visibleBounds)
+        guard !intersection.isNull, intersection.height > 0 else { return false }
+
+        let visibleRatio = intersection.height / frame.height
+        return visibleRatio >= 0.72
+    }
+
+    private func revealIfNeeded(force: Bool = false, useFocusSequenceDelay: Bool = false) {
+        guard force || !hasAnimated else { return }
+
+        if reduceMotion {
+            hasAnimated = true
+            revealProgress = 1
+            return
+        }
+
+        guard force || isVisibleEnough else { return }
+
+        hasAnimated = true
+        let delay = useFocusSequenceDelay ? 5.1 : 0.35
+        withAnimation(.easeOut(duration: 5.0).delay(delay)) {
+            revealProgress = 1
+        }
+    }
+
+    private func resetAndReveal() {
+        if reduceMotion {
+            hasAnimated = true
+            revealProgress = 1
+            return
+        }
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            hasAnimated = false
+            revealProgress = 0
+        }
+
+        DispatchQueue.main.async {
+            revealIfNeeded(useFocusSequenceDelay: wasVisibleOnInitialFrame)
+        }
+    }
+}
+
+private struct PracticeWindowGlyphFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .null
+
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+private struct PracticeWindowGlyphCanvas: View, Animatable {
+    let insight: PracticeWindowInsight
+    var progress: CGFloat
+    let glyphColor: Color
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    var body: some View {
+        Canvas { context, size in
+            let insetX: CGFloat = 8
+            let availableWidth = max(size.width - (insetX * 2), 1)
+            let centerY = (size.height / 2) - 1.5
+            let opticalExtension: CGFloat = 2.5
+            let startX = insetX - opticalExtension
+            let endX = insetX + availableWidth + opticalExtension
+            let resolvedProgress = Double(progress)
+
+            var line = Path()
+            line.move(to: CGPoint(x: startX, y: centerY))
+            line.addLine(to: CGPoint(x: endX, y: centerY))
+            context.stroke(
+                line,
+                with: .color(glyphColor.opacity(0.31)),
+                style: StrokeStyle(lineWidth: 1.35, lineCap: .round)
+            )
+
+            guard shouldRenderDominantDot else { return }
+
+            let dotX = insetX + (availableWidth * dotPosition)
+            let radius: CGFloat = 7.6
+            let rect = CGRect(
+                x: dotX - radius,
+                y: centerY - radius,
+                width: radius * 2,
+                height: radius * 2
+            )
+            let dotPath = Path(ellipseIn: rect)
+
+            context.fill(
+                dotPath,
+                with: .color(glyphColor.opacity(0.62 * resolvedProgress))
+            )
+            context.stroke(
+                dotPath,
+                with: .color(glyphColor.opacity(0.78 * resolvedProgress)),
+                lineWidth: 1.25
+            )
+        }
+    }
+
+    private var shouldRenderDominantDot: Bool {
+        switch insight {
+        case .mornings, .afternoons, .evenings:
+            return true
+        case .spreadThroughDay, .insufficientData:
+            return false
+        }
+    }
+
+    private var dotPosition: CGFloat {
+        switch insight {
+        case .mornings:
+            return 0.23
+        case .afternoons:
+            return 0.50
+        case .evenings:
+            return 0.77
+        case .spreadThroughDay, .insufficientData:
+            return 0.50
+        }
+    }
+}
+
 private struct SessionShapeGlyph: View {
     let shape: SessionShapeInsight
 
