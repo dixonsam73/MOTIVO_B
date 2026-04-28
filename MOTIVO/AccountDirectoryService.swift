@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260428_134500_AccountDirectoryAutoGenerationCaseFix
-// SCOPE: Account ID auto-generation/backfill guard fix — compare backend user IDs case-insensitively so uppercase UUID callers do not skip generation.
-// SEARCH-TOKEN: 20260428_134500_AccountDirectoryAutoGenerationCaseFix
+// CHANGE-ID: 20260428_153100_AccountIDRequireBackendRowForGeneration
+// SCOPE: Account ID auto-generation requires an existing backend directory row before deriving a handle.
+// SEARCH-TOKEN: 20260428_153100_AccountIDRequireBackendRowForGeneration
 
 
 // CHANGE-ID: 20260309_205500_AvatarBootstrapSelfRow_6c1a
@@ -371,16 +371,22 @@ public final class AccountDirectoryService {
             currentRow = row
         }
 
-        // Never overwrite an existing backend value.
-        guard trimmedNonEmpty(currentRow?.accountID) == nil else { return nil }
+        // Generation must be based on the per-user backend directory row.
+        // If no row exists yet, onboarding/profile sync has not written the current user's
+        // display name. Do not fall back to AuthManager/ProfileStore here, because those
+        // values can be stale during sign-out/delete/recreate transitions.
+        guard let currentRow else { return nil }
 
-        let effectiveDisplayName = trimmedNonEmpty(displayName) ?? trimmedNonEmpty(currentRow?.displayName) ?? ""
+        // Never overwrite an existing backend value.
+        guard trimmedNonEmpty(currentRow.accountID) == nil else { return nil }
+
+        guard let effectiveDisplayName = trimmedNonEmpty(currentRow.displayName) else { return nil }
         guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
 
-        let effectiveLookupEnabled = currentRow?.lookupEnabled ?? lookupEnabled
-        let effectiveFollowRequestsEnabled = followRequestsEnabled ?? currentRow?.followRequestsEnabled
-        let effectiveLocation = location ?? currentRow?.location
-        let effectiveInstruments = instruments ?? currentRow?.instruments
+        let effectiveLookupEnabled = currentRow.lookupEnabled
+        let effectiveFollowRequestsEnabled = followRequestsEnabled ?? currentRow.followRequestsEnabled
+        let effectiveLocation = currentRow.location ?? location
+        let effectiveInstruments = currentRow.instruments ?? instruments
 
         for attempt in 1...10 {
             let candidate = autoAccountIDCandidate(base: base, attempt: attempt)

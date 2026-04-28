@@ -1,10 +1,7 @@
-// CHANGE-ID: 20260428_121500_Profile_ExplicitAccountIDBackfill
-// SCOPE: ProfileView bootstrap/backfill trigger for missing auto-generated Account ID; no UI/layout/search/follow/feed changes.
-// SEARCH-TOKEN: 20260428_121500_Profile_ExplicitAccountIDBackfill
+// CHANGE-ID: 20260428_151500_ProfileAccountIDStaleStateGuard
+// SCOPE: Account ID sync hardening - prevent stale accountIDText from being posted for a new backend user; trigger generation from current backend identity only.
+// SEARCH-TOKEN: 20260428_151500_ProfileAccountIDStaleStateGuard
 
-// CHANGE-ID: 20260428_111000_AccountIDAutoGenerationSync_ProfileView_b7c9
-// SCOPE: Sync auto-generated backend account_id into local ProfileStore/ProfileView state. No UI/layout changes.
-// SEARCH-TOKEN: 20260428_111000_AccountIDAutoGenerationSync_ProfileView_b7c9
 // CHANGE-ID: 20260317_125300_ProfileCard_InnerCardDividersIcons
 // SCOPE: ProfileView — profile card only: add inner card surface, row dividers, and subtle conditional location/account ID icons while preserving all existing logic and behavior.
 // SEARCH-TOKEN: 20260317_125300_ProfileCard_InnerCardDividersIcons
@@ -251,7 +248,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     @State private var lastDirectorySyncFingerprint: String? = nil
     @State private var lastAccountIDSubmitAt: Date? = nil
     @State private var accountIDAutoGenerationInFlight: Bool = false
-    @State private var accountIDAutoGenerationAttemptedUserID: String? = nil
+    @State private var accountIDAutoGenerationAttemptedBackendID: String? = nil
     private var followRequestMode: FollowRequestMode {
         get {
             let mode = FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual
@@ -847,75 +844,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          // Phase 12C: per-backend-user lookup state (per-user; legacy allowDiscovery_v1 adopted as initial default)
          discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
          accountIDText = ProfileStore.accountID(for: auth.backendUserID)
-         Task { await bootstrapAutoGenerateAccountIDIfNeeded() }
      }
-
-
-     @MainActor
-     private func syncGeneratedAccountIDFromBackendIfNeeded(userID: String) async {
-         guard accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-
-         let result = await AccountDirectoryService.shared.fetchSelfRow(userID: userID)
-         guard case .success(let row?) = result else { return }
-         guard let generated = row.accountID?.trimmingCharacters(in: .whitespacesAndNewlines), !generated.isEmpty else { return }
-
-         ProfileStore.setAccountID(generated, for: userID)
-         accountIDText = generated
-     }
-
-    @MainActor
-    private func bootstrapAutoGenerateAccountIDIfNeeded() async {
-        guard BackendEnvironment.shared.isConnected else { return }
-        guard auth.hasSupabaseAccessToken else { return }
-
-        guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
-
-        let visibleAccountID = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard visibleAccountID.isEmpty else { return }
-
-        let storedAccountID = ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard storedAccountID.isEmpty else {
-            accountIDText = storedAccountID
-            return
-        }
-
-        let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !display.isEmpty else { return }
-
-        guard accountIDAutoGenerationInFlight == false else { return }
-        guard accountIDAutoGenerationAttemptedUserID != backendID else { return }
-
-        accountIDAutoGenerationInFlight = true
-        accountIDAutoGenerationAttemptedUserID = backendID
-        defer { accountIDAutoGenerationInFlight = false }
-
-        let enabled = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-        let frm = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual)
-        let followRequestsEnabled = !(frm == .autoApproveContacts || frm == .closed)
-        let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
-        let instrumentsClean = instrumentsArray
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .sorted { a, b in
-                a.localizedCaseInsensitiveCompare(b) == .orderedAscending
-            }
-
-        guard let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
-            userID: backendID,
-            displayName: display,
-            localAccountID: nil,
-            lookupEnabled: enabled,
-            followRequestsEnabled: followRequestsEnabled,
-            location: locOrNil,
-            instruments: instrumentsClean
-        ) else { return }
-
-        ProfileStore.setAccountID(generated, for: backendID)
-        accountIDText = generated
-        accountIDSyncMessage = nil
-        accountIDSyncIsError = false
-    }
 
      private func clearUserPresentedStateForSignOut() {
          // Clear all user-presented state without mutating persisted device-level Profile.
@@ -927,8 +856,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          locationText = ""
          accountIDText = ""
          discoveryModeRawPerUser = DiscoveryMode.none.rawValue
-         accountIDAutoGenerationInFlight = false
-         accountIDAutoGenerationAttemptedUserID = nil
 
          userActivities = []
          // Keep AppStorage primaryActivityRef unchanged; normalize displayed choice only.
@@ -1172,8 +1099,11 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          let frm = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual)
          let followRequestsEnabled = !(frm == .autoApproveContacts || frm == .closed)
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-         let accountIDForWrite: String? = acct.isEmpty ? nil : acct
-         let acctOrNil: String? = (acct.count >= 3) ? acct : nil
+         let storedAccountID = ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines)
+         // Account ID is user-scoped. During sign-out/delete/recreate transitions, accountIDText can briefly
+         // contain the previous user's handle. Only send an explicit account_id when it matches the value stored
+         // for the current backend user; otherwise omit it so auto-generation can safely derive from this user's name.
+         let acctOrNil: String? = (acct.count >= 3 && !storedAccountID.isEmpty && acct == storedAccountID) ? acct : nil
          let locTrim = locationText.trimmingCharacters(in: .whitespacesAndNewlines)
          let locOrNil: String? = locTrim.isEmpty ? nil : locTrim
          let instrumentsClean = instrumentsArray
@@ -1189,7 +1119,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
              displayName: display,
-             accountID: accountIDForWrite,
+             accountID: acctOrNil,
              lookupEnabled: enabled,
              followRequestsEnabled: followRequestsEnabled,
              location: locOrNil,
@@ -1197,15 +1127,17 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          )
          switch result {
 case .success:
-    if acctOrNil == nil {
-        await syncGeneratedAccountIDFromBackendIfNeeded(userID: backendID)
-    }
-    let syncedAccountID = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
-    let syncedAccountIDOrNil: String? = syncedAccountID.isEmpty ? nil : syncedAccountID
-    let syncedFingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(syncedAccountIDOrNil ?? "nil")|\(enabled ? "1" : "0")|fr:\(followRequestsEnabled ? "1" : "0")|i:\(instrumentsFP)"
-    lastDirectorySyncFingerprint = syncedFingerprint
+    lastDirectorySyncFingerprint = fingerprint
     accountIDSyncMessage = nil
     accountIDSyncIsError = false
+    await attemptAccountIDAutoGenerationIfNeeded(
+        backendID: backendID,
+        displayName: display,
+        lookupEnabled: enabled,
+        followRequestsEnabled: followRequestsEnabled,
+        location: locOrNil,
+        instruments: instrumentsSorted
+    )
 case .failure(let error):
     if isAccountIDCollision(error) {
         accountIDSyncMessage = "That account ID is already taken."
@@ -1215,6 +1147,52 @@ case .failure(let error):
     accountIDSyncIsError = true
 }
      }
+
+    @MainActor
+    private func attemptAccountIDAutoGenerationIfNeeded(
+        backendID: String,
+        displayName: String,
+        lookupEnabled: Bool,
+        followRequestsEnabled: Bool,
+        location: String?,
+        instruments: [String]
+    ) async {
+        guard BackendEnvironment.shared.isConnected else { return }
+        let auth = _auth.wrappedValue
+        guard auth.hasSupabaseAccessToken else { return }
+
+        let trimmedBackendID = backendID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedBackendID.isEmpty else { return }
+        guard auth.backendUserID?.caseInsensitiveCompare(trimmedBackendID) == .orderedSame else { return }
+
+        let trimmedDisplayName = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedDisplayName.isEmpty else { return }
+
+        let storedAccountID = ProfileStore.accountID(for: trimmedBackendID).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard storedAccountID.isEmpty else { return }
+
+        guard accountIDAutoGenerationInFlight == false else { return }
+        guard accountIDAutoGenerationAttemptedBackendID?.caseInsensitiveCompare(trimmedBackendID) != .orderedSame else { return }
+
+        accountIDAutoGenerationInFlight = true
+        accountIDAutoGenerationAttemptedBackendID = trimmedBackendID
+        defer { accountIDAutoGenerationInFlight = false }
+
+        let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
+            userID: trimmedBackendID,
+            displayName: trimmedDisplayName,
+            localAccountID: storedAccountID,
+            lookupEnabled: lookupEnabled,
+            followRequestsEnabled: followRequestsEnabled,
+            location: location,
+            instruments: instruments
+        )
+
+        guard let generated, !generated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        ProfileStore.setAccountID(generated, for: trimmedBackendID)
+        accountIDText = generated
+        lastDirectorySyncFingerprint = nil
+    }
 
 
 
@@ -1536,14 +1514,10 @@ private func initials(from string: String) -> String {
                 if newValue == nil {
                     accountIDText = ""
                     discoveryModeRawPerUser = DiscoveryMode.none.rawValue
-                    accountIDAutoGenerationInFlight = false
-                    accountIDAutoGenerationAttemptedUserID = nil
                 } else {
                     discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
                     accountIDText = ProfileStore.accountID(for: auth.backendUserID)
                     locationText = ProfileStore.location(for: auth.backendUserID)
-                    accountIDAutoGenerationAttemptedUserID = nil
-                    Task { await bootstrapAutoGenerateAccountIDIfNeeded() }
                 }
             }
              .onChange(of: primaryActivityRef) { _ in
