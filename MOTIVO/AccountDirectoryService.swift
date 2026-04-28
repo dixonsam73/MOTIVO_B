@@ -1,3 +1,8 @@
+// CHANGE-ID: 20260428_134500_AccountDirectoryAutoGenerationCaseFix
+// SCOPE: Account ID auto-generation/backfill guard fix — compare backend user IDs case-insensitively so uppercase UUID callers do not skip generation.
+// SEARCH-TOKEN: 20260428_134500_AccountDirectoryAutoGenerationCaseFix
+
+
 // CHANGE-ID: 20260309_205500_AvatarBootstrapSelfRow_6c1a
 // SCOPE: Multi-device account bootstrap hardening — include account_directory.avatar_key in self-row fetch for owner avatar fallback.
 // SEARCH-TOKEN: 20260309_205500_AvatarBootstrapSelfRow_6c1a
@@ -93,7 +98,7 @@ public struct SelfDirectoryRow: Decodable, Hashable {
 
 public final class AccountDirectoryService {
     // Phase 12C hygiene: never POST invalid account_id values.
-    // Rule: accept only [a-z0-9_] and length 3–24; otherwise send null.
+    // Rule: accept only [a-z0-9_] and length 3–24. Blank/invalid account_id values are omitted from writes.
     private func sanitizedLocation(_ raw: String?) -> String? {
         guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         return s
@@ -106,6 +111,52 @@ public final class AccountDirectoryService {
         let filtered = s.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" }
         guard filtered.count >= 3, filtered.count <= 24 else { return nil }
         return String(filtered)
+    }
+
+    private func trimmedNonEmpty(_ raw: String?) -> String? {
+        guard let s = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        return s
+    }
+
+    private func autoAccountIDBase(from displayName: String) -> String? {
+        let folded = displayName
+            .folding(options: [.diacriticInsensitive, .widthInsensitive], locale: .current)
+            .lowercased()
+
+        let filtered = folded.filter { ("a"..."z").contains($0) || ("0"..."9").contains($0) || $0 == "_" }
+        let capped = String(filtered.prefix(24))
+        guard capped.count >= 3 else { return nil }
+        return capped
+    }
+
+    private func autoAccountIDCandidate(base: String, attempt: Int) -> String {
+        guard attempt > 1 else { return String(base.prefix(24)) }
+
+        let suffix = String(attempt)
+        let prefixLimit = max(0, 24 - suffix.count)
+        return String(base.prefix(prefixLimit)) + suffix
+    }
+
+    private func isUniqueAccountIDViolation(_ error: Error) -> Bool {
+        func inspect(_ ns: NSError) -> Bool {
+            if ns.code == 409 { return true }
+
+            let haystack = ([ns.domain, ns.localizedDescription] + ns.userInfo.map { "\($0.key)=\($0.value)" })
+                .joined(separator: " ")
+                .lowercased()
+
+            if haystack.contains("23505") { return true }
+            if haystack.contains("409") && haystack.contains("account") { return true }
+            if haystack.contains("account_directory_account_id_key") { return true }
+
+            if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
+                return inspect(underlying)
+            }
+
+            return false
+        }
+
+        return inspect(error as NSError)
     }
 
     public static let shared = AccountDirectoryService()
@@ -261,13 +312,114 @@ public final class AccountDirectoryService {
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
     public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, followRequestsEnabled: Bool? = nil, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
+        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else {
+            return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))
+        }
+
+        if let explicitAccountID = sanitizedAccountID(accountID) {
+            return await upsertSelfRowOnce(
+                userID: uid,
+                displayName: displayName,
+                accountIDToWrite: explicitAccountID,
+                includeAccountID: true,
+                lookupEnabled: lookupEnabled,
+                followRequestsEnabled: followRequestsEnabled,
+                location: location,
+                instruments: instruments
+            )
+        }
+
+        // Blank/invalid account_id values are intentionally omitted. This preserves any existing
+        // generated/backend account_id instead of clearing it back to NULL.
+        return await upsertSelfRowOnce(
+            userID: uid,
+            displayName: displayName,
+            accountIDToWrite: nil,
+            includeAccountID: false,
+            lookupEnabled: lookupEnabled,
+            followRequestsEnabled: followRequestsEnabled,
+            location: location,
+            instruments: instruments
+        )
+    }
+
+    /// Best-effort auto-generation/backfill for a missing account_id.
+    /// Returns the generated account_id on success, or nil when generation is skipped/failed.
+    @discardableResult
+    public func autoGenerateAccountIDIfMissing(userID: String, displayName: String, localAccountID: String?, lookupEnabled: Bool, followRequestsEnabled: Bool? = nil, location: String? = nil, instruments: [String]? = nil) async -> String? {
+        let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !uid.isEmpty else { return nil }
+
+        // Connected + authenticated owner only.
+        // AuthManager.canonicalBackendUserID() is lowercased, while some callers pass
+        // uppercase UUID strings from restored/profile state. UUID identity is
+        // case-insensitive; normalize both sides so valid owners do not skip generation.
+        guard BackendEnvironment.shared.isConnected else { return nil }
+        guard let canonicalUID = await AuthManager.canonicalBackendUserID()?.trimmingCharacters(in: .whitespacesAndNewlines),
+              canonicalUID.caseInsensitiveCompare(uid) == .orderedSame else { return nil }
+
+        // Never overwrite a local/manual value.
+        guard trimmedNonEmpty(localAccountID) == nil else { return nil }
+
+        let currentRowResult = await fetchSelfRow(userID: uid)
+        let currentRow: SelfDirectoryRow?
+        switch currentRowResult {
+        case .failure:
+            return nil
+        case .success(let row):
+            currentRow = row
+        }
+
+        // Never overwrite an existing backend value.
+        guard trimmedNonEmpty(currentRow?.accountID) == nil else { return nil }
+
+        let effectiveDisplayName = trimmedNonEmpty(displayName) ?? trimmedNonEmpty(currentRow?.displayName) ?? ""
+        guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
+
+        let effectiveLookupEnabled = currentRow?.lookupEnabled ?? lookupEnabled
+        let effectiveFollowRequestsEnabled = followRequestsEnabled ?? currentRow?.followRequestsEnabled
+        let effectiveLocation = location ?? currentRow?.location
+        let effectiveInstruments = instruments ?? currentRow?.instruments
+
+        for attempt in 1...10 {
+            let candidate = autoAccountIDCandidate(base: base, attempt: attempt)
+            let result = await upsertSelfRowOnce(
+                userID: uid,
+                displayName: effectiveDisplayName,
+                accountIDToWrite: candidate,
+                includeAccountID: true,
+                lookupEnabled: effectiveLookupEnabled,
+                followRequestsEnabled: effectiveFollowRequestsEnabled,
+                location: effectiveLocation,
+                instruments: effectiveInstruments
+            )
+
+            switch result {
+            case .success:
+                return candidate
+            case .failure(let error):
+                if isUniqueAccountIDViolation(error) {
+                    continue
+                }
+                return nil
+            }
+        }
+
+        return nil
+    }
+
+    private func upsertSelfRowOnce(userID: String, displayName: String, accountIDToWrite: String?, includeAccountID: Bool, lookupEnabled: Bool, followRequestsEnabled: Bool?, location: String?, instruments: [String]?) async -> Result<Void, Error> {
         var payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
-            "account_id": sanitizedAccountID(accountID) ?? NSNull(),
             "lookup_enabled": lookupEnabled,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
+
+        if includeAccountID, let accountIDToWrite = sanitizedAccountID(accountIDToWrite) {
+            payload["account_id"] = accountIDToWrite
+        }
 
         if let followRequestsEnabled = followRequestsEnabled {
             payload["follow_requests_enabled"] = followRequestsEnabled
@@ -296,7 +448,7 @@ public final class AccountDirectoryService {
             // Live identity cache update: immediately merge the new identity values.
             let existing = await cache.getMany([userID])[userID]
             let merged = DirectoryAccount(userID: userID,
-                                          accountID: sanitizedAccountID(accountID),
+                                          accountID: includeAccountID ? sanitizedAccountID(accountIDToWrite) : existing?.accountID,
                                           displayName: displayName,
                                           location: sanitizedLocation(location),
                                           avatarKey: existing?.avatarKey,

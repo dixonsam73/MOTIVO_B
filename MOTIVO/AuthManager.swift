@@ -127,6 +127,11 @@ final class AuthManager: NSObject, ObservableObject {
     private var directoryHydrationTask: Task<Void, Never>?
     private var lastHydratedDirectoryUserID: String?
 
+    // Account ID auto-generation backfill (session-liveness anchored, best-effort).
+    private var accountIDBackfillTask: Task<Void, Never>?
+    private var accountIDBackfillAttemptedUserIDs = Set<String>()
+    private var accountIDBackfillInFlightUserIDs = Set<String>()
+
 
 
     // CHANGE-ID: 20260129_221500_14_3H_B4_fixTokenGuard
@@ -216,6 +221,7 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         scheduleDirectoryHydrationIfNeeded(reason: "init")
+        scheduleAccountIDBackfillIfNeeded(reason: "init")
 
 }
 
@@ -247,6 +253,48 @@ final class AuthManager: NSObject, ObservableObject {
         directoryHydrationTask = Task { [weak self] in
             guard let self else { return }
             await self.hydrateDirectoryStateFromBackend(userID: bid, reason: reason)
+        }
+    }
+
+    private func scheduleAccountIDBackfillIfNeeded(reason: String) {
+        // Account ID generation is only meaningful for an authenticated Connected backend user.
+        guard !LocalFactoryReset.isInProgress else { return }
+        guard BackendEnvironment.shared.isConnected else { return }
+        guard BackendConfig.isConfigured else { return }
+        guard self.currentUserID != nil else { return }
+        guard self.hasSupabaseAccessToken else { return }
+
+        guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
+        guard accountIDBackfillAttemptedUserIDs.contains(bid) == false else { return }
+        guard accountIDBackfillInFlightUserIDs.contains(bid) == false else { return }
+
+        accountIDBackfillAttemptedUserIDs.insert(bid)
+        accountIDBackfillInFlightUserIDs.insert(bid)
+
+        accountIDBackfillTask?.cancel()
+        accountIDBackfillTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.accountIDBackfillInFlightUserIDs.remove(bid)
+                }
+            }
+
+            let localAccountID = ProfileStore.accountID(for: bid)
+            let lookupEnabled = ProfileStore.discoveryModeRaw(for: bid) == 1
+
+            guard let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
+                userID: bid,
+                displayName: self.displayName ?? "",
+                localAccountID: localAccountID,
+                lookupEnabled: lookupEnabled,
+                followRequestsEnabled: nil,
+                location: nil,
+                instruments: nil
+            ) else { return }
+
+            ProfileStore.setAccountID(generated, for: bid)
+            NSLog("[Auth] account_id backfill generated user=%@ reason=%@ account_id=%@", bid, reason, generated)
         }
     }
 
@@ -443,6 +491,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
                 self.backendUserID = supaUserID
                 self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "refreshSupabaseSession")
+                self.scheduleAccountIDBackfillIfNeeded(reason: "refreshSupabaseSession")
             }
 
             NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
@@ -492,6 +541,10 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
         lastHydratedDirectoryUserID = nil
+        accountIDBackfillTask?.cancel()
+        accountIDBackfillTask = nil
+        accountIDBackfillAttemptedUserIDs.removeAll()
+        accountIDBackfillInFlightUserIDs.removeAll()
 
         let namespaceUserID = AttachmentTitlePersistenceKeys.normalize(
             BackendEnvironment.shared.isConnected
@@ -626,13 +679,15 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             UserDefaults.standard.set(supaUserID, forKey: Self.supabaseUserIDDefaultsKey)
             UserDefaults.standard.set(supaUserID, forKey: Self.backendUserDefaultsKey)
 
+            NetworkManager.shared.setBearerToken(accessToken)
+
             await MainActor.run {
                 self.backendUserID = supaUserID
                 self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "supabaseSignIn")
+                self.scheduleAccountIDBackfillIfNeeded(reason: "supabaseSignIn")
             }
 
-            NetworkManager.shared.setBearerToken(accessToken)
             NSLog("[Auth] Supabase sign-in success user=%@", supaUserID)
         } catch {
             NSLog("[Auth] Supabase sign-in failed: %@", String(describing: error))
