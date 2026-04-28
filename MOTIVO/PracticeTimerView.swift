@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260428_191500_ptv_setup_pending_branch
+// SCOPE: PracticeTimerView onboarding routing only — render AppSetUpView as the home-root branch for signed-in users with incomplete setup until backend proves an existing account; preserve completion handoff to normal timer.
+
+// CHANGE-ID: 20260428_171900_ptv_onboarding_routing_coordination
+// SCOPE: PracticeTimerView onboarding routing only — make setup gate win over ProfileView after sign-in and keep completion on timer home. No UI/layout, auth, backend, persistence, or ProfileView changes.
+
 // CHANGE-ID: 20260421_190800_ptv_session_meta_resolved_tint_handoff
 // SCOPE: Move SessionMetaCard tint meaning ownership into PracticeTimerView using bounded local-session recompute; SessionMetaCard becomes presentational only. No UI/layout/preload flow changes.
 
@@ -961,7 +967,7 @@ private func loadPracticeDefaultsIfNeeded() {
         }
 
         let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
-        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
+        let hasInstrument = fetchInstruments().contains(where: { $0.profile == profile })
 
         if !hasName { return "missingName|\(uid)" }
         if !hasInstrument { return "missingInstrument|\(uid)" }
@@ -973,9 +979,9 @@ private func loadPracticeDefaultsIfNeeded() {
         guard BackendConfig.isConfigured else { return false }
 
         switch auth.backendBootstrapState {
-        case .unknown, .checking, .existingAccount:
+        case .existingAccount:
             return false
-        case .newAccount:
+        case .unknown, .checking, .newAccount:
             break
         }
 
@@ -989,8 +995,18 @@ private func loadPracticeDefaultsIfNeeded() {
         let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
         if !hasName { return true }
 
-        let hasInstrument = allInstruments.contains(where: { $0.profile == profile })
+        let hasInstrument = fetchInstruments().contains(where: { $0.profile == profile })
         return !hasInstrument
+    }
+
+    private var shouldRenderAppSetUpRoot: Bool {
+        isHomePresentation && requiresAppSetUpNow()
+    }
+
+    private func completeAppSetUpAndRevealTimer() {
+        refreshInstrumentSelectionFromStore()
+        showAppSetUp = false
+        if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
     }
 
     private func evaluateAppSetUpGate() {
@@ -1006,9 +1022,11 @@ private func loadPracticeDefaultsIfNeeded() {
             return
         }
 
-        let shouldShow = requiresAppSetUpNow()
-        if shouldShow != showAppSetUp {
-            showAppSetUp = shouldShow
+        if requiresAppSetUpNow() {
+            if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
+            if showAppSetUp { showAppSetUp = false }
+        } else if showAppSetUp {
+            showAppSetUp = false
         }
     }
 
@@ -1017,7 +1035,7 @@ private func loadPracticeDefaultsIfNeeded() {
         guard BackendConfig.isConfigured else { return }
         guard !auth.isSignedIn else { return }
         guard !appRoute.isProfilePresented else { return }
-        handleProfileTap()
+        appRoute.isProfilePresented = true
     }
 
     private var launchGateEvaluationKey: String {
@@ -1032,6 +1050,12 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private func handleProfileTap() {
+        if requiresAppSetUpNow() {
+            if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
+            if showAppSetUp { showAppSetUp = false }
+            return
+        }
+
         appRoute.isProfilePresented = true
         showAppSetUp = false
     }
@@ -1150,12 +1174,24 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+    @ViewBuilder
     var body: some View {
-        NavigationStack {
-            mainScrollView
-                .navigationDestination(isPresented: $showMeView) {
-                    MeView()
-                }
+        if shouldRenderAppSetUpRoot {
+            AppSetUpView(onComplete: {
+                completeAppSetUpAndRevealTimer()
+            })
+            .interactiveDismissDisabled(true)
+            .onAppear {
+                if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
+                if showAppSetUp { showAppSetUp = false }
+            }
+        } else {
+            NavigationStack {
+                mainScrollView
+                    .navigationDestination(isPresented: $showMeView) {
+                        MeView()
+                    }
+            }
         }
     }
 
@@ -1453,13 +1489,6 @@ private func loadPracticeDefaultsIfNeeded() {
             }
         }
         #endif
-        .fullScreenCover(isPresented: $showAppSetUp) {
-            AppSetUpView(onComplete: {
-                refreshInstrumentSelectionFromStore()
-                showAppSetUp = false
-            })
-            .interactiveDismissDisabled(true)
-        }
         .sheet(isPresented: $showProfile) {
             ProfileView(onClose: { showProfile = false })
         }

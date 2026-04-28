@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260428_191500_ProfileSignInGateSuppress
+// SCOPE: ProfileView — close signed-out sign-in gate immediately after successful sign-in so setup root can render without signed-in ProfileView flash; no other UI/logic changes.
+// SEARCH-TOKEN: 20260428_191500_ProfileSignInGateSuppress
+
 // CHANGE-ID: 20260428_151500_ProfileAccountIDStaleStateGuard
 // SCOPE: Account ID sync hardening - prevent stale accountIDText from being posted for a new backend user; trigger generation from current backend identity only.
 // SEARCH-TOKEN: 20260428_151500_ProfileAccountIDStaleStateGuard
@@ -41,7 +45,7 @@
 // SEARCH-TOKEN: 20260227_124200_DeleteAccount_InvalidJWT_Fix
 
 // CHANGE-ID: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
-// SCOPE: UI-only — ProfileView: align signed-in Sign out action styling with signed-out Sign in (soft surface button, same size/typography); no logic/auth changes.
+// SCOPE: ProfileView onboarding routing only — after signed-out Apple sign-in gate succeeds, suppress signed-in Profile form rendering and close the gate; no UI/auth/profile logic changes.
 // SEARCH-TOKEN: 20260225_153600_PV_SignOutButtonSoftSurface_AlignAuthActions_1f6c2d
 
 // CHANGE-ID: 20260227_115200_Profile_DeleteAccount_Action
@@ -265,12 +269,21 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
      @State private var showTintModeSelection: Bool = false
- 
+    @State private var signedOutGateWasVisible: Bool = false
+    @State private var signedOutGateCloseRequested: Bool = false
+
+    private var shouldSuppressSignedInProfileAfterGateSignIn: Bool {
+        signedOutGateWasVisible && auth.currentUserID != nil && onClose != nil
+    }
+
      var body: some View {
          modalsAndAlerts(
              NavigationStack {
                 ZStack {
-                    if auth.isSignedIn {
+                    if shouldSuppressSignedInProfileAfterGateSignIn {
+                        Color.clear
+                            .onAppear(perform: closeSignedOutGateAfterSuccessfulSignInIfNeeded)
+                    } else if auth.isSignedIn {
                         Form {
                      Group {
                          profileSection
@@ -423,7 +436,19 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .padding(.horizontal, Theme.Spacing.l)
+            .onAppear {
+                signedOutGateWasVisible = true
+                signedOutGateCloseRequested = false
+            }
         }
+    }
+
+    private func closeSignedOutGateAfterSuccessfulSignInIfNeeded() {
+        guard signedOutGateWasVisible else { return }
+        guard signedOutGateCloseRequested == false else { return }
+        guard auth.currentUserID != nil else { return }
+        signedOutGateCloseRequested = true
+        onClose?()
     }
 
 
@@ -1488,6 +1513,11 @@ private func initials(from string: String) -> String {
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
             .onChange(of: auth.currentUserID) { oldValue, newValue in
+                if oldValue == nil, newValue != nil, signedOutGateWasVisible {
+                    closeSignedOutGateAfterSuccessfulSignInIfNeeded()
+                    return
+                }
+
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
                 // before we clear UI state (location is stored per-user in ProfileStore).
