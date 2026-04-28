@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260428_092600_practice_window_delayed_dot_fade
+// SCOPE: MeView-only PracticeWindowGlyph timing polish: keep centre-out line expansion speed, delay dominant dot reveal until line completes, and slow dot fade. No gating, layout, insight logic, or other cards changed.
+// SEARCH-TOKEN: 20260428_092600_practice_window_delayed_dot_fade
+// CHANGE-ID: 20260428_091500_practice_window_center_expand_dot_fade
+// SCOPE: MeView-only PracticeWindowGlyph animation refinement: line expands from centre while optional dot fades in; preserves existing gating, delays, layout, insight logic, and other cards.
+// SEARCH-TOKEN: 20260428_091500_practice_window_center_expand_dot_fade
 // CHANGE-ID: 20260427_214700_practice_window_dot_line_optical_parity
 // SCOPE: MeView-only PracticeWindowGlyph visual polish: optically extend line, retune dot positions, slow dot fade to Focus circle pace. No gating, layout, insight logic, or other cards changed.
 // SEARCH-TOKEN: 20260427_214700_practice_window_dot_line_optical_parity
@@ -2096,7 +2102,8 @@ private struct PracticeWindowGlyph: View {
     let insight: PracticeWindowInsight
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var revealProgress: CGFloat = 0
+    @State private var lineRevealProgress: CGFloat = 0
+    @State private var dotRevealProgress: CGFloat = 0
     @State private var hasAnimated = false
     @State private var isVisibleEnough = false
     @State private var hasResolvedInitialVisibility = false
@@ -2107,7 +2114,8 @@ private struct PracticeWindowGlyph: View {
     var body: some View {
         PracticeWindowGlyphCanvas(
             insight: insight,
-            progress: revealProgress,
+            lineProgress: lineRevealProgress,
+            dotProgress: dotRevealProgress,
             glyphColor: glyphColor
         )
         .frame(width: 108, height: 34)
@@ -2163,7 +2171,8 @@ private struct PracticeWindowGlyph: View {
 
         if reduceMotion {
             hasAnimated = true
-            revealProgress = 1
+            lineRevealProgress = 1
+            dotRevealProgress = 1
             return
         }
 
@@ -2171,15 +2180,23 @@ private struct PracticeWindowGlyph: View {
 
         hasAnimated = true
         let delay = useFocusSequenceDelay ? 5.1 : 0.35
-        withAnimation(.easeOut(duration: 5.0).delay(delay)) {
-            revealProgress = 1
+        let lineDuration: Double = 5.0
+        let dotDuration: Double = 2.6
+
+        withAnimation(.easeOut(duration: lineDuration).delay(delay)) {
+            lineRevealProgress = 1
+        }
+
+        withAnimation(.easeIn(duration: 1.6).delay(delay + lineDuration)) {
+            dotRevealProgress = 1
         }
     }
 
     private func resetAndReveal() {
         if reduceMotion {
             hasAnimated = true
-            revealProgress = 1
+            lineRevealProgress = 1
+            dotRevealProgress = 1
             return
         }
 
@@ -2187,7 +2204,8 @@ private struct PracticeWindowGlyph: View {
         transaction.disablesAnimations = true
         withTransaction(transaction) {
             hasAnimated = false
-            revealProgress = 0
+            lineRevealProgress = 0
+            dotRevealProgress = 0
         }
 
         DispatchQueue.main.async {
@@ -2205,12 +2223,16 @@ private struct PracticeWindowGlyphFramePreferenceKey: PreferenceKey {
 }
 private struct PracticeWindowGlyphCanvas: View, Animatable {
     let insight: PracticeWindowInsight
-    var progress: CGFloat
+    var lineProgress: CGFloat
+    var dotProgress: CGFloat
     let glyphColor: Color
 
-    var animatableData: CGFloat {
-        get { progress }
-        set { progress = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(lineProgress, dotProgress) }
+        set {
+            lineProgress = newValue.first
+            dotProgress = newValue.second
+        }
     }
 
     var body: some View {
@@ -2221,11 +2243,16 @@ private struct PracticeWindowGlyphCanvas: View, Animatable {
             let opticalExtension: CGFloat = 2.5
             let startX = insetX - opticalExtension
             let endX = insetX + availableWidth + opticalExtension
-            let resolvedProgress = Double(progress)
+            let fullLineWidth = max(endX - startX, 1)
+            let lineCenterX = startX + (fullLineWidth / 2)
+            let clampedLineProgress = min(max(lineProgress, 0), 1)
+            let clampedDotProgress = min(max(dotProgress, 0), 1)
+            let resolvedDotProgress = Double(clampedDotProgress)
+            let halfLineWidth = (fullLineWidth / 2) * clampedLineProgress
 
             var line = Path()
-            line.move(to: CGPoint(x: startX, y: centerY))
-            line.addLine(to: CGPoint(x: endX, y: centerY))
+            line.move(to: CGPoint(x: lineCenterX - halfLineWidth, y: centerY))
+            line.addLine(to: CGPoint(x: lineCenterX + halfLineWidth, y: centerY))
             context.stroke(
                 line,
                 with: .color(glyphColor.opacity(0.31)),
@@ -2246,11 +2273,11 @@ private struct PracticeWindowGlyphCanvas: View, Animatable {
 
             context.fill(
                 dotPath,
-                with: .color(glyphColor.opacity(0.62 * resolvedProgress))
+                with: .color(glyphColor.opacity(0.62 * resolvedDotProgress))
             )
             context.stroke(
                 dotPath,
-                with: .color(glyphColor.opacity(0.78 * resolvedProgress)),
+                with: .color(glyphColor.opacity(0.78 * resolvedDotProgress)),
                 lineWidth: 1.25
             )
         }
