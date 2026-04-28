@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260428_111500_DeleteAccountV2_RuntimeConnectedModeRestore
+// SCOPE: Delete Account v2 runtime reset — restore non-DEBUG Connected backend mode after bundled config bootstrap so immediate re-onboarding matches fresh install. No UI/layout or unrelated logic changes.
+// SEARCH-TOKEN: 20260428_111500-DELETE-ACCOUNT-V2-RUNTIME-CONNECTED-MODE-RESTORE
+
 // CHANGE-ID: 20260303_165200_DeleteAccountV2_Stage5C_UserDefaultsDomainWipe
 // SCOPE: Delete Account v2 Stage 5C — extend LocalFactoryReset to wipe ProfileStore (UserDefaults + local avatar files) and remote avatar caches. No other UI/logic changes.
 // SEARCH-TOKEN: 20260303_165200-DELETE-ACCOUNT-V2-STAGE5C-LOCALFACTORYRESET
@@ -58,6 +62,16 @@ enum LocalFactoryReset {
 
         // Re-apply bundled backend config (if present) so AppSetup gating can work immediately without restart.
         BackendConfig.bootstrapFromBundleIfNeededForFactoryReset()
+
+        #if !DEBUG
+        // Mirror MOTIVOApp.init() fresh-install default after a runtime factory reset.
+        // UserDefaults domain wipe removes backendMode_v1, but app init does not rerun before immediate re-onboarding.
+        if BackendConfig.isConfigured {
+            UserDefaults.standard.set(BackendMode.backendConnected.rawValue, forKey: BackendKeys.modeKey)
+            BackendConfig.apply()
+            NSLog("[LocalFactoryReset] restored Connected backend mode after factory reset bootstrap")
+        }
+        #endif
 
         // Wipe local profile identity artifacts (UserDefaults profile.* keys + local avatar files).
         // We intentionally do not rely on a user id here; ProfileStore will purge any profile.* keys.
