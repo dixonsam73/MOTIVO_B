@@ -270,7 +270,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @State private var showAboutEtudes: Bool = false
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
-    @State private var signedOutGateCloseRequested: Bool = false
+ 
 
     private var shouldSuppressSignedInProfileAfterGateSignIn: Bool {
         signedOutGateWasVisible && auth.currentUserID != nil && onClose != nil
@@ -282,7 +282,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 ZStack {
                     if shouldSuppressSignedInProfileAfterGateSignIn {
                         Color.clear
-                            .onAppear(perform: closeSignedOutGateAfterSuccessfulSignInIfNeeded)
                     } else if auth.isSignedIn {
                         Form {
                      Group {
@@ -438,18 +437,11 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             .padding(.horizontal, Theme.Spacing.l)
             .onAppear {
                 signedOutGateWasVisible = true
-                signedOutGateCloseRequested = false
             }
         }
     }
 
-    private func closeSignedOutGateAfterSuccessfulSignInIfNeeded() {
-        guard signedOutGateWasVisible else { return }
-        guard signedOutGateCloseRequested == false else { return }
-        guard auth.currentUserID != nil else { return }
-        signedOutGateCloseRequested = true
-        onClose?()
-    }
+    
 
 
 // MARK: - Sections
@@ -1513,10 +1505,7 @@ private func initials(from string: String) -> String {
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
             .onChange(of: auth.currentUserID) { oldValue, newValue in
-                if oldValue == nil, newValue != nil, signedOutGateWasVisible {
-                    closeSignedOutGateAfterSuccessfulSignInIfNeeded()
-                    return
-                }
+               
 
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
