@@ -11,6 +11,11 @@
 //  [ROLLBACK ANCHOR] v7.8 DesignLite — pre
 //
 import SwiftUI
+
+// CHANGE-ID: 20260429_155500_Theme_ThreadTintSlots
+// SCOPE: Theme.swift — add two restrained ThreadTint palette slots (slate, clay) and extend thread assignment order only; no tint logic/UI changes.
+// SEARCH-TOKEN: 20260429_155500_Theme_ThreadTintSlots
+
 import CoreData
 
 #if canImport(UIKit)
@@ -875,6 +880,8 @@ enum Theme {
             case apricot = 3
             case sage = 4
             case lavender = 5
+            case slate = 6
+            case clay = 7
         }
 
         private static let defaultsKeyPrefix = "theme.threadTint.slotMap.v1"
@@ -1011,7 +1018,9 @@ enum Theme {
             .rose,
             .sage,
             .apricot,
-            .lavender
+            .lavender,
+            .slate,
+            .clay
         ]
 
         private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
@@ -1050,6 +1059,14 @@ enum Theme {
                 return Color(red: 0.84, green: 0.81, blue: 0.88)
             case (.lavender, .dark):
                 return Color(red: 0.38, green: 0.34, blue: 0.43)
+            case (.slate, .light):
+                return Color(red: 0.78, green: 0.82, blue: 0.76)
+            case (.slate, .dark):
+                return Color(red: 0.34, green: 0.39, blue: 0.32)
+            case (.clay, .light):
+                return Color(red: 0.86, green: 0.78, blue: 0.72)
+            case (.clay, .dark):
+                return Color(red: 0.42, green: 0.34, blue: 0.29)
             }
         }
 
