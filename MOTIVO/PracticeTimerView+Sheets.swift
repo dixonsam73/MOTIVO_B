@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260429_102500_AVVTrimPlaybackCopy
+// SCOPE: PTV attachment viewer trim callbacks — pass disposable copies to trim persistence so AVV keeps its active playback URL alive after video replace/save-as-new. No UI, recorder, trim export, or non-viewer logic changes.
+// SEARCH-TOKEN: 20260429_102500_AVVTrimPlaybackCopy
+
 // CHANGE-ID: 20260324_144300_ptv_sheets_root_route_reviewsave
 // SCOPE: Root-route handoff only — review save in home presentation now switches AppRoute directly to .content instead of triggering modal ContentView presentation. No UI/layout or sheet architecture changes.
 // SEARCH-TOKEN: 20260324_144300_ptv_sheets_root_route_reviewsave
@@ -232,6 +236,24 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
             return UUID(uuidString: stem)
         }
 
+        func disposableTrimPersistenceURL(from url: URL) -> URL {
+            let fm = FileManager.default
+            let ext = url.pathExtension
+            let filename = ext.isEmpty
+                ? UUID().uuidString
+                : "\(UUID().uuidString).\(ext)"
+            let copyURL = fm.temporaryDirectory.appendingPathComponent(filename)
+            do {
+                try fm.copyItem(at: url, to: copyURL)
+                return copyURL
+            } catch {
+#if DEBUG
+                print("[PTV] attachmentViewer trim copy failed; falling back to original URL: \(error)")
+#endif
+                return url
+            }
+        }
+
         return AttachmentViewerView(
             imageURLs: imageURLs,
             startIndex: startIndex,
@@ -325,7 +347,7 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                     if let item = stagedVideos.first(where: { $0.id == uuid })
                         ?? stagedAudio.first(where: { $0.id == uuid })
                         ?? stagedImages.first(where: { $0.id == uuid }) {
-                        handleTrimReplaceOriginal(from: newURL, for: item)
+                        handleTrimReplaceOriginal(from: disposableTrimPersistenceURL(from: newURL), for: item)
                     }
                 }
             },
@@ -334,7 +356,7 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                     if let item = stagedVideos.first(where: { $0.id == uuid })
                         ?? stagedAudio.first(where: { $0.id == uuid })
                         ?? stagedImages.first(where: { $0.id == uuid }) {
-                        handleTrimSaveAsNew(from: newURL, basedOn: item)
+                        handleTrimSaveAsNew(from: disposableTrimPersistenceURL(from: newURL), basedOn: item)
                     }
                 }
             },
