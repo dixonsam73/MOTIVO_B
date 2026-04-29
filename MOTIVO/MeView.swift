@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260429_152800_MeView_ThreadCardsTint
+// SCOPE: MeView — apply existing card tint treatment to thread-specific insight cards when resolved tint source is Thread only; preserve instrument/activity tint behaviour.
+// SEARCH-TOKEN: 20260429_152800_MeView_ThreadCardsTint
+
+// CHANGE-ID: 20260429_143500_MeView_ThreadTintMode
+// SCOPE: MeView tint handling only — add Thread tint source support after Theme enum expansion; preserve all insight/layout/data behaviour.
+// SEARCH-TOKEN: 20260429_143500_MeView_ThreadTintMode
+
 // CHANGE-ID: 20260428_092600_practice_window_delayed_dot_fade
 // SCOPE: MeView-only PracticeWindowGlyph timing polish: keep centre-out line expansion speed, delay dominant dot reveal until line completes, and slow dot fade. No gating, layout, insight logic, or other cards changed.
 // SEARCH-TOKEN: 20260428_092600_practice_window_delayed_dot_fade
@@ -239,6 +247,7 @@ struct MeView: View {
     @State private var topActivityByTime: (name: String, seconds: Int)? = nil
     @State private var instrumentTintCounts: [String: Int] = [:]
     @State private var activityTintCounts: [String: Int] = [:]
+    @State private var threadTintCounts: [String: Int] = [:]
     @State private var timeDistributionSlices: [ActivitySlice] = []
     @State private var threadDistributionSlices: [ActivitySlice] = []
     @State private var instrumentDistributionSlices: [ActivitySlice] = []
@@ -285,7 +294,12 @@ struct MeView: View {
                             .buttonStyle(InsightCardButtonStyle())
                         }
                         if let insight = bestThreadFocus {
-                            BestFocusCategoryInsightCard(title: "Most focused thread", insight: insight)
+                            BestFocusCategoryInsightCard(
+                                title: "Most focused thread",
+                                insight: insight,
+                                fillColor: bestThreadFocusCardFillColor,
+                                strokeColor: bestThreadFocusCardStrokeColor
+                            )
                         }
                         if let insight = bestInstrumentFocus {
                             BestFocusCategoryInsightCard(
@@ -306,7 +320,11 @@ struct MeView: View {
                     }
                 }
 if let insights, hasVisibleInterpretiveInsights {
-    InterpretiveInsightsStack(insights: insights)
+    InterpretiveInsightsStack(
+        insights: insights,
+        emergingThreadFillColor: emergingThreadCardFillColor,
+        emergingThreadStrokeColor: emergingThreadCardStrokeColor
+    )
 }
                 AdaptiveGrid {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
@@ -374,7 +392,11 @@ if let insights, hasVisibleInterpretiveInsights {
                         TimeDistributionCard(title: "Time by thread", slices: threadDistributionSlices)
                     }
                     if topThread != nil {
-                        TopThreadCard(winner: topThread)
+                        TopThreadCard(
+                            winner: topThread,
+                            fillColor: topThreadCardFillColor,
+                            strokeColor: topThreadCardStrokeColor
+                        )
                     }
                     if instrumentUniqueCountInRange >= 2 {
                         TimeDistributionCard(title: "Time by instrument", slices: instrumentDistributionSlices)
@@ -607,6 +629,9 @@ if let insights, hasVisibleInterpretiveInsights {
         threadDistributionSlices = threadStats.slices
         threadUniqueCountInRange = threadStats.uniqueCount
         topThread = threadStats.top
+        threadTintCounts = categoryCounts(from: sessionsInRange) { s in
+            threadLabel(for: s)
+        }
         let instrumentTotals = categoryTotals(from: sessionsInRange) { s in
             instrumentLabel(for: s)
         }
@@ -619,9 +644,7 @@ if let insights, hasVisibleInterpretiveInsights {
 
         highestFocusSession = highestFocusInsight(from: sessionsInRange)
         bestThreadFocus = bestFocusCategoryInsight(from: sessionsInRange, requiresMultipleEligibleGroups: true) { session in
-            let raw = session.value(forKey: "threadLabel") as? String
-            let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return trimmed.isEmpty ? nil : trimmed
+            threadLabel(for: session)
         }
 
         if hasMeaningfulInstrumentVariation(in: allSessions, fallbackSessions: sessionsInRange) {
@@ -700,6 +723,7 @@ if let insights, hasVisibleInterpretiveInsights {
 
         threadDistributionSlices = []
         threadUniqueCountInRange = 0
+        threadTintCounts = [:]
         topThread = nil
         highestFocusSession = nil
         bestThreadFocus = nil
@@ -756,6 +780,8 @@ if let insights, hasVisibleInterpretiveInsights {
             return .instrument
         case .activity:
             return .activity
+        case .thread:
+            return .thread
         case .auto:
             if let storedSource = Theme.storedAutoTintSource(), storedSource != .off {
                 return storedSource
@@ -769,12 +795,16 @@ if let insights, hasVisibleInterpretiveInsights {
                 let label = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                 return label.isEmpty ? nil : label
             }
+            let globalThreadCounts = categoryCounts(from: allSessions) { s in
+                threadLabel(for: s)
+            }
 
-            if globalInstrumentCounts.isEmpty == false || globalActivityCounts.isEmpty == false {
+            if globalInstrumentCounts.isEmpty == false || globalActivityCounts.isEmpty == false || globalThreadCounts.isEmpty == false {
                 return Theme.resolvedTintSource(
                     tintMode: .auto,
                     instrumentCounts: globalInstrumentCounts,
                     activityCounts: globalActivityCounts,
+                    threadCounts: globalThreadCounts,
                     persistedAutoSource: nil,
                     persistAutoSource: false
                 )
@@ -784,6 +814,7 @@ if let insights, hasVisibleInterpretiveInsights {
                 tintMode: .auto,
                 instrumentCounts: instrumentTintCounts,
                 activityCounts: activityTintCounts,
+                threadCounts: threadTintCounts,
                 persistedAutoSource: nil,
                 persistAutoSource: false
             )
@@ -800,6 +831,17 @@ if let insights, hasVisibleInterpretiveInsights {
             insights.returnPattern != .insufficientData ||
             insights.practiceWindow != .insufficientData ||
             insights.sessionShape != .insufficientData
+    }
+
+    private var bestThreadFocusCardTint: Theme.ResolvedTint? {
+        guard let insight = bestThreadFocus else { return nil }
+        guard topWinnerActiveTintSource == .thread else { return nil }
+        return Theme.ResolvedTint(
+            source: .thread,
+            instrumentLabel: nil,
+            activityLabel: nil,
+            threadLabel: insight.name
+        )
     }
 
     private var bestInstrumentFocusCardTint: Theme.ResolvedTint? {
@@ -819,6 +861,22 @@ if let insights, hasVisibleInterpretiveInsights {
             source: .activity,
             instrumentLabel: nil,
             activityLabel: insight.name
+        )
+    }
+
+    private var bestThreadFocusCardFillColor: Color? {
+        bestThreadFocusCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var bestThreadFocusCardStrokeColor: Color? {
+        bestThreadFocusCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
         )
     }
 
@@ -874,6 +932,17 @@ if let insights, hasVisibleInterpretiveInsights {
         )
     }
 
+    private var topThreadCardTint: Theme.ResolvedTint? {
+        guard let winner = topThread else { return nil }
+        guard topWinnerActiveTintSource == .thread else { return nil }
+        return Theme.ResolvedTint(
+            source: .thread,
+            instrumentLabel: nil,
+            activityLabel: nil,
+            threadLabel: winner.name
+        )
+    }
+
     private var topActivityCardFillColor: Color? {
         topActivityCardTint?.fill(
             ownerID: topWinnerTintOwnerID,
@@ -906,6 +975,49 @@ if let insights, hasVisibleInterpretiveInsights {
         )
     }
 
+    private var topThreadCardFillColor: Color? {
+        topThreadCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var topThreadCardStrokeColor: Color? {
+        topThreadCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var emergingThreadCardTint: Theme.ResolvedTint? {
+        guard let emerging = insights?.emergingThread else { return nil }
+        guard topWinnerActiveTintSource == .thread else { return nil }
+        return Theme.ResolvedTint(
+            source: .thread,
+            instrumentLabel: nil,
+            activityLabel: nil,
+            threadLabel: emerging.name
+        )
+    }
+
+    private var emergingThreadCardFillColor: Color? {
+        emergingThreadCardTint?.fill(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
+    private var emergingThreadCardStrokeColor: Color? {
+        emergingThreadCardTint?.stroke(
+            ownerID: topWinnerTintOwnerID,
+            scheme: colorScheme,
+            strength: .cardMediumLight
+        )
+    }
+
     private func sessionMomentCardTint(for session: Session?) -> Theme.ResolvedTint? {
         guard let session else { return nil }
 
@@ -925,6 +1037,14 @@ if let insights, hasVisibleInterpretiveInsights {
                 source: .activity,
                 instrumentLabel: nil,
                 activityLabel: label
+            )
+        case .thread:
+            guard let label = threadLabel(for: session) else { return nil }
+            return Theme.ResolvedTint(
+                source: .thread,
+                instrumentLabel: nil,
+                activityLabel: nil,
+                threadLabel: label
             )
         case .off:
             return nil
@@ -1234,6 +1354,12 @@ if let insights, hasVisibleInterpretiveInsights {
     }
 
     // MARK: - Time-based category helpers
+    private func threadLabel(for session: Session) -> String? {
+        let raw = session.value(forKey: "threadLabel") as? String
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     private func categoryTotals(from sessions: [Session], label: (Session) -> String?) -> [String: Int] {
         var totals: [String: Int] = [:]
         for s in sessions {
@@ -1365,11 +1491,27 @@ fileprivate struct AdaptiveGrid<Content: View>: View {
 
 fileprivate struct InterpretiveInsightsStack: View {
     let insights: MeViewInsights
+    let emergingThreadFillColor: Color?
+    let emergingThreadStrokeColor: Color?
+
+    init(
+        insights: MeViewInsights,
+        emergingThreadFillColor: Color? = nil,
+        emergingThreadStrokeColor: Color? = nil
+    ) {
+        self.insights = insights
+        self.emergingThreadFillColor = emergingThreadFillColor
+        self.emergingThreadStrokeColor = emergingThreadStrokeColor
+    }
 
     var body: some View {
         VStack(spacing: Theme.Spacing.section) {
             if let emerging = insights.emergingThread {
-                EmergingThreadCard(insight: emerging)
+                EmergingThreadCard(
+                    insight: emerging,
+                    fillColor: emergingThreadFillColor,
+                    strokeColor: emergingThreadStrokeColor
+                )
             }
             if insights.returnPattern != .insufficientData {
                 ReturnPatternCard(insight: insights.returnPattern)
@@ -1771,7 +1913,21 @@ fileprivate struct BestFocusCategoryInsightCard: View {
 
 
 fileprivate struct EmergingThreadCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let insight: EmergingThreadInsight
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        insight: EmergingThreadInsight,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.insight = insight
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -1785,7 +1941,11 @@ fileprivate struct EmergingThreadCard: View {
                 .font(Theme.Text.meta)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Emerging thread: \(insight.name), more regular in your practice")
     }
@@ -2578,7 +2738,21 @@ fileprivate struct TopTimeWinnerCard: View {
 
 
 fileprivate struct TopThreadCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let winner: (name: String, seconds: Int)?
+    let fillColor: Color?
+    let strokeColor: Color?
+
+    init(
+        winner: (name: String, seconds: Int)?,
+        fillColor: Color? = nil,
+        strokeColor: Color? = nil
+    ) {
+        self.winner = winner
+        self.fillColor = fillColor
+        self.strokeColor = strokeColor
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -2601,7 +2775,11 @@ fileprivate struct TopThreadCard: View {
                     .foregroundStyle(.secondary)
             }
         }
-.cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(
+            padding: Theme.Spacing.m,
+            fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
+            strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
+        )
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }

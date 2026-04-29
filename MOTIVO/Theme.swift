@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260424_135500_Theme_AutoTintStrongInstrumentOverride
-// SCOPE: Refine Auto tint sticky logic so overwhelmingly stronger instrument variation can reclaim stale activity selection. No palette or visual treatment changes.
+// CHANGE-ID: 20260429_142200_Theme_ThreadTintMode
+// SCOPE: Add Thread as a selectable tint mode and Auto fallback source while preserving existing Instrument/Activity tint behaviour.
 //
 //  Theme.swift
 //  MOTIVO
@@ -87,6 +87,7 @@ enum Theme {
         case auto
         case instrument
         case activity
+        case thread
         case off
 
         var id: String { rawValue }
@@ -96,6 +97,7 @@ enum Theme {
             case .auto: return "Auto"
             case .instrument: return "Instrument"
             case .activity: return "Activity"
+            case .thread: return "Thread"
             case .off: return "Off"
             }
         }
@@ -104,6 +106,7 @@ enum Theme {
     enum ResolvedTintSource: String {
         case instrument
         case activity
+        case thread
         case off
     }
 
@@ -111,6 +114,19 @@ enum Theme {
         let source: ResolvedTintSource
         let instrumentLabel: String?
         let activityLabel: String?
+        let threadLabel: String?
+
+        init(
+            source: ResolvedTintSource,
+            instrumentLabel: String?,
+            activityLabel: String?,
+            threadLabel: String? = nil
+        ) {
+            self.source = source
+            self.instrumentLabel = instrumentLabel
+            self.activityLabel = activityLabel
+            self.threadLabel = threadLabel
+        }
 
         var isDormant: Bool {
             source == .off
@@ -136,6 +152,14 @@ enum Theme {
                     for: activityLabel,
                     scheme: scheme,
                     strength: strength
+                )
+            case .thread:
+                return ThreadTint.surfaceFill(
+                    for: threadLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    strength: strength,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
                 )
             case .off:
                 return Colors.surface(scheme)
@@ -163,6 +187,14 @@ enum Theme {
                     scheme: scheme,
                     strength: strength
                 )
+            case .thread:
+                return ThreadTint.cardStroke(
+                    for: threadLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    strength: strength,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                )
             case .off:
                 return Colors.cardStroke(scheme)
             }
@@ -185,6 +217,13 @@ enum Theme {
                 return ActivityTint.visibleAccentColor(
                     for: activityLabel,
                     scheme: scheme
+                )
+            case .thread:
+                return ThreadTint.visibleAccentColor(
+                    for: threadLabel,
+                    ownerID: ownerID,
+                    scheme: scheme,
+                    shouldAssignIfNeeded: shouldAssignIfNeeded
                 )
             case .off:
                 return nil
@@ -250,6 +289,10 @@ enum Theme {
         return summary.secondMostUsedCount >= 2 || summary.distinctCount >= 3
     }
 
+    static func meaningfulThreadVariation(from counts: [String: Int]) -> Bool {
+        variationSummary(from: counts).hasMeaningfulVariation
+    }
+
     static func instrumentVariationStronglyOutweighsActivity(
         instrumentCounts: [String: Int],
         activityCounts: [String: Int]
@@ -287,12 +330,16 @@ enum Theme {
     static func resolvedAutoTintSource(
         instrumentCounts: [String: Int],
         activityCounts: [String: Int],
+        threadCounts: [String: Int] = [:],
         persistedSource: ResolvedTintSource? = nil,
         persistResult: Bool = true
     ) -> ResolvedTintSource {
         let instrumentMeaningful = meaningfulInstrumentVariation(from: instrumentCounts)
         let activityMeaningful = meaningfulActivityVariation(from: activityCounts)
+        let threadMeaningful = meaningfulThreadVariation(from: threadCounts)
         let currentSource = persistedSource ?? storedAutoTintSource()
+
+        let fallbackSource: ResolvedTintSource = threadMeaningful ? .thread : .off
 
         let resolved: ResolvedTintSource
         switch currentSource {
@@ -302,7 +349,7 @@ enum Theme {
             } else if activityMeaningful {
                 resolved = .activity
             } else {
-                resolved = .off
+                resolved = fallbackSource
             }
 
         case .activity:
@@ -316,6 +363,17 @@ enum Theme {
             } else if instrumentMeaningful {
                 resolved = .instrument
             } else {
+                resolved = fallbackSource
+            }
+
+        case .thread:
+            if threadMeaningful && !instrumentMeaningful && !activityMeaningful {
+                resolved = .thread
+            } else if instrumentMeaningful {
+                resolved = .instrument
+            } else if activityMeaningful {
+                resolved = .activity
+            } else {
                 resolved = .off
             }
 
@@ -325,7 +383,7 @@ enum Theme {
             } else if activityMeaningful {
                 resolved = .activity
             } else {
-                resolved = .off
+                resolved = fallbackSource
             }
         }
 
@@ -338,7 +396,8 @@ enum Theme {
     static func resolvedTintSource(
         tintMode: TintMode,
         activeInstrumentCount: Int,
-        activeActivityCount: Int
+        activeActivityCount: Int,
+        activeThreadCount: Int = 0
     ) -> ResolvedTintSource {
         switch tintMode {
         case .off:
@@ -350,11 +409,16 @@ enum Theme {
             if activeInstrumentCount == 1 && activeActivityCount > 1 {
                 return .activity
             }
+            if activeInstrumentCount <= 1 && activeActivityCount <= 1 && activeThreadCount > 1 {
+                return .thread
+            }
             return .off
         case .instrument:
             return activeInstrumentCount > 1 ? .instrument : .off
         case .activity:
             return activeActivityCount > 1 ? .activity : .off
+        case .thread:
+            return activeThreadCount > 1 ? .thread : .off
         }
     }
 
@@ -362,6 +426,7 @@ enum Theme {
         tintMode: TintMode,
         instrumentCounts: [String: Int],
         activityCounts: [String: Int],
+        threadCounts: [String: Int] = [:],
         persistedAutoSource: ResolvedTintSource? = nil,
         persistAutoSource: Bool = true
     ) -> ResolvedTintSource {
@@ -372,10 +437,13 @@ enum Theme {
             return meaningfulInstrumentVariation(from: instrumentCounts) ? .instrument : .off
         case .activity:
             return meaningfulActivityVariation(from: activityCounts) ? .activity : .off
+        case .thread:
+            return meaningfulThreadVariation(from: threadCounts) ? .thread : .off
         case .auto:
             return resolvedAutoTintSource(
                 instrumentCounts: instrumentCounts,
                 activityCounts: activityCounts,
+                threadCounts: threadCounts,
                 persistedSource: persistedAutoSource,
                 persistResult: persistAutoSource
             )
@@ -385,29 +453,35 @@ enum Theme {
     static func resolvedTint(
         instrument: String?,
         activity: String?,
+        thread: String? = nil,
         tintMode: TintMode,
         activeInstrumentCount: Int,
-        activeActivityCount: Int
+        activeActivityCount: Int,
+        activeThreadCount: Int = 0
     ) -> ResolvedTint {
         let source = resolvedTintSource(
             tintMode: tintMode,
             activeInstrumentCount: activeInstrumentCount,
-            activeActivityCount: activeActivityCount
+            activeActivityCount: activeActivityCount,
+            activeThreadCount: activeThreadCount
         )
 
         return ResolvedTint(
             source: source,
             instrumentLabel: instrument,
-            activityLabel: activity
+            activityLabel: activity,
+            threadLabel: thread
         )
     }
 
     static func resolvedTint(
         instrument: String?,
         activity: String?,
+        thread: String? = nil,
         tintMode: TintMode,
         instrumentCounts: [String: Int],
         activityCounts: [String: Int],
+        threadCounts: [String: Int] = [:],
         persistedAutoSource: ResolvedTintSource? = nil,
         persistAutoSource: Bool = true
     ) -> ResolvedTint {
@@ -415,6 +489,7 @@ enum Theme {
             tintMode: tintMode,
             instrumentCounts: instrumentCounts,
             activityCounts: activityCounts,
+            threadCounts: threadCounts,
             persistedAutoSource: persistedAutoSource,
             persistAutoSource: persistAutoSource
         )
@@ -422,7 +497,8 @@ enum Theme {
         return ResolvedTint(
             source: source,
             instrumentLabel: instrument,
-            activityLabel: activity
+            activityLabel: activity,
+            threadLabel: thread
         )
     }
 
@@ -717,6 +793,282 @@ enum Theme {
         }
 
         private static func strokeBlendAmount(for strength: Strength, scheme: ColorScheme) -> CGFloat {
+            switch (strength, scheme) {
+            case (.pickerStrong, .light): return 0.28
+            case (.pickerStrong, .dark): return 0.24
+            case (.cardMedium, .light): return 0.22
+            case (.cardMedium, .dark): return 0.18
+            case (.cardMediumLight, .light): return 0.14
+            case (.cardMediumLight, .dark): return 0.13
+            case (.cardLight, .light): return 0.10
+            case (.cardLight, .dark): return 0.10
+            case (.monthBar, .light): return 0.16
+            case (.monthBar, .dark): return 0.14
+            }
+        }
+
+        private static func blendedSurface(base: Color, overlay: Color, amount: CGFloat) -> Color {
+            guard amount > 0 else { return base }
+
+            #if canImport(UIKit)
+            let baseUIColor = UIColor(base)
+            let overlayUIColor = UIColor(overlay)
+            return Color(uiColor: mix(base: baseUIColor, overlay: overlayUIColor, amount: amount))
+            #elseif canImport(AppKit)
+            let baseNSColor = NSColor(base)
+            let overlayNSColor = NSColor(overlay)
+            return Color(mix(base: baseNSColor, overlay: overlayNSColor, amount: amount))
+            #else
+            return overlay.opacity(amount)
+            #endif
+        }
+
+        #if canImport(UIKit)
+        private static func mix(base: UIColor, overlay: UIColor, amount: CGFloat) -> UIColor {
+            let clamped = max(0, min(1, amount))
+            var baseR: CGFloat = 0
+            var baseG: CGFloat = 0
+            var baseB: CGFloat = 0
+            var baseA: CGFloat = 0
+            var overlayR: CGFloat = 0
+            var overlayG: CGFloat = 0
+            var overlayB: CGFloat = 0
+            var overlayA: CGFloat = 0
+
+            guard base.getRed(&baseR, green: &baseG, blue: &baseB, alpha: &baseA),
+                  overlay.getRed(&overlayR, green: &overlayG, blue: &overlayB, alpha: &overlayA) else {
+                return base
+            }
+
+            return UIColor(
+                red: baseR + (overlayR - baseR) * clamped,
+                green: baseG + (overlayG - baseG) * clamped,
+                blue: baseB + (overlayB - baseB) * clamped,
+                alpha: baseA + (overlayA - baseA) * clamped
+            )
+        }
+        #endif
+
+        #if canImport(AppKit)
+        private static func mix(base: NSColor, overlay: NSColor, amount: CGFloat) -> NSColor {
+            let clamped = max(0, min(1, amount))
+            guard let baseRGB = base.usingColorSpace(.deviceRGB),
+                  let overlayRGB = overlay.usingColorSpace(.deviceRGB) else {
+                return base
+            }
+
+            return NSColor(
+                red: baseRGB.redComponent + (overlayRGB.redComponent - baseRGB.redComponent) * clamped,
+                green: baseRGB.greenComponent + (overlayRGB.greenComponent - baseRGB.greenComponent) * clamped,
+                blue: baseRGB.blueComponent + (overlayRGB.blueComponent - baseRGB.blueComponent) * clamped,
+                alpha: baseRGB.alphaComponent + (overlayRGB.alphaComponent - baseRGB.alphaComponent) * clamped
+            )
+        }
+        #endif
+    }
+
+
+    enum ThreadTint {
+        enum Slot: Int, CaseIterable {
+            case coolDeep = 1
+            case rose = 2
+            case apricot = 3
+            case sage = 4
+            case lavender = 5
+        }
+
+        private static let defaultsKeyPrefix = "theme.threadTint.slotMap.v1"
+
+        static func normalizedLabel(_ label: String?) -> String? {
+            guard let label else { return nil }
+            let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return nil }
+
+            return trimmed
+                .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .lowercased()
+        }
+
+        static func slot(
+            for threadLabel: String?,
+            ownerID: String?,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Slot? {
+            guard let normalized = normalizedLabel(threadLabel) else { return nil }
+
+            let namespace = namespaceKey(ownerID: ownerID)
+            var map = slotMap(ownerID: ownerID)
+
+            if let existing = map[normalized], let slot = Slot(rawValue: existing) {
+                return slot
+            }
+
+            guard shouldAssignIfNeeded else { return nil }
+
+            let nextSlot = nextAvailableSlot(from: map)
+            map[normalized] = nextSlot.rawValue
+            UserDefaults.standard.set(map, forKey: namespace)
+            return nextSlot
+        }
+
+        static func surfaceFill(
+            for threadLabel: String?,
+            ownerID: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color {
+            let base = Theme.Colors.surface(scheme)
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+                return base
+            }
+            return blendedSurface(base: base, overlay: paletteColor(for: slot, scheme: scheme), amount: blendAmount(for: strength, scheme: scheme))
+        }
+
+        static func cardStroke(
+            for threadLabel: String?,
+            ownerID: String?,
+            scheme: ColorScheme,
+            strength: InstrumentTint.Strength,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color {
+            let baseStroke = Theme.Colors.cardStroke(scheme)
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+                return baseStroke
+            }
+            return blendedSurface(base: baseStroke, overlay: paletteColor(for: slot, scheme: scheme), amount: strokeBlendAmount(for: strength, scheme: scheme))
+        }
+
+        static func visibleAccentColor(
+            for threadLabel: String?,
+            ownerID: String?,
+            scheme: ColorScheme,
+            shouldAssignIfNeeded: Bool = true
+        ) -> Color? {
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+                return nil
+            }
+            return paletteColor(for: slot, scheme: scheme)
+        }
+
+        static func debugSlotMap(ownerID: String?) -> [String: Int] {
+            slotMap(ownerID: ownerID)
+        }
+
+        private static func namespaceKey(ownerID: String?) -> String {
+            let normalizedOwner = ownerID?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+                .lowercased()
+            if let normalizedOwner, !normalizedOwner.isEmpty {
+                return "\(defaultsKeyPrefix).\(normalizedOwner)"
+            }
+            return "\(defaultsKeyPrefix).__anonymous__"
+        }
+
+        private static func slotMap(ownerID: String?) -> [String: Int] {
+            let namespace = namespaceKey(ownerID: ownerID)
+            let rawMap = UserDefaults.standard.dictionary(forKey: namespace) as? [String: Int] ?? [:]
+            let sanitized = sanitizedSlotMap(rawMap)
+            if sanitized != rawMap {
+                UserDefaults.standard.set(sanitized, forKey: namespace)
+            }
+            return sanitized
+        }
+
+        private static func sanitizedSlotMap(_ rawMap: [String: Int]) -> [String: Int] {
+            let orderedLabels = rawMap.keys.sorted { lhs, rhs in
+                let leftValue = rawMap[lhs] ?? Int.max
+                let rightValue = rawMap[rhs] ?? Int.max
+                if leftValue != rightValue { return leftValue < rightValue }
+                return lhs < rhs
+            }
+
+            var cleaned: [String: Int] = [:]
+            var pending: [String] = []
+            var usedVisibleSlots = Set<Int>()
+
+            for label in orderedLabels {
+                guard let rawValue = rawMap[label], let slot = Slot(rawValue: rawValue) else { continue }
+
+                if usedVisibleSlots.contains(slot.rawValue) {
+                    pending.append(label)
+                } else {
+                    cleaned[label] = slot.rawValue
+                    usedVisibleSlots.insert(slot.rawValue)
+                }
+            }
+
+            for label in pending {
+                let nextSlot = nextAvailableSlot(from: cleaned)
+                cleaned[label] = nextSlot.rawValue
+            }
+
+            return cleaned
+        }
+
+        private static let visibleAssignmentPriority: [Slot] = [
+            .coolDeep,
+            .rose,
+            .sage,
+            .apricot,
+            .lavender
+        ]
+
+        private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
+            let usedVisibleSlots = visibleAssignmentPriority.filter { usedSlot in
+                Set(map.values).contains(usedSlot.rawValue)
+            }
+
+            for slot in visibleAssignmentPriority where !usedVisibleSlots.contains(slot) {
+                return slot
+            }
+
+            let usedCount = usedVisibleSlots.count
+            guard !visibleAssignmentPriority.isEmpty else { return .lavender }
+            return visibleAssignmentPriority[usedCount % visibleAssignmentPriority.count]
+        }
+
+        private static func paletteColor(for slot: Slot, scheme: ColorScheme) -> Color {
+            switch (slot, scheme) {
+            case (.coolDeep, .light):
+                return Color(red: 0.70, green: 0.76, blue: 0.82)
+            case (.coolDeep, .dark):
+                return Color(red: 0.31, green: 0.37, blue: 0.43)
+            case (.rose, .light):
+                return Color(red: 0.89, green: 0.81, blue: 0.84)
+            case (.rose, .dark):
+                return Color(red: 0.43, green: 0.34, blue: 0.38)
+            case (.apricot, .light):
+                return Color(red: 0.90, green: 0.82, blue: 0.75)
+            case (.apricot, .dark):
+                return Color(red: 0.45, green: 0.36, blue: 0.30)
+            case (.sage, .light):
+                return Color(red: 0.79, green: 0.85, blue: 0.80)
+            case (.sage, .dark):
+                return Color(red: 0.33, green: 0.40, blue: 0.35)
+            case (.lavender, .light):
+                return Color(red: 0.84, green: 0.81, blue: 0.88)
+            case (.lavender, .dark):
+                return Color(red: 0.38, green: 0.34, blue: 0.43)
+            }
+        }
+
+        private static func blendAmount(for strength: InstrumentTint.Strength, scheme: ColorScheme) -> CGFloat {
+            switch (strength, scheme) {
+            case (.pickerStrong, .light): return 0.42
+            case (.pickerStrong, .dark): return 0.34
+            case (.cardMedium, .light): return 0.32
+            case (.cardMedium, .dark): return 0.24
+            case (.cardMediumLight, .light): return 0.20
+            case (.cardMediumLight, .dark): return 0.18
+            case (.cardLight, .light): return 0.14
+            case (.cardLight, .dark): return 0.14
+            case (.monthBar, .light): return 0.24
+            case (.monthBar, .dark): return 0.20
+            }
+        }
+
+        private static func strokeBlendAmount(for strength: InstrumentTint.Strength, scheme: ColorScheme) -> CGFloat {
             switch (strength, scheme) {
             case (.pickerStrong, .light): return 0.28
             case (.pickerStrong, .dark): return 0.24

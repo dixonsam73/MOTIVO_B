@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260429_145500_ContentView_ThreadTintWiring
+// SCOPE: ContentView - wire Thread tint counts and labels into owner-local Journal tint resolution; preserve existing instrument/activity behavior, filters, layout, navigation, backend surfaces, and row rendering.
+// SEARCH-TOKEN: 20260429_145500_ContentView_ThreadTintWiring
+
 // CHANGE-ID: 20260426_184250_PeoplePulseCancelFix_a81f
 // SCOPE: Cancel People notification pulse in-place when unseen People notifications clear; preserve existing single-icon notification behaviour
 // SEARCH-TOKEN: 20260426_184250_PeoplePulseCancelFix_a81f
@@ -408,6 +412,7 @@ struct JournalYearMonthRowModel: Identifiable {
     let metadataText: String?
     let dominantInstrumentLabel: String?
     let dominantActivityLabel: String?
+    let dominantThreadLabel: String?
     let ownerUserID: String?
     let tintSource: Theme.ResolvedTintSource
     let widthFraction: CGFloat
@@ -1970,11 +1975,32 @@ fileprivate struct SessionsRootView: View {
         )
     }
 
+    private func journalThreadLabel(for session: Session) -> String? {
+        let raw = ((session.value(forKey: "threadLabel") as? String) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let sanitized = ThreadLabelSanitizer.sanitize(raw, maxLength: 32),
+              !sanitized.isEmpty else {
+            return nil
+        }
+
+        return sanitized
+    }
+
+    private func journalThreadCounts(in sessions: [Session]) -> [String: Int] {
+        Theme.usageCounts(
+            labels: sessions.compactMap {
+                Theme.ThreadTint.normalizedLabel(journalThreadLabel(for: $0))
+            }
+        )
+    }
+
     private func journalResolvedTintSource(in sessions: [Session]) -> Theme.ResolvedTintSource {
         Theme.resolvedTintSource(
             tintMode: journalTintMode,
             instrumentCounts: journalInstrumentCounts(in: sessions),
             activityCounts: journalActivityCounts(in: sessions),
+            threadCounts: journalThreadCounts(in: sessions),
             persistAutoSource: false
         )
     }
@@ -1983,9 +2009,11 @@ fileprivate struct SessionsRootView: View {
         Theme.resolvedTint(
             instrument: journalInstrumentLabel(for: session),
             activity: journalActivityLabel(for: session),
+            thread: journalThreadLabel(for: session),
             tintMode: journalTintMode,
             instrumentCounts: journalInstrumentCounts(in: sessions),
             activityCounts: journalActivityCounts(in: sessions),
+            threadCounts: journalThreadCounts(in: sessions),
             persistAutoSource: false
         )
     }
@@ -2692,6 +2720,10 @@ fileprivate struct SessionsRootView: View {
                 for: monthSessions,
                 totalSeconds: totalSeconds
             )
+            let dominantThread = journalYearDominantThread(
+                for: monthSessions,
+                totalSeconds: totalSeconds
+            )
             let metadataText = journalYearMetadataText(
                 for: monthSessions,
                 totalSeconds: totalSeconds,
@@ -2722,6 +2754,7 @@ fileprivate struct SessionsRootView: View {
                 metadataText: metadataText,
                 dominantInstrumentLabel: dominantInstrument?.label,
                 dominantActivityLabel: dominantActivity?.label,
+                dominantThreadLabel: dominantThread?.label,
                 ownerUserID: rowOwnerUserID,
                 tintSource: journalResolvedTintSource(in: journalTintContextSessions),
                 widthFraction: widthFraction,
@@ -2824,6 +2857,17 @@ fileprivate struct SessionsRootView: View {
         )
     }
 
+    private func journalYearDominantThread(
+        for sessions: [Session],
+        totalSeconds: Int
+    ) -> JournalYearFacetSummary? {
+        journalYearDominantFacet(
+            for: sessions,
+            totalSeconds: totalSeconds,
+            label: journalYearThreadLabel(for:)
+        )
+    }
+
     private func journalYearDominantFacet(
         for sessions: [Session],
         totalSeconds: Int,
@@ -2869,6 +2913,10 @@ fileprivate struct SessionsRootView: View {
         }
 
         return nil
+    }
+
+    private func journalYearThreadLabel(for session: Session) -> String? {
+        journalThreadLabel(for: session)
     }
 
     private func journalYearLabelsMatch(_ lhs: String, _ rhs: String?) -> Bool {

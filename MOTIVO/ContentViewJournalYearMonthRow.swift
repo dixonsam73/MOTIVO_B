@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
-// SCOPE: Journal Year month-row tint source wiring only — preserve identical layout, spacing, typography, navigation, and behavior while switching leader tint from instrument-only to the shared resolved source passed from ContentView.
-// SEARCH-TOKEN: 20260421_183700_ContentView_JournalTintResolverPass_7c2d
+// CHANGE-ID: 20260429_151500_CVJYMR_ThreadLeaderTint
+// SCOPE: ContentViewJournalYearMonthRow — wire .thread tint source to Year row leader colour using dominantThreadLabel; preserve all layout, spacing, typography, navigation, and existing instrument/activity tint behaviour.
+// SEARCH-TOKEN: 20260429_151500_CVJYMR_ThreadLeaderTint
 
 import SwiftUI
 
@@ -69,6 +69,13 @@ struct JournalYearMonthRow: View {
             return Theme.ActivityTint.visibleAccentColor(
                 for: row.dominantActivityLabel,
                 scheme: colorScheme
+            )
+        case .thread:
+            return Theme.ThreadTint.visibleAccentColor(
+                for: row.dominantThreadLabel,
+                ownerID: row.ownerUserID,
+                scheme: colorScheme,
+                shouldAssignIfNeeded: false
             )
         case .off:
             return nil
