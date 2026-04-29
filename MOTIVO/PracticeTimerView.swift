@@ -3223,7 +3223,11 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
             }
             audioDurations[id] = durationSeconds
 
+            let shouldRevealAttachmentsAfterStaging = !hasAttachments
             stagedAudio.append(StagedAttachment(id: id, data: data, kind: .audio))
+            if shouldRevealAttachmentsAfterStaging {
+                isAttachmentsVisible = true
+            }
             if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
                 UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
             }
@@ -3276,7 +3280,11 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
                 videoThumbnails[id] = thumb
             }
 
+            let shouldRevealAttachmentsAfterStaging = !hasAttachments
             stagedVideos.append(StagedAttachment(id: id, data: data, kind: .video))
+            if shouldRevealAttachmentsAfterStaging {
+                isAttachmentsVisible = true
+            }
             if UserDefaults.standard.bool(forKey: ephemeralMediaFlagKey) == false {
                 UserDefaults.standard.set(true, forKey: ephemeralMediaFlagKey)
             }
