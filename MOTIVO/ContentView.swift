@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260429_222500_ContentView_MonthTintInsetSource
+// SCOPE: ContentView - Month journal yearCompact row inset only: reserve leader text inset from resolved Month tint source instead of per-row accent presence; preserve Week/Year/tint/thread/filter/backend behavior.
+// SEARCH-TOKEN: 20260429_222500_ContentView_MonthTintInsetSource
+
 // CHANGE-ID: 20260429_145500_ContentView_ThreadTintWiring
 // SCOPE: ContentView - wire Thread tint counts and labels into owner-local Journal tint resolution; preserve existing instrument/activity behavior, filters, layout, navigation, backend surfaces, and row rendering.
 // SEARCH-TOKEN: 20260429_145500_ContentView_ThreadTintWiring
@@ -1021,6 +1025,7 @@ fileprivate struct SessionsRootView: View {
                                 case .month:
                                     let journalSections = journalYearSections(sessions: localRows)
                                     let usesYearArchivePresentation = true
+                                    let monthShouldReserveTintInset = journalResolvedTintSource(in: journalTintContextSessions) != .off
 
                                     if journalSections.isEmpty {
                                         if !hasAnyJournalContent {
@@ -1069,7 +1074,8 @@ fileprivate struct SessionsRootView: View {
                                                         activeUserFilterUserID: $activeUserFilterUserID,
                                                         activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs,
                                                         filtersExpanded: $filtersExpanded,
-                                                        journalStyle: .yearCompact
+                                                        journalStyle: .yearCompact,
+                                                        yearCompactHorizontalPadding: monthShouldReserveTintInset ? 12 : 6
                                                     )
                                                     .contentShape(Rectangle())
                                                     .onTapGesture {
@@ -3120,6 +3126,7 @@ fileprivate struct SessionRow: View {
     @ObservedObject var session: Session
     let scope: FeedScope
     let journalStyle: JournalStyle
+    let yearCompactHorizontalPadding: CGFloat
 
     @Binding var selectedThread: String?
     @Binding var activeUserFilterUserID: String?
@@ -3155,11 +3162,13 @@ fileprivate struct SessionRow: View {
         activeUserFilterUserID: Binding<String?>,
         activeEnsembleMemberUserIDs: Set<String>,
         filtersExpanded: Binding<Bool>,
-        journalStyle: JournalStyle = .standard
+        journalStyle: JournalStyle = .standard,
+        yearCompactHorizontalPadding: CGFloat = 12
     ) {
         self._session = ObservedObject(initialValue: session)
         self.scope = scope
         self.journalStyle = journalStyle
+        self.yearCompactHorizontalPadding = yearCompactHorizontalPadding
         self._selectedThread = selectedThread
         self._activeUserFilterUserID = activeUserFilterUserID
         self.activeEnsembleMemberUserIDs = activeEnsembleMemberUserIDs
@@ -3834,7 +3843,7 @@ fileprivate struct SessionRow: View {
                 }
             }
         }
-                .padding(.horizontal, isYearCompactJournalRow ? 12 : 0)
+                .padding(.horizontal, isYearCompactJournalRow ? yearCompactHorizontalPadding : 0)
         .padding(.vertical,
             isYearCompactJournalRow ? 1 :
             (isMonthCompactJournalRow ? 3 :
