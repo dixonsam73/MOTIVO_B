@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+// CHANGE-ID: 20260429_111000_MediaTrim_LiveRotatePreview
+// SCOPE: MediaTrimView - show selected video rotation in the live preview only; preserve export, trim, save, audio, and surrounding UI logic.
+// SEARCH-TOKEN: 20260429_111000_MediaTrim_LiveRotatePreview
 // CHANGE-ID: 20260429_104500_MediaTrim_VideoRotateExport
 // SCOPE: MediaTrimView - add video-only 90-degree rotate control and bake rotation into export; preserve audio and non-rotated export behaviour.
 // SEARCH-TOKEN: 20260429_104500_MediaTrim_VideoRotateExport
@@ -127,12 +130,18 @@ public struct MediaTrimView: View {
                         if let player = model.player {
                             if isLandscapePhone {
                                 VideoPlayer(player: player)
+                                    .rotationEffect(.degrees(Double(model.videoRotationDegrees)))
+                                    .scaleEffect(model.videoRotationPreviewScale)
+                                    .animation(.easeInOut(duration: 0.18), value: model.videoRotationDegrees)
                                     .aspectRatio(16/9, contentMode: .fit)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     .padding(Theme.Spacing.m)
                                     .onDisappear { player.pause() }
                             } else {
                                 VideoPlayer(player: player)
+                                    .rotationEffect(.degrees(Double(model.videoRotationDegrees)))
+                                    .scaleEffect(model.videoRotationPreviewScale)
+                                    .animation(.easeInOut(duration: 0.18), value: model.videoRotationDegrees)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                                     .padding(Theme.Spacing.m)
                                     .onDisappear { player.pause() }
@@ -756,6 +765,11 @@ extension MediaTrimView {
             let m = s / 60
             let r = s % 60
             return String(format: "%02d:%02d", m, r)
+        }
+
+        var videoRotationPreviewScale: CGFloat {
+            let normalized = ((videoRotationDegrees % 360) + 360) % 360
+            return (normalized == 90 || normalized == 270) ? 0.56 : 1.0
         }
 
         func formatTime(_ seconds: Double) -> String {
