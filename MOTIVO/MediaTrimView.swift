@@ -1,6 +1,18 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+// CHANGE-ID: 20260429_115500_MediaTrim_LandscapeScrollGapFix
+// SCOPE: MediaTrimView - landscape-only correction: restore scroll access and add breathing room between preview and scrubber; preserve trim/export/rotate/save/audio/portrait logic.
+// SEARCH-TOKEN: 20260429_115500_MediaTrim_LandscapeScrollGapFix
+// CHANGE-ID: 20260429_114500_MediaTrim_LandscapeFinalFit
+// SCOPE: MediaTrimView - landscape-only final density pass: compact control strip, rebalance preview, and remove scroll dependency; preserve trim/export/rotate/save/audio/portrait logic.
+// SEARCH-TOKEN: 20260429_114500_MediaTrim_LandscapeFinalFit
+// CHANGE-ID: 20260429_113500_MediaTrim_LandscapeDensityPass
+// SCOPE: MediaTrimView - landscape-only density polish for video trim editor; preserve trim, export, rotate, save, audio, and portrait logic.
+// SEARCH-TOKEN: 20260429_113500_MediaTrim_LandscapeDensityPass
+// CHANGE-ID: 20260429_112500_MediaTrim_LandscapeCompactPreview
+// SCOPE: MediaTrimView - cap video preview height in landscape phone editing layout only; preserve trim, export, rotate, save, audio, and AVV playback logic.
+// SEARCH-TOKEN: 20260429_112500_MediaTrim_LandscapeCompactPreview
 // CHANGE-ID: 20260429_111000_MediaTrim_LiveRotatePreview
 // SCOPE: MediaTrimView - show selected video rotation in the live preview only; preserve export, trim, save, audio, and surrounding UI logic.
 // SEARCH-TOKEN: 20260429_111000_MediaTrim_LiveRotatePreview
@@ -61,20 +73,14 @@ public struct MediaTrimView: View {
             let isLandscapePhone = (UIDevice.current.userInterfaceIdiom == .phone) && (geo.size.width > geo.size.height)
 
             Group {
-                if isLandscapePhone {
-                    ScrollView(.vertical) {
-                        mainContent(isLandscapePhone: true)
-                    }
-                } else {
-                    mainContent(isLandscapePhone: false)
-                }
+                mainContent(isLandscapePhone: isLandscapePhone, availableHeight: geo.size.height)
             }
             .interactiveDismissDisabled(isLandscapePhone)
         }
     }
 
     @ViewBuilder
-    private func mainContent(isLandscapePhone: Bool) -> some View {
+    private func mainContent(isLandscapePhone: Bool, availableHeight: CGFloat) -> some View {
         // QA (visual only):
         // 1) Video sits in rounded card; pillar bars feel subdued.
         // 2) Handles are outline-only, readable over video.
@@ -91,6 +97,15 @@ public struct MediaTrimView: View {
         let playFillOpacity: Double = (colorScheme == .dark) ? 0.22 : 0.18
         let handleStrokeOpacity: Double = 0.60
         let playheadOpacity: Double = 0.95
+        let landscapeVideoPreviewHeight: CGFloat = min(250, max(210, availableHeight * 0.46))
+        let mainStackSpacing: CGFloat = isLandscapePhone ? Theme.Spacing.xs : Theme.Spacing.m
+        let cardStackSpacing: CGFloat = isLandscapePhone ? Theme.Spacing.xs : Theme.Spacing.m
+        let cardPadding: CGFloat = isLandscapePhone ? Theme.Spacing.s : Theme.Spacing.l
+        let cardBottomPadding: CGFloat = isLandscapePhone ? Theme.Spacing.s : Theme.Spacing.xl
+        let selectorHeight: CGFloat = isLandscapePhone ? 40 : 56
+        let selectorBottomPadding: CGFloat = isLandscapePhone ? 0 : Theme.Spacing.m
+        let actionTopPadding: CGFloat = isLandscapePhone ? Theme.Spacing.xs : Theme.Spacing.xl
+        let outerVerticalPadding: CGFloat = isLandscapePhone ? Theme.Spacing.s : Theme.Spacing.l
 
         // QA (tone & hierarchy):
         // 1) Primary button now reads “Save as new”; calls Save-as-New.
@@ -99,15 +114,18 @@ public struct MediaTrimView: View {
         // 4) Handles are lighter; active handle gets full opacity while dragging.
         // 5) Light/dark parity OK; Theme tokens used where available. No logic changed.
 
-        VStack(spacing: Theme.Spacing.m) {
-            // Title Row
-            HStack {
-                Text(mediaType == .audio ? "Trim Audio" : "Trim Video")
-                    .sectionHeader()
-                Spacer()
-                Text(model.selectedDurationFormatted)
-                    .font(.callout)
-                    .foregroundStyle(secondaryText)
+        let editorStack = AnyView(
+            VStack(spacing: mainStackSpacing) {
+                if !isLandscapePhone {
+                // Title Row
+                HStack {
+                    Text(mediaType == .audio ? "Trim Audio" : "Trim Video")
+                        .sectionHeader()
+                    Spacer()
+                    Text(model.selectedDurationFormatted)
+                        .font(.callout)
+                        .foregroundStyle(secondaryText)
+                }
             }
 
             Button(action: { onCancel() }) {
@@ -118,10 +136,10 @@ public struct MediaTrimView: View {
             .accessibilityLabel("Cancel")
             .accessibilityHint("Close without trimming")
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
+            .padding(.top, isLandscapePhone ? 0 : 4)
 
             // Card Surface
-            VStack(spacing: Theme.Spacing.m) {
+            VStack(spacing: cardStackSpacing) {
                 if mediaType == .video {
                     ZStack {
                         RoundedRectangle(cornerRadius: 16, style: .continuous)
@@ -134,8 +152,10 @@ public struct MediaTrimView: View {
                                     .scaleEffect(model.videoRotationPreviewScale)
                                     .animation(.easeInOut(duration: 0.18), value: model.videoRotationDegrees)
                                     .aspectRatio(16/9, contentMode: .fit)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: landscapeVideoPreviewHeight)
                                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                    .padding(Theme.Spacing.m)
+                                    .padding(Theme.Spacing.s)
                                     .onDisappear { player.pause() }
                             } else {
                                 VideoPlayer(player: player)
@@ -153,8 +173,10 @@ public struct MediaTrimView: View {
                                     ProgressView()
                                 }
                                 .aspectRatio(16/9, contentMode: .fit)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: landscapeVideoPreviewHeight)
                                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .padding(Theme.Spacing.m)
+                                .padding(Theme.Spacing.s)
                             } else {
                                 ZStack {
                                     Color(UIColor.secondarySystemBackground)
@@ -168,6 +190,7 @@ public struct MediaTrimView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.Colors.cardStroke(colorScheme)))
                     .accessibilityHidden(true)
+                    .padding(.bottom, isLandscapePhone ? Theme.Spacing.s : 0)
 
                     VideoRangeSelector(startTime: $model.startTime,
                                        endTime: $model.endTime,
@@ -175,8 +198,8 @@ public struct MediaTrimView: View {
                                        currentTime: model.scrubPosition,
                                        onChange: { focus in model.handleDragChanged(focus: focus) },
                                        onEnd: { focus in model.handleDragEnded(focus: focus) })
-                        .frame(height: 56)
-                        .padding(.bottom, Theme.Spacing.m)
+                        .frame(height: selectorHeight)
+                        .padding(.bottom, selectorBottomPadding)
                 }
 
                 if mediaType == .audio {
@@ -186,10 +209,10 @@ public struct MediaTrimView: View {
                 }
 
                 // Minimal scrubber + play/pause
-                PlaybackControls(model: model, mediaType: mediaType)
+                PlaybackControls(model: model, mediaType: mediaType, compactLandscape: isLandscapePhone && mediaType == .video)
             }
-            .padding(Theme.Spacing.l)
-            .padding(.bottom, Theme.Spacing.xl)
+            .padding(cardPadding)
+            .padding(.bottom, cardBottomPadding)
             .cardSurface()
 
             // Actions (PracticeTimer-style soft accent)
@@ -203,10 +226,10 @@ public struct MediaTrimView: View {
             .frame(height: 0) // spacer to separate card and buttons visually
 
             HStack {
-                HStack(spacing: Theme.Spacing.m) {
+                HStack(spacing: isLandscapePhone ? Theme.Spacing.s : Theme.Spacing.m) {
                     Button(action: { model.export(mode: .saveAsNew) { url in onSaveAsNewAttachment(url, mediaType) } }) {
                         Text("Save as new")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(maxWidth: .infinity, minHeight: isLandscapePhone ? 40 : 44)
                             .foregroundStyle(accent)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -219,7 +242,7 @@ public struct MediaTrimView: View {
 
                     Button(action: { model.export(mode: .replaceOriginal) { url in onReplaceAttachment(assetURL, url, mediaType) } }) {
                         Text("Replace")
-                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .frame(maxWidth: .infinity, minHeight: isLandscapePhone ? 40 : 44)
                             .foregroundStyle(accent)
                             .background(
                                 RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -233,10 +256,22 @@ public struct MediaTrimView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.horizontal, Theme.Spacing.l)
-            .padding(.bottom, Theme.Spacing.l)
-            .padding(.top, Theme.Spacing.xl)
+            .padding(.bottom, isLandscapePhone ? Theme.Spacing.s : Theme.Spacing.l)
+            .padding(.top, actionTopPadding)
+            }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.vertical, outerVerticalPadding)
+        )
+
+        Group {
+            if isLandscapePhone {
+                ScrollView(.vertical, showsIndicators: false) {
+                    editorStack
+                }
+            } else {
+                editorStack
+            }
         }
-        .padding(Theme.Spacing.l)
         .overlay(alignment: .topLeading) {
             if model.isExporting {
                 ExportOverlay(progress: model.exportProgress)
@@ -270,44 +305,69 @@ private struct VideoPreview: View {
 private struct PlaybackControls: View {
     @ObservedObject var model: MediaTrimView.Model
     let mediaType: MediaTrimView.MediaType
+    let compactLandscape: Bool
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(spacing: Theme.Spacing.m) {
-            HStack(spacing: Theme.Spacing.m) {
-                Button(action: { model.togglePlayPause() }) {
-                    Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                        .font(.title2)
-                        .foregroundStyle(Theme.Colors.accent)
-                        .frame(width: 44, height: 44)
-                        .background(controlBackground)
-                        .shadow(radius: 1)
-                }
-                .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
-                .accessibilityHint("Toggles playback")
+        if compactLandscape {
+            HStack(spacing: Theme.Spacing.s) {
+                playbackButton
 
                 if mediaType == .video {
-                    Button(action: { model.rotateVideoClockwise() }) {
-                        Image(systemName: "rotate.right")
-                            .font(.title2)
-                            .foregroundStyle(Theme.Colors.accent)
-                            .frame(width: 44, height: 44)
-                            .background(controlBackground)
-                            .shadow(radius: 1)
-                    }
-                    .accessibilityLabel("Rotate video")
-                    .accessibilityHint("Rotate the exported video 90 degrees clockwise")
+                    rotateButton
                 }
-            }
 
-            Text("\(model.formatTime(model.scrubPosition))  •  \(model.formatTime(model.duration))")
-                .font(.caption)
-                .foregroundStyle(Theme.Colors.secondaryText)
+                Text("\(model.formatTime(model.scrubPosition))  •  \(model.formatTime(model.duration))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .padding(.leading, Theme.Spacing.xs)
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            VStack(spacing: Theme.Spacing.m) {
+                HStack(spacing: Theme.Spacing.m) {
+                    playbackButton
+
+                    if mediaType == .video {
+                        rotateButton
+                    }
+                }
+
+                Text("\(model.formatTime(model.scrubPosition))  •  \(model.formatTime(model.duration))")
+                    .font(.caption)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
         }
     }
 
+    private var playbackButton: some View {
+        Button(action: { model.togglePlayPause() }) {
+            Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                .font(.title2)
+                .foregroundStyle(Theme.Colors.accent)
+                .frame(width: compactLandscape ? 36 : 44, height: compactLandscape ? 36 : 44)
+                .background(controlBackground)
+                .shadow(radius: 1)
+        }
+        .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+        .accessibilityHint("Toggles playback")
+    }
+
+    private var rotateButton: some View {
+        Button(action: { model.rotateVideoClockwise() }) {
+            Image(systemName: "rotate.right")
+                .font(.title2)
+                .foregroundStyle(Theme.Colors.accent)
+                .frame(width: compactLandscape ? 36 : 44, height: compactLandscape ? 36 : 44)
+                .background(controlBackground)
+                .shadow(radius: 1)
+        }
+        .accessibilityLabel("Rotate video")
+        .accessibilityHint("Rotate the exported video 90 degrees clockwise")
+    }
+
     private var controlBackground: some View {
-        RoundedRectangle(cornerRadius: 22, style: .continuous)
+        RoundedRectangle(cornerRadius: compactLandscape ? 18 : 22, style: .continuous)
             .fill(Theme.Colors.accent.opacity((scheme == .dark) ? 0.22 : 0.18))
     }
 }
