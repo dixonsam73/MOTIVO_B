@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import AVKit
+// CHANGE-ID: 20260429_104500_MediaTrim_VideoRotateExport
+// SCOPE: MediaTrimView - add video-only 90-degree rotate control and bake rotation into export; preserve audio and non-rotated export behaviour.
+// SEARCH-TOKEN: 20260429_104500_MediaTrim_VideoRotateExport
 // CHANGE-ID: 20260222_160500_MediaTrim_BoundedFallback
 // SCOPE: Replace HighestQuality fallback with bounded export presets (HEVC/1080p/720p/Medium) for video trim
 
@@ -174,7 +177,7 @@ public struct MediaTrimView: View {
                 }
 
                 // Minimal scrubber + play/pause
-                PlaybackControls(model: model)
+                PlaybackControls(model: model, mediaType: mediaType)
             }
             .padding(Theme.Spacing.l)
             .padding(.bottom, Theme.Spacing.xl)
@@ -255,30 +258,48 @@ private struct VideoPreview: View {
         }
     }
 }
-
 private struct PlaybackControls: View {
     @ObservedObject var model: MediaTrimView.Model
+    let mediaType: MediaTrimView.MediaType
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: Theme.Spacing.m) {
-            // Play button
-            Button(action: { model.togglePlayPause() }) {
-                Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title2)
-                    .foregroundStyle(Theme.Colors.accent)
-                    .frame(width: 44, height: 44)
-                    .background(RoundedRectangle(cornerRadius: 22, style: .continuous).fill(Theme.Colors.accent.opacity((scheme == .dark) ? 0.22 : 0.18)))
-                    .shadow(radius: 1)
-            }
-            .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
-            .accessibilityHint("Toggles playback")
+            HStack(spacing: Theme.Spacing.m) {
+                Button(action: { model.togglePlayPause() }) {
+                    Image(systemName: model.isPlaying ? "pause.fill" : "play.fill")
+                        .font(.title2)
+                        .foregroundStyle(Theme.Colors.accent)
+                        .frame(width: 44, height: 44)
+                        .background(controlBackground)
+                        .shadow(radius: 1)
+                }
+                .accessibilityLabel(model.isPlaying ? "Pause" : "Play")
+                .accessibilityHint("Toggles playback")
 
-            // Consolidated time readout
+                if mediaType == .video {
+                    Button(action: { model.rotateVideoClockwise() }) {
+                        Image(systemName: "rotate.right")
+                            .font(.title2)
+                            .foregroundStyle(Theme.Colors.accent)
+                            .frame(width: 44, height: 44)
+                            .background(controlBackground)
+                            .shadow(radius: 1)
+                    }
+                    .accessibilityLabel("Rotate video")
+                    .accessibilityHint("Rotate the exported video 90 degrees clockwise")
+                }
+            }
+
             Text("\(model.formatTime(model.scrubPosition))  •  \(model.formatTime(model.duration))")
                 .font(.caption)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
+    }
+
+    private var controlBackground: some View {
+        RoundedRectangle(cornerRadius: 22, style: .continuous)
+            .fill(Theme.Colors.accent.opacity((scheme == .dark) ? 0.22 : 0.18))
     }
 }
 
@@ -709,6 +730,7 @@ extension MediaTrimView {
         @Published var isExporting: Bool = false
         @Published var exportProgress: Double = 0
         @Published var alert: ModelAlert? = nil
+        @Published var videoRotationDegrees: Int = 0
 
         // Internals
         private(set) var asset: AVAsset?
@@ -748,6 +770,7 @@ extension MediaTrimView {
             teardown()
             currentURL = url
             currentType = mediaType
+            videoRotationDegrees = 0
 
             let generation = UUID()
             self.loadGeneration = generation
@@ -869,6 +892,11 @@ extension MediaTrimView {
                 }
                 isPlaying = true
             }
+        }
+
+        func rotateVideoClockwise() {
+            guard currentType == .video else { return }
+            videoRotationDegrees = (videoRotationDegrees + 90) % 360
         }
 
         func scrubEditingChanged(isEditing: Bool) {
@@ -1099,8 +1127,10 @@ extension MediaTrimView {
             let tempURL = tmpDir.appendingPathComponent(UUID().uuidString).appendingPathExtension(ext)
             // Clean any pre-existing (unlikely)
             try? fm.removeItem(at: tempURL)
+            let normalizedRotation = ((videoRotationDegrees % 360) + 360) % 360
+            let shouldApplyVideoRotation = (currentType == .video && normalizedRotation != 0)
 
-            // Choose preset (unchanged logic)
+            // Choose preset. Rotation requires re-encoding because passthrough ignores video composition transforms.
             var preset = AVAssetExportPresetPassthrough
             if currentType == .audio {
                 if !AVAssetExportSession.exportPresets(compatibleWith: asset).contains(preset) {
@@ -1108,7 +1138,7 @@ extension MediaTrimView {
                 }
             } else {
                 let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
-                if !compatiblePresets.contains(preset) {
+                if shouldApplyVideoRotation || !compatiblePresets.contains(preset) {
                     let boundedFallbacks: [String] = [
                         AVAssetExportPresetHEVC1920x1080,
                         AVAssetExportPreset1920x1080,
@@ -1117,8 +1147,8 @@ extension MediaTrimView {
                     ]
                     if let chosen = boundedFallbacks.first(where: { compatiblePresets.contains($0) }) {
                         preset = chosen
-                    } else if let chosen = compatiblePresets.first(where: { $0 != AVAssetExportPresetHighestQuality }) ?? compatiblePresets.first {
-                        // Last-resort fallback: choose the first compatible preset that isn't HighestQuality if possible.
+                    } else if let chosen = compatiblePresets.first(where: { $0 != AVAssetExportPresetHighestQuality && $0 != AVAssetExportPresetPassthrough }) ?? compatiblePresets.first(where: { $0 != AVAssetExportPresetPassthrough }) {
+                        // Last-resort fallback: choose the first compatible non-passthrough preset if possible.
                         preset = chosen
                     } else {
                         isExporting = false
@@ -1137,6 +1167,16 @@ extension MediaTrimView {
             exporter.outputURL = tempURL
             exporter.shouldOptimizeForNetworkUse = true
             exporter.outputFileType = currentType == .audio ? .m4a : .mp4
+
+            if shouldApplyVideoRotation {
+                guard let composition = makeVideoRotationComposition(for: asset, rotationDegrees: normalizedRotation) else {
+                    isExporting = false
+                    alert = ModelAlert(title: "Export failed", message: "Unable to prepare video rotation.")
+                    removeIfExists(tempURL)
+                    return
+                }
+                exporter.videoComposition = composition
+            }
 
             // Debug
             if let inputURL = currentURL {
@@ -1198,6 +1238,39 @@ extension MediaTrimView {
                     }
                 }
             }
+        }
+
+        private func makeVideoRotationComposition(for asset: AVAsset, rotationDegrees: Int) -> AVMutableVideoComposition? {
+            guard let track = asset.tracks(withMediaType: .video).first else { return nil }
+
+            let naturalSize = track.naturalSize
+            let baseTransform = track.preferredTransform
+            let baseRect = CGRect(origin: .zero, size: naturalSize).applying(baseTransform)
+            let baseSize = CGSize(width: abs(baseRect.width), height: abs(baseRect.height))
+
+            let radians = CGFloat(rotationDegrees) * .pi / 180
+            let rotation = CGAffineTransform(rotationAngle: radians)
+            let rotatedRect = CGRect(origin: .zero, size: baseSize).applying(rotation)
+            let renderSize = CGSize(width: abs(rotatedRect.width), height: abs(rotatedRect.height))
+
+            var transform = baseTransform
+            transform = transform.concatenating(CGAffineTransform(translationX: -baseRect.minX, y: -baseRect.minY))
+            transform = transform.concatenating(rotation)
+            transform = transform.concatenating(CGAffineTransform(translationX: -rotatedRect.minX, y: -rotatedRect.minY))
+
+            let instruction = AVMutableVideoCompositionInstruction()
+            instruction.timeRange = CMTimeRange(start: .zero, duration: asset.duration)
+
+            let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+            layerInstruction.setTransform(transform, at: .zero)
+            instruction.layerInstructions = [layerInstruction]
+
+            let composition = AVMutableVideoComposition()
+            composition.instructions = [instruction]
+            composition.renderSize = renderSize
+            composition.frameDuration = CMTime(value: 1, timescale: 30)
+
+            return composition
         }
 
         private func fileSize(at url: URL) -> Int64 {
