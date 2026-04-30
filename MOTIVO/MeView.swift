@@ -1139,7 +1139,7 @@ if let insights, hasVisibleInterpretiveInsights {
         if !preds.isEmpty { req.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: preds) }
         req.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
         if let limit { req.fetchLimit = limit }
-        do { return try ctx.fetch(req) } catch { return [] }
+        do { return try ctx.fetch(req).filter { !$0.isThought } } catch { return [] }
     }
 
     // MARK: - Focus (duration-weighted visual average)

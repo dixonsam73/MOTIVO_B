@@ -549,7 +549,7 @@ return AttachmentViewerView(
         // ⬇️ Use fullScreenCover so nothing underneath flashes when we close parent
         .fullScreenCover(isPresented: $showEdit) {
             // [v7.8 Stage 2] Updated to match current AddEditSessionView initializer
-            AddEditSessionView(session: session) {
+            AddEditSessionView(session: session, isThoughtMode: session.isThought) {
                 shouldDismissAfterEditSave = true
                 showEdit = false
             }
@@ -650,7 +650,7 @@ return AttachmentViewerView(
     
     @ViewBuilder
     private func mainContent() -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+        VStack(alignment: .leading, spacing: session.isThought ? Theme.Spacing.m : Theme.Spacing.l) {
             SessionIdentityHeader(session: session)
                 .environmentObject(auth)
                 #if DEBUG
@@ -660,16 +660,41 @@ return AttachmentViewerView(
                     isDebugPresented = true
                 }
                 #endif
-                .padding(.bottom, 4)
+                .padding(.bottom, session.isThought ? 8 : 4)
 
-            if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
+            if !session.isThought, !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
                     Text(activityDescriptionText)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .cardSurface(fillColor: activityDescriptionCardFillColor, strokeColor: activityDescriptionCardStrokeColor)
             }
 
+            if session.isThought {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(thoughtDateTimeLine)
+                        .font(Theme.Text.meta.weight(.medium))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .padding(.top, 4)          // slightly more separation from identity row
+                        .padding(.leading, 16)     // match cardSurface horizontal inset
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let header = session.thoughtHeader {
+                            Text(header)
+                                .font(Theme.Text.body.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if let body = session.thoughtBodyPreview {
+                            Text(body)
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .cardSurface()
+                }
+            } else {
             VStack(alignment: .leading, spacing: 6) {
                 Group {
                     HStack {
@@ -703,6 +728,7 @@ return AttachmentViewerView(
                 .accessibilityElement(children: .contain)
             }
             .cardSurface(fillColor: metaCardFillColor, strokeColor: metaCardStrokeColor)
+            }
 
             let originalNotes = session.notes ?? ""
             let (focusDotIndexFromNotes, displayNotes) = extractFocusDotIndex(from: originalNotes)
@@ -712,7 +738,7 @@ return AttachmentViewerView(
             let effortDot = Int(session.effort)
             let focusDotIndex: Int? = focusDotIndexFromNotes ?? ((effortDot == 5) ? nil : effortDot)
             let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
-            if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !session.isThought, !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 if areNotesPrivate && !isOwner {
                     // Do not show notes to non-owners when private
                 } else {
@@ -728,7 +754,7 @@ return AttachmentViewerView(
                 }
             }
 
-            if let dot = focusDotIndex {
+            if !session.isThought, let dot = focusDotIndex {
                 FocusSectionCard(dotIndex: dot)
             }
 
@@ -859,6 +885,14 @@ return AttachmentViewerView(
     }
 
 // MARK: - Meta line (date • time • duration)
+
+    private var thoughtDateTimeLine: String {
+        let ts = session.timestamp ?? Date()
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: ts)
+    }
 
     private var metaLine: String {
         let ts = session.timestamp ?? Date()

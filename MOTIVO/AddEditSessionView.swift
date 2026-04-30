@@ -145,6 +145,7 @@ struct AddEditSessionView: View {
     // Editing existing session or creating new
     var session: Session? = nil
     var onSuccessfulSave: (() -> Void)? = nil
+    var isThoughtMode: Bool = false
 
     // Form state
     @State private var instruments: [Instrument] = []
@@ -409,9 +410,10 @@ struct AddEditSessionView: View {
         stripFocusTokensFromNotes_edit()
     }
 
-    init(session: Session? = nil, onSuccessfulSave: (() -> Void)? = nil) {
+    init(session: Session? = nil, isThoughtMode: Bool = false, onSuccessfulSave: (() -> Void)? = nil) {
         self.session = session
         self.onSuccessfulSave = onSuccessfulSave
+        self.isThoughtMode = isThoughtMode || (session?.isThought ?? false)
         // Seed time-related fields on edit so they don’t flash empty
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
@@ -795,9 +797,10 @@ attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: v
     @ViewBuilder
     private var contentStack: some View {
 VStack(alignment: .leading, spacing: Theme.Spacing.section) {
-    Text(isEdit ? "Edit Session" : "Add Session").sectionHeader()
+    Text(isThoughtMode ? (isEdit ? "Edit Thought" : "Add Thought") : (isEdit ? "Edit Session" : "Add Session")).sectionHeader()
 
 
+                if !isThoughtMode {
                 // No instruments / Instrument picker
                 if hasNoInstruments {
                     // Show the empty-state card only after the first 120ms tick
@@ -921,6 +924,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .accessibilityIdentifier("picker.thread")
                 }
                 .cardSurface()
+                }
 
                 // Start Time
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -946,6 +950,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 .cardSurface()
 
                 // Duration
+                if !isThoughtMode {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Duration").sectionHeader()
                     Button {
@@ -973,6 +978,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     }
                 }
                 .cardSurface()
+                }
 
                 // ---------- Visibility ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -1022,7 +1028,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 .cardSurface()
                 .padding(.bottom, Theme.Spacing.s)
                 // NEW — State card (read/write)
-                stateStripCard_edit
+                if !isThoughtMode {
+                    stateStripCard_edit
+                }
 
                 
                 // Attachments grid
@@ -1382,7 +1390,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Spacer(minLength: 0)
 
             Button(action: { save() }) {
-                Text("Save Session")
+                Text(isThoughtMode ? "Save Thought" : "Save Session")
                     .font(Theme.Text.body)
                     .foregroundColor(.primary)
                     .opacity(1.0)
@@ -1391,8 +1399,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             .background(Theme.Colors.primaryAction.opacity(0.17))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .buttonStyle(.plain)
-            .disabled(durationSeconds == 0 || instrument == nil)
-            .accessibilityLabel("Save session")
+            .disabled(isThoughtMode ? !canSaveThought : (durationSeconds == 0 || instrument == nil))
+            .accessibilityLabel(isThoughtMode ? "Save thought" : "Save session")
             .accessibilityIdentifier("button.saveSession")
 
             Spacer(minLength: 0)
@@ -1730,23 +1738,36 @@ private var instrumentPicker: some View {
 
 // MARK: - Actions
 
+    private var canSaveThought: Bool {
+        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !stagedAttachments.isEmpty
+    }
+
     private func save() {
+        if isThoughtMode && !canSaveThought { return }
         let s = session ?? Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             s.setValue(UUID(), forKey: "id")
         }
-        s.instrument = instrument
-
-        // Title = activityDetail (trimmed) or fallback
         let trimmedDetail = activityDetail.trimmingCharacters(in: .whitespacesAndNewlines)
-        s.title = trimmedDetail.isEmpty ? defaultTitle(for: instrument, activity: activity) : trimmedDetail
+        let effectiveDurationSeconds = isThoughtMode ? 0 : durationSeconds
+
+        if isThoughtMode {
+            s.instrument = nil
+            s.title = ""
+        } else {
+            s.instrument = instrument
+            // Title = activityDetail (trimmed) or fallback
+            s.title = trimmedDetail.isEmpty ? defaultTitle(for: instrument, activity: activity) : trimmedDetail
+        }
 
         s.timestamp = timestamp
-        s.durationSeconds = Int64(durationSeconds)
+        s.durationSeconds = Int64(effectiveDurationSeconds)
         s.isPublic = isPublic
         // Persist focus structurally (do NOT encode into notes)
         if s.entity.attributesByName.keys.contains("effort") {
-            if let idx = selectedDotIndex_edit {
+            if isThoughtMode {
+                s.setValue(Int16(5), forKey: "effort")
+            } else if let idx = selectedDotIndex_edit {
                 s.setValue(Int16(idx), forKey: "effort")
             } else {
                 // Treat nil as "unset" (default effort = 5)
@@ -1754,7 +1775,7 @@ private var instrumentPicker: some View {
             }
         }
 
-        if selectedDotIndex_edit != nil {
+        if !isThoughtMode, selectedDotIndex_edit != nil {
             applyFocusToNotesBeforeSave_edit()
         } else {
             // No focus selected — ensure tokens are not persisted
@@ -1766,20 +1787,29 @@ private var instrumentPicker: some View {
         s.notes = notes
 
         // Persist activity type + detail
-        s.setValue(activity.rawValue, forKey: "activityType")
-        s.setValue(trimmedDetail, forKey: "activityDetail")
-
-        // Threads v1 (owner-only metadata)
-        if s.entity.attributesByName.keys.contains("threadLabel") {
-            s.setValue(sanitizeThreadLabel_v1(threadLabel), forKey: "threadLabel")
-        }
-
-        // If a custom name is selected, stamp userActivityLabel; otherwise clear any previous custom label
         let trimmedCustom = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !trimmedCustom.isEmpty {
-            s.setValue(trimmedCustom, forKey: "userActivityLabel")
-        } else {
+        if isThoughtMode {
+            s.setValue(activity.rawValue, forKey: "activityType")
+            s.setValue("", forKey: "activityDetail")
             s.setValue(nil, forKey: "userActivityLabel")
+            if s.entity.attributesByName.keys.contains("threadLabel") {
+                s.setValue(nil, forKey: "threadLabel")
+            }
+        } else {
+            s.setValue(activity.rawValue, forKey: "activityType")
+            s.setValue(trimmedDetail, forKey: "activityDetail")
+
+            // Threads v1 (owner-only metadata)
+            if s.entity.attributesByName.keys.contains("threadLabel") {
+                s.setValue(sanitizeThreadLabel_v1(threadLabel), forKey: "threadLabel")
+            }
+
+            // If a custom name is selected, stamp userActivityLabel; otherwise clear any previous custom label
+            if !trimmedCustom.isEmpty {
+                s.setValue(trimmedCustom, forKey: "userActivityLabel")
+            } else {
+                s.setValue(nil, forKey: "userActivityLabel")
+            }
         }
 
         // Owner stamp
@@ -1852,7 +1882,7 @@ private var instrumentPicker: some View {
                 return
             }
 
-            let focusValue: Int? = selectedDotIndex_edit
+            let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
 
             let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
             let instLabel =
@@ -1863,14 +1893,16 @@ private var instrumentPicker: some View {
                 id: sid,
                 sessionID: sid,
                 sessionTimestamp: timestamp,
-                title: s.title,
-                durationSeconds: Int(durationSeconds),
-                activityType: activityTypeString,
-                activityDetail: trimmedDetail,
-                instrumentLabel: instLabel,
+                title: isThoughtMode ? nil : s.title,
+                durationSeconds: effectiveDurationSeconds,
+                activityType: isThoughtMode ? nil : activityTypeString,
+                activityDetail: isThoughtMode ? nil : trimmedDetail,
+                instrumentLabel: isThoughtMode ? nil : instLabel,
                 mood: nil,
                 effort: focusValue,
-                isPublic: isPublic
+                isPublic: isPublic,
+                notes: notes,
+                areNotesPrivate: areNotesPrivate_edit
             )
 
             // Publish and visibility are separate concepts:

@@ -90,7 +90,7 @@ enum StatsHelper {
     
     static func fetchStats(in ctx: NSManagedObjectContext, range: StatsRange, ownerUserID: String? = nil) throws -> SessionStats {
         let (start, end) = dateBounds(for: range)
-        let req = NSFetchRequest<NSManagedObject>(entityName: "Session")
+        let req = NSFetchRequest<Session>(entityName: "Session")
         var preds: [NSPredicate] = []
         if let s = start { preds.append(NSPredicate(format: "timestamp >= %@", s as NSDate)) }
         if let e = end { preds.append(NSPredicate(format: "timestamp < %@", e as NSDate)) }
@@ -98,9 +98,9 @@ enum StatsHelper {
             preds.append(NSPredicate(format: "ownerUserID == %@", ownerUserID))
         }
         if !preds.isEmpty { req.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: preds) }
-        let objs = try ctx.fetch(req)
+        let objs = try ctx.fetch(req).filter { !$0.isThought }
         let count = objs.count
-        let seconds = objs.reduce(0) { $0 + ( $1.value(forKey: "durationSeconds") as? Int ?? 0 ) }
+        let seconds = objs.reduce(0) { $0 + Int($1.durationSeconds) }
         return SessionStats(count: count, seconds: seconds)
     }
 
@@ -156,6 +156,7 @@ enum StatsHelper {
         let (start, end) = dateBounds(for: range, now: now, cal: cal)
 
         return posts.filter { post in
+            if post.isThought { return false }
             if let ownerUserID, ownerUserID.isEmpty == false, post.ownerUserID != ownerUserID {
                 return false
             }

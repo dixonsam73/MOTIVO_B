@@ -51,6 +51,10 @@
 // SCOPE: Visual-only/local-state only — add paperclip toggle for staged attachments visibility on timer surface and remove attachments header. No attachment data, playback, or backend changes.
 
 //////
+// CHANGE-ID: 20260430_135800_PTV_ThoughtEntry
+// SCOPE: PracticeTimerView — add Add Thought entry from existing + action via AESV thought mode; no other UI/logic changes.
+// SEARCH-TOKEN: 20260430_135800_PTV_ThoughtEntry
+
 //  PracticeTimerView.swift
 //  MOTIVO
 //
@@ -180,6 +184,7 @@ struct PracticeTimerView: View {
     // Review sheet
     @State var showReviewSheet = false
     @State private var showManualAddSheet: Bool = false
+    @State private var showThoughtEditorSheet: Bool = false
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -1650,6 +1655,18 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
             })
         }
+        .sheet(isPresented: $showThoughtEditorSheet) {
+            AddEditSessionView(isThoughtMode: true, onSuccessfulSave: {
+                if isHomePresentation {
+                    showThoughtEditorSheet = false
+                    DispatchQueue.main.async {
+                        appRoute.route = .content
+                    }
+                } else {
+                    isPresented = false
+                }
+            })
+        }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
             if oldValue == true && newValue == false && didSaveFromReview == false {
@@ -2135,8 +2152,14 @@ private var bottomActionSection: some View {
                 .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
             }
 
-            Button {
-                showManualAddSheet = true
+            Menu {
+                Button("Log Session") {
+                    showManualAddSheet = true
+                }
+
+                Button("Add Thought") {
+                    showThoughtEditorSheet = true
+                }
             } label: {
                 Image(systemName: "plus")
                     .symbolRenderingMode(.monochrome)
@@ -2146,7 +2169,7 @@ private var bottomActionSection: some View {
                     .contentShape(Circle())
             }
             .buttonStyle(.bordered)
-            .accessibilityLabel("Add session manually")
+            .accessibilityLabel("Add entry")
         }
         .frame(maxWidth: .infinity, alignment: .center)
 

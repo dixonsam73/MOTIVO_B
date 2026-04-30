@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260430_161500_BackendShim_ThoughtPrivacyFeedGate
+// SCOPE: BackendShim privacy only — keep owner-private backend posts out of all/feed results while preserving mine results; no schema/payload/rendering changes.
+// SEARCH-TOKEN: 20260430_161500_BackendShim_ThoughtPrivacyFeedGate
+
 // CHANGE-ID: 20260309_142900_OwnerStatsBackendFetch_protocolfix_e31a
 // SCOPE: Add analytics-only full-history owner fetch to BackendPublishService and both conformers; no feed-store or publish-flow changes.
 // SEARCH-TOKEN: 20260309_142900_OwnerStatsBackendFetch_protocolfix_e31a
@@ -1517,15 +1521,13 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
 
                 let all: [BackendPost]
                 if normalized == "all" {
-                    // Defence-in-depth: followers must never render owner-private posts even if backend policy regresses.
-                    all = rawPosts.filter {
-                        let postOwner = ($0.ownerUserID ?? "").lowercased()
-                        return postOwner == ownerLower || $0.isPublic == true
-                    }
+                    // Defence-in-depth: Feed renders only explicitly public posts.
+                    // Owner-private posts remain available through Mine, not Feed.
+                    all = rawPosts.filter { $0.isPublic == true }
                 } else {
                     all = mine
                 }
-
+             
                 let iso = ISO8601DateFormatter()
                 func sortByCreatedDesc(_ posts: [BackendPost]) -> [BackendPost] {
                     posts.sorted { a, b in

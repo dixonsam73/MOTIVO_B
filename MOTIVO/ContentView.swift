@@ -1,3 +1,27 @@
+// CHANGE-ID: 20260430_175500_ContentView_FeedThoughtIdentityHeader
+// SCOPE: ContentView Feed only — route local Thought posts through the existing SessionRow Feed wrapper so identity header and actions remain shared; Thought-specific rendering is limited to the content block; no Journal/backend/model changes.
+// SEARCH-TOKEN: 20260430_175500_ContentView_FeedThoughtIdentityHeader
+
+// CHANGE-ID: 20260430_170000_ContentView_JournalWeekThoughtDensity
+// SCOPE: ContentView — Journal Week Thought cards only: tighten internal vertical rhythm and soften Thought typography without changing Feed, session cards, Month/Year, thumbnail size, or card container system.
+// SEARCH-TOKEN: 20260430_170000_ContentView_JournalWeekThoughtDensity
+
+// CHANGE-ID: 20260430_181500_ContentView_FinalRenderFeedPrivacyGate
+// SCOPE: ContentView - fail-close final Feed render source so private local rows cannot flash from live or frozen feed items; no UI/schema/backend changes.
+// SEARCH-TOKEN: 20260430_181500_ContentView_FinalRenderFeedPrivacyGate
+
+// CHANGE-ID: 20260430_170500_ContentView_EarlyFeedPrivacyGate
+// SCOPE: ContentView privacy only — exclude all private local rows at the earliest Feed filtering branch to prevent private Thoughts flashing during Journal→Feed transitions; no visual/backend/schema changes.
+// SEARCH-TOKEN: 20260430_170500_ContentView_EarlyFeedPrivacyGate
+
+// CHANGE-ID: 20260430_164500_ContentView_ThoughtRowFullWidth
+// SCOPE: ContentView only — force local Thought rows to use one full-width layout path so short, multiline, and attachment Thoughts share the same card structure; no model/backend/filter changes.
+// SEARCH-TOKEN: 20260430_164500_ContentView_ThoughtRowFullWidth
+
+// CHANGE-ID: 20260430_151500_ContentView_ThoughtPolishPass2Safe
+// SCOPE: ContentView only — restore Thought rows to neutral SessionRow card containers, keep notes-first internals, ensure private Thoughts are excluded from Feed without new service calls, and render backend Thoughts with Thought layout; no model/schema/backend/analytics or other file changes.
+// SEARCH-TOKEN: 20260430_151500_ContentView_ThoughtPolishPass2Safe
+
 // CHANGE-ID: 20260429_222500_ContentView_MonthTintInsetSource
 // SCOPE: ContentView - Month journal yearCompact row inset only: reserve leader text inset from resolved Month tint source instead of per-row accent presence; preserve Week/Year/tint/thread/filter/backend behavior.
 // SEARCH-TOKEN: 20260429_222500_ContentView_MonthTintInsetSource
@@ -908,18 +932,22 @@ fileprivate struct SessionsRootView: View {
                             let finalLocalRowsForFeed: [Session] = {
                                 guard selectedScope == .all else { return localRows }
 
+                                // Defence-in-depth: local Feed rows have already passed the shared isPublic gate
+                                // in filteredSessions, but keep the source array fail-closed here too.
+                                let feedVisibleLocalRows = localRows.filter { $0.isPublic }
+
                                 func normalizedOwnerID(_ raw: String?) -> String {
                                     (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                                 }
 
                                 let me = normalizedOwnerID(effectiveUserID)
-                                guard !me.isEmpty else { return localRows }
+                                guard !me.isEmpty else { return feedVisibleLocalRows }
 
                                 if hasExplicitFeedNarrowing {
-                                    return localRows
+                                    return feedVisibleLocalRows
                                 }
 
-                                let hasEligibleNonOwnerLocalPost = localRows.contains {
+                                let hasEligibleNonOwnerLocalPost = feedVisibleLocalRows.contains {
                                     normalizedOwnerID($0.ownerUserID) != me
                                 }
 
@@ -928,10 +956,10 @@ fileprivate struct SessionsRootView: View {
                                 }
 
                                 guard !(hasEligibleNonOwnerLocalPost || hasEligibleNonOwnerRemotePost) else {
-                                    return localRows
+                                    return feedVisibleLocalRows
                                 }
 
-                                return localRows.filter { normalizedOwnerID($0.ownerUserID) != me }
+                                return feedVisibleLocalRows.filter { normalizedOwnerID($0.ownerUserID) != me }
                             }()
 
                             let liveFeedItems: [FeedRowItem] = FeedRowItem.build(
@@ -939,7 +967,21 @@ fileprivate struct SessionsRootView: View {
                                 remote: remotePosts
                             )
 
-                            let renderFeedItems: [FeedRowItem] = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
+                            let renderFeedItems: [FeedRowItem] = {
+                                let source = (isFeedNavFrozen && !frozenFeedItems.isEmpty) ? frozenFeedItems : liveFeedItems
+                                guard selectedScope == .all else { return source }
+
+                                // Final render gate: private local rows must never reach the Feed ForEach,
+                                // including stale/frozen items captured during scope transitions.
+                                return source.filter { item in
+                                    switch item.kind {
+                                    case .local(let session):
+                                        return session.isPublic
+                                    case .remote(let post):
+                                        return post.isPublic == true
+                                    }
+                                }
+                            }()
 
                             if selectedScope == .mine {
                                 switch selectedJournalLens {
@@ -986,22 +1028,35 @@ fileprivate struct SessionsRootView: View {
                                                     ) { EmptyView() }
                                                     .opacity(0)
 
-                                                    SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
-                                                        .contentShape(Rectangle())
-                                                        .onTapGesture {
-                                                            feedNavFreezeTask?.cancel()
-                                                            isFeedNavFrozen = true
-                                                            frozenFeedItems = renderFeedItems
-                                                            pushSessionID = (session.value(forKey: "id") as? UUID)
-                                                        }
-                                                        .modifier(
-                                                            JournalWeekLeadingTintCardModifier(
-                                                                tintColor: journalMonthBarAccentColor(for: session, in: journalWeekTintContextSessions) ?? journalWeekCardFillColor(for: session, in: journalWeekTintContextSessions),
-                                                                strokeColor: journalWeekCardStrokeColor(for: session, in: journalWeekTintContextSessions),
-                                                                showsLeadingTint: journalResolvedTintSource(in: journalWeekTintContextSessions) != .off
+                                                    if session.isThought {
+                                                        ThoughtRow(session: session, scope: selectedScope, context: .journalWeek)
+                                                            .cardSurface()
+                                                            .contentShape(Rectangle())
+                                                            .onTapGesture {
+                                                                feedNavFreezeTask?.cancel()
+                                                                isFeedNavFrozen = true
+                                                                frozenFeedItems = renderFeedItems
+                                                                pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                            }
+                                                            .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
+                                                    } else {
+                                                        SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
+                                                            .contentShape(Rectangle())
+                                                            .onTapGesture {
+                                                                feedNavFreezeTask?.cancel()
+                                                                isFeedNavFrozen = true
+                                                                frozenFeedItems = renderFeedItems
+                                                                pushSessionID = (session.value(forKey: "id") as? UUID)
+                                                            }
+                                                            .modifier(
+                                                                JournalWeekLeadingTintCardModifier(
+                                                                    tintColor: journalMonthBarAccentColor(for: session, in: journalWeekTintContextSessions) ?? journalWeekCardFillColor(for: session, in: journalWeekTintContextSessions),
+                                                                    strokeColor: journalWeekCardStrokeColor(for: session, in: journalWeekTintContextSessions),
+                                                                    showsLeadingTint: journalResolvedTintSource(in: journalWeekTintContextSessions) != .off
+                                                                )
                                                             )
-                                                        )
-                                                        .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
+                                                            .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : Theme.Spacing.m + 2)
+                                                    }
                                                 }
                                                                                             .buttonStyle(.plain)
                                                 .listRowSeparator(.hidden)
@@ -1023,7 +1078,7 @@ fileprivate struct SessionsRootView: View {
                                     }
 
                                 case .month:
-                                    let journalSections = journalYearSections(sessions: localRows)
+                                    let journalSections = journalYearSections(sessions: localRows.filter { !$0.isThought })
                                     let usesYearArchivePresentation = true
                                     let monthShouldReserveTintInset = journalResolvedTintSource(in: journalTintContextSessions) != .off
 
@@ -1116,7 +1171,7 @@ fileprivate struct SessionsRootView: View {
                                     }
 
                                 case .year:
-                                    let yearSections = journalCalendarYearSections(sessions: localRows)
+                                    let yearSections = journalCalendarYearSections(sessions: localRows.filter { !$0.isThought })
                                     let currentMonthAnchorID = journalCurrentMonthAnchorID(in: yearSections)
 
                                     if yearSections.isEmpty {
@@ -1196,6 +1251,7 @@ fileprivate struct SessionsRootView: View {
                                             .opacity(0)
 
                                             SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
+                                                .cardSurface()
                                                 .contentShape(Rectangle())
                                                 .onTapGesture {
                                                     feedNavFreezeTask?.cancel()
@@ -1203,7 +1259,6 @@ fileprivate struct SessionsRootView: View {
                                                     frozenFeedItems = renderFeedItems
                                                     pushSessionID = (session.value(forKey: "id") as? UUID)
                                                 }
-                                                .cardSurface()
                                                 .overlay {
                                                     RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
                                                         .fill(Theme.Colors.surface(colorScheme).opacity(0.035))
@@ -1809,6 +1864,10 @@ fileprivate struct SessionsRootView: View {
         case .all:
             if let me = effectiveUserID {
                 out = out.filter { s in
+                    // Feed is shared-space only. Private local rows — Thoughts and normal sessions —
+                    // must never enter the Feed source array, even briefly during scope transitions.
+                    if s.isPublic == false { return false }
+
                     let isMine = (s.ownerUserID == me)
                     if isMine { return true }
                         #if DEBUG
@@ -1828,6 +1887,7 @@ fileprivate struct SessionsRootView: View {
 
         // Instrument (core)
         if let inst = selectedInstrument {
+            out = out.filter { !$0.isThought }
             let id = inst.objectID
             let targetName = (inst.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             let targetNorm = targetName.lowercased()
@@ -1846,6 +1906,9 @@ fileprivate struct SessionsRootView: View {
         }
 
         // Activity (core enum or custom name)
+        if selectedActivity != .any {
+            out = out.filter { !$0.isThought }
+        }
         switch selectedActivity {
         case .any:
             break
@@ -1862,6 +1925,7 @@ fileprivate struct SessionsRootView: View {
 
         // Thread (owner-only; local-only)
         if let selected = selectedThread {
+            out = out.filter { !$0.isThought }
             let target = selected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if let me = effectiveUserID, !target.isEmpty {
                 out = out.filter { s in
@@ -2257,13 +2321,21 @@ fileprivate struct SessionsRootView: View {
         if selectedThread != nil { return [] }
 
         return posts.filter { post in
-            remoteMatchesSelectedInstrument(post) &&
+            if selectedInstrument != nil || selectedActivity != .any || selectedThread != nil {
+                guard !backendPostIsThought(post) else { return false }
+            }
+            return remoteMatchesSelectedInstrument(post) &&
             remoteMatchesSelectedActivity(post) &&
             remoteMatchesSelectedEnsemble(post) &&
             remoteMatchesActiveUserFilter(post) &&
             remoteMatchesSavedOnly(post) &&
             remoteMatchesSearch(post)
         }
+    }
+
+    private func backendPostIsThought(_ post: BackendPost) -> Bool {
+        let model = BackendSessionViewModel(post: post, currentUserID: (effectiveBackendUserID ?? ""))
+        return BackendThoughtRules.isThought(post: post, model: model)
     }
 
 
@@ -2563,7 +2635,7 @@ fileprivate struct SessionsRootView: View {
     private var journalTintContextSessions: [Session] {
         guard selectedScope == .mine, let uid = effectiveUserID else { return journalArchiveSessions }
         return Array(sessions)
-            .filter { $0.ownerUserID == uid }
+            .filter { $0.ownerUserID == uid && !$0.isThought }
             .sorted { journalDate(for: $0) > journalDate(for: $1) }
     }
 
@@ -2593,7 +2665,7 @@ fileprivate struct SessionsRootView: View {
     }
 
     private var journalCurrentPeriodTotalSeconds: Int {
-        journalCurrentPeriodSessions.reduce(0) { partial, session in
+        journalCurrentPeriodSessions.filter { !$0.isThought }.reduce(0) { partial, session in
             partial + Int(session.durationSeconds)
         }
     }
@@ -3715,131 +3787,168 @@ fileprivate struct SessionRow: View {
                         .accessibilityIdentifier("row.datetime")
                 }
 
-                // Title only (paperclip removed)
-                Text(feedTitle)
-                    .font(isYearCompactJournalRow ? .subheadline.weight(.semibold) : (isMonthCompactJournalRow ? .subheadline.weight(.medium) : .headline))
-                    .lineLimit(isYearCompactJournalRow ? 1 : 2)
-                    .truncationMode(.tail)
-                    .accessibilityIdentifier("row.title")
-
-                if scope == .mine {
-                    let metaLine = isYearCompactJournalRow ? yearCompactMetadataLine : journalMetadataLine
-                    let thread = journalThreadLabel
-                    let tailLine = isYearCompactJournalRow ? yearCompactMetadataTailLine : journalMetadataTailLine
-
-                    if let thread, !thread.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Button {
-                                if selectedThread == thread {
-                                    selectedThread = nil
-                                } else {
-                                    selectedThread = thread
-                                }
-                            } label: {
-                                ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption, verticalPadding: 1)
-                            }
-                            .buttonStyle(.plain)
-
-                            if !tailLine.isEmpty {
-                                Text("· \(tailLine)")
-                                    .font(.caption)
-                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        }
-                        .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Session metadata")
-                        .accessibilityIdentifier("row.subtitle")
-                    } else if !metaLine.isEmpty {
-                        Text(metaLine)
-                            .font(.caption)
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                            .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
-                            .accessibilityLabel("Session metadata")
-                            .accessibilityIdentifier("row.subtitle")
-                    }
-
-                    if showsJournalNotesPreview, !journalNotesPreviewLines.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
-                            ForEach(Array(journalNotesPreviewLines.enumerated()), id: \.offset) { _, line in
-                                Text(line.isBullet ? "• \(line.text)" : line.text)
-                                    .font(Theme.Text.body)
-                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
-                                    .lineLimit(1)
-                                    .truncationMode(.tail)
-                            }
-                        }
-                        .padding(.top, metaLine.isEmpty ? 4 : 6)
-                        .accessibilityLabel("Notes preview")
-                        .accessibilityIdentifier("row.notesPreview")
-                    }
-                } else {
-                    // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
-                    let metaLine = instrumentActivityLine
-                    let thread = journalThreadLabel
-
-                    if let thread, !thread.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 7) {
-                            Button {
-                                if selectedThread == thread {
-                                    selectedThread = nil
-                                } else {
-                                    selectedThread = thread
-                                }
-                            } label: {
-                                ThreadMetaPill(title: thread, isSelected: selectedThread == thread)
-                            }
-                            .buttonStyle(.plain)
-
-                            if !metaLine.isEmpty {
-                                Text("·")
-                                    .font(Theme.Text.body)
-
-                                Text(metaLine)
-                                    .font(Theme.Text.body)
-                                    .lineLimit(2)
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-                        .padding(.top, 3)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Instrument and activity")
-                        .accessibilityIdentifier("row.subtitle")
-                    } else if !metaLine.isEmpty {
-                        Text(metaLine)
-                            .font(Theme.Text.body)
+                if scope != .mine && session.isThought {
+                    if let header = session.thoughtHeader {
+                        Text(header)
+                            .font(Theme.Text.body.weight(.semibold))
+                            .foregroundStyle(.primary)
                             .lineLimit(2)
-                            .padding(.top, 3)
-                            .accessibilityLabel("Instrument and activity")
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("row.title")
+                    }
+
+                    if let body = session.thoughtBodyPreview {
+                        Text(body)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.88))
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.top, 1)
                             .accessibilityIdentifier("row.subtitle")
                     }
-                }
 
-                if showsJournalAttachmentPreview, let fav = favoriteAttachment {
-                    // If viewer isn't the owner, hide preview when favorite is private
-                    if viewerIsOwner || !isPrivate(fav) {
+                    if let fav = favoriteAttachment {
                         HStack(alignment: .center, spacing: 8) {
                             SingleAttachmentPreview(attachment: fav)
-                                .scaleEffect(scope == .mine ? 0.92 : 1.0, anchor: .leading)
-                                .opacity(scope == .mine ? 0.96 : 1.0)
-                            Spacer()
+                            Spacer(minLength: 0)
                         }
-                        .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 3 : 5) : 2)
+                        .padding(.top, 6)
+
+                        if let sid = sessionUUID {
+                            interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
+                                .padding(.top, 6)
+                        }
+                    } else if let sid = sessionUUID {
+                        interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
+                            .padding(.top, 6)
                     }
-                    // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
-                    if let sid = sessionUUID {
+                } else {
+                    // Title only (paperclip removed)
+                    Text(feedTitle)
+                        .font(isYearCompactJournalRow ? .subheadline.weight(.semibold) : (isMonthCompactJournalRow ? .subheadline.weight(.medium) : .headline))
+                        .lineLimit(isYearCompactJournalRow ? 1 : 2)
+                        .truncationMode(.tail)
+                        .accessibilityIdentifier("row.title")
+
+                    if scope == .mine {
+                        let metaLine = isYearCompactJournalRow ? yearCompactMetadataLine : journalMetadataLine
+                        let thread = journalThreadLabel
+                        let tailLine = isYearCompactJournalRow ? yearCompactMetadataTailLine : journalMetadataTailLine
+
+                        if let thread, !thread.isEmpty {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Button {
+                                    if selectedThread == thread {
+                                        selectedThread = nil
+                                    } else {
+                                        selectedThread = thread
+                                    }
+                                } label: {
+                                    ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption, verticalPadding: 1)
+                                }
+                                .buttonStyle(.plain)
+
+                                if !tailLine.isEmpty {
+                                    Text("· \(tailLine)")
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                            }
+                            .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Session metadata")
+                            .accessibilityIdentifier("row.subtitle")
+                        } else if !metaLine.isEmpty {
+                            Text(metaLine)
+                                .font(.caption)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
+                                .accessibilityLabel("Session metadata")
+                                .accessibilityIdentifier("row.subtitle")
+                        }
+
+                        if showsJournalNotesPreview, !journalNotesPreviewLines.isEmpty {
+                            VStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(journalNotesPreviewLines.enumerated()), id: \.offset) { _, line in
+                                    Text(line.isBullet ? "• \(line.text)" : line.text)
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.96))
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                }
+                            }
+                            .padding(.top, metaLine.isEmpty ? 4 : 6)
+                            .accessibilityLabel("Notes preview")
+                            .accessibilityIdentifier("row.notesPreview")
+                        }
+                    } else {
+                        // Instrument / Activity subtitle (metadata) — Thread pill when present (local-only)
+                        let metaLine = instrumentActivityLine
+                        let thread = journalThreadLabel
+
+                        if let thread, !thread.isEmpty {
+                            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                                Button {
+                                    if selectedThread == thread {
+                                        selectedThread = nil
+                                    } else {
+                                        selectedThread = thread
+                                    }
+                                } label: {
+                                    ThreadMetaPill(title: thread, isSelected: selectedThread == thread)
+                                }
+                                .buttonStyle(.plain)
+
+                                if !metaLine.isEmpty {
+                                    Text("·")
+                                        .font(Theme.Text.body)
+
+                                    Text(metaLine)
+                                        .font(Theme.Text.body)
+                                        .lineLimit(2)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            .padding(.top, 3)
+                            .accessibilityElement(children: .combine)
+                            .accessibilityLabel("Instrument and activity")
+                            .accessibilityIdentifier("row.subtitle")
+                        } else if !metaLine.isEmpty {
+                            Text(metaLine)
+                                .font(Theme.Text.body)
+                                .lineLimit(2)
+                                .padding(.top, 3)
+                                .accessibilityLabel("Instrument and activity")
+                                .accessibilityIdentifier("row.subtitle")
+                        }
+                    }
+
+                    if showsJournalAttachmentPreview, let fav = favoriteAttachment {
+                        // If viewer isn't the owner, hide preview when favorite is private
+                        if viewerIsOwner || !isPrivate(fav) {
+                            HStack(alignment: .center, spacing: 8) {
+                                SingleAttachmentPreview(attachment: fav)
+                                    .scaleEffect(scope == .mine ? 0.92 : 1.0, anchor: .leading)
+                                    .opacity(scope == .mine ? 0.96 : 1.0)
+                                Spacer()
+                            }
+                            .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 3 : 5) : 2)
+                        }
+                        // Interaction row (Like · Comment · Share) — placed directly under thumbnail when present
+                        if let sid = sessionUUID {
+                            interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
+                                .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 4 : 7) : 6)
+                        }
+                    }
+                    // Fallback: if there is no thumbnail, place the interaction row below the subtitle
+                    else if !isYearCompactJournalRow, let sid = sessionUUID {
                         interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
                             .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 4 : 7) : 6)
                     }
-                }
-                // Fallback: if there is no thumbnail, place the interaction row below the subtitle
-                else if !isYearCompactJournalRow, let sid = sessionUUID {
-                    interactionRow(sessionID: sid, attachmentCount: extraAttachmentCount)
-                        .padding(.top, scope == .mine ? (isMonthCompactJournalRow ? 4 : 7) : 6)
                 }
             }
         }
@@ -4502,6 +4611,114 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #endif
 // MARK: - Step 8C Backend Feed Row (read-only)
 
+fileprivate enum ThoughtRowContext {
+    case feed
+    case journalWeek
+}
+
+fileprivate struct ThoughtRow: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let session: Session
+    let scope: FeedScope
+    let context: ThoughtRowContext
+
+    init(session: Session, scope: FeedScope, context: ThoughtRowContext = .feed) {
+        self.session = session
+        self.scope = scope
+        self.context = context
+    }
+
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.dateFormat = "d MMM yyyy, HH:mm"
+        return formatter
+    }()
+
+    private var timestampText: String {
+        Self.timestampFormatter.string(from: session.timestamp ?? Date())
+    }
+
+    private var attachments: [Attachment] {
+        (session.attachments as? Set<Attachment>).map { Array($0) } ?? []
+    }
+
+    private var favoriteAttachment: Attachment? {
+        pickFavoriteAttachment(from: attachments)
+    }
+
+    private var verticalPadding: CGFloat {
+        if context == .journalWeek { return 5 }
+        return scope == .mine ? 7 : 6
+    }
+
+    private var rowSpacing: CGFloat {
+        context == .journalWeek ? 3 : 4
+    }
+
+    private var timestampOpacity: Double {
+        context == .journalWeek ? 0.64 : 0.72
+    }
+
+    private var headerTopPadding: CGFloat {
+        context == .journalWeek ? 0 : 1
+    }
+
+    private var bodyTopPadding: CGFloat {
+        context == .journalWeek ? 0 : 1
+    }
+
+    private var bodyOpacity: Double {
+        context == .journalWeek ? 0.78 : 0.88
+    }
+
+    private var thumbnailTopPadding: CGFloat {
+        if context == .journalWeek { return 3 }
+        return scope == .mine ? 5 : 6
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: rowSpacing) {
+            Text(timestampText)
+                .font(.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(timestampOpacity))
+                .lineLimit(1)
+                .accessibilityLabel("Date and time")
+                .accessibilityIdentifier("row.datetime")
+
+            if let header = session.thoughtHeader {
+                Text(header)
+                    .font(Theme.Text.body.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, headerTopPadding)
+                    .accessibilityIdentifier("row.title")
+            }
+
+            if let body = session.thoughtBodyPreview {
+                Text(body)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(bodyOpacity))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, bodyTopPadding)
+                    .accessibilityIdentifier("row.subtitle")
+            }
+
+            if let favoriteAttachment {
+                HStack(alignment: .center, spacing: 8) {
+                    SingleAttachmentPreview(attachment: favoriteAttachment)
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, thumbnailTopPadding)
+            }
+        }
+        .padding(.vertical, verticalPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 fileprivate struct BackendPostRow: View {
     let model: BackendSessionViewModel
     let directoryAccount: DirectoryAccount?
@@ -4564,6 +4781,58 @@ fileprivate struct BackendPostRow: View {
 }
 
 // Phase 14.2.1 — Remote post row that is a visual twin
+
+fileprivate enum BackendThoughtRules {
+    static func isThought(post: BackendPost, model: BackendSessionViewModel) -> Bool {
+        if post.isThought { return true }
+
+        guard let duration = numericValue(named: ["durationSeconds", "duration_seconds", "duration"], in: post),
+              abs(duration) < 0.0001 else {
+            return false
+        }
+
+        let instrument = stringValue(named: ["instrumentLabel", "instrument_label"], in: post)
+        let title = stringValue(named: ["title", "sessionTitle", "session_title"], in: post)
+        let notes = stringValue(named: ["notes", "body", "text"], in: post)
+        let hasContent = !notes.isEmpty || !model.attachmentRefs.isEmpty
+
+        return instrument.isEmpty && title.isEmpty && hasContent
+    }
+
+    private static func stringValue(named names: [String], in value: Any) -> String {
+        for name in names {
+            if let raw = mirrorValue(named: name, in: value) {
+                let unwrapped = unwrapOptional(raw) ?? raw
+                if let string = unwrapped as? String {
+                    return string.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+            }
+        }
+        return ""
+    }
+
+    private static func numericValue(named names: [String], in value: Any) -> Double? {
+        for name in names {
+            if let raw = mirrorValue(named: name, in: value) {
+                let unwrapped = unwrapOptional(raw) ?? raw
+                if let double = unwrapped as? Double { return double }
+                if let int = unwrapped as? Int { return Double(int) }
+                if let number = unwrapped as? NSNumber { return number.doubleValue }
+            }
+        }
+        return nil
+    }
+
+    private static func mirrorValue(named name: String, in value: Any) -> Any? {
+        Mirror(reflecting: value).children.first(where: { $0.label == name })?.value
+    }
+
+    private static func unwrapOptional(_ value: Any) -> Any? {
+        let mirror = Mirror(reflecting: value)
+        guard mirror.displayStyle == .optional else { return value }
+        return mirror.children.first?.value
+    }
+}
 
 // Remote row layout stability: cache whether a post has attachments (and its chosen "fav" ref).
 // This prevents a transient empty attachmentRefs render from collapsing the thumbnail lane and then re-expanding it.
@@ -4859,8 +5128,23 @@ fileprivate struct RemotePostRowTwin: View {
         return nil
     }
 
+    private static let thoughtTimestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_GB")
+        formatter.dateFormat = "d MMM yyyy, HH:mm"
+        return formatter
+    }()
+
     private var model: BackendSessionViewModel {
         BackendSessionViewModel(post: post, currentUserID: (viewerUserID ?? ""))
+    }
+
+    private var isThoughtPost: Bool {
+        BackendThoughtRules.isThought(post: post, model: model)
+    }
+
+    private var thoughtDateTimeLine: String {
+        Self.thoughtTimestampFormatter.string(from: timestampDate)
     }
 
     private var activityName: String {
@@ -5126,7 +5410,7 @@ private var extraAttachmentCount: Int {
                 }
 
                 if let dt = dateTimeLine {
-                    Text(dt)
+                    Text(isThoughtPost ? thoughtDateTimeLine : dt)
                         .font(.caption2)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
@@ -5135,21 +5419,40 @@ private var extraAttachmentCount: Int {
                         .accessibilityIdentifier("row.datetime")
                 }
 
-                // Title only (paperclip removed)
-                Text(feedTitle)
-                    .font(.headline)
-                    .lineLimit(2)
-                    .accessibilityLabel("Session title")
-                    .accessibilityIdentifier("row.title")
+                if isThoughtPost {
+                    if let header = post.thoughtHeader {
+                        Text(header)
+                            .font(.headline)
+                            .lineLimit(2)
+                            .accessibilityLabel("Thought")
+                            .accessibilityIdentifier("row.title")
+                    }
 
-                // Activity subtitle (metadata)
-                if !instrumentActivityLine.isEmpty {
-                    Text(instrumentActivityLine)
-                        .font(Theme.Text.body)
+                    if let body = post.thoughtBodyPreview {
+                        Text(body)
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .lineLimit(2)
+                            .padding(.top, 3)
+                            .accessibilityIdentifier("row.subtitle")
+                    }
+                } else {
+                    // Title only (paperclip removed)
+                    Text(feedTitle)
+                        .font(.headline)
                         .lineLimit(2)
-                        .padding(.top, 3)
-                        .accessibilityLabel(instrumentActivityLine)
-                        .accessibilityIdentifier("row.subtitle")
+                        .accessibilityLabel("Session title")
+                        .accessibilityIdentifier("row.title")
+
+                    // Activity subtitle (metadata)
+                    if !instrumentActivityLine.isEmpty {
+                        Text(instrumentActivityLine)
+                            .font(Theme.Text.body)
+                            .lineLimit(2)
+                            .padding(.top, 3)
+                            .accessibilityLabel(instrumentActivityLine)
+                            .accessibilityIdentifier("row.subtitle")
+                    }
                 }
 
                 // Attachment preview (twin placement to SessionRow)

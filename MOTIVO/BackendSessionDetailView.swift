@@ -199,6 +199,10 @@ struct BackendSessionDetailView: View {
 
         let dateStr = dateFormatter.string(from: ts)
         let timeStr = timeFormatter.string(from: ts)
+        if model.isThought {
+            return "\(dateStr), \(timeStr)"
+        }
+
         let durStr = formattedDurationDisplay(Int(model.durationSeconds ?? 0))
 
         return "\(dateStr) • \(timeStr) • \(durStr)"
@@ -290,11 +294,11 @@ struct BackendSessionDetailView: View {
 
     @ViewBuilder
     private func mainContent() -> some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+        VStack(alignment: .leading, spacing: model.isThought ? Theme.Spacing.m : Theme.Spacing.l) {
             identityHeader()
-                .padding(.bottom, 4)
+                .padding(.bottom, model.isThought ? 8 : 4)
 
-            if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !model.isThought, !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines))
                         .fixedSize(horizontal: false, vertical: true)
@@ -302,6 +306,31 @@ struct BackendSessionDetailView: View {
                 .cardSurface()
             }
 
+            if model.isThought {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(metaLine)
+                        .font(Theme.Text.meta.weight(.medium))
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .padding(.top, 4)
+                        .padding(.leading, 16)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        if let header = model.thoughtHeader {
+                            Text(header)
+                                .font(Theme.Text.body.weight(.semibold))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+
+                        if let body = model.thoughtBodyPreview {
+                            Text(body)
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .cardSurface()
+                }
+            } else {
             VStack(alignment: .leading, spacing: 6) {
                 Group {
                     HStack {
@@ -317,11 +346,12 @@ struct BackendSessionDetailView: View {
                 .accessibilityElement(children: .contain)
             }
             .cardSurface()
+            }
 
             let originalNotes = model.notes ?? ""
             let (focusDotIndexFromNotes, displayNotes) = extractFocusDotIndex(from: originalNotes)
 
-            if !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            if !model.isThought, !displayNotes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Notes").sectionHeader()
@@ -342,7 +372,7 @@ struct BackendSessionDetailView: View {
                 return nil
             }()
 
-            if let dot = focusDotIndex {
+            if !model.isThought, let dot = focusDotIndex {
                 FocusSectionCard(dotIndex: dot)
             }
 

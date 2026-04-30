@@ -81,6 +81,20 @@ enum Theme {
         }
     }
 
+    enum Thought {
+        static func surfaceFill(_ scheme: ColorScheme) -> Color {
+            scheme == .dark
+            ? Color(red: 0.18, green: 0.16, blue: 0.13).opacity(0.78)
+            : Color(red: 0.98, green: 0.94, blue: 0.84).opacity(0.72)
+        }
+
+        static func stroke(_ scheme: ColorScheme) -> Color {
+            scheme == .dark
+            ? Color.white.opacity(0.07)
+            : Color.black.opacity(0.055)
+        }
+    }
+
     enum Text {
         static var pageTitle: Font { .title3.weight(.semibold) }
         static var sectionHeader: Font { .subheadline.weight(.semibold) }
