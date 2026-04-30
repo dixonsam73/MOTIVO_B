@@ -424,7 +424,6 @@ if let insights, hasVisibleInterpretiveInsights {
             resetHighestFocusCircleReveal()
         }
         .onChange(of: range) { _, _ in
-            resetHighestFocusCircleReveal()
             Task { await reload() }
         }
         .onChange(of: auth.backendUserID) { _, _ in Task { await reload() } }
@@ -507,13 +506,36 @@ if let insights, hasVisibleInterpretiveInsights {
     }
 
     private func scheduleHighestFocusCircleRevealIfNeeded() {
+        guard let insight = highestFocusSession else {
+            highestFocusCircleRevealToken += 1
+            didScheduleHighestFocusCircleReveal = false
+            animatedHighestFocusCircle = 0
+
+            withAnimation(.easeOut(duration: 3.5)) {
+                showHighestFocusCircle = false
+            }
+            return
+        }
+
+        let target = CGFloat(insight.normalizedFocus)
+
+        if showHighestFocusCircle {
+            guard abs(animatedHighestFocusCircle - target) > 0.001 else { return }
+
+            highestFocusCircleRevealToken += 1
+            didScheduleHighestFocusCircleReveal = true
+
+            withAnimation(.easeOut(duration: 5.0)) {
+                animatedHighestFocusCircle = target
+            }
+            return
+        }
+
         guard didScheduleHighestFocusCircleReveal == false else { return }
-        guard let insight = highestFocusSession else { return }
 
         didScheduleHighestFocusCircleReveal = true
 
         let revealToken = highestFocusCircleRevealToken
-        let target = CGFloat(insight.normalizedFocus)
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 5.55) {
             guard revealToken == highestFocusCircleRevealToken else { return }
@@ -2545,7 +2567,7 @@ private struct SessionShapeGlyph: View {
         guard !intersection.isNull, intersection.height > 0 else { return false }
 
         let visibleRatio = intersection.height / frame.height
-        return visibleRatio >= 0.72
+        return visibleRatio >= 0.98
     }
 
     private func settleIfNeeded(force: Bool = false, useFocusSequenceDelay: Bool = false) {
