@@ -325,7 +325,17 @@ struct AppSetUpView: View {
 
             switch result {
             case .success:
-                break
+                if let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
+                    userID: backendID,
+                    displayName: trimmedName,
+                    localAccountID: ProfileStore.accountID(for: backendID),
+                    lookupEnabled: false,
+                    followRequestsEnabled: true,
+                    location: nil,
+                    instruments: instrumentsSorted
+                ) {
+                    ProfileStore.setAccountID(generated, for: backendID)
+                }
             case .failure:
                 statusMessage = "Couldn’t finish setup right now. Please try again."
                 return
