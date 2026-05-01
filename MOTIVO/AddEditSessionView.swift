@@ -1661,6 +1661,7 @@ private var instrumentPicker: some View {
             // New mode defaults
             timestamp = Date()
             durationSeconds = 0
+            isPublic = !isThoughtMode
 
             // Threads v1 (owner-only metadata)
             threadLabel = nil
