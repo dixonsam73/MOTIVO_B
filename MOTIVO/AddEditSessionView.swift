@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260501_224500_AESV_ShareToggleInline
+// SCOPE: AESV visibility card — remove redundant “On” label and place Share with followers inline with the toggle. No logic or persistence changes.
+// SEARCH-TOKEN: 20260501_224500_AESV_ShareToggleInline
+
 // CHANGE-ID: 20260317_183800_AESV_AutoDescriptionReplaceOnFocus
 // SCOPE: AddEditSessionView — make untouched auto description clear on first focus and restore current auto description on blur if left empty. No other UI or logic changes.
 // SEARCH-TOKEN: 20260317_183800_AESV_AutoDescriptionReplaceOnFocus
@@ -982,10 +986,10 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                 // ---------- Visibility ----------
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Share with followers").sectionHeader()
-                    Toggle("On", isOn: $isPublic)
-                        .font(Theme.Text.body)
-                        .tint(Theme.Colors.accent)
+                    Toggle(isOn: $isPublic) {
+                        Text("Share with followers").sectionHeader()
+                    }
+                    .tint(Theme.Colors.accent)
                 }
                 .cardSurface()
 
