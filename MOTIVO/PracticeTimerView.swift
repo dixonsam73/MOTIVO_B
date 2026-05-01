@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260501_215900_ptv_inline_add_actions_compiler_guard
+// SCOPE: Replace + menu with idle-only inline action row; preserve existing manual log/thought sheet flows and Tasks Pad behaviour.
+
 // CHANGE-ID: 20260428_191500_ptv_setup_pending_branch
 // SCOPE: PracticeTimerView onboarding routing only — render AppSetUpView as the home-root branch for signed-in users with incomplete setup until backend proves an existing account; preserve completion handoff to normal timer.
 
@@ -294,6 +297,7 @@ struct PracticeTimerView: View {
 
     // --- Tasks/Notes Pad State (v7.9A) ---
     @State private var showTasksPad: Bool = false
+    @State private var showAddEntryActions: Bool = false
     @State var showTaskImportSourceDialog: Bool = false
     @State var showTaskImportReplaceAppendDialog: Bool = false
     @State var showTaskImportPasteSheet: Bool = false
@@ -1397,9 +1401,6 @@ private func loadPracticeDefaultsIfNeeded() {
         } else {
             self.videoTitles = [:]
         }
-            #if DEBUG
-            print("[PracticeTimer] hydrate IDs defaults audio=\(audioIDs) video=\(videoIDs) image=\(imageIDs) store=\(StagingStore.list().map{ $0.id })")
-            #endif
             let hasPersistedStagedIDs = (!audioIDStrings.isEmpty || !videoIDStrings.isEmpty || !imageIDStrings.isEmpty)
 
             // Also check the staging store to avoid clearing attachments that exist on disk
@@ -2101,6 +2102,10 @@ private func loadPracticeDefaultsIfNeeded() {
         !stagedImages.isEmpty || !stagedAudio.isEmpty || !stagedVideos.isEmpty
     }
 
+    private var isIdleAddEntryAvailable: Bool {
+        !isRunning && elapsedSeconds == 0 && accumulatedSeconds == 0 && startDate == nil
+    }
+
 @ViewBuilder
 private var bottomActionSection: some View {
     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -2130,7 +2135,10 @@ private var bottomActionSection: some View {
                     if showTasksPad {
                         showTasksPad = false
                     } else {
-                        showTasksPad = true
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showAddEntryActions = false
+                            showTasksPad = true
+                        }
                         loadPracticeDefaultsIfNeeded()
                         loadDefaultTasksIfNeeded()
                         persistTasksSnapshot()
@@ -2152,28 +2160,66 @@ private var bottomActionSection: some View {
                 .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
             }
 
-            Menu {
-                Button("Log Session") {
-                    showManualAddSheet = true
+            if isIdleAddEntryAvailable {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        showTasksPad = false
+                        showAddEntryActions.toggle()
+                    }
+                } label: {
+                    Image(systemName: "plus")
+                        .symbolRenderingMode(.monochrome)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(showAddEntryActions ? tasksAccentIcon : recorderIcon)
+                        .frame(width: 48, height: 48)
+                        .contentShape(Circle())
                 }
-
-                Button("Add Thought") {
-                    showThoughtEditorSheet = true
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .symbolRenderingMode(.monochrome)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(recorderIcon)
-                    .frame(width: 48, height: 48)
-                    .contentShape(Circle())
+                .buttonStyle(.bordered)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(showAddEntryActions ? tasksAccent.opacity(0.26) : Color.clear)
+                )
+                .clipShape(Capsule(style: .continuous))
+                .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
             }
-            .buttonStyle(.bordered)
-            .accessibilityLabel("Add entry")
         }
         .frame(maxWidth: .infinity, alignment: .center)
 
-        if showTasksButton && showTasksPad {
+        if showAddEntryActions && isIdleAddEntryAvailable {
+            VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 12) {
+                    Button {
+                        showAddEntryActions = false
+                        showManualAddSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("+")
+                            Text("Add session")
+                        }
+                        .foregroundStyle(tasksAccent.opacity(0.95))
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer(minLength: 8)
+
+                    Button {
+                        showAddEntryActions = false
+                        showThoughtEditorSheet = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("+")
+                            Text("Add thought")
+                        }
+                        .foregroundStyle(tasksAccent.opacity(0.95))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.top, 10)
+            .padding(.bottom, 12)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        } else if showTasksButton && showTasksPad {
             TasksPadCard(
                 showTasksPad: $showTasksPad,
                 taskLines: $taskLines,
@@ -2517,6 +2563,7 @@ private var bottomActionSection: some View {
             ud.set(UUID().uuidString, forKey: currentSessionIDKey)
         }
         guard instrument != nil else { return }
+        showAddEntryActions = false
         if !isRunning {
             if startDate == nil { startDate = Date() }
 
@@ -2726,10 +2773,6 @@ private var bottomActionSection: some View {
         let audioIDs = audioIDStrings.compactMap(UUID.init)
         let videoIDs = videoIDStrings.compactMap(UUID.init)
         let imageIDs = imageIDStrings.compactMap(UUID.init)
-        #if DEBUG
-        print("[PracticeTimer] hydrate IDs defaults audio=\(audioIDs) video=\(videoIDs) image=\(imageIDs) store=\(StagingStore.list().map{ $0.id })")
-        #endif
-
         let refs = StagingStore.list()
         var rebuiltAudio: [StagedAttachment] = []
         var rebuiltVideo: [StagedAttachment] = []
@@ -2859,6 +2902,7 @@ private var bottomActionSection: some View {
         startDate = nil
         accumulatedSeconds = 0
         elapsedSeconds = 0
+        showAddEntryActions = false
         activity = .practice
         activityDetail = ""
         activityChoice = "core:0"
