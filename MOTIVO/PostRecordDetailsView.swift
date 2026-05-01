@@ -775,10 +775,17 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
 
                     // ---------- Visibility ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Share with followers").sectionHeader()
-                        Toggle("On", isOn: $isPublic)
+                        HStack {
+                            Text("Share with followers")
+                                .sectionHeader()
+
+                            Spacer()
+
+                            Toggle("", isOn: $isPublic)
+                                .labelsHidden()
+                                .tint(Theme.Colors.accent)
+                        }
                             .font(Theme.Text.body)
-                            .tint(Theme.Colors.accent)
                     }
                     .cardSurface()
 
