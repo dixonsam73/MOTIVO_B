@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260502_162500_ContentView_MonthThoughtRows
+// SCOPE: ContentView Month journal only — include local Thought rows in Month chronology and route them to the dedicated MonthThoughtRow component; preserve existing session bars, Year stats-only behaviour, analytics exclusions, deletion, navigation, backend, and model logic.
+// SEARCH-TOKEN: 20260502_162500_ContentView_MonthThoughtRows
+
 // CHANGE-ID: 20260430_175500_ContentView_FeedThoughtIdentityHeader
 // SCOPE: ContentView Feed only — route local Thought posts through the existing SessionRow Feed wrapper so identity header and actions remain shared; Thought-specific rendering is limited to the content block; no Journal/backend/model changes.
 // SEARCH-TOKEN: 20260430_175500_ContentView_FeedThoughtIdentityHeader
@@ -1078,7 +1082,7 @@ fileprivate struct SessionsRootView: View {
                                     }
 
                                 case .month:
-                                    let journalSections = journalYearSections(sessions: localRows.filter { !$0.isThought })
+                                    let journalSections = journalYearSections(sessions: localRows)
                                     let usesYearArchivePresentation = true
                                     let monthShouldReserveTintInset = journalResolvedTintSource(in: journalTintContextSessions) != .off
 
@@ -1122,16 +1126,32 @@ fileprivate struct SessionsRootView: View {
                                                     ) { EmptyView() }
                                                     .opacity(0)
 
-                                                    SessionRow(
-                                                        session: session,
-                                                        scope: selectedScope,
-                                                        selectedThread: $selectedThread,
-                                                        activeUserFilterUserID: $activeUserFilterUserID,
-                                                        activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs,
-                                                        filtersExpanded: $filtersExpanded,
-                                                        journalStyle: .yearCompact,
-                                                        yearCompactHorizontalPadding: monthShouldReserveTintInset ? 12 : 6
-                                                    )
+                                                    Group {
+                                                        if session.isThought {
+                                                            MonthThoughtRow(session: session)
+                                                        } else {
+                                                            SessionRow(
+                                                                session: session,
+                                                                scope: selectedScope,
+                                                                selectedThread: $selectedThread,
+                                                                activeUserFilterUserID: $activeUserFilterUserID,
+                                                                activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs,
+                                                                filtersExpanded: $filtersExpanded,
+                                                                journalStyle: .yearCompact,
+                                                                yearCompactHorizontalPadding: monthShouldReserveTintInset ? 12 : 6
+                                                            )
+                                                            .modifier(
+                                                                JournalArchiveRowContainerModifier(
+                                                                    lens: usesYearArchivePresentation ? .year : selectedJournalLens,
+                                                                    yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
+                                                                    barFillColor: journalMonthBarFillColor(for: session, in: journalTintContextSessions),
+                                                                    barStrokeColor: journalMonthBarStrokeColor(for: session, in: journalTintContextSessions),
+                                                                    barAccentColor: journalMonthBarAccentColor(for: session, in: journalTintContextSessions),
+                                                                    barAccentWidth: 6
+                                                                )
+                                                            )
+                                                        }
+                                                    }
                                                     .contentShape(Rectangle())
                                                     .onTapGesture {
                                                         feedNavFreezeTask?.cancel()
@@ -1139,16 +1159,6 @@ fileprivate struct SessionsRootView: View {
                                                         frozenFeedItems = renderFeedItems
                                                         pushSessionID = (session.value(forKey: "id") as? UUID)
                                                     }
-                                                    .modifier(
-                                                        JournalArchiveRowContainerModifier(
-                                                            lens: usesYearArchivePresentation ? .year : selectedJournalLens,
-                                                            yearWidthFraction: journalYearSurfaceWidthFraction(for: session, maxDuration: journalYearMaxDuration(for: localRows)),
-                                                            barFillColor: journalMonthBarFillColor(for: session, in: journalTintContextSessions),
-                                                            barStrokeColor: journalMonthBarStrokeColor(for: session, in: journalTintContextSessions),
-                                                            barAccentColor: journalMonthBarAccentColor(for: session, in: journalTintContextSessions),
-                                                            barAccentWidth: 6
-                                                        )
-                                                    )
                                                     .padding(.bottom, rowIndex == section.sessions.count - 1 ? Theme.Spacing.xl : 4)
                                                 }
                                                 .buttonStyle(.plain)
@@ -4217,7 +4227,7 @@ fileprivate struct VideoOrIconTile: View {
     }
 }
 
-fileprivate struct SingleAttachmentPreview: View {
+struct SingleAttachmentPreview: View {
     let attachment: Attachment
     @State private var poster: UIImage? = nil
 
