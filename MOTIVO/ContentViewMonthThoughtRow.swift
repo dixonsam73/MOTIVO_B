@@ -42,7 +42,7 @@ struct MonthThoughtRow: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(titleText)
                     .font(Theme.Text.body.weight(.semibold))
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(Color.primary.opacity(0.75))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .accessibilityIdentifier("monthThought.title")
