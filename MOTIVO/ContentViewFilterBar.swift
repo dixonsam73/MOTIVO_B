@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260504_174500_FilterBarThoughtsContentFilter
+// SCOPE: Add expanded filter-card Content row and dynamic search placeholder for All/Sessions/Thoughts only; preserve existing row styling and filter controls.
+// SEARCH-TOKEN: 20260504_174500_FilterBarThoughtsContentFilter
+
 // CHANGE-ID: 20260420_165900_ContentView_FilterBarExtractionSafetyPass1_7f2a
 // SCOPE: Extracted filter-card rendering cluster from ContentView with no behavior, spacing, navigation, or visual changes. Contains only FilterBar, FilterCardRow, FilterCardDivider, FilterCardSearchField, FilterSelectorValueControl, FilterSelectorTrailingControlStyle, and FilterCardUI.
 // SEARCH-TOKEN: 20260420_165900_ContentView_FilterBarExtractionSafetyPass1_7f2a
@@ -83,6 +87,7 @@ struct FilterCardRow<Trailing: View>: View {
 
 struct FilterCardSearchField: View {
     @Binding var text: String
+    let placeholder: String
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -92,9 +97,9 @@ struct FilterCardSearchField: View {
                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
 
             TextField(
-                "Search",
+                placeholder,
                 text: $text,
-                prompt: Text("Search")
+                prompt: Text(placeholder)
                     .font(.footnote)
                     .foregroundStyle(Theme.Colors.secondaryText.opacity(colorScheme == .dark ? 0.92 : 0.86))
             )
@@ -131,6 +136,7 @@ struct FilterBar: View {
     let customNames: [String]
     @Binding var selectedInstrument: Instrument?
     @Binding var selectedActivity: ActivityFilter
+    @Binding var selectedContentFilter: ContentFilter
     @Binding var searchText: String
     @Binding var savedOnly: Bool
     @Binding var selectedThread: String?
@@ -167,7 +173,7 @@ struct FilterBar: View {
                     .padding(.horizontal, Theme.Spacing.card)
 
                 HStack(spacing: 0) {
-                    FilterCardSearchField(text: $searchText)
+                    FilterCardSearchField(text: $searchText, placeholder: selectedContentFilter.searchPlaceholder)
                 }
                 .frame(minHeight: FilterCardUI.rowMinHeight)
                 .padding(.horizontal, Theme.Spacing.card)
@@ -297,6 +303,32 @@ struct FilterBar: View {
                         }
                     } label: {
                         FilterSelectorValueControl(valueText: selectedEnsembleName)
+                    }
+                    .simultaneousGesture(
+                        TapGesture().onEnded {
+                            #if canImport(UIKit)
+                            ContentViewKeyboardDismiss.dismiss()
+                            #endif
+                        }
+                    )
+                    .modifier(FilterSelectorTrailingControlStyle())
+                }
+
+                FilterCardDivider()
+                    .padding(.horizontal, Theme.Spacing.card)
+
+                FilterCardRow(label: "Content") {
+                    Menu {
+                        ForEach(ContentFilter.allCases) { filter in
+                            Button(filter.label) {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                                selectedContentFilter = filter
+                            }
+                        }
+                    } label: {
+                        FilterSelectorValueControl(valueText: selectedContentFilter.label)
                     }
                     .simultaneousGesture(
                         TapGesture().onEnded {

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260504_174500_ThoughtsContentFilter
+// SCOPE: Add Content filter row for All/Sessions/Thoughts and compose it through Journal Week, Journal Month, Feed, Saved, and search placeholder only; no model/backend/analytics/card visual changes.
+// SEARCH-TOKEN: 20260504_174500_ThoughtsContentFilter
+
 // CHANGE-ID: 20260502_162500_ContentView_MonthThoughtRows
 // SCOPE: ContentView Month journal only — include local Thought rows in Month chronology and route them to the dedicated MonthThoughtRow component; preserve existing session bars, Year stats-only behaviour, analytics exclusions, deletion, navigation, backend, and model logic.
 // SEARCH-TOKEN: 20260502_162500_ContentView_MonthThoughtRows
@@ -417,6 +421,31 @@ enum ActivityFilter: Hashable, Identifiable {
     }
 }
 
+
+enum ContentFilter: String, CaseIterable, Identifiable {
+    case all
+    case sessions
+    case thoughts
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .sessions: return "Sessions"
+        case .thoughts: return "Thoughts"
+        }
+    }
+
+    var searchPlaceholder: String {
+        switch self {
+        case .all: return "Search"
+        case .sessions: return "Search sessions"
+        case .thoughts: return "Search thoughts"
+        }
+    }
+}
+
 // MARK: - Entry
 
 struct ContentView: View {
@@ -482,6 +511,7 @@ fileprivate struct SessionsRootView: View {
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
+    @State private var selectedContentFilter: ContentFilter = .all
     @State private var selectedThread: String? = nil
     @State private var activeUserFilterUserID: String? = nil
     @State private var selectedEnsembleID: String? = nil
@@ -857,6 +887,7 @@ fileprivate struct SessionsRootView: View {
                             .filter { !$0.isEmpty },
                         selectedInstrument: $selectedInstrument,
                         selectedActivity: $selectedActivity,
+                        selectedContentFilter: $selectedContentFilter,
                         searchText: $searchText,
                         savedOnly: $savedOnly,
                         selectedThread: $selectedThread,
@@ -1895,6 +1926,16 @@ fileprivate struct SessionsRootView: View {
             }
         }
 
+        // Content (sessions / Thoughts)
+        switch selectedContentFilter {
+        case .all:
+            break
+        case .sessions:
+            out = out.filter { !$0.isThought }
+        case .thoughts:
+            out = out.filter { $0.isThought }
+        }
+
         // Instrument (core)
         if let inst = selectedInstrument {
             out = out.filter { !$0.isThought }
@@ -2331,8 +2372,19 @@ fileprivate struct SessionsRootView: View {
         if selectedThread != nil { return [] }
 
         return posts.filter { post in
+            let isThought = backendPostIsThought(post)
+
+            switch selectedContentFilter {
+            case .all:
+                break
+            case .sessions:
+                guard !isThought else { return false }
+            case .thoughts:
+                guard isThought else { return false }
+            }
+
             if selectedInstrument != nil || selectedActivity != .any || selectedThread != nil {
-                guard !backendPostIsThought(post) else { return false }
+                guard !isThought else { return false }
             }
             return remoteMatchesSelectedInstrument(post) &&
             remoteMatchesSelectedActivity(post) &&
@@ -2626,12 +2678,14 @@ fileprivate struct SessionsRootView: View {
         let hasSearchQuery = !debouncedQuery
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .isEmpty
+        let hasSelectedContentFilter = selectedContentFilter != .all
 
         return hasActiveUserFilter ||
             hasSelectedInstrument ||
             hasSelectedActivity ||
             hasSelectedThread ||
             hasSelectedEnsemble ||
+            hasSelectedContentFilter ||
             savedOnly ||
             hasSearchQuery
     }
