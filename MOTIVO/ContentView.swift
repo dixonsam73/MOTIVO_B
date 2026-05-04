@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260504_180500_ContentView_JournalThoughtSaveParity
+// SCOPE: Journal Week Thought rows only — add existing viewer-local Save heart control beneath Thought content using FeedInteractionStore; no Feed/session/detail/filter/model/backend changes.
+// SEARCH-TOKEN: 20260504_180500_ContentView_JournalThoughtSaveParity
+
 // CHANGE-ID: 20260504_174500_ThoughtsContentFilter
 // SCOPE: Add Content filter row for All/Sessions/Thoughts and compose it through Journal Week, Journal Month, Feed, Saved, and search placeholder only; no model/backend/analytics/card visual changes.
 // SEARCH-TOKEN: 20260504_174500_ThoughtsContentFilter
@@ -1064,7 +1068,7 @@ fileprivate struct SessionsRootView: View {
                                                     .opacity(0)
 
                                                     if session.isThought {
-                                                        ThoughtRow(session: session, scope: selectedScope, context: .journalWeek)
+                                                        ThoughtRow(session: session, scope: selectedScope, context: .journalWeek, viewerUserID: effectiveUserID)
                                                             .cardSurface()
                                                             .contentShape(Rectangle())
                                                             .onTapGesture {
@@ -4685,11 +4689,15 @@ fileprivate struct ThoughtRow: View {
     let session: Session
     let scope: FeedScope
     let context: ThoughtRowContext
+    let viewerUserID: String?
 
-    init(session: Session, scope: FeedScope, context: ThoughtRowContext = .feed) {
+    @State private var isSavedLocal: Bool = false
+
+    init(session: Session, scope: FeedScope, context: ThoughtRowContext = .feed, viewerUserID: String? = nil) {
         self.session = session
         self.scope = scope
         self.context = context
+        self.viewerUserID = viewerUserID
     }
 
     private static let timestampFormatter: DateFormatter = {
@@ -4701,6 +4709,10 @@ fileprivate struct ThoughtRow: View {
 
     private var timestampText: String {
         Self.timestampFormatter.string(from: session.timestamp ?? Date())
+    }
+
+    private var sessionUUID: UUID? {
+        session.value(forKey: "id") as? UUID
     }
 
     private var attachments: [Attachment] {
@@ -4777,9 +4789,45 @@ fileprivate struct ThoughtRow: View {
                 }
                 .padding(.top, thumbnailTopPadding)
             }
+
+            if context == .journalWeek, let sessionUUID {
+                journalWeekSaveRow(sessionID: sessionUUID)
+                    .padding(.top, favoriteAttachment == nil ? thumbnailTopPadding : 8)
+            }
         }
         .padding(.vertical, verticalPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .task(id: sessionUUID) {
+            if context == .journalWeek, let sessionUUID, let viewerUserID {
+                isSavedLocal = FeedInteractionStore.isSaved(sessionUUID, viewerUserID: viewerUserID)
+            } else {
+                isSavedLocal = false
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func journalWeekSaveRow(sessionID: UUID) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Button(action: {
+                #if canImport(UIKit)
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                #endif
+                let vid = viewerUserID ?? "unknown"
+                let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: vid)
+                isSavedLocal = newState
+            }) {
+                HStack(spacing: 6) {
+                    Image(systemName: isSavedLocal ? "heart.fill" : "heart")
+                        .foregroundStyle(isSavedLocal ? Color.red.opacity(0.75) : Theme.Colors.secondaryText)
+                }
+                .font(.system(size: 18, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
+
+            Spacer(minLength: 0)
+        }
     }
 }
 
