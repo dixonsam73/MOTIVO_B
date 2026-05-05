@@ -4,6 +4,10 @@
 // CHANGE-ID: 20260326_145800_stage3b_longpress_reveal
 // SCOPE: Stage 3B — preserve compact short-tap metronome toggle and live pulse feedback while adding long-press inline reveal support and a subtle close affordance for the full controls.
 
+// CHANGE-ID: 20260505_174500_LongPressControlsHint
+// SCOPE: Report Metronome compact trigger tap/long-press discovery for one-time parent hint; no audio/control logic changes.
+// SEARCH-TOKEN: 20260505_174500_LongPressControlsHint
+
 import SwiftUI
 
 struct MetronomeControlStripCard: View {
@@ -329,6 +333,8 @@ struct MetronomeCompactTrigger: View {
     let metronomeEngine: MetronomeEngine
     let recorderIcon: Color
     let shouldAnimateCompactIcon: Bool
+    var onTapHintRequest: (() -> Void)? = nil
+    var onLongPressDiscovered: (() -> Void)? = nil
     var onRevealControls: (() -> Void)? = nil
 
     @State private var metronomeSwingRight: Bool = false
@@ -357,6 +363,7 @@ struct MetronomeCompactTrigger: View {
             LongPressGesture(minimumDuration: 0.45)
                 .onEnded { _ in
                     suppressNextTap = true
+                    onLongPressDiscovered?()
                     onRevealControls?()
                 }
         )
@@ -382,6 +389,7 @@ struct MetronomeCompactTrigger: View {
             suppressNextTap = false
             return
         }
+        onTapHintRequest?()
         toggleMetronome()
     }
 

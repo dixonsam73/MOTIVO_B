@@ -75,6 +75,10 @@
 // CHANGE-ID: 20260326_132900_stage2b
 // SCOPE: Keep weekly pulse persistent across idle/running/paused to remove start-time layout shift
 
+// CHANGE-ID: 20260505_174500_LongPressControlsHint
+// SCOPE: Add one-time Drone/Metronome compact-control long-press hint; no audio, expanded-control, tuner, media, task, navigation, or persistence changes outside hint state.
+// SEARCH-TOKEN: 20260505_174500_LongPressControlsHint
+
 import SwiftUI
 import Combine
 import CoreData
@@ -165,6 +169,10 @@ struct PracticeTimerView: View {
     @State private var showSessionMetaSetup: Bool = false
     @State private var showDroneControlsExpanded: Bool = false
     @State private var showMetronomeControlsExpanded: Bool = false
+    @AppStorage("ptv_hasSeenDroneLongPressHint_v1") private var hasSeenDroneLongPressHint: Bool = false
+    @AppStorage("ptv_hasSeenMetronomeLongPressHint_v1") private var hasSeenMetronomeLongPressHint: Bool = false
+    @State private var showLongPressControlsHint: Bool = false
+    @State private var longPressControlsHintToken = UUID()
     @State private var isTunerOpen: Bool = false
     @State private var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
@@ -1909,6 +1917,12 @@ private func loadPracticeDefaultsIfNeeded() {
                         droneNotes: droneNotes,
                         droneEngine: audioServices.droneEngine,
                         recorderIcon: recorderIcon,
+                        onTapHintRequest: {
+                            requestDroneLongPressHint()
+                        },
+                        onLongPressDiscovered: {
+                            markDroneLongPressHintDiscovered()
+                        },
                         onRevealControls: {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 showDroneControlsExpanded.toggle()
@@ -1928,6 +1942,12 @@ private func loadPracticeDefaultsIfNeeded() {
                         metronomeEngine: audioServices.metronomeEngine,
                         recorderIcon: recorderIcon,
                         shouldAnimateCompactIcon: !showMetronomeControlsExpanded,
+                        onTapHintRequest: {
+                            requestMetronomeLongPressHint()
+                        },
+                        onLongPressDiscovered: {
+                            markMetronomeLongPressHintDiscovered()
+                        },
                         onRevealControls: {
                             withAnimation(.easeInOut(duration: 0.18)) {
                                 showMetronomeControlsExpanded.toggle()
@@ -1961,6 +1981,16 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .center)
+            .overlay(alignment: .top) {
+                if showLongPressControlsHint {
+                    Text("Long press for controls")
+                        .font(.caption)
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.82))
+                        .transition(.opacity)
+                        .offset(y: -22)
+                        .accessibilityHidden(true)
+                }
+            }
             .padding(.bottom, Theme.Spacing.xs)
 
             if showDroneStrip && showDroneControlsExpanded {
@@ -1994,6 +2024,48 @@ private func loadPracticeDefaultsIfNeeded() {
                 .zIndex(5)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
+        }
+    }
+
+    private func requestDroneLongPressHint() {
+        guard !hasSeenDroneLongPressHint else { return }
+        hasSeenDroneLongPressHint = true
+        presentLongPressControlsHint()
+    }
+
+    private func requestMetronomeLongPressHint() {
+        guard !hasSeenMetronomeLongPressHint else { return }
+        hasSeenMetronomeLongPressHint = true
+        presentLongPressControlsHint()
+    }
+
+    private func markDroneLongPressHintDiscovered() {
+        hasSeenDroneLongPressHint = true
+        hideLongPressControlsHint()
+    }
+
+    private func markMetronomeLongPressHintDiscovered() {
+        hasSeenMetronomeLongPressHint = true
+        hideLongPressControlsHint()
+    }
+
+    private func presentLongPressControlsHint() {
+        let token = UUID()
+        longPressControlsHintToken = token
+
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showLongPressControlsHint = true
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard longPressControlsHintToken == token else { return }
+            hideLongPressControlsHint()
+        }
+    }
+
+    private func hideLongPressControlsHint() {
+        withAnimation(.easeInOut(duration: 1.0)) {
+            showLongPressControlsHint = false
         }
     }
 

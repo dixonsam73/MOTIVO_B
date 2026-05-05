@@ -5,6 +5,10 @@
 // CHANGE-ID: 20260328_034900_stage3b_remove_close
 // SCOPE: Stage 3B refinement — remove explicit close affordance so long press on the compact trigger is the sole reveal/dismiss mechanism.
 
+// CHANGE-ID: 20260505_174500_LongPressControlsHint
+// SCOPE: Report Drone compact trigger tap/long-press discovery for one-time parent hint; no audio/control logic changes.
+// SEARCH-TOKEN: 20260505_174500_LongPressControlsHint
+
 import SwiftUI
 
 struct DroneControlStripCard: View {
@@ -172,6 +176,8 @@ struct DroneCompactTrigger: View {
     let droneNotes: [String]
     let droneEngine: DroneEngine
     let recorderIcon: Color
+    var onTapHintRequest: (() -> Void)? = nil
+    var onLongPressDiscovered: (() -> Void)? = nil
     var onRevealControls: (() -> Void)? = nil
 
     @State private var suppressNextTap = false
@@ -195,6 +201,7 @@ struct DroneCompactTrigger: View {
             LongPressGesture(minimumDuration: 0.45)
                 .onEnded { _ in
                     suppressNextTap = true
+                    onLongPressDiscovered?()
                     onRevealControls?()
                 }
         )
@@ -207,6 +214,7 @@ struct DroneCompactTrigger: View {
             suppressNextTap = false
             return
         }
+        onTapHintRequest?()
         toggleDrone()
     }
 
