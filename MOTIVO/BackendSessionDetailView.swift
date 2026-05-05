@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260505_174500_BackendSessionDetailView_SaveHint
+// SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
+// SEARCH-TOKEN: 20260505_174500_BackendSessionDetailView_SaveHint
 // CHANGE-ID: 20260219_233200_BSDV_VideoThumbs_IDFix_a1f3
 // SCOPE: BSDV — fix attachment thumbs grid duplicate IDs so videos render alongside images (no UI redesign; BSDV-only).
 // INVARIANTS: No backend/schema/RLS/RPC changes. No attachment persistence changes. No UI redesign. Changes localized to BSDV viewer launch.
@@ -123,6 +126,9 @@ struct BackendSessionDetailView: View {
 
     // Mirrors SessionDetailView’s local interaction state
     @State private var isLikedLocal: Bool = false
+    @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
+    @State private var showSaveHint: Bool = false
+    @State private var saveHintToken = UUID()
 
     private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
 
@@ -790,16 +796,55 @@ struct BackendSessionDetailView: View {
     }
 
 
+    private var saveHintView: some View {
+        VStack(spacing: 2) {
+            Text("Saved for later")
+                .font(Theme.Text.meta)
+                .foregroundStyle(.primary)
+            Text("Use Filter to find saved posts")
+                .font(.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .transition(.opacity)
+    }
+
+    private func presentSaveHint() {
+        let token = UUID()
+        saveHintToken = token
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showSaveHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard saveHintToken == token else { return }
+            hideSaveHint()
+        }
+    }
+
+    private func hideSaveHint() {
+        withAnimation(.easeInOut(duration: 1.0)) {
+            showSaveHint = false
+        }
+    }
+
     // MARK: - Interactions row (must match SessionDetailView)
 
     private func interactionRow() -> some View {
-        HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
+            if showSaveHint {
+                saveHintView
+            }
+
+            HStack(spacing: 0) {
             Button(action: {
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 #endif
                 let newState = FeedInteractionStore.toggleSaved(model.id, viewerUserID: effectiveViewerUserID ?? "unknown")
                 isLikedLocal = newState
+                if !hasSeenSaveHint {
+                    presentSaveHint()
+                    hasSeenSaveHint = true
+                }
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: isLikedLocal ? "heart.fill" : "heart")
@@ -840,6 +885,7 @@ struct BackendSessionDetailView: View {
             }
         }
         .accessibilityElement(children: .contain)
+        }
     }
 
     private func shareText() -> String {

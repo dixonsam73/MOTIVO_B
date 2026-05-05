@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260505_174500_ContentView_SaveHint
+// SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
+// SEARCH-TOKEN: 20260505_174500_ContentView_SaveHint
 // CHANGE-ID: 20260504_180500_ContentView_JournalThoughtSaveParity
 // SCOPE: Journal Week Thought rows only — add existing viewer-local Save heart control beneath Thought content using FeedInteractionStore; no Feed/session/detail/filter/model/backend changes.
 // SEARCH-TOKEN: 20260504_180500_ContentView_JournalThoughtSaveParity
@@ -3283,6 +3286,9 @@ fileprivate struct SessionRow: View {
     @State private var isCommentsPresented: Bool = false
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
+    @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
+    @State private var showSaveHint: Bool = false
+    @State private var saveHintToken = UUID()
     @State private var isShareSheetPresented: Bool = false
     @State private var isSharing: Bool = false
     @State private var errorLine: String? = nil
@@ -4099,9 +4105,45 @@ fileprivate struct SessionRow: View {
         }
     }
 
+
+    private var saveHintView: some View {
+        VStack(spacing: 2) {
+            Text("Saved for later")
+                .font(Theme.Text.meta)
+                .foregroundStyle(.primary)
+            Text("Use Filter to find saved posts")
+                .font(.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .transition(.opacity)
+    }
+
+    private func presentSaveHint() {
+        let token = UUID()
+        saveHintToken = token
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showSaveHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard saveHintToken == token else { return }
+            hideSaveHint()
+        }
+    }
+
+    private func hideSaveHint() {
+        withAnimation(.easeInOut(duration: 1.0)) {
+            showSaveHint = false
+        }
+    }
+
     @ViewBuilder
     private func interactionRow(sessionID: UUID, attachmentCount: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
+            if showSaveHint {
+                saveHintView
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
             // Like
             Button(action: {
                 #if canImport(UIKit)
@@ -4110,6 +4152,10 @@ fileprivate struct SessionRow: View {
                 let vid = viewerUserID ?? "unknown"
                 let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: vid)
                 isSavedLocal = newState
+                if !hasSeenSaveHint {
+                    presentSaveHint()
+                    hasSeenSaveHint = true
+                }
                 // 8H-A: no counts
 
             }) {
@@ -4174,6 +4220,7 @@ fileprivate struct SessionRow: View {
         .accessibilityElement(children: .contain)
         .sheet(isPresented: $isShareSheetPresented) {
             ShareToFollowerSheet(postID: sessionID, isPresented: $isShareSheetPresented)
+        }
         }
     }
 
@@ -4692,6 +4739,9 @@ fileprivate struct ThoughtRow: View {
     let viewerUserID: String?
 
     @State private var isSavedLocal: Bool = false
+    @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
+    @State private var showSaveHint: Bool = false
+    @State private var saveHintToken = UUID()
 
     init(session: Session, scope: FeedScope, context: ThoughtRowContext = .feed, viewerUserID: String? = nil) {
         self.session = session
@@ -4806,9 +4856,45 @@ fileprivate struct ThoughtRow: View {
         }
     }
 
+
+    private var saveHintView: some View {
+        VStack(spacing: 2) {
+            Text("Saved for later")
+                .font(Theme.Text.meta)
+                .foregroundStyle(.primary)
+            Text("Use Filter to find saved posts")
+                .font(.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .transition(.opacity)
+    }
+
+    private func presentSaveHint() {
+        let token = UUID()
+        saveHintToken = token
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showSaveHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard saveHintToken == token else { return }
+            hideSaveHint()
+        }
+    }
+
+    private func hideSaveHint() {
+        withAnimation(.easeInOut(duration: 1.0)) {
+            showSaveHint = false
+        }
+    }
+
     @ViewBuilder
     private func journalWeekSaveRow(sessionID: UUID) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
+            if showSaveHint {
+                saveHintView
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
             Button(action: {
                 #if canImport(UIKit)
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -4816,6 +4902,10 @@ fileprivate struct ThoughtRow: View {
                 let vid = viewerUserID ?? "unknown"
                 let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: vid)
                 isSavedLocal = newState
+                if !hasSeenSaveHint {
+                    presentSaveHint()
+                    hasSeenSaveHint = true
+                }
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: isSavedLocal ? "heart.fill" : "heart")
@@ -4827,6 +4917,7 @@ fileprivate struct ThoughtRow: View {
             .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
 
             Spacer(minLength: 0)
+            }
         }
     }
 }
@@ -5140,6 +5231,9 @@ fileprivate struct RemotePostRowTwin: View {
 
     @State private var showPeek: Bool = false
     @State private var isSavedLocal: Bool = false
+    @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
+    @State private var showSaveHint: Bool = false
+    @State private var saveHintToken = UUID()
     @State private var isRemoteCommentsPresented: Bool = false
 
     private func favAndExtraCount(from refs: [BackendSessionViewModel.BackendAttachmentRef]) -> (BackendSessionViewModel.BackendAttachmentRef?, Int) {
@@ -5701,8 +5795,44 @@ private struct DirectoryAvatarCircle: View {
 }
 #endif
 
+
+private var saveHintView: some View {
+    VStack(spacing: 2) {
+        Text("Saved for later")
+            .font(Theme.Text.meta)
+            .foregroundStyle(.primary)
+        Text("Use Filter to find saved posts")
+            .font(.caption2)
+            .foregroundStyle(Theme.Colors.secondaryText)
+    }
+    .transition(.opacity)
+    }
+
+private func presentSaveHint() {
+    let token = UUID()
+    saveHintToken = token
+    withAnimation(.easeInOut(duration: 0.15)) {
+        showSaveHint = true
+    }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+        guard saveHintToken == token else { return }
+        hideSaveHint()
+    }
+    }
+
+private func hideSaveHint() {
+    withAnimation(.easeInOut(duration: 1.0)) {
+        showSaveHint = false
+    }
+    }
+
 private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 16) {
+        VStack(alignment: .leading, spacing: 4) {
+            if showSaveHint {
+                saveHintView
+            }
+
+            HStack(alignment: .firstTextBaseline, spacing: 16) {
             // Save (viewer-local)
             Button(action: {
                 #if canImport(UIKit)
@@ -5711,6 +5841,10 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
                 let vid = viewerUserID ?? "unknown"
                 let newState = FeedInteractionStore.toggleSaved(postID, viewerUserID: vid)
                 isSavedLocal = newState
+                if !hasSeenSaveHint {
+                    presentSaveHint()
+                    hasSeenSaveHint = true
+                }
             }) {
                 HStack(spacing: 6) {
                     Image(systemName: isSavedLocal ? "heart.fill" : "heart")
@@ -5748,6 +5882,7 @@ private func interactionRow(postID: UUID, attachmentCount: Int) -> some View {
         .padding(.top, -2)
         .font(.subheadline)
         .accessibilityElement(children: .contain)
+        }
     }
 
     private func shareText() -> String {

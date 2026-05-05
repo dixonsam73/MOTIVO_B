@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260505_174500_SessionDetailView_SaveHint
+// SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
+// SEARCH-TOKEN: 20260505_174500_SessionDetailView_SaveHint
 // CHANGE-ID: 20260424_124500_SDV_ActivityTintCardRouting
 // SCOPE: Owner-only activity tint now routes to the activity description card when that card contains the visible activity label; instrument tint behaviour unchanged.
 // SEARCH-TOKEN: 20260424_124500_SDV_ActivityTintCardRouting
@@ -205,6 +208,9 @@ struct SessionDetailView: View {
 
     // Added state for local saved interaction state
     @State private var isSavedLocal: Bool = false
+    @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
+    @State private var showSaveHint: Bool = false
+    @State private var saveHintToken = UUID()
     @State private var cachedMetaCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
 
@@ -1273,10 +1279,45 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
         dismiss()
     }
 
+    private var saveHintView: some View {
+        VStack(spacing: 2) {
+            Text("Saved for later")
+                .font(Theme.Text.meta)
+                .foregroundStyle(.primary)
+            Text("Use Filter to find saved posts")
+                .font(.caption2)
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .transition(.opacity)
+    }
+
+    private func presentSaveHint() {
+        let token = UUID()
+        saveHintToken = token
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showSaveHint = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) {
+            guard saveHintToken == token else { return }
+            hideSaveHint()
+        }
+    }
+
+    private func hideSaveHint() {
+        withAnimation(.easeInOut(duration: 1.0)) {
+            showSaveHint = false
+        }
+    }
+
     // Added interactionRow view builder for Like · Comment · Share
     @ViewBuilder
     private func interactionRow(sessionID: UUID) -> some View {
-        HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 4) {
+            if showSaveHint {
+                saveHintView
+            }
+
+            HStack(spacing: 0) {
             // Like
             Button(action: {
                 #if canImport(UIKit)
@@ -1284,6 +1325,10 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
                 #endif
                 let newState = FeedInteractionStore.toggleSaved(sessionID, viewerUserID: effectiveViewerUserID ?? "unknown")
                 isSavedLocal = newState
+                if !hasSeenSaveHint {
+                    presentSaveHint()
+                    hasSeenSaveHint = true
+                }
             }) {
                 HStack(spacing: 8) {
                     Image(systemName: isSavedLocal ? "heart.fill" : "heart")
@@ -1337,6 +1382,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
             }
         }
         .accessibilityElement(children: .contain)
+        }
     }
 }
 
