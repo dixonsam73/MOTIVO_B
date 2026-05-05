@@ -164,8 +164,8 @@ private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
     }
     guard !totals.isEmpty else { return [] }
     let sorted = totals.sorted { $0.value > $1.value }
-    let head = Array(sorted.prefix(6))
-    let tail = sorted.dropFirst(6)
+    let head = Array(sorted.prefix(7))
+    let tail = sorted.dropFirst(7)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -195,8 +195,8 @@ private func threadAnalytics(from sessions: [Session]) -> ThreadAnalyticsResult 
     let sorted = totals.sorted { $0.value > $1.value }
     let uniqueCount = totals.count
 
-    let head = Array(sorted.prefix(6))
-    let tail = sorted.dropFirst(6)
+    let head = Array(sorted.prefix(7))
+    let tail = sorted.dropFirst(7)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     let slices = otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -1409,8 +1409,8 @@ if let insights, hasVisibleInterpretiveInsights {
     private func distributionSlices(from totals: [String: Int]) -> [ActivitySlice] {
         guard !totals.isEmpty else { return [] }
         let sorted = totals.sorted { $0.value > $1.value }
-        let head = Array(sorted.prefix(6))
-        let tail = sorted.dropFirst(6)
+        let head = Array(sorted.prefix(7))
+        let tail = sorted.dropFirst(7)
         let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
         let otherTotal = tail.reduce(0) { $0 + $1.value }
         return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
