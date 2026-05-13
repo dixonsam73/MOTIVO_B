@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_091500_PTV_ThoughtThreadHandoff
+// SCOPE: PracticeTimerView — extract Thought editor sheet content and pass provisional thread prefill into Thought creation only.
+// SEARCH-TOKEN: 20260513_091500_PTV_ThoughtThreadHandoff
+
 // CHANGE-ID: 20260513_075400_PTV_AmbientThreadContinuity
 // SCOPE: PracticeTimerView — add ambient provisional thread continuity chips derived from local session history; no persistence, project UI, or canonical metadata changes.
 // SEARCH-TOKEN: 20260513_075400_PTV_AmbientThreadContinuity
@@ -1205,6 +1209,23 @@ private func loadPracticeDefaultsIfNeeded() {
         }
     }
 
+    private var thoughtEditorSheet: some View {
+        AddEditSessionView(
+            isThoughtMode: true,
+            threadLabelPrefill: selectedProvisionalThreadLabelForReview,
+            onSuccessfulSave: {
+                if isHomePresentation {
+                    showThoughtEditorSheet = false
+                    DispatchQueue.main.async {
+                        appRoute.route = .content
+                    }
+                } else {
+                    isPresented = false
+                }
+            }
+        )
+    }
+
     @ViewBuilder
     var body: some View {
         if shouldRenderAppSetUpRoot {
@@ -1679,16 +1700,7 @@ private func loadPracticeDefaultsIfNeeded() {
             })
         }
         .sheet(isPresented: $showThoughtEditorSheet) {
-            AddEditSessionView(isThoughtMode: true, onSuccessfulSave: {
-                if isHomePresentation {
-                    showThoughtEditorSheet = false
-                    DispatchQueue.main.async {
-                        appRoute.route = .content
-                    }
-                } else {
-                    isPresented = false
-                }
-            })
+            thoughtEditorSheet
         }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
