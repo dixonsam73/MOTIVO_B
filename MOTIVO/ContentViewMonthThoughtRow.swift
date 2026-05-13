@@ -1,11 +1,12 @@
-// CHANGE-ID: 20260502_101500_ContentViewMonthThoughtRowGridFix
-// SCOPE: Visual-only geometry correction for Month Thought rows: restore neutral timeline anchor, align title column to Month session rows, keep compact image/video thumbnail only; no logic/model/navigation changes.
-// SEARCH-TOKEN: 20260502_101500_ContentViewMonthThoughtRowGridFix
+// CHANGE-ID: 20260513_171900_MonthThoughtThreadDisplayParity
+// SCOPE: Add subdued thread chip continuity display to Journal Month Thought rows only; preserve existing compact geometry, neutral timeline anchor, attachments, navigation, analytics, and Year behavior.
+// SEARCH-TOKEN: 20260513_171900_MonthThoughtThreadDisplayParity
 
 import SwiftUI
 
 struct MonthThoughtRow: View {
     let session: Session
+    @Binding var selectedThread: String?
 
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -23,6 +24,10 @@ struct MonthThoughtRow: View {
 
     private var timestampText: String {
         Self.timestampFormatter.string(from: session.timestamp ?? Date())
+    }
+
+    private var threadLabel: String? {
+        sanitizeThoughtThreadLabel(session.threadLabel ?? "", maxLength: 32)
     }
 
     private var visualAttachment: Attachment? {
@@ -52,6 +57,24 @@ struct MonthThoughtRow: View {
                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.68))
                     .lineLimit(1)
                     .accessibilityIdentifier("monthThought.datetime")
+
+                if let thread = threadLabel, !thread.isEmpty {
+                    Button {
+                        if selectedThread == thread {
+                            selectedThread = nil
+                        } else {
+                            selectedThread = thread
+                        }
+                    } label: {
+                        ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption2, verticalPadding: 0)
+                            .scaleEffect(0.94)
+                            .opacity(0.92)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 1)
+                    .accessibilityLabel("Thread \(thread)")
+                    .accessibilityIdentifier("monthThought.thread")
+                }
             }
             .layoutPriority(1)
 
@@ -129,4 +152,12 @@ private func attachmentVisualKind(_ attachment: Attachment) -> String? {
     }
 
     return nil
+}
+
+
+private func sanitizeThoughtThreadLabel(_ label: String, maxLength: Int) -> String? {
+    let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+    if trimmed.count <= maxLength { return trimmed }
+    return String(trimmed.prefix(maxLength)).trimmingCharacters(in: .whitespacesAndNewlines)
 }

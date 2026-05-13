@@ -9,9 +9,9 @@
 // SCOPE: Add Content filter row for All/Sessions/Thoughts and compose it through Journal Week, Journal Month, Feed, Saved, and search placeholder only; no model/backend/analytics/card visual changes.
 // SEARCH-TOKEN: 20260504_174500_ThoughtsContentFilter
 
-// CHANGE-ID: 20260502_162500_ContentView_MonthThoughtRows
-// SCOPE: ContentView Month journal only — include local Thought rows in Month chronology and route them to the dedicated MonthThoughtRow component; preserve existing session bars, Year stats-only behaviour, analytics exclusions, deletion, navigation, backend, and model logic.
-// SEARCH-TOKEN: 20260502_162500_ContentView_MonthThoughtRows
+// CHANGE-ID: 20260513_171900_ThoughtThreadDisplayParity
+// SCOPE: Thought thread display parity for Journal Week and Month Thought rows only; add subdued thread chip continuity display while preserving Year, analytics, metrics, backend, tint, and existing session row logic.
+// SEARCH-TOKEN: 20260513_171900_ThoughtThreadDisplayParity
 
 // CHANGE-ID: 20260430_175500_ContentView_FeedThoughtIdentityHeader
 // SCOPE: ContentView Feed only — route local Thought posts through the existing SessionRow Feed wrapper so identity header and actions remain shared; Thought-specific rendering is limited to the content block; no Journal/backend/model changes.
@@ -1071,7 +1071,7 @@ fileprivate struct SessionsRootView: View {
                                                     .opacity(0)
 
                                                     if session.isThought {
-                                                        ThoughtRow(session: session, scope: selectedScope, context: .journalWeek, viewerUserID: effectiveUserID)
+                                                        ThoughtRow(session: session, scope: selectedScope, selectedThread: $selectedThread, context: .journalWeek, viewerUserID: effectiveUserID)
                                                             .cardSurface()
                                                             .contentShape(Rectangle())
                                                             .onTapGesture {
@@ -1166,7 +1166,7 @@ fileprivate struct SessionsRootView: View {
 
                                                     Group {
                                                         if session.isThought {
-                                                            MonthThoughtRow(session: session)
+                                                            MonthThoughtRow(session: session, selectedThread: $selectedThread)
                                                         } else {
                                                             SessionRow(
                                                                 session: session,
@@ -4735,6 +4735,7 @@ fileprivate struct ThoughtRow: View {
     @Environment(\.colorScheme) private var colorScheme
     let session: Session
     let scope: FeedScope
+    @Binding var selectedThread: String?
     let context: ThoughtRowContext
     let viewerUserID: String?
 
@@ -4743,9 +4744,10 @@ fileprivate struct ThoughtRow: View {
     @State private var showSaveHint: Bool = false
     @State private var saveHintToken = UUID()
 
-    init(session: Session, scope: FeedScope, context: ThoughtRowContext = .feed, viewerUserID: String? = nil) {
+    init(session: Session, scope: FeedScope, selectedThread: Binding<String?> = .constant(nil), context: ThoughtRowContext = .feed, viewerUserID: String? = nil) {
         self.session = session
         self.scope = scope
+        self._selectedThread = selectedThread
         self.context = context
         self.viewerUserID = viewerUserID
     }
@@ -4763,6 +4765,11 @@ fileprivate struct ThoughtRow: View {
 
     private var sessionUUID: UUID? {
         session.value(forKey: "id") as? UUID
+    }
+
+
+    private var threadLabel: String? {
+        ThreadLabelSanitizer.sanitize(session.threadLabel ?? "", maxLength: 32)
     }
 
     private var attachments: [Attachment] {
@@ -4809,8 +4816,27 @@ fileprivate struct ThoughtRow: View {
                 .font(.caption2)
                 .foregroundStyle(Theme.Colors.secondaryText.opacity(timestampOpacity))
                 .lineLimit(1)
+                .padding(.leading, (context == .journalWeek && threadLabel != nil && !(threadLabel?.isEmpty ?? true)) ? 3 : 0)
                 .accessibilityLabel("Date and time")
                 .accessibilityIdentifier("row.datetime")
+
+
+            if context == .journalWeek, let thread = threadLabel, !thread.isEmpty {
+                Button {
+                    if selectedThread == thread {
+                        selectedThread = nil
+                    } else {
+                        selectedThread = thread
+                    }
+                } label: {
+                    ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption, verticalPadding: 1)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+                .padding(.bottom, 6)
+                .accessibilityLabel("Thread \(thread)")
+                .accessibilityIdentifier("row.thread")
+            }
 
             if let header = session.thoughtHeader {
                 Text(header)
