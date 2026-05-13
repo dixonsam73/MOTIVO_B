@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_081900_AESV_ThoughtThreadSupport
+// SCOPE: AddEditSessionView — allow optional Thread selection in Thought mode and preserve Thought threadLabel on save. No analytics/filter/UI redesign changes.
+// SEARCH-TOKEN: 20260513_081900_AESV_ThoughtThreadSupport
+
 // CHANGE-ID: 20260501_224500_AESV_ShareToggleInline
 // SCOPE: AESV visibility card — remove redundant “On” label and place Share with followers inline with the toggle. No logic or persistence changes.
 // SEARCH-TOKEN: 20260501_224500_AESV_ShareToggleInline
@@ -150,6 +154,7 @@ struct AddEditSessionView: View {
     var session: Session? = nil
     var onSuccessfulSave: (() -> Void)? = nil
     var isThoughtMode: Bool = false
+    var threadLabelPrefill: String? = nil
 
     // Form state
     @State private var instruments: [Instrument] = []
@@ -414,10 +419,16 @@ struct AddEditSessionView: View {
         stripFocusTokensFromNotes_edit()
     }
 
-    init(session: Session? = nil, isThoughtMode: Bool = false, onSuccessfulSave: (() -> Void)? = nil) {
+    init(
+        session: Session? = nil,
+        isThoughtMode: Bool = false,
+        threadLabelPrefill: String? = nil,
+        onSuccessfulSave: (() -> Void)? = nil
+    ) {
         self.session = session
         self.onSuccessfulSave = onSuccessfulSave
         self.isThoughtMode = isThoughtMode || (session?.isThought ?? false)
+        self.threadLabelPrefill = threadLabelPrefill
         // Seed time-related fields on edit so they don’t flash empty
         if let s = session {
             if let ts = s.timestamp { _timestamp = State(initialValue: ts) }
@@ -428,6 +439,8 @@ struct AddEditSessionView: View {
                 let raw = (s.value(forKey: "threadLabel") as? String) ?? ""
                 _threadLabel = State(initialValue: sanitizeThreadLabel_v1(raw))
             }
+        } else if let clean = sanitizeThreadLabel_v1(threadLabelPrefill) {
+            _threadLabel = State(initialValue: clean)
         }
     }
 
@@ -904,6 +917,8 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                 }                }
                 .cardSurface()
 
+                }
+
                 // Thread (owner-only metadata)
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Thread").sectionHeader()
@@ -928,7 +943,6 @@ VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     .accessibilityIdentifier("picker.thread")
                 }
                 .cardSurface()
-                }
 
                 // Start Time
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -1664,7 +1678,7 @@ private var instrumentPicker: some View {
             isPublic = !isThoughtMode
 
             // Threads v1 (owner-only metadata)
-            threadLabel = nil
+            threadLabel = sanitizeThreadLabel_v1(threadLabelPrefill)
 
             if instrument == nil {
                 if let primaryName = fetchPrimaryInstrumentName(),
@@ -1797,17 +1811,9 @@ private var instrumentPicker: some View {
             s.setValue(activity.rawValue, forKey: "activityType")
             s.setValue("", forKey: "activityDetail")
             s.setValue(nil, forKey: "userActivityLabel")
-            if s.entity.attributesByName.keys.contains("threadLabel") {
-                s.setValue(nil, forKey: "threadLabel")
-            }
         } else {
             s.setValue(activity.rawValue, forKey: "activityType")
             s.setValue(trimmedDetail, forKey: "activityDetail")
-
-            // Threads v1 (owner-only metadata)
-            if s.entity.attributesByName.keys.contains("threadLabel") {
-                s.setValue(sanitizeThreadLabel_v1(threadLabel), forKey: "threadLabel")
-            }
 
             // If a custom name is selected, stamp userActivityLabel; otherwise clear any previous custom label
             if !trimmedCustom.isEmpty {
@@ -1815,6 +1821,11 @@ private var instrumentPicker: some View {
             } else {
                 s.setValue(nil, forKey: "userActivityLabel")
             }
+        }
+
+        // Threads v1 (owner-only metadata)
+        if s.entity.attributesByName.keys.contains("threadLabel") {
+            s.setValue(sanitizeThreadLabel_v1(threadLabel), forKey: "threadLabel")
         }
 
         // Owner stamp
