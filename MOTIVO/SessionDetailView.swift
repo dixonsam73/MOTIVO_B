@@ -685,6 +685,17 @@ return AttachmentViewerView(
                         .padding(.leading, 16)     // match cardSurface horizontal inset
 
                     VStack(alignment: .leading, spacing: 6) {
+                        if let thread = threadLabelForDisplay {
+                            Text(thread)
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(.secondary)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(Color(uiColor: .tertiarySystemFill))
+                                .clipShape(Capsule())
+                                .padding(.bottom, 2)
+                        }
+
                         if let header = session.thoughtHeader {
                             Text(header)
                                 .font(Theme.Text.body.weight(.semibold))
