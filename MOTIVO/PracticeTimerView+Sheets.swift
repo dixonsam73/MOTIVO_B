@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_075400_PTV_AmbientThreadContinuity_Sheets
+// SCOPE: PracticeTimerView+Sheets — pass provisional ambient thread context into PRDV review; no other sheet behaviour changes.
+// SEARCH-TOKEN: 20260513_075400_PTV_AmbientThreadContinuity_Sheets
+
 // CHANGE-ID: 20260429_102500_AVVTrimPlaybackCopy
 // SCOPE: PTV attachment viewer trim callbacks — pass disposable copies to trim persistence so AVV keeps its active playback URL alive after video replace/save-as-new. No UI, recorder, trim export, or non-viewer logic changes.
 // SEARCH-TOKEN: 20260429_102500_AVVTrimPlaybackCopy
@@ -82,6 +86,7 @@ extension PracticeTimerView {
                 activityTypeRaw: activity.rawValue,
                 activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                 notesPrefill: nil,
+                threadLabelPrefill: selectedProvisionalThreadLabelForReview,
                 prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                 prefillAttachmentNames: audioTitles,
                 onSaved: {

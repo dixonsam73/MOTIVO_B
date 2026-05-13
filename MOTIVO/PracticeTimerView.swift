@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_075400_PTV_AmbientThreadContinuity
+// SCOPE: PracticeTimerView — add ambient provisional thread continuity chips derived from local session history; no persistence, project UI, or canonical metadata changes.
+// SEARCH-TOKEN: 20260513_075400_PTV_AmbientThreadContinuity
+
 // CHANGE-ID: 20260501_215900_ptv_inline_add_actions_compiler_guard
 // SCOPE: Replace + menu with idle-only inline action row; preserve existing manual log/thought sheet flows and Tasks Pad behaviour.
 
@@ -108,6 +112,14 @@ private enum PracticeTimerCompositionUI {
     static let sessionMetaOpenTopBuffer: CGFloat = Theme.Spacing.s + 2
 }
 
+private enum PracticeTimerAmbientThreadUI {
+    static let maxVisibleChips: Int = 3
+    static let recentWindowDays: Int = 90
+    static let strongDominanceShare: Double = 0.55
+    static let calmSettleDuration: Double = 0.72
+    static let fadeDuration: Double = 0.48
+}
+
 
 enum TaskLineType: String, Codable {
     case task
@@ -178,6 +190,7 @@ struct PracticeTimerView: View {
     @State private var isAttachmentsVisible: Bool = false
     @StateObject private var tunerService = TunerService()
     @State private var cachedSessionMetaTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
+    @State private var provisionalThreadLabel: String? = nil
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -1829,6 +1842,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var mainContent: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+            ambientThreadContinuitySection
             sessionMetaSection
             compactToolsSection
             if isTunerOpen {
@@ -1845,6 +1859,49 @@ private func loadPracticeDefaultsIfNeeded() {
         .padding(.horizontal, Theme.Spacing.l)
         .padding(.top, 0)
         .padding(.bottom, Theme.Spacing.xl)
+    }
+
+    @ViewBuilder
+    private var ambientThreadContinuitySection: some View {
+        let chips = visibleAmbientThreadChips
+
+        if !chips.isEmpty {
+            HStack(spacing: Theme.Spacing.s) {
+                ForEach(chips, id: \.self) { thread in
+                    ambientThreadChip(thread)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.top, Theme.Spacing.xs)
+            .padding(.bottom, -Theme.Spacing.xs)
+            .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.calmSettleDuration), value: provisionalThreadLabel)
+            .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration), value: isTimerSessionInProgress)
+            .transition(.opacity)
+        }
+    }
+
+    private func ambientThreadChip(_ thread: String) -> some View {
+        Button {
+            toggleProvisionalThread(thread)
+        } label: {
+            Text(thread)
+                .font(Theme.Text.meta)
+                .foregroundStyle(Theme.Colors.secondaryText)
+                .lineLimit(1)
+                .padding(.horizontal, Theme.Spacing.s + 2)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.30 : 0.42))
+                )
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.72), lineWidth: 0.75)
+                )
+                .contentShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Thread \(thread)")
     }
 
     @ViewBuilder
@@ -2518,6 +2575,140 @@ private var bottomActionSection: some View {
         )
     }
 
+    private var isTimerSessionInProgress: Bool {
+        isRunning || startDate != nil || accumulatedSeconds > 0 || elapsedSeconds > 0
+    }
+
+    var selectedProvisionalThreadLabelForReview: String? {
+        sanitizeAmbientThreadLabel(provisionalThreadLabel ?? "")
+    }
+
+    private var visibleAmbientThreadChips: [String] {
+        if isTimerSessionInProgress {
+            if let selected = selectedProvisionalThreadLabelForReview {
+                return [selected]
+            }
+            return []
+        }
+
+        if let selected = selectedProvisionalThreadLabelForReview {
+            return [selected]
+        }
+
+        return eligibleAmbientThreadLabels()
+    }
+
+    private func toggleProvisionalThread(_ thread: String) {
+        guard let clean = sanitizeAmbientThreadLabel(thread) else { return }
+        withAnimation(.easeInOut(duration: PracticeTimerAmbientThreadUI.calmSettleDuration)) {
+            if selectedProvisionalThreadLabelForReview?.caseInsensitiveCompare(clean) == .orderedSame {
+                provisionalThreadLabel = nil
+            } else {
+                provisionalThreadLabel = clean
+            }
+        }
+    }
+
+    private func sanitizeAmbientThreadLabel(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let collapsed = trimmed
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+
+        guard !collapsed.isEmpty else { return nil }
+
+        if collapsed.count <= 32 {
+            return collapsed
+        }
+
+        let index = collapsed.index(collapsed.startIndex, offsetBy: 32)
+        return String(collapsed[..<index])
+    }
+
+    private struct AmbientThreadCandidate {
+        let label: String
+        let totalCount: Int
+        let recentCount: Int
+        let latestDate: Date
+        let score: Double
+    }
+
+    private func eligibleAmbientThreadLabels() -> [String] {
+        let request: NSFetchRequest<Session> = Session.fetchRequest()
+        request.sortDescriptors = [NSSortDescriptor(key: "timestamp", ascending: false)]
+        request.fetchLimit = 240
+        request.returnsObjectsAsFaults = true
+
+        let sessions = (try? viewContext.fetch(request)) ?? []
+        guard !sessions.isEmpty else { return [] }
+
+        let now = Date()
+        let recentCutoff = Calendar.current.date(
+            byAdding: .day,
+            value: -PracticeTimerAmbientThreadUI.recentWindowDays,
+            to: now
+        ) ?? now.addingTimeInterval(-Double(PracticeTimerAmbientThreadUI.recentWindowDays) * 86_400)
+
+        var displayLabelsByKey: [String: String] = [:]
+        var totalCounts: [String: Int] = [:]
+        var recentCounts: [String: Int] = [:]
+        var latestDates: [String: Date] = [:]
+
+        for session in sessions {
+            guard let label = sanitizeAmbientThreadLabel((session.value(forKey: "threadLabel") as? String) ?? "") else { continue }
+            let key = label.lowercased()
+            displayLabelsByKey[key] = displayLabelsByKey[key] ?? label
+            totalCounts[key, default: 0] += 1
+
+            let timestamp = session.timestamp ?? .distantPast
+            if timestamp >= recentCutoff {
+                recentCounts[key, default: 0] += 1
+            }
+            if let existing = latestDates[key] {
+                if timestamp > existing { latestDates[key] = timestamp }
+            } else {
+                latestDates[key] = timestamp
+            }
+        }
+
+        guard !totalCounts.isEmpty else { return [] }
+        let totalThreadedItems = totalCounts.values.reduce(0, +)
+
+        let candidates: [AmbientThreadCandidate] = totalCounts.compactMap { key, totalCount in
+            guard let label = displayLabelsByKey[key], let latest = latestDates[key] else { return nil }
+            let recentCount = recentCounts[key] ?? 0
+            let dominance = totalThreadedItems > 0 ? Double(totalCount) / Double(totalThreadedItems) : 0
+
+            let isRepeatedRecentUse = recentCount >= 2
+            let isStrongDominantThread = totalCount >= 3 && dominance >= PracticeTimerAmbientThreadUI.strongDominanceShare
+            let isClearlyRecurringThread = totalCount >= 3 && recentCount >= 1
+
+            guard isRepeatedRecentUse || isStrongDominantThread || isClearlyRecurringThread else { return nil }
+
+            let recencyWeight: Double = latest >= recentCutoff ? 1.0 : 0.0
+            let score = (Double(recentCount) * 3.0) + Double(totalCount) + (dominance * 2.0) + recencyWeight
+            return AmbientThreadCandidate(
+                label: label,
+                totalCount: totalCount,
+                recentCount: recentCount,
+                latestDate: latest,
+                score: score
+            )
+        }
+
+        return candidates
+            .sorted { lhs, rhs in
+                if lhs.score != rhs.score { return lhs.score > rhs.score }
+                if lhs.latestDate != rhs.latestDate { return lhs.latestDate > rhs.latestDate }
+                return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+            }
+            .prefix(PracticeTimerAmbientThreadUI.maxVisibleChips)
+            .map(\.label)
+    }
+
     // MARK: - Apply choices / primary
 
     func applyChoice(_ choice: String) {
@@ -3015,6 +3206,7 @@ private var bottomActionSection: some View {
         accumulatedSeconds = 0
         elapsedSeconds = 0
         showAddEntryActions = false
+        provisionalThreadLabel = nil
         activity = .practice
         activityDetail = ""
         activityChoice = "core:0"

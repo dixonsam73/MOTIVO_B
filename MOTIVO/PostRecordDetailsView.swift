@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_073900_PRDV_AmbientThreadPrefill
+// SCOPE: PostRecordDetailsView — accept optional provisional thread prefill from PracticeTimerView while preserving PRDV as canonical confirmation surface. No UI or logic changes outside thread seeding.
+// SEARCH-TOKEN: 20260513_073900_PRDV_AmbientThreadPrefill
+
 // CHANGE-ID: 20260317_181500_PRDV_AutoDescriptionReplaceOnFocus
 // SCOPE: PostRecordDetailsView — retain content-header parity and make untouched auto description clear on first focus, restoring auto text on blur if left empty. No other UI or logic changes.
 // SEARCH-TOKEN: 20260317_181500_PRDV_AutoDescriptionReplaceOnFocus
@@ -399,6 +403,7 @@ struct PostRecordDetailsView: View {
         activityTypeRaw: Int16? = nil,
         activityDetailPrefill: String? = nil,
         notesPrefill: String? = nil,
+        threadLabelPrefill: String? = nil,
         prefillAttachments: [StagedAttachment]? = nil,
         prefillAttachmentNames: [UUID: String]? = nil,
         onSaved: (() -> Void)? = nil,
@@ -436,6 +441,7 @@ struct PostRecordDetailsView: View {
         }
         if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
         self._notes = State(initialValue: notesPrefill ?? "")
+        self._threadLabel = State(initialValue: ThreadLabelSanitizer_Stage6_1.sanitize(threadLabelPrefill ?? ""))
         self.prefillAttachments = prefillAttachments
         self.prefillAttachmentNames = prefillAttachmentNames
         self.onSaved = onSaved
