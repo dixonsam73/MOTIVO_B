@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260513_164950_PTV_AmbientOverlayVerticalParity
+// SCOPE: PracticeTimerView — preserve overlay chip vertical parity during ambient thread deselect handoff.
+// SEARCH-TOKEN: 20260513_164950_PTV_AmbientOverlayVerticalParity
+
 // CHANGE-ID: 20260513_091500_PTV_ThoughtThreadHandoff
 // SCOPE: PracticeTimerView — extract Thought editor sheet content and pass provisional thread prefill into Thought creation only.
 // SEARCH-TOKEN: 20260513_091500_PTV_ThoughtThreadHandoff
@@ -116,12 +120,23 @@ private enum PracticeTimerCompositionUI {
     static let sessionMetaOpenTopBuffer: CGFloat = Theme.Spacing.s + 2
 }
 
+
+private struct AmbientThreadChipFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [String: CGRect] = [:]
+
+    static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 private enum PracticeTimerAmbientThreadUI {
     static let maxVisibleChips: Int = 3
     static let recentWindowDays: Int = 90
     static let strongDominanceShare: Double = 0.55
-    static let calmSettleDuration: Double = 0.72
-    static let fadeDuration: Double = 0.48
+    static let calmSettleDuration: Double = 0.95
+    static let deselectReturnDuration: Double = 1.65
+    static let fadeDuration: Double = 0.68
+    static let reservedChipRegionHeight: CGFloat = 38
 }
 
 
@@ -195,6 +210,18 @@ struct PracticeTimerView: View {
     @StateObject private var tunerService = TunerService()
     @State private var cachedSessionMetaTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
     @State private var provisionalThreadLabel: String? = nil
+    @State private var ambientThreadCollapseTarget: String? = nil
+    @State private var ambientThreadMovementDuration: Double =
+       PracticeTimerAmbientThreadUI.calmSettleDuration
+    @State private var displayedAmbientThreadChips: [String] = []
+    @State private var ambientThreadChipFrames: [String: CGRect] = [:]
+    @State private var ambientThreadFloatingThread: String? = nil
+    @State private var ambientThreadFloatingX: CGFloat? = nil
+    @State private var ambientThreadFloatingY: CGFloat? = nil
+    @State private var ambientThreadHideRowSelectedChip: Bool = false
+    @Namespace private var ambientThreadChipNamespace
+    // CHANGE-ID: 20260513_162410_PTV_OverlayHandoffNoFade
+    // SCOPE: Ambient thread chip deselect overlay handoff visibility only
 
     // Prefetch guard to avoid duplicate first-paint work
     @State private var didPrefetch: Bool = false
@@ -1875,21 +1902,70 @@ private func loadPracticeDefaultsIfNeeded() {
 
     @ViewBuilder
     private var ambientThreadContinuitySection: some View {
-        let chips = visibleAmbientThreadChips
+        let chips = displayedAmbientThreadChips.isEmpty ? visibleAmbientThreadChips : displayedAmbientThreadChips
+        let shouldShowChips = !chips.isEmpty && !showSessionMetaSetup
 
-        if !chips.isEmpty {
-            HStack(spacing: Theme.Spacing.s) {
-                ForEach(chips, id: \.self) { thread in
-                    ambientThreadChip(thread)
+        GeometryReader { proxy in
+            ZStack(alignment: .bottom) {
+                HStack(spacing: Theme.Spacing.s) {
+                    ForEach(chips, id: \.self) { thread in
+                        ambientThreadChip(thread)
+                            .matchedGeometryEffect(id: thread, in: ambientThreadChipNamespace)
+                            .opacity(ambientThreadRowChipOpacity(for: thread))
+                            .background(
+                                GeometryReader { chipProxy in
+                                    Color.clear.preference(
+                                        key: AmbientThreadChipFramePreferenceKey.self,
+                                        value: [thread: chipProxy.frame(in: .named("ambientThreadChipRow"))]
+                                    )
+                                }
+                            )
+                            .animation(
+                                .easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration),
+                                value: ambientThreadCollapseTarget
+                            )
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+
+                if let floatingThread = ambientThreadFloatingThread {
+                    ambientThreadChip(floatingThread)
+                        .allowsHitTesting(false)
+                        .position(
+                            x: ambientThreadFloatingX ?? (proxy.size.width / 2),
+                            y: ambientThreadFloatingY ?? (PracticeTimerAmbientThreadUI.reservedChipRegionHeight / 2)
+                        )
+                        .transition(.identity)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.top, Theme.Spacing.xs)
-            .padding(.bottom, -Theme.Spacing.xs)
-            .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.calmSettleDuration), value: provisionalThreadLabel)
-            .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration), value: isTimerSessionInProgress)
-            .transition(.opacity)
+            .coordinateSpace(name: "ambientThreadChipRow")
+            .onPreferenceChange(AmbientThreadChipFramePreferenceKey.self) { frames in
+                ambientThreadChipFrames = frames
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .frame(height: PracticeTimerAmbientThreadUI.reservedChipRegionHeight, alignment: .bottom)
+        .opacity(shouldShowChips ? 1 : 0)
+        .allowsHitTesting(shouldShowChips && ambientThreadFloatingThread == nil)
+        .accessibilityHidden(!shouldShowChips)
+        .padding(.top, Theme.Spacing.s)
+        .padding(.bottom, -2)
+        .animation(ambientThreadFloatingThread == nil ? .easeInOut(duration: ambientThreadMovementDuration) : nil, value: displayedAmbientThreadChips)
+        .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration), value: isTimerSessionInProgress)
+        .animation(.easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration), value: showSessionMetaSetup)
+    }
+
+
+    private func ambientThreadRowChipOpacity(for thread: String) -> Double {
+        if ambientThreadHideRowSelectedChip && ambientThreadFloatingThread == thread {
+            return 0
+        }
+
+        if let collapseTarget = ambientThreadCollapseTarget, collapseTarget != thread {
+            return 0
+        }
+
+        return 1
     }
 
     private func ambientThreadChip(_ thread: String) -> some View {
@@ -1929,6 +2005,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     activityLabel: activityDisplayName(for: activityChoice),
                     resolvedTint: cachedSessionMetaTint
                 )
+                .padding(.top, PracticeTimerCompositionUI.sessionMetaOpenTopBuffer)
                 .hidden()
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -2611,13 +2688,73 @@ private var bottomActionSection: some View {
     }
 
     private func toggleProvisionalThread(_ thread: String) {
-        guard let clean = sanitizeAmbientThreadLabel(thread) else { return }
-        withAnimation(.easeInOut(duration: PracticeTimerAmbientThreadUI.calmSettleDuration)) {
-            if selectedProvisionalThreadLabelForReview?.caseInsensitiveCompare(clean) == .orderedSame {
+
+        // DESELECT
+        if provisionalThreadLabel == thread {
+
+            ambientThreadCollapseTarget = thread
+            ambientThreadMovementDuration =
+                PracticeTimerAmbientThreadUI.deselectReturnDuration
+            ambientThreadFloatingThread = thread
+            ambientThreadFloatingX = nil
+            ambientThreadFloatingY = ambientThreadChipFrames[thread]?.midY
+            ambientThreadHideRowSelectedChip = true
+
+            // Restore the full destination row immediately underneath the floating chip.
+            // The selected chip is hidden in the row during travel, so there is still
+            // only one visible selected chip while the overlay owns the return motion.
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) {
                 provisionalThreadLabel = nil
-            } else {
-                provisionalThreadLabel = clean
+                displayedAmbientThreadChips = visibleAmbientThreadChips
             }
+
+            DispatchQueue.main.async {
+                DispatchQueue.main.async {
+                    let destinationX = ambientThreadChipFrames[thread]?.midX
+
+                    withAnimation(
+                        .easeInOut(duration: PracticeTimerAmbientThreadUI.deselectReturnDuration)
+                    ) {
+                        ambientThreadFloatingX = destinationX
+                    }
+                }
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + PracticeTimerAmbientThreadUI.deselectReturnDuration
+            ) {
+                var handoffTransaction = Transaction()
+                handoffTransaction.disablesAnimations = true
+                withTransaction(handoffTransaction) {
+                    ambientThreadHideRowSelectedChip = false
+                    ambientThreadFloatingThread = nil
+                    ambientThreadFloatingX = nil
+                    ambientThreadFloatingY = nil
+                }
+
+                // Fade only the sibling chips back in after the return movement settles.
+                withAnimation(
+                    .easeInOut(duration: PracticeTimerAmbientThreadUI.fadeDuration)
+                ) {
+                    ambientThreadCollapseTarget = nil
+                }
+            }
+
+            return
+        }
+
+        // SELECT
+        ambientThreadCollapseTarget = thread
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + PracticeTimerAmbientThreadUI.fadeDuration
+        ) {
+            ambientThreadMovementDuration =
+                PracticeTimerAmbientThreadUI.calmSettleDuration
+            provisionalThreadLabel = thread
+            displayedAmbientThreadChips = visibleAmbientThreadChips
         }
     }
 
