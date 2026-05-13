@@ -162,6 +162,7 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
+    @AppStorage("meViewSelectedRange_v1") private var persistedMeViewRangeRaw: String = StatsRange.total.rawValue
 
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
@@ -1157,7 +1158,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 Button {
                     showMeView = true
                 } label: {
-                    Text(weeklyPulseLine)
+                    Text(temporalSummaryLine)
                         .font(Theme.Text.meta)
                         .foregroundStyle(Theme.Colors.secondaryText)
                         .lineLimit(1)
@@ -2397,8 +2398,28 @@ private var bottomActionSection: some View {
 
     // MARK: - Helpers for wheel UI
 
-    private var weeklyPulseLine: String {
-        "This week · \(formattedWeeklyDuration(secondsThisWeek()))"
+    private var resolvedMeViewRange: StatsRange {
+        StatsRange(rawValue: persistedMeViewRangeRaw) ?? .total
+    }
+
+    private var temporalSummaryLine: String {
+        let seconds = secondsForResolvedRange()
+        let formatted = StatsHelper.formatDuration(seconds)
+
+        switch resolvedMeViewRange {
+
+        case .week:
+            return "This week • \(formatted)"
+
+        case .month:
+            return "This month • \(formatted)"
+
+        case .year:
+            return "This year • \(formatted)"
+
+        case .total:
+            return "Total • \(formatted)"
+        }
     }
 
     private func currentInstrumentName() -> String {
@@ -2761,19 +2782,38 @@ private var bottomActionSection: some View {
         }
     }
 
-    private func secondsThisWeek() -> Int {
-        let calendar = Calendar.current
-        guard let interval = calendar.dateInterval(of: .weekOfYear, for: Date()) else { return 0 }
-
+    private func secondsForResolvedRange() -> Int {
         let req: NSFetchRequest<Session> = Session.fetchRequest()
-        req.predicate = NSPredicate(format: "timestamp >= %@ AND timestamp < %@", interval.start as NSDate, interval.end as NSDate)
-
         let sessions = (try? viewContext.fetch(req)) ?? []
-        return sessions.reduce(0) { partial, session in
-            partial + Int(session.durationSeconds)
+
+        switch resolvedMeViewRange {
+
+        case .total:
+            return sessions.reduce(0) { partial, session in
+                partial + Int(session.durationSeconds)
+            }
+
+        case .week, .month, .year:
+            let bounds = StatsHelper.dateBounds(
+                for: resolvedMeViewRange,
+                now: Date(),
+                cal: Calendar.current
+            )
+
+            guard let start = bounds.start, let end = bounds.end else {
+                return 0
+            }
+
+            return sessions
+                .filter {
+                    guard let timestamp = $0.timestamp else { return false }
+                    return timestamp >= start && timestamp < end
+                }
+                .reduce(0) { partial, session in
+                    partial + Int(session.durationSeconds)
+                }
         }
     }
-
     private func formattedWeeklyDuration(_ seconds: Int) -> String {
         let hours = seconds / 3600
         let minutes = (seconds % 3600) / 60

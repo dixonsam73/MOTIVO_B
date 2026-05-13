@@ -218,7 +218,10 @@ struct MeView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
-    @State private var range: StatsRange = .total
+    @AppStorage("meViewSelectedRange_v1")
+    private var persistedRangeRaw: String = StatsRange.total.rawValue
+
+    @State private var range: StatsRange
     @State private var sessionStats: SessionStats = .init(count: 0, seconds: 0)
     @State private var avgSessionSeconds: Int64? = nil
     @State private var firstSessionDate: Date? = nil
@@ -260,6 +263,17 @@ struct MeView: View {
     @State private var bestInstrumentFocus: FocusCategoryInsight? = nil
     @State private var bestActivityFocus: FocusCategoryInsight? = nil
     @State private var insights: MeViewInsights? = nil
+
+    init() {
+        let persisted =
+            UserDefaults.standard.string(forKey: "meViewSelectedRange_v1")
+
+        _range = State(
+            initialValue:
+                StatsRange(rawValue: persisted ?? "")
+                ?? .total
+        )
+    }
 
     var body: some View {
         ScrollView {
@@ -429,6 +443,9 @@ if let insights, hasVisibleInterpretiveInsights {
         .onChange(of: auth.backendUserID) { _, _ in Task { await reload() } }
         .onChange(of: avgFocus) { _, newValue in
             updateFocusCircleTargetAfterInitialAppearance(newValue)
+        }
+        .onChange(of: range) { _, newValue in
+            persistedRangeRaw = newValue.rawValue
         }
         .appBackground()
         .background {
