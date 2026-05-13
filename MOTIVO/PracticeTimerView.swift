@@ -1969,22 +1969,90 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private func ambientThreadChip(_ thread: String) -> some View {
-        Button {
+        let threadTintActive = (Theme.TintMode(rawValue: tintModeRawValue) ?? .auto) == .thread
+
+        let baseSurface = Theme.Colors.surface(colorScheme)
+        let baseStroke = Theme.Colors.cardStroke(colorScheme)
+
+        let tintSurface = Theme.ThreadTint.surfaceFill(
+            for: thread,
+            ownerID: nil,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+
+        let tintStroke = Theme.ThreadTint.cardStroke(
+            for: thread,
+            ownerID: nil,
+            scheme: colorScheme,
+            strength: .cardMedium
+        )
+
+        let tintText = Theme.ThreadTint.visibleAccentColor(
+            for: thread,
+            ownerID: nil,
+            scheme: colorScheme
+        )
+
+        let isFloatingSelected =
+            ambientThreadFloatingThread == thread ||
+            (
+                ambientThreadFloatingThread == nil &&
+                provisionalThreadLabel == thread
+            )
+
+        let fillColor: Color = {
+            guard threadTintActive else {
+                return baseSurface.opacity(colorScheme == .dark ? 0.30 : 0.42)
+            }
+
+            if isFloatingSelected {
+                return tintSurface.opacity(colorScheme == .dark ? 0.82 : 0.90)
+            } else {
+                return tintSurface.opacity(colorScheme == .dark ? 0.92 : 1.0)
+            }
+        }()
+
+        let strokeColor: Color = {
+            guard threadTintActive else {
+                return baseStroke.opacity(0.72)
+            }
+
+            if isFloatingSelected {
+                return tintStroke.opacity(0.58)
+            } else {
+                return tintStroke.opacity(0.82)
+            }
+        }()
+
+        let textColor: Color = {
+            guard threadTintActive else {
+                return Theme.Colors.secondaryText
+            }
+
+            if ambientThreadFloatingThread == nil {
+                return Color.primary.opacity(colorScheme == .dark ? 0.98 : 0.92)
+            } else {
+                return Color.primary.opacity(colorScheme == .dark ? 0.92 : 0.82)
+            }
+        }()
+
+        return Button {
             toggleProvisionalThread(thread)
         } label: {
             Text(thread)
                 .font(Theme.Text.meta)
-                .foregroundStyle(Theme.Colors.secondaryText)
+                .foregroundStyle(textColor)
                 .lineLimit(1)
                 .padding(.horizontal, Theme.Spacing.s + 2)
                 .padding(.vertical, 6)
                 .background(
                     Capsule(style: .continuous)
-                        .fill(Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.30 : 0.42))
+                        .fill(fillColor)
                 )
                 .overlay(
                     Capsule(style: .continuous)
-                        .stroke(Theme.Colors.cardStroke(colorScheme).opacity(0.72), lineWidth: 0.75)
+                        .stroke(strokeColor, lineWidth: 0.75)
                 )
                 .contentShape(Capsule(style: .continuous))
         }
