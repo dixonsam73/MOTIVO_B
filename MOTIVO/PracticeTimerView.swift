@@ -1976,21 +1976,21 @@ private func loadPracticeDefaultsIfNeeded() {
 
         let tintSurface = Theme.ThreadTint.surfaceFill(
             for: thread,
-            ownerID: nil,
+            ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMedium
         )
 
         let tintStroke = Theme.ThreadTint.cardStroke(
             for: thread,
-            ownerID: nil,
+            ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMedium
         )
 
         let tintText = Theme.ThreadTint.visibleAccentColor(
             for: thread,
-            ownerID: nil,
+            ownerID: auth.currentUserID,
             scheme: colorScheme
         )
 
