@@ -16,6 +16,10 @@ import SwiftUI
 // SCOPE: Theme.swift — add two restrained ThreadTint palette slots (slate, clay) and extend thread assignment order only; no tint logic/UI changes.
 // SEARCH-TOKEN: 20260429_155500_Theme_ThreadTintSlots
 
+// CHANGE-ID: 20260513_104900_Theme_ThreadTintPaletteExpansion
+// SCOPE: Theme.swift — expand ThreadTint's authored palette and improve exhausted-palette reuse only; no Instrument/Activity/UI/tint-strength changes.
+// SEARCH-TOKEN: 20260513_104900_Theme_ThreadTintPaletteExpansion
+
 import CoreData
 
 #if canImport(UIKit)
@@ -896,6 +900,13 @@ enum Theme {
             case lavender = 5
             case slate = 6
             case clay = 7
+            case moss = 8
+            case petrol = 9
+            case indigo = 10
+            case stone = 11
+            case bronze = 12
+            case teal = 13
+            case plum = 14
         }
 
         private static let defaultsKeyPrefix = "theme.threadTint.slotMap.v1"
@@ -1031,24 +1042,40 @@ enum Theme {
             .coolDeep,
             .rose,
             .sage,
+            .indigo,
             .apricot,
+            .petrol,
             .lavender,
+            .bronze,
             .slate,
-            .clay
+            .plum,
+            .clay,
+            .teal,
+            .moss,
+            .stone
         ]
 
         private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
-            let usedVisibleSlots = visibleAssignmentPriority.filter { usedSlot in
-                Set(map.values).contains(usedSlot.rawValue)
-            }
+            let assignedCounts = Dictionary(grouping: map.values, by: { $0 })
+                .mapValues { $0.count }
 
-            for slot in visibleAssignmentPriority where !usedVisibleSlots.contains(slot) {
+            for slot in visibleAssignmentPriority where assignedCounts[slot.rawValue] == nil {
                 return slot
             }
 
-            let usedCount = usedVisibleSlots.count
-            guard !visibleAssignmentPriority.isEmpty else { return .lavender }
-            return visibleAssignmentPriority[usedCount % visibleAssignmentPriority.count]
+            guard let leastUsedSlot = visibleAssignmentPriority.min(by: { lhs, rhs in
+                let leftCount = assignedCounts[lhs.rawValue] ?? 0
+                let rightCount = assignedCounts[rhs.rawValue] ?? 0
+                if leftCount != rightCount { return leftCount < rightCount }
+
+                let leftIndex = visibleAssignmentPriority.firstIndex(of: lhs) ?? Int.max
+                let rightIndex = visibleAssignmentPriority.firstIndex(of: rhs) ?? Int.max
+                return leftIndex < rightIndex
+            }) else {
+                return .lavender
+            }
+
+            return leastUsedSlot
         }
 
         private static func paletteColor(for slot: Slot, scheme: ColorScheme) -> Color {
@@ -1081,6 +1108,34 @@ enum Theme {
                 return Color(red: 0.86, green: 0.78, blue: 0.72)
             case (.clay, .dark):
                 return Color(red: 0.42, green: 0.34, blue: 0.29)
+            case (.moss, .light):
+                return Color(red: 0.73, green: 0.79, blue: 0.66)
+            case (.moss, .dark):
+                return Color(red: 0.31, green: 0.38, blue: 0.25)
+            case (.petrol, .light):
+                return Color(red: 0.69, green: 0.80, blue: 0.81)
+            case (.petrol, .dark):
+                return Color(red: 0.25, green: 0.39, blue: 0.40)
+            case (.indigo, .light):
+                return Color(red: 0.74, green: 0.76, blue: 0.88)
+            case (.indigo, .dark):
+                return Color(red: 0.30, green: 0.32, blue: 0.46)
+            case (.stone, .light):
+                return Color(red: 0.82, green: 0.80, blue: 0.73)
+            case (.stone, .dark):
+                return Color(red: 0.38, green: 0.36, blue: 0.30)
+            case (.bronze, .light):
+                return Color(red: 0.82, green: 0.74, blue: 0.62)
+            case (.bronze, .dark):
+                return Color(red: 0.39, green: 0.32, blue: 0.22)
+            case (.teal, .light):
+                return Color(red: 0.70, green: 0.83, blue: 0.77)
+            case (.teal, .dark):
+                return Color(red: 0.27, green: 0.40, blue: 0.34)
+            case (.plum, .light):
+                return Color(red: 0.83, green: 0.76, blue: 0.84)
+            case (.plum, .dark):
+                return Color(red: 0.39, green: 0.31, blue: 0.42)
             }
         }
 
