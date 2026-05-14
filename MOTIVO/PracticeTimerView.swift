@@ -2721,14 +2721,21 @@ private var bottomActionSection: some View {
         let activityCounts = Theme.usageCounts(
             labels: sessions.compactMap { normalizedSessionActivityLabel(from: $0) }
         )
+        let threadCounts = Theme.usageCounts(
+            labels: sessions.compactMap {
+                sanitizeAmbientThreadLabel($0.threadLabel ?? "")
+            }
+        )
         let tintMode = Theme.TintMode(rawValue: tintModeRawValue) ?? .auto
 
         cachedSessionMetaTint = Theme.resolvedTint(
             instrument: normalizedCurrentSessionMetaInstrumentLabel(),
             activity: normalizedCurrentSessionMetaActivityLabel(),
+            thread: selectedProvisionalThreadLabelForReview,
             tintMode: tintMode,
             instrumentCounts: instrumentCounts,
-            activityCounts: activityCounts
+            activityCounts: activityCounts,
+            threadCounts: threadCounts
         )
     }
 

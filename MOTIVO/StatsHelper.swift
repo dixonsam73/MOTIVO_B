@@ -17,6 +17,11 @@
 // SEARCH-TOKEN: 20260309_133200_BackendStatsParity_b712
 // =============================================
 
+// CHANGE-ID: 20260514_073000_StatsHelper_ThreadImportanceCounts
+// SCOPE: StatsHelper.swift — add count-only thread importance helpers for ThreadTint weighting; no tint logic, colour assignment, UI behaviour, or backend thread semantics.
+// SEARCH-TOKEN: 20260514_073000_StatsHelper_ThreadImportanceCounts
+// =============================================
+
 import Foundation
 import CoreData
 
@@ -102,6 +107,50 @@ enum StatsHelper {
         let count = objs.count
         let seconds = objs.reduce(0) { $0 + Int($1.durationSeconds) }
         return SessionStats(count: count, seconds: seconds)
+    }
+
+    // MARK: - Thread importance helpers
+
+    static func fetchThreadCounts(in ctx: NSManagedObjectContext, range: StatsRange, ownerUserID: String? = nil) throws -> [String: Int] {
+        let (start, end) = dateBounds(for: range)
+        let req = NSFetchRequest<Session>(entityName: "Session")
+        var preds: [NSPredicate] = []
+        if let s = start { preds.append(NSPredicate(format: "timestamp >= %@", s as NSDate)) }
+        if let e = end { preds.append(NSPredicate(format: "timestamp < %@", e as NSDate)) }
+        if let ownerUserID, ownerUserID.isEmpty == false {
+            preds.append(NSPredicate(format: "ownerUserID == %@", ownerUserID))
+        }
+        if !preds.isEmpty { req.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: preds) }
+
+        return threadCounts(from: try ctx.fetch(req))
+    }
+
+    static func threadCounts(from sessions: [Session]) -> [String: Int] {
+        var counts: [String: Int] = [:]
+
+        for session in sessions where session.isThought == false {
+            guard let label = normalizedDistributionLabel(session.threadLabel) else { continue }
+            counts[label, default: 0] += 1
+        }
+
+        return counts
+    }
+
+    static func rankedThreadLabels(from threadCounts: [String: Int]) -> [String] {
+        var aggregated: [String: Int] = [:]
+
+        for (rawLabel, rawCount) in threadCounts where rawCount > 0 {
+            guard let label = normalizedDistributionLabel(rawLabel) else { continue }
+            aggregated[label, default: 0] += rawCount
+        }
+
+        return aggregated
+            .map { (label: $0.key, count: $0.value) }
+            .sorted { lhs, rhs in
+                if lhs.count != rhs.count { return lhs.count > rhs.count }
+                return lhs.label.localizedCaseInsensitiveCompare(rhs.label) == .orderedAscending
+            }
+            .map { $0.label }
     }
 
     // MARK: - Backend analytics-only helpers

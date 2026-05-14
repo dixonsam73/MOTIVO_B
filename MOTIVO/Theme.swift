@@ -20,6 +20,10 @@ import SwiftUI
 // SCOPE: Theme.swift — expand ThreadTint's authored palette and improve exhausted-palette reuse only; no Instrument/Activity/UI/tint-strength changes.
 // SEARCH-TOKEN: 20260513_104900_Theme_ThreadTintPaletteExpansion
 
+// CHANGE-ID: 20260514_073000_Theme_WeightedStableThreadTint
+// SCOPE: Theme.swift — add weighted stable ThreadTint priming so high-usage threads preferentially receive hero slots without reshuffling existing persisted mappings.
+// SEARCH-TOKEN: 20260514_073000_Theme_WeightedStableThreadTint
+
 import CoreData
 
 #if canImport(UIKit)
@@ -138,17 +142,20 @@ enum Theme {
         let instrumentLabel: String?
         let activityLabel: String?
         let threadLabel: String?
+        let threadCounts: [String: Int]
 
         init(
             source: ResolvedTintSource,
             instrumentLabel: String?,
             activityLabel: String?,
-            threadLabel: String? = nil
+            threadLabel: String? = nil,
+            threadCounts: [String: Int] = [:]
         ) {
             self.source = source
             self.instrumentLabel = instrumentLabel
             self.activityLabel = activityLabel
             self.threadLabel = threadLabel
+            self.threadCounts = threadCounts
         }
 
         var isDormant: Bool {
@@ -182,7 +189,8 @@ enum Theme {
                     ownerID: ownerID,
                     scheme: scheme,
                     strength: strength,
-                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                    shouldAssignIfNeeded: shouldAssignIfNeeded,
+                    threadCounts: threadCounts
                 )
             case .off:
                 return Colors.surface(scheme)
@@ -216,7 +224,8 @@ enum Theme {
                     ownerID: ownerID,
                     scheme: scheme,
                     strength: strength,
-                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                    shouldAssignIfNeeded: shouldAssignIfNeeded,
+                    threadCounts: threadCounts
                 )
             case .off:
                 return Colors.cardStroke(scheme)
@@ -246,7 +255,8 @@ enum Theme {
                     for: threadLabel,
                     ownerID: ownerID,
                     scheme: scheme,
-                    shouldAssignIfNeeded: shouldAssignIfNeeded
+                    shouldAssignIfNeeded: shouldAssignIfNeeded,
+                    threadCounts: threadCounts
                 )
             case .off:
                 return nil
@@ -521,7 +531,8 @@ enum Theme {
             source: source,
             instrumentLabel: instrument,
             activityLabel: activity,
-            threadLabel: thread
+            threadLabel: thread,
+            threadCounts: threadCounts
         )
     }
 
@@ -924,9 +935,14 @@ enum Theme {
         static func slot(
             for threadLabel: String?,
             ownerID: String?,
-            shouldAssignIfNeeded: Bool = true
+            shouldAssignIfNeeded: Bool = true,
+            threadCounts: [String: Int] = [:]
         ) -> Slot? {
             guard let normalized = normalizedLabel(threadLabel) else { return nil }
+
+            if shouldAssignIfNeeded, threadCounts.isEmpty == false {
+                primeWeightedSlots(threadCounts: threadCounts, ownerID: ownerID)
+            }
 
             let namespace = namespaceKey(ownerID: ownerID)
             var map = slotMap(ownerID: ownerID)
@@ -948,10 +964,11 @@ enum Theme {
             ownerID: String?,
             scheme: ColorScheme,
             strength: InstrumentTint.Strength,
-            shouldAssignIfNeeded: Bool = true
+            shouldAssignIfNeeded: Bool = true,
+            threadCounts: [String: Int] = [:]
         ) -> Color {
             let base = Theme.Colors.surface(scheme)
-            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded, threadCounts: threadCounts) else {
                 return base
             }
             return blendedSurface(base: base, overlay: paletteColor(for: slot, scheme: scheme), amount: blendAmount(for: strength, scheme: scheme))
@@ -962,10 +979,11 @@ enum Theme {
             ownerID: String?,
             scheme: ColorScheme,
             strength: InstrumentTint.Strength,
-            shouldAssignIfNeeded: Bool = true
+            shouldAssignIfNeeded: Bool = true,
+            threadCounts: [String: Int] = [:]
         ) -> Color {
             let baseStroke = Theme.Colors.cardStroke(scheme)
-            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded, threadCounts: threadCounts) else {
                 return baseStroke
             }
             return blendedSurface(base: baseStroke, overlay: paletteColor(for: slot, scheme: scheme), amount: strokeBlendAmount(for: strength, scheme: scheme))
@@ -975,9 +993,10 @@ enum Theme {
             for threadLabel: String?,
             ownerID: String?,
             scheme: ColorScheme,
-            shouldAssignIfNeeded: Bool = true
+            shouldAssignIfNeeded: Bool = true,
+            threadCounts: [String: Int] = [:]
         ) -> Color? {
-            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded) else {
+            guard let slot = slot(for: threadLabel, ownerID: ownerID, shouldAssignIfNeeded: shouldAssignIfNeeded, threadCounts: threadCounts) else {
                 return nil
             }
             return paletteColor(for: slot, scheme: scheme)
@@ -985,6 +1004,38 @@ enum Theme {
 
         static func debugSlotMap(ownerID: String?) -> [String: Int] {
             slotMap(ownerID: ownerID)
+        }
+
+        static func primeWeightedSlots(threadCounts: [String: Int], ownerID: String?) {
+            let rankedLabels = StatsHelper.rankedThreadLabels(from: threadCounts)
+                .compactMap { normalizedLabel($0) }
+
+            guard rankedLabels.isEmpty == false else { return }
+
+            let namespace = namespaceKey(ownerID: ownerID)
+            let existingMap = slotMap(ownerID: ownerID)
+
+            var rebuiltMap: [String: Int] = [:]
+
+            for label in rankedLabels {
+                let preferredSlots = preferredSlotsForWeightedAssignment(currentMap: rebuiltMap)
+                let nextSlot = nextAvailableSlot(from: rebuiltMap, preferredSlots: preferredSlots)
+                rebuiltMap[label] = nextSlot.rawValue
+            }
+
+            let orphanedLabels = existingMap.keys
+                .filter { rebuiltMap[$0] == nil }
+                .sorted()
+
+            for label in orphanedLabels {
+                let preferredSlots = secondaryAssignmentPriority + heroAssignmentPriority
+                let nextSlot = nextAvailableSlot(from: rebuiltMap, preferredSlots: preferredSlots)
+                rebuiltMap[label] = nextSlot.rawValue
+            }
+
+            guard rebuiltMap != existingMap else { return }
+
+            UserDefaults.standard.set(rebuiltMap, forKey: namespace)
         }
 
         private static func namespaceKey(ownerID: String?) -> String {
@@ -1038,12 +1089,15 @@ enum Theme {
             return cleaned
         }
 
-        private static let visibleAssignmentPriority: [Slot] = [
+        private static let heroAssignmentPriority: [Slot] = [
             .coolDeep,
             .rose,
-            .sage,
-            .indigo,
             .apricot,
+            .sage,
+            .indigo
+        ]
+
+        private static let secondaryAssignmentPriority: [Slot] = [
             .petrol,
             .lavender,
             .bronze,
@@ -1055,21 +1109,40 @@ enum Theme {
             .stone
         ]
 
-        private static func nextAvailableSlot(from map: [String: Int]) -> Slot {
+        private static var visibleAssignmentPriority: [Slot] {
+            heroAssignmentPriority + secondaryAssignmentPriority
+        }
+
+
+        private static func preferredSlotsForWeightedAssignment(currentMap map: [String: Int]) -> [Slot] {
+            let assignedSlots = Set(map.values)
+            let hasAvailableHeroSlot = heroAssignmentPriority.contains { slot in
+                assignedSlots.contains(slot.rawValue) == false
+            }
+
+            if hasAvailableHeroSlot {
+                return heroAssignmentPriority + secondaryAssignmentPriority
+            }
+
+            return secondaryAssignmentPriority + heroAssignmentPriority
+        }
+
+        private static func nextAvailableSlot(from map: [String: Int], preferredSlots: [Slot]? = nil) -> Slot {
+            let priority = preferredSlots ?? visibleAssignmentPriority
             let assignedCounts = Dictionary(grouping: map.values, by: { $0 })
                 .mapValues { $0.count }
 
-            for slot in visibleAssignmentPriority where assignedCounts[slot.rawValue] == nil {
+            for slot in priority where assignedCounts[slot.rawValue] == nil {
                 return slot
             }
 
-            guard let leastUsedSlot = visibleAssignmentPriority.min(by: { lhs, rhs in
+            guard let leastUsedSlot = priority.min(by: { lhs, rhs in
                 let leftCount = assignedCounts[lhs.rawValue] ?? 0
                 let rightCount = assignedCounts[rhs.rawValue] ?? 0
                 if leftCount != rightCount { return leftCount < rightCount }
 
-                let leftIndex = visibleAssignmentPriority.firstIndex(of: lhs) ?? Int.max
-                let rightIndex = visibleAssignmentPriority.firstIndex(of: rhs) ?? Int.max
+                let leftIndex = priority.firstIndex(of: lhs) ?? Int.max
+                let rightIndex = priority.firstIndex(of: rhs) ?? Int.max
                 return leftIndex < rightIndex
             }) else {
                 return .lavender
