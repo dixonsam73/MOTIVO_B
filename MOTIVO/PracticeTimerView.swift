@@ -2464,6 +2464,7 @@ private var bottomActionSection: some View {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showTasksPad = false
                         }
+                        persistTasksSnapshot()
                     } else {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showAddEntryActions = false
