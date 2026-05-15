@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_2118_ThoughtLeadTypography
+// SCOPE: Refine Thought row lead typography in ContentView only using lightweight Text composition; no feed logic, layout, filtering, model, or backend changes.
+// SEARCH-TOKEN: 20260515_2118_ThoughtLeadTypography
+
 // CHANGE-ID: 20260505_174500_ContentView_SaveHint
 // SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
 // SEARCH-TOKEN: 20260505_174500_ContentView_SaveHint
@@ -3863,12 +3867,19 @@ fileprivate struct SessionRow: View {
 
                 if scope != .mine && session.isThought {
                     if let header = session.thoughtHeader {
-                        Text(header)
-                            .font(Theme.Text.body.weight(.semibold))
-                            .foregroundStyle(.primary)
-                            .lineLimit(2)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("row.title")
+                        let splitHeader = splitThoughtLead(header)
+                        (
+                            Text(splitHeader.lead)
+                                .font(Theme.Text.body.weight(.semibold))
+                                .foregroundColor(Color.primary.opacity(0.86))
+                            +
+                            Text(splitHeader.remainder)
+                                .font(Theme.Text.body)
+                                .foregroundColor(Color.primary.opacity(0.78))
+                        )
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("row.title")
                     }
 
                     if let body = session.thoughtBodyPreview {
@@ -4726,6 +4737,48 @@ fileprivate func attachmentPhotoLibraryImage(_ a: Attachment, targetMax: CGFloat
 #endif
 // MARK: - Step 8C Backend Feed Row (read-only)
 
+
+fileprivate func splitThoughtLead(_ text: String) -> (lead: String, remainder: String) {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else {
+        return ("", "")
+    }
+
+    let maxLeadCharacters = 42
+    let preferredSeparators: [Character] = [":", "—", "."]
+
+    for separator in preferredSeparators {
+        if let separatorIndex = trimmed.firstIndex(of: separator) {
+            let nextIndex = trimmed.index(after: separatorIndex)
+            let leadCandidate = String(trimmed[..<nextIndex])
+                .replacingOccurrences(of: " :", with: ":")
+                .replacingOccurrences(of: " .", with: ".")
+                .replacingOccurrences(of: " —", with: "—")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if !leadCandidate.isEmpty && leadCandidate.count <= maxLeadCharacters {
+                let remainderCandidate = String(trimmed[nextIndex...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if remainderCandidate.isEmpty {
+                    return (leadCandidate, "")
+                }
+
+                return (leadCandidate, " " + remainderCandidate)
+            }
+        }
+    }
+
+    let words = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+    guard words.count > 5 else {
+        return (trimmed, "")
+    }
+
+    let lead = words.prefix(5).joined(separator: " ")
+    let remainder = words.dropFirst(5).joined(separator: " ")
+    return (lead, " " + remainder)
+}
+
 fileprivate enum ThoughtRowContext {
     case feed
     case journalWeek
@@ -4839,13 +4892,20 @@ fileprivate struct ThoughtRow: View {
             }
 
             if let header = session.thoughtHeader {
-                Text(header)
-                    .font(Theme.Text.body.weight(.semibold))
-                    .foregroundStyle(.primary)
-                    .lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, headerTopPadding)
-                    .accessibilityIdentifier("row.title")
+                let splitHeader = splitThoughtLead(header)
+                (
+                    Text(splitHeader.lead)
+                        .font(Theme.Text.body.weight(.semibold))
+                        .foregroundColor(Color.primary.opacity(0.86))
+                    +
+                    Text(splitHeader.remainder)
+                        .font(Theme.Text.body)
+                        .foregroundColor(Color.primary.opacity(0.78))
+                )
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, headerTopPadding)
+                .accessibilityIdentifier("row.title")
             }
 
             if let body = session.thoughtBodyPreview {
@@ -5653,11 +5713,19 @@ private var extraAttachmentCount: Int {
 
                 if isThoughtPost {
                     if let header = post.thoughtHeader {
-                        Text(header)
-                            .font(.headline)
-                            .lineLimit(2)
-                            .accessibilityLabel("Thought")
-                            .accessibilityIdentifier("row.title")
+                        let splitHeader = splitThoughtLead(header)
+                        (
+                            Text(splitHeader.lead)
+                                .font(.headline.weight(.semibold))
+                                .foregroundColor(Color.primary.opacity(0.86))
+                            +
+                            Text(splitHeader.remainder)
+                                .font(.headline.weight(.regular))
+                                .foregroundColor(Color.primary.opacity(0.78))
+                        )
+                        .lineLimit(2)
+                        .accessibilityLabel("Thought")
+                        .accessibilityIdentifier("row.title")
                     }
 
                     if let body = post.thoughtBodyPreview {
