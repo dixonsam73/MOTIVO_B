@@ -69,7 +69,7 @@ extension PracticeTimerView {
                                 isAddingNewInstrumentInPicker = true
                             } label: {
                                 HStack {
-                                    Text("+ New instrument…")
+                                    Text("+ New instrument")
                                         .font(Theme.Text.body)
                                         .foregroundStyle(Theme.Colors.accent)
                                     Spacer(minLength: 0)

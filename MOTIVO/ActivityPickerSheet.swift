@@ -57,7 +57,7 @@ struct ActivityPickerSheet: View {
                             isAddingNewActivity = true
                         } label: {
                             HStack {
-                                Text("+ New activity…")
+                                Text("+ New activity")
                                     .font(Theme.Text.body)
                                     .foregroundStyle(Theme.Colors.accent)
                                 Spacer(minLength: 0)
