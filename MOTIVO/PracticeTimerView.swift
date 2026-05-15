@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_122500_ThreadSuggestionsToggle
+// SCOPE: PracticeTimerView presentation only — respect Show thread suggestions setting by hiding ambient thread chips; no thread logic or animation changes.
+// SEARCH-TOKEN: 20260515_122500_ThreadSuggestionsToggle
+
 // CHANGE-ID: 20260515_111500_PTV_PickerInlineCreate
 // SCOPE: Add lightweight inline New Instrument/New Activity creation from PTV picker sheets; persist to canonical saved lists and immediately select. No unrelated UI/logic changes.
 // SEARCH-TOKEN: 20260515_111500_PTV_PickerInlineCreate
@@ -198,6 +202,7 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
+    @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
     @AppStorage("meViewSelectedRange_v1") private var persistedMeViewRangeRaw: String = StatsRange.total.rawValue
@@ -1912,7 +1917,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var ambientThreadContinuitySection: some View {
         let chips = displayedAmbientThreadChips.isEmpty ? visibleAmbientThreadChips : displayedAmbientThreadChips
-        let shouldShowChips = !chips.isEmpty && !showSessionMetaSetup
+        let shouldShowChips = showThreadSuggestions && !chips.isEmpty && !showSessionMetaSetup
 
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {

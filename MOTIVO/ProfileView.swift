@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_122500_ThreadSuggestionsToggle
+// SCOPE: ProfileView settings only — add persisted Show thread suggestions toggle; no other UI or logic changes.
+// SEARCH-TOKEN: 20260515_122500_ThreadSuggestionsToggle
+
 // CHANGE-ID: 20260428_191500_ProfileSignInGateSuppress
 // SCOPE: ProfileView — close signed-out sign-in gate immediately after successful sign-in so setup root can render without signed-in ProfileView flash; no other UI/logic changes.
 // SEARCH-TOKEN: 20260428_191500_ProfileSignInGateSuppress
@@ -185,6 +189,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
      @AppStorage("appSettings_showTasksPad") private var showTasksPad: Bool = true
+    @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
 
@@ -694,6 +699,18 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
                  Toggle(isOn: $showTasksPad) {
                      Text("Show Tasks Pad")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     Divider()
+                         .padding(.leading, 16)
+                 }
+
+                 Toggle(isOn: $showThreadSuggestions) {
+                     Text("Show Thread Suggestions")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)
