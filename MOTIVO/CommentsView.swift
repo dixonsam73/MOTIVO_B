@@ -1618,7 +1618,9 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
                         }
                     } else {
                         Image(systemName: "paperplane.fill")
-                            .foregroundStyle(Color.primary).fontWeight(.bold)
+                            .frame(width: 32, height: 32)
+                            .foregroundStyle(Color.primary)
+                            .fontWeight(.bold)
                     }
                 }
                 .buttonStyle(.plain)
