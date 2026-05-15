@@ -1987,7 +1987,6 @@ fileprivate struct SessionsRootView: View {
 
         // Thread (owner-only; local-only)
         if let selected = selectedThread {
-            out = out.filter { !$0.isThought }
             let target = selected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
             if let me = effectiveUserID, !target.isEmpty {
                 out = out.filter { s in
