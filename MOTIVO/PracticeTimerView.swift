@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_074800_PTV_LightweightSessionMetaLabels
+// SCOPE: PracticeTimerView — replace SessionMetaCard reveal with lightweight instrument/activity labels above the fixed quaver control; preserve existing picker flows.
+// SEARCH-TOKEN: 20260515_074800_PTV_LightweightSessionMetaLabels
+
 // CHANGE-ID: 20260513_164950_PTV_AmbientOverlayVerticalParity
 // SCOPE: PracticeTimerView — preserve overlay chip vertical parity during ambient thread deselect handoff.
 // SEARCH-TOKEN: 20260513_164950_PTV_AmbientOverlayVerticalParity
@@ -1903,7 +1907,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var ambientThreadContinuitySection: some View {
         let chips = displayedAmbientThreadChips.isEmpty ? visibleAmbientThreadChips : displayedAmbientThreadChips
-        let shouldShowChips = !chips.isEmpty && !showSessionMetaSetup
+        let shouldShowChips = !chips.isEmpty
 
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -2063,35 +2067,11 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var sessionMetaSection: some View {
         VStack(alignment: .center, spacing: Theme.Spacing.xs) {
-            ZStack {
-                SessionMetaCard(
-                    instruments: instruments,
-                    instrument: $instrument,
-                    showInstrumentSheet: $showInstrumentSheet,
-                    showActivitySheet: $showActivitySheet,
-                    currentInstrumentName: currentInstrumentName(),
-                    activityLabel: activityDisplayName(for: activityChoice),
-                    resolvedTint: cachedSessionMetaTint
-                )
-                .padding(.top, PracticeTimerCompositionUI.sessionMetaOpenTopBuffer)
-                .hidden()
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-
-                if showSessionMetaSetup {
-                    SessionMetaCard(
-                        instruments: instruments,
-                        instrument: $instrument,
-                        showInstrumentSheet: $showInstrumentSheet,
-                        showActivitySheet: $showActivitySheet,
-                        currentInstrumentName: currentInstrumentName(),
-                        activityLabel: activityDisplayName(for: activityChoice),
-                        resolvedTint: cachedSessionMetaTint
-                    )
-                    .padding(.top, PracticeTimerCompositionUI.sessionMetaOpenTopBuffer)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
+            sessionMetaContextLabels
+                .opacity(showSessionMetaSetup ? 1 : 0)
+                .allowsHitTesting(showSessionMetaSetup)
+                .accessibilityHidden(!showSessionMetaSetup)
+                .animation(.easeInOut(duration: 0.18), value: showSessionMetaSetup)
 
             Button {
                 withAnimation(.easeInOut(duration: 0.18)) {
@@ -2116,7 +2096,54 @@ private func loadPracticeDefaultsIfNeeded() {
             .padding(.bottom, 2)
         }
         .frame(maxWidth: .infinity)
-          .padding(.bottom, Theme.Spacing.xs)
+        .padding(.bottom, Theme.Spacing.xs)
+    }
+
+    @ViewBuilder
+    private var sessionMetaContextLabels: some View {
+        HStack(alignment: .center, spacing: 12) {
+            if hasMultipleInstruments {
+                Button {
+                    showInstrumentSheet = true
+                } label: {
+                    Text(currentInstrumentName())
+                        .lineLimit(1)
+                        .foregroundStyle(tasksAccent.opacity(0.95))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Change instrument")
+            } else if let only = instruments.first {
+                Text(only.name ?? "Instrument")
+                    .lineLimit(1)
+                    .foregroundStyle(tasksAccent.opacity(0.95))
+                    .onAppear {
+                        DispatchQueue.main.async {
+                            if instrument == nil {
+                                instrument = only
+                            }
+                        }
+                    }
+            } else {
+                Text("Instrument")
+                    .lineLimit(1)
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                showActivitySheet = true
+            } label: {
+                Text(activityDisplayName(for: activityChoice))
+                    .lineLimit(1)
+                    .foregroundStyle(tasksAccent.opacity(0.95))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Change activity")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.top, 2)
+        .padding(.bottom, 10)
     }
 
     @ViewBuilder
