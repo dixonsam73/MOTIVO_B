@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_111500_PTV_PickerInlineCreate_Sheets
+// SCOPE: Add lightweight inline New Instrument/New Activity creation controls to PTV picker sheets; no unrelated sheet behaviour changes.
+// SEARCH-TOKEN: 20260515_111500_PTV_PickerInlineCreate_Sheets
+
 // CHANGE-ID: 20260513_075400_PTV_AmbientThreadContinuity_Sheets
 // SCOPE: PracticeTimerView+Sheets — pass provisional ambient thread context into PRDV review; no other sheet behaviour changes.
 // SEARCH-TOKEN: 20260513_075400_PTV_AmbientThreadContinuity_Sheets
@@ -38,6 +42,45 @@ extension PracticeTimerView {
                     .pickerStyle(.wheel)
                     .labelsHidden()
                     .frame(maxWidth: .infinity, alignment: .top)
+
+                    Divider()
+                        .opacity(0.45)
+
+                    VStack(spacing: Theme.Spacing.xs) {
+                        if isAddingNewInstrumentInPicker {
+                            HStack(spacing: Theme.Spacing.s) {
+                                TextField("New instrument", text: $newInstrumentNameInPicker)
+                                    .font(Theme.Text.body)
+                                    .textInputAutocapitalization(.words)
+                                    .submitLabel(.done)
+                                    .onSubmit {
+                                        createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
+                                    }
+
+                                Button("Add") {
+                                    createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
+                                }
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
+                                .disabled(newInstrumentNameInPicker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        } else {
+                            Button {
+                                isAddingNewInstrumentInPicker = true
+                            } label: {
+                                HStack {
+                                    Text("+ New instrument…")
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(Theme.Colors.accent)
+                                    Spacer(minLength: 0)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, Theme.Spacing.m)
+                    .padding(.vertical, Theme.Spacing.s)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .padding(.top, Theme.Spacing.s)
@@ -52,7 +95,11 @@ extension PracticeTimerView {
                         }
                     }
                     ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") { showInstrumentSheet = false }
+                        Button("Cancel") {
+                            newInstrumentNameInPicker = ""
+                            isAddingNewInstrumentInPicker = false
+                            showInstrumentSheet = false
+                        }
                     }
                 }
             }
@@ -71,6 +118,9 @@ extension PracticeTimerView {
                 resetTasks: {
                     // when activity changes in the timer, reset tasks context
                     resetTasksForNewSessionContext()
+                },
+                createActivityChoice: { name in
+                    createActivityChoiceFromPicker(named: name)
                 }
             )
         }

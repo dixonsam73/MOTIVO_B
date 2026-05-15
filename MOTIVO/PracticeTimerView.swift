@@ -1,6 +1,9 @@
-// CHANGE-ID: 20260515_074800_PTV_LightweightSessionMetaLabels
-// SCOPE: PracticeTimerView — replace SessionMetaCard reveal with lightweight instrument/activity labels above the fixed quaver control; preserve existing picker flows.
-// SEARCH-TOKEN: 20260515_074800_PTV_LightweightSessionMetaLabels
+// CHANGE-ID: 20260515_111500_PTV_PickerInlineCreate
+// SCOPE: Add lightweight inline New Instrument/New Activity creation from PTV picker sheets; persist to canonical saved lists and immediately select. No unrelated UI/logic changes.
+// SEARCH-TOKEN: 20260515_111500_PTV_PickerInlineCreate
+
+// CHANGE-ID: 20260515_115900_PTV_SessionMetaLabelRestore
+// SCOPE: Restore lightweight quaver-revealed instrument/activity labels after picker inline-create merge regression; preserve picker additions and all other PTV behaviour.
 
 // CHANGE-ID: 20260513_164950_PTV_AmbientOverlayVerticalParity
 // SCOPE: PracticeTimerView — preserve overlay chip vertical parity during ambient thread deselect handoff.
@@ -202,6 +205,8 @@ struct PracticeTimerView: View {
     // Wheel picker sheet toggles
     @State var showInstrumentSheet: Bool = false
     @State var showActivitySheet: Bool = false
+    @State var isAddingNewInstrumentInPicker: Bool = false
+    @State var newInstrumentNameInPicker: String = ""
     @State private var showSessionMetaSetup: Bool = false
     @State private var showDroneControlsExpanded: Bool = false
     @State private var showMetronomeControlsExpanded: Bool = false
@@ -1907,7 +1912,7 @@ private func loadPracticeDefaultsIfNeeded() {
     @ViewBuilder
     private var ambientThreadContinuitySection: some View {
         let chips = displayedAmbientThreadChips.isEmpty ? visibleAmbientThreadChips : displayedAmbientThreadChips
-        let shouldShowChips = !chips.isEmpty
+        let shouldShowChips = !chips.isEmpty && !showSessionMetaSetup
 
         GeometryReader { proxy in
             ZStack(alignment: .bottom) {
@@ -3086,6 +3091,116 @@ private var bottomActionSection: some View {
         } else {
             instrumentIndex = 0
             instrument = instruments.first
+        }
+    }
+
+    func createAndSelectInstrumentFromPicker(named rawName: String) {
+        guard PersistenceController.shared.currentUserID != nil else { return }
+
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        guard let ownerProfile = fetchOrCreateProfileForSessionMetaPicker() else { return }
+
+        let existingInstruments = fetchInstruments()
+        if let existing = existingInstruments.first(where: {
+            ($0.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            instruments = existingInstruments
+            instrument = existing
+            if let idx = instruments.firstIndex(of: existing) {
+                instrumentIndex = idx
+            }
+            newInstrumentNameInPicker = ""
+            isAddingNewInstrumentInPicker = false
+            showInstrumentSheet = false
+            return
+        }
+
+        let inst = Instrument(context: viewContext)
+        inst.id = UUID()
+        inst.name = name
+        inst.profile = ownerProfile
+
+        do {
+            _ = try PersistenceController.shared.fetchOrCreateUserInstrument(
+                named: name,
+                mapTo: inst,
+                visibleOnProfile: true,
+                in: viewContext
+            )
+            try viewContext.save()
+        } catch {
+            viewContext.rollback()
+            print("PTV instrument picker add failed: \(error)")
+            return
+        }
+
+        instruments = fetchInstruments()
+        if let match = instruments.first(where: {
+            ($0.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            instrument = match
+            if let idx = instruments.firstIndex(of: match) {
+                instrumentIndex = idx
+            }
+        }
+
+        newInstrumentNameInPicker = ""
+        isAddingNewInstrumentInPicker = false
+        showInstrumentSheet = false
+    }
+
+    func createActivityChoiceFromPicker(named rawName: String) -> String? {
+        guard PersistenceController.shared.currentUserID != nil else { return nil }
+
+        let name = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return nil }
+
+        do {
+            let saved = try PersistenceController.shared.fetchOrCreateUserActivity(
+                named: name,
+                mapTo: 0,
+                in: viewContext
+            )
+            try viewContext.save()
+            loadUserActivities()
+
+            let savedName = (saved.displayName ?? name).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !savedName.isEmpty else { return nil }
+            return "custom:\(savedName)"
+        } catch {
+            viewContext.rollback()
+            print("PTV activity picker add failed: \(error)")
+            return nil
+        }
+    }
+
+    private func fetchOrCreateProfileForSessionMetaPicker() -> Profile? {
+        guard PersistenceController.shared.currentUserID != nil else { return nil }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+
+        do {
+            if let existing = try viewContext.fetch(req).first {
+                if existing.value(forKey: "id") == nil {
+                    existing.setValue(UUID(), forKey: "id")
+                    try? viewContext.save()
+                }
+                return existing
+            }
+
+            let profile = Profile(context: viewContext)
+            profile.setValue(UUID(), forKey: "id")
+            profile.name = ""
+            profile.primaryInstrument = ""
+            profile.defaultPrivacy = false
+            try viewContext.save()
+            return profile
+        } catch {
+            viewContext.rollback()
+            print("PTV profile load for instrument picker failed: \(error)")
+            return nil
         }
     }
 
