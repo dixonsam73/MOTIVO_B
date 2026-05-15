@@ -3389,12 +3389,21 @@ fileprivate struct SessionRow: View {
     }
 
     private var journalMetadataLine: String {
-        [
+        let editorialTimestamp: String? = {
+            guard let date = journalDateText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !date.isEmpty,
+                  let time = journalTimeText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !time.isEmpty else {
+                return nil
+            }
+
+            return "\(date) at \(time)"
+        }()
+
+        return [
             journalThreadLabel,
             instrumentActivityLine.isEmpty ? nil : instrumentActivityLine,
-            journalDateText,
-            journalTimeText,
-            journalDurationText
+            editorialTimestamp
         ]
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
@@ -3402,11 +3411,20 @@ fileprivate struct SessionRow: View {
     }
 
     private var journalMetadataTailLine: String {
-        [
+        let editorialTimestamp: String? = {
+            guard let date = journalDateText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !date.isEmpty,
+                  let time = journalTimeText?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !time.isEmpty else {
+                return nil
+            }
+
+            return "\(date) at \(time)"
+        }()
+
+        return [
             instrumentActivityLine.isEmpty ? nil : instrumentActivityLine,
-            journalDateText,
-            journalTimeText,
-            journalDurationText
+            editorialTimestamp
         ]
         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
         .filter { !$0.isEmpty }
@@ -3920,7 +3938,7 @@ fileprivate struct SessionRow: View {
                         let tailLine = isYearCompactJournalRow ? yearCompactMetadataTailLine : journalMetadataTailLine
 
                         if let thread, !thread.isEmpty {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            VStack(alignment: .leading, spacing: 6) {
                                 Button {
                                     if selectedThread == thread {
                                         selectedThread = nil
@@ -3933,14 +3951,14 @@ fileprivate struct SessionRow: View {
                                 .buttonStyle(.plain)
 
                                 if !tailLine.isEmpty {
-                                    Text("· \(tailLine)")
+                                    Text(tailLine)
                                         .font(.caption)
                                         .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                                         .lineLimit(1)
                                         .truncationMode(.tail)
                                 }
                             }
-                            .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 2))
+                            .padding(.top, isYearCompactJournalRow ? 0 : (isMonthCompactJournalRow ? 1 : 1))
                             .accessibilityElement(children: .combine)
                             .accessibilityLabel("Session metadata")
                             .accessibilityIdentifier("row.subtitle")
