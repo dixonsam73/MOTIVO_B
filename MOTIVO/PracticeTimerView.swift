@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260515_073800_PTV_ControlRevealOpacity
+// SCOPE: Align PTV bottom control reveal animations with Session Meta opacity-only behaviour; no UI or logic changes outside Tasks Pad/+ actions reveal paths.
+// SEARCH-TOKEN: 20260515_073800_PTV_ControlRevealOpacity
+
 // CHANGE-ID: 20260515_122500_ThreadSuggestionsToggle
 // SCOPE: PracticeTimerView presentation only — respect Show thread suggestions setting by hiding ambient thread chips; no thread logic or animation changes.
 // SEARCH-TOKEN: 20260515_122500_ThreadSuggestionsToggle
@@ -2457,7 +2461,9 @@ private var bottomActionSection: some View {
             if showTasksButton {
                 Button {
                     if showTasksPad {
-                        showTasksPad = false
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showTasksPad = false
+                        }
                     } else {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showAddEntryActions = false
@@ -2542,7 +2548,7 @@ private var bottomActionSection: some View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 10)
             .padding(.bottom, 12)
-            .transition(.opacity.combined(with: .move(edge: .top)))
+            .transition(.opacity)
         } else if showTasksButton && showTasksPad {
             TasksPadCard(
                 showTasksPad: $showTasksPad,
@@ -2575,6 +2581,7 @@ private var bottomActionSection: some View {
                     showTaskImportPasteSheet = true
                 }
             )
+            .transition(.opacity)
         }
     }
 }
