@@ -22,9 +22,19 @@ struct TimerCard: View {
     var body: some View {
         VStack(alignment: .center, spacing: Theme.Spacing.s) {
             Text(elapsedLabel)
-                .font(.system(size: 50, weight: .semibold, design: .rounded))
-                .foregroundStyle(Color.primary.opacity(0.85))
+                .font(.system(size: 44, weight: .medium, design: .rounded))
+                .foregroundStyle(
+                    Color(red: 0.33, green: 0.45, blue: 0.58)
+                        .opacity(hasStarted ? 0.82 : 0.0)
+                )
                 .monospacedDigit()
+                .animation(
+                    hasStarted
+                        ? .easeOut(duration: 3.0)
+                        : .easeOut(duration: 0.45),
+                    value: hasStarted
+                )
+                .accessibilityHidden(!hasStarted)
                 .frame(maxWidth: .infinity, alignment: .center)
 
             transportControls
@@ -45,8 +55,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Theme.Colors.primaryAction.opacity(0.18))
-                .foregroundStyle(.primary)
+                .background(Theme.Colors.primaryAction.opacity(0.14))
+                .foregroundStyle(Color.primary.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Finish") {
@@ -55,8 +65,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Color.red.opacity(0.18))
-                .foregroundStyle(.primary)
+                .background(Color.red.opacity(0.12))
+                .foregroundStyle(Color.primary.opacity(0.70))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         } else if isPaused {
@@ -67,8 +77,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Theme.Colors.primaryAction.opacity(0.10))
-                .foregroundStyle(.primary)
+                .background(Theme.Colors.primaryAction.opacity(0.08))
+                .foregroundStyle(Color.primary.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Finish") {
@@ -77,8 +87,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Color.red.opacity(0.18))
-                .foregroundStyle(.primary)
+                .background(Color.red.opacity(0.12))
+                .foregroundStyle(Color.primary.opacity(0.70))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Button("Reset") {
@@ -87,8 +97,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: .infinity, minHeight: 44)
-                .background(Color.orange.opacity(0.18))
-                .foregroundStyle(.primary)
+                .background(Color.orange.opacity(0.12))
+                .foregroundStyle(Color.primary.opacity(0.70))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
         } else {
@@ -101,8 +111,8 @@ struct TimerCard: View {
                 .buttonStyle(.bordered)
                 .tint(.clear)
                 .frame(maxWidth: 260, minHeight: 44)
-                .background(Theme.Colors.primaryAction.opacity(0.18))
-                .foregroundStyle(.primary)
+                .background(Theme.Colors.primaryAction.opacity(0.14))
+                .foregroundStyle(Color.primary.opacity(0.72))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
 
                 Spacer(minLength: 0)
