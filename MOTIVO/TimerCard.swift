@@ -169,6 +169,7 @@ struct TimerCard: View {
 
                 Spacer(minLength: 0)
             }
+            .offset(y: -34)
 
         case .running:
             HStack(spacing: Theme.Spacing.m) {
