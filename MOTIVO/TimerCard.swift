@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260516_101800_timer_phase3_motion_language
-// SCOPE: Calm transport-state recomposition using stable spatial layout, softer opacity transitions, and unified button geometry without changing timer behaviour or container architecture.
+// CHANGE-ID: 20260516_104500_timer_phase3_persistent_outgoing_controls
+// SCOPE: Preserve outgoing timer controls during transitions so they fade away before the next control layout fades in, without changing timer behaviour or container architecture.
 
 import SwiftUI
 
@@ -11,6 +11,18 @@ struct TimerCard: View {
     let onReset: () -> Void
     let onFinish: () -> Void
 
+    private enum ControlMode: Equatable {
+        case idle
+        case running
+        case paused
+    }
+
+    @State private var displayedControlMode: ControlMode = .idle
+    @State private var outgoingControlMode: ControlMode?
+    @State private var outgoingOpacity: Double = 0.0
+    @State private var incomingOpacity: Double = 1.0
+    @State private var isControlTransitionActive: Bool = false
+
     private var hasStarted: Bool {
         elapsedLabel != "00:00"
     }
@@ -19,12 +31,55 @@ struct TimerCard: View {
         !isRunning && hasStarted
     }
 
-    private var controlAnimation: Animation {
+    private var currentControlMode: ControlMode {
+        if isRunning {
+            return .running
+        } else if isPaused {
+            return .paused
+        } else {
+            return .idle
+        }
+    }
+
+    private var fadeOutAnimation: Animation {
+        .easeInOut(duration: 0.78)
+    }
+
+    private var fadeInAnimation: Animation {
         .easeInOut(duration: 0.52)
     }
-    
-    @State private var isStartingTransition: Bool = false
-    
+
+    private func performControlTransition(
+        to targetMode: ControlMode,
+        action: @escaping () -> Void
+    ) {
+        guard !isControlTransitionActive else { return }
+
+        isControlTransitionActive = true
+        outgoingControlMode = displayedControlMode
+        outgoingOpacity = 1.0
+        incomingOpacity = 0.0
+
+        action()
+
+        withAnimation(fadeOutAnimation) {
+            outgoingOpacity = 0.0
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.78) {
+            displayedControlMode = targetMode
+            outgoingControlMode = nil
+
+            withAnimation(fadeInAnimation) {
+                incomingOpacity = 1.0
+            }
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) {
+                isControlTransitionActive = false
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .center, spacing: Theme.Spacing.s) {
             Text(elapsedLabel)
@@ -49,92 +104,113 @@ struct TimerCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .center)
         .cardSurface()
+        .onAppear {
+            displayedControlMode = currentControlMode
+        }
+        .onChange(of: currentControlMode) { _, newValue in
+            guard !isControlTransitionActive else { return }
+            displayedControlMode = newValue
+            incomingOpacity = 1.0
+            outgoingControlMode = nil
+            outgoingOpacity = 0.0
+        }
     }
 
     private var transportControls: some View {
-        Group {
-
-            if isRunning {
-
-                HStack(spacing: Theme.Spacing.m) {
-
-                    controlSlot(
-                        title: "Pause",
-                        isVisible: !isStartingTransition,
-                        background: Theme.Colors.primaryAction.opacity(0.14),
-                        action: onPause
-                    )
-
-                    controlSlot(
-                        title: "Finish",
-                        isVisible: !isStartingTransition,
-                        background: Color.red.opacity(0.12),
-                        action: onFinish
-                    )
-                }
-                .frame(maxWidth: 360)
-
-            } else if isPaused {
-
-                HStack(spacing: Theme.Spacing.m) {
-
-                    controlSlot(
-                        title: "Resume",
-                        isVisible: !isStartingTransition,
-                        background: Theme.Colors.primaryAction.opacity(0.08),
-                        action: onStart
-                    )
-
-                    controlSlot(
-                        title: "Finish",
-                        isVisible: !isStartingTransition,
-                        background: Color.red.opacity(0.12),
-                        action: onFinish
-                    )
-
-                    controlSlot(
-                        title: "Reset",
-                        isVisible: !isStartingTransition,
-                        background: Color.orange.opacity(0.12),
-                        action: onReset
-                    )
-                }
-
-            } else {
-
-                HStack(spacing: Theme.Spacing.m) {
-
-                    Spacer(minLength: 0)
-
-                    controlSlot(
-                        title: "Start",
-                        isVisible: !isStartingTransition,
-                        background: Theme.Colors.primaryAction.opacity(0.14),
-                        action: {
-                            isStartingTransition = true
-                            onStart()
-
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) {
-                                isStartingTransition = false
-                            }
-                        }
-                    )
-                    .frame(maxWidth: 180)
-
-                    Spacer(minLength: 0)
-                }
+        ZStack {
+            if let outgoingControlMode {
+                controlLayout(for: outgoingControlMode, isInteractive: false)
+                    .opacity(outgoingOpacity)
             }
+
+            controlLayout(for: displayedControlMode, isInteractive: !isControlTransitionActive)
+                .opacity(incomingOpacity)
         }
     }
 
     @ViewBuilder
+    private func controlLayout(
+        for mode: ControlMode,
+        isInteractive: Bool
+    ) -> some View {
+        switch mode {
+        case .idle:
+            HStack(spacing: Theme.Spacing.m) {
+                Spacer(minLength: 0)
+
+                controlSlot(
+                    title: "Start",
+                    background: Theme.Colors.primaryAction.opacity(0.14),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .running, action: onStart)
+                    }
+                )
+                .frame(maxWidth: 180)
+
+                Spacer(minLength: 0)
+            }
+
+        case .running:
+            HStack(spacing: Theme.Spacing.m) {
+                controlSlot(
+                    title: "Pause",
+                    background: Theme.Colors.primaryAction.opacity(0.14),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .paused, action: onPause)
+                    }
+                )
+
+                controlSlot(
+                    title: "Finish",
+                    background: Color.red.opacity(0.12),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .running, action: onFinish)
+                    }
+                )
+            }
+            .frame(maxWidth: 360)
+
+        case .paused:
+            HStack(spacing: Theme.Spacing.m) {
+                controlSlot(
+                    title: "Resume",
+                    background: Theme.Colors.primaryAction.opacity(0.08),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .running, action: onStart)
+                    }
+                )
+
+                controlSlot(
+                    title: "Finish",
+                    background: Color.red.opacity(0.12),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .paused, action: onFinish)
+                    }
+                )
+
+                controlSlot(
+                    title: "Reset",
+                    background: Color.orange.opacity(0.12),
+                    isInteractive: isInteractive,
+                    action: {
+                        performControlTransition(to: .idle, action: onReset)
+                    }
+                )
+            }
+        }
+    }
+
     private func controlSlot(
         title: String,
-        isVisible: Bool,
         background: Color,
+        isInteractive: Bool,
         action: @escaping () -> Void
     ) -> some View {
-
         Button(title) {
             action()
         }
@@ -144,14 +220,8 @@ struct TimerCard: View {
         .background(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .fill(background)
-                .opacity(isVisible ? 1.0 : 0.0)
         )
-        .foregroundStyle(
-            Color.primary.opacity(isVisible ? 0.72 : 0.0)
-        )
-        .opacity(isVisible ? 1.0 : 0.0)
-        .offset(y: isVisible ? 0 : 4)
-        .allowsHitTesting(isVisible)
-        .animation(controlAnimation, value: isVisible)
+        .foregroundStyle(Color.primary.opacity(0.72))
+        .allowsHitTesting(isInteractive)
     }
 }
