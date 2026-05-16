@@ -2438,7 +2438,7 @@ private func loadPracticeDefaultsIfNeeded() {
         !isRunning && elapsedSeconds == 0 && accumulatedSeconds == 0 && startDate == nil
     }
     private var shouldRenderIdleAddEntryButton: Bool {
-        isIdleAddEntryAvailable || preserveIdleAddEntryGeometry
+        preserveIdleAddEntryGeometry || (isIdleAddEntryAvailable && !lowerUtilityRowRecentering)
     }
 
     private var idleAddEntryOpacity: Double {
@@ -2533,28 +2533,32 @@ private func loadPracticeDefaultsIfNeeded() {
             }
             .onChange(of: isIdleAddEntryAvailable) { _, isAvailable in
                 if isAvailable {
-                    withAnimation(.easeInOut(duration: 0.82)) {
-                        preserveIdleAddEntryGeometry = true
+                    if !lowerUtilityRowRecentering {
+                        withAnimation(.easeInOut(duration: 0.82)) {
+                            preserveIdleAddEntryGeometry = true
+                        }
                     }
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
-                        withAnimation(.easeInOut(duration: 0.32)) {
+                        withAnimation(.easeInOut(duration: 0.48)) {
                             showOutgoingIdleAddEntry = true
                         }
                     }
 
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.86) {
+                        lowerUtilityRowRecentering = false
                         preserveIdleAddEntryGeometry = false
                     }
                 } else {
+                    lowerUtilityRowRecentering = false
                     preserveIdleAddEntryGeometry = true
 
                     withAnimation(.easeInOut(duration: 0.48)) {
                         showOutgoingIdleAddEntry = false
                     }
 
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
-                        withAnimation(.easeInOut(duration: 0.62)) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.54) {
+                        withAnimation(.easeInOut(duration: 0.78)) {
                             preserveIdleAddEntryGeometry = false
                         }
                     }
@@ -3317,6 +3321,11 @@ private func loadPracticeDefaultsIfNeeded() {
         clearPersistedTimer()
         clearPersistedStagedAttachments()
         clearPersistedTasks()
+        lowerUtilityRowRecentering = true
+        showOutgoingIdleAddEntry = false
+        withAnimation(.easeInOut(duration: 0.82)) {
+            preserveIdleAddEntryGeometry = true
+        }
         resetUIOnly()
         videoTitles.removeAll()
         UserDefaults.standard.removeObject(forKey: currentSessionIDKey)
