@@ -5,6 +5,7 @@ import SwiftUI
 
 struct TimerCard: View {
     let elapsedLabel: String
+    let elapsedSeconds: Int
     let isRunning: Bool
     let onStart: () -> Void
     let onPause: () -> Void
@@ -48,7 +49,25 @@ struct TimerCard: View {
     private var fadeInAnimation: Animation {
         .easeInOut(duration: 0.52)
     }
+    
+    private var timerFocusOpacity: Double {
+        guard hasStarted else { return 0.0 }
 
+        let progress = min(Double(elapsedSeconds) / 1800.0, 1.0)
+
+        return 0.58 + (progress * 0.28)
+    }
+
+    private var timerFocusColor: Color {
+        let progress = min(Double(elapsedSeconds) / 1800.0, 1.0)
+
+        let red = 0.33 - (0.08 * progress)
+        let green = 0.45 - (0.07 * progress)
+        let blue = 0.58 - (0.06 * progress)
+
+        return Color(red: red, green: green, blue: blue)
+    }
+    
     private func performControlTransition(
         to targetMode: ControlMode,
         action: @escaping () -> Void
@@ -85,8 +104,8 @@ struct TimerCard: View {
             Text(elapsedLabel)
                 .font(.system(size: 44, weight: .medium, design: .rounded))
                 .foregroundStyle(
-                    Color(red: 0.33, green: 0.45, blue: 0.58)
-                        .opacity(hasStarted ? 0.82 : 0.0)
+                    timerFocusColor
+                        .opacity(timerFocusOpacity)
                 )
                 .monospacedDigit()
                 .animation(

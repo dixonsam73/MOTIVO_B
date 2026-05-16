@@ -2329,6 +2329,7 @@ private func loadPracticeDefaultsIfNeeded() {
     private var timerSection: some View {
         TimerCard(
             elapsedLabel: formattedElapsed(elapsedSeconds),
+            elapsedSeconds: elapsedSeconds,
             isRunning: isRunning,
             onStart: { start() },
             onPause: { pause() },
