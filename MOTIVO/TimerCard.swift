@@ -121,8 +121,8 @@ struct TimerCard: View {
                 .frame(maxWidth: 520)
                 .frame(maxWidth: .infinity, alignment: .center)
         }
+        .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .center)
-        .cardSurface()
         .onAppear {
             displayedControlMode = currentControlMode
         }
