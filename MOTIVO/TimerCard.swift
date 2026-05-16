@@ -167,7 +167,7 @@ struct TimerCard: View {
                     background: Color.red.opacity(0.12),
                     isInteractive: isInteractive,
                     action: {
-                        performControlTransition(to: .running, action: onFinish)
+                        performControlTransition(to: .paused, action: onFinish)
                     }
                 )
             }
