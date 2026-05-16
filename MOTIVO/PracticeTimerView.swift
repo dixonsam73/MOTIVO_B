@@ -237,6 +237,9 @@ struct PracticeTimerView: View {
     @State private var ambientThreadFloatingX: CGFloat? = nil
     @State private var ambientThreadFloatingY: CGFloat? = nil
     @State private var ambientThreadHideRowSelectedChip: Bool = false
+    @State private var preserveIdleAddEntryGeometry = false
+    @State private var showOutgoingIdleAddEntry = false
+    @State private var lowerUtilityRowRecentering = false
     @Namespace private var ambientThreadChipNamespace
     // CHANGE-ID: 20260513_162410_PTV_OverlayHandoffNoFade
     // SCOPE: Ambient thread chip deselect overlay handoff visibility only
@@ -2434,159 +2437,200 @@ private func loadPracticeDefaultsIfNeeded() {
     private var isIdleAddEntryAvailable: Bool {
         !isRunning && elapsedSeconds == 0 && accumulatedSeconds == 0 && startDate == nil
     }
+    private var shouldRenderIdleAddEntryButton: Bool {
+        isIdleAddEntryAvailable || preserveIdleAddEntryGeometry
+    }
 
-@ViewBuilder
-private var bottomActionSection: some View {
-    VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-        HStack(spacing: Theme.Spacing.m) {
-            if hasAttachments {
-                Button {
-                    isAttachmentsVisible.toggle()
-                } label: {
-                    Image(systemName: "paperclip")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(isAttachmentsVisible ? tasksAccentIcon : recorderIcon)
-                        .frame(width: 48, height: 48)
-                        .contentShape(Circle())
+    private var idleAddEntryOpacity: Double {
+        showOutgoingIdleAddEntry ? 1 : 0
+    }
+
+    @ViewBuilder
+    private var bottomActionSection: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(spacing: Theme.Spacing.m) {
+                if hasAttachments {
+                    Button {
+                        isAttachmentsVisible.toggle()
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(isAttachmentsVisible ? tasksAccentIcon : recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(isAttachmentsVisible ? tasksAccent.opacity(0.26) : Color.clear)
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                    .accessibilityLabel(isAttachmentsVisible ? "Hide attachments" : "Show attachments")
                 }
-                .buttonStyle(.bordered)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(isAttachmentsVisible ? tasksAccent.opacity(0.26) : Color.clear)
-                )
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel(isAttachmentsVisible ? "Hide attachments" : "Show attachments")
-            }
 
-            if showTasksButton {
-                Button {
-                    if showTasksPad {
+                if showTasksButton {
+                    Button {
+                        if showTasksPad {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showTasksPad = false
+                            }
+                            persistTasksSnapshot()
+                        } else {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                showAddEntryActions = false
+                                showTasksPad = true
+                            }
+                            loadPracticeDefaultsIfNeeded()
+                            loadDefaultTasksIfNeeded()
+                            persistTasksSnapshot()
+                        }
+                    } label: {
+                        Image(systemName: "checklist")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(showTasksPad ? tasksAccentIcon : recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                    .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
+                }
+
+                if shouldRenderIdleAddEntryButton {
+                    Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showTasksPad = false
+                            showAddEntryActions.toggle()
                         }
-                        persistTasksSnapshot()
-                    } else {
-                        withAnimation(.easeInOut(duration: 0.18)) {
+                    } label: {
+                        Image(systemName: "plus")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(showAddEntryActions ? tasksAccentIcon : recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(showAddEntryActions ? tasksAccent.opacity(0.26) : Color.clear)
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                    .opacity(idleAddEntryOpacity)
+                    .allowsHitTesting(isIdleAddEntryAvailable)
+                    .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
+            .onAppear {
+                showOutgoingIdleAddEntry = isIdleAddEntryAvailable
+            }
+            .onChange(of: isIdleAddEntryAvailable) { _, isAvailable in
+                if isAvailable {
+                    withAnimation(.easeInOut(duration: 0.82)) {
+                        preserveIdleAddEntryGeometry = true
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+                        withAnimation(.easeInOut(duration: 0.32)) {
+                            showOutgoingIdleAddEntry = true
+                        }
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.86) {
+                        preserveIdleAddEntryGeometry = false
+                    }
+                } else {
+                    preserveIdleAddEntryGeometry = true
+
+                    withAnimation(.easeInOut(duration: 0.48)) {
+                        showOutgoingIdleAddEntry = false
+                    }
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.34) {
+                        withAnimation(.easeInOut(duration: 0.62)) {
+                            preserveIdleAddEntryGeometry = false
+                        }
+                    }
+                }
+            }
+
+            if showAddEntryActions && isIdleAddEntryAvailable {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 12) {
+                        Button {
                             showAddEntryActions = false
-                            showTasksPad = true
+                            showManualAddSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("+")
+                                Text("Add session")
+                            }
+                            .foregroundStyle(tasksAccent.opacity(0.95))
                         }
+                        .buttonStyle(.plain)
+
+                        Spacer(minLength: 8)
+
+                        Button {
+                            showAddEntryActions = false
+                            showThoughtEditorSheet = true
+                        } label: {
+                            HStack(spacing: 4) {
+                                Text("+")
+                                Text("Add thought")
+                            }
+                            .foregroundStyle(tasksAccent.opacity(0.95))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.top, 10)
+                .padding(.bottom, 12)
+                .transition(.opacity)
+            } else if showTasksButton && showTasksPad {
+                TasksPadCard(
+                    showTasksPad: $showTasksPad,
+                    taskLines: $taskLines,
+                    autoTaskTexts: $autoTaskTexts,
+                    focusedTaskID: $focusedTaskID,
+                    tasksAccent: tasksAccent,
+                    onToggleDone: { id in toggleDone(id) },
+                    onToggleLineType: { id in toggleTaskLineType(id) },
+                    onDeleteLine: { id in deleteLine(id) },
+                    onClearAll: { clearAllTasks() },
+                    onAddEmptyLine: { addEmptyTaskLine() },
+                    onHandleReturn: { id in handleTaskReturn(for: id) },
+                    onPersistSnapshot: { persistTasksSnapshot() },
+                    onMarkTaskSetDirty: { resetLink in
+                        markLinkedTaskSetDirty(resetLink: resetLink)
+                    },
+                    saveListButtonTitle: taskSetSaveButtonTitle,
+                    isSaveListDisabled: isTaskSetSaveButtonDisabled,
+                    onSaveList: {
+                        beginTaskSetSaveFlow()
+                    },
+                    onExpand: {
                         loadPracticeDefaultsIfNeeded()
                         loadDefaultTasksIfNeeded()
                         persistTasksSnapshot()
+                    },
+                    onImportTasks: {
+                        unlinkTaskSetForLoadedOrImportedList()
+                        showTaskImportPasteSheet = true
                     }
-                } label: {
-                    Image(systemName: "checklist")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(showTasksPad ? tasksAccentIcon : recorderIcon)
-                        .frame(width: 48, height: 48)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.bordered)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(showTasksPad ? tasksAccent.opacity(0.26) : Color.clear)
                 )
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
+                .transition(.opacity)
             }
-
-            if isIdleAddEntryAvailable {
-                Button {
-                    withAnimation(.easeInOut(duration: 0.18)) {
-                        showTasksPad = false
-                        showAddEntryActions.toggle()
-                    }
-                } label: {
-                    Image(systemName: "plus")
-                        .symbolRenderingMode(.monochrome)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(showAddEntryActions ? tasksAccentIcon : recorderIcon)
-                        .frame(width: 48, height: 48)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.bordered)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(showAddEntryActions ? tasksAccent.opacity(0.26) : Color.clear)
-                )
-                .clipShape(Capsule(style: .continuous))
-                .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .center)
-
-        if showAddEntryActions && isIdleAddEntryAvailable {
-            VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                    Button {
-                        showAddEntryActions = false
-                        showManualAddSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("+")
-                            Text("Add session")
-                        }
-                        .foregroundStyle(tasksAccent.opacity(0.95))
-                    }
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 8)
-
-                    Button {
-                        showAddEntryActions = false
-                        showThoughtEditorSheet = true
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text("+")
-                            Text("Add thought")
-                        }
-                        .foregroundStyle(tasksAccent.opacity(0.95))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 10)
-            .padding(.bottom, 12)
-            .transition(.opacity)
-        } else if showTasksButton && showTasksPad {
-            TasksPadCard(
-                showTasksPad: $showTasksPad,
-                taskLines: $taskLines,
-                autoTaskTexts: $autoTaskTexts,
-                focusedTaskID: $focusedTaskID,
-                tasksAccent: tasksAccent,
-                onToggleDone: { id in toggleDone(id) },
-                onToggleLineType: { id in toggleTaskLineType(id) },
-                onDeleteLine: { id in deleteLine(id) },
-                onClearAll: { clearAllTasks() },
-                onAddEmptyLine: { addEmptyTaskLine() },
-                onHandleReturn: { id in handleTaskReturn(for: id) },
-                onPersistSnapshot: { persistTasksSnapshot() },
-                onMarkTaskSetDirty: { resetLink in
-                    markLinkedTaskSetDirty(resetLink: resetLink)
-                },
-                saveListButtonTitle: taskSetSaveButtonTitle,
-                isSaveListDisabled: isTaskSetSaveButtonDisabled,
-                onSaveList: {
-                    beginTaskSetSaveFlow()
-                },
-                onExpand: {
-                    loadPracticeDefaultsIfNeeded()
-                    loadDefaultTasksIfNeeded()
-                    persistTasksSnapshot()
-                },
-                onImportTasks: {
-                    unlinkTaskSetForLoadedOrImportedList()
-                    showTaskImportPasteSheet = true
-                }
-            )
-            .transition(.opacity)
         }
     }
-}
 
     @ViewBuilder
     private var attachmentsSection: some View {
