@@ -728,11 +728,17 @@ return AttachmentViewerView(
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
                                 Text(thread)
                                     .font(Theme.Text.meta.weight(.semibold))
-                                    .foregroundStyle(threadChipTextColor)
+                                    .foregroundStyle(Color.primary.opacity(0.82))
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 2)
-                                    .background(threadChipFillColor)
-                                    .clipShape(Capsule())
+                                    .background(
+                                        threadChipFillColor,
+                                        in: Capsule(style: .continuous)
+                                    )
+                                    .overlay(
+                                        Capsule(style: .continuous)
+                                            .stroke(threadChipTextColor.opacity(0.72), lineWidth: 1)
+                                    )
                                 Text("·")
                                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.56))
                                 Text(metaLine)
