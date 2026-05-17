@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260517_173800_AESV_FloatingMetadataParity
+// SCOPE: AddEditSessionView visual-only — port PRDV floating metadata row language to AESV/Thought mode; remove metadata card/tint treatment while preserving Focus/Notes/Attachments/save behaviours.
+// SEARCH-TOKEN: 20260517_173800_AESV_FloatingMetadataParity
+
 // CHANGE-ID: 20260513_081900_AESV_ThoughtThreadSupport
 // SCOPE: AddEditSessionView — allow optional Thread selection in Thought mode and preserve Thought threadLabel on save. No analytics/filter/UI redesign changes.
 // SEARCH-TOKEN: 20260513_081900_AESV_ThoughtThreadSupport
@@ -818,194 +822,261 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
 
                 if !isThoughtMode {
-                // No instruments / Instrument picker
-                if hasNoInstruments {
-                    // Show the empty-state card only after the first 120ms tick
-                    if instrumentsGateArmed && !instrumentsReady {
-                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                            Text("No instruments found").sectionHeader()
-                            Text("Add an instrument in your Profile to save this session.")
-                                .font(.subheadline)
-                                .foregroundStyle(Theme.Colors.secondaryText)
+                    // No instruments / Instrument picker
+                    if hasNoInstruments {
+                        // Show the empty-state card only after the first 120ms tick
+                        if instrumentsGateArmed && !instrumentsReady {
+                            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                                Text("No instruments found").sectionHeader()
+                                Text("Add an instrument in your Profile to save this session.")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .cardSurface()
+                        } else {
+                            // Render nothing until either the arm time passes or instruments arrive
+                            EmptyView()
                         }
-                        .cardSurface()
-                    } else {
-                        // Render nothing until either the arm time passes or instruments arrive
-                        EmptyView()
-                    }
-                } else if hasMultipleInstruments {
-                    // Instrument (always visible if any instruments exist)
-VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-    Text("Instrument").sectionHeader()
-    if hasMultipleInstruments {
-        // Tappable row → wheel sheet
-        Button {
-            showInstrumentPicker = true
-        } label: {
-            HStack {
-                Text(instrument?.name ?? "Select instrument…")
-                    .font(Theme.Text.body)
-                Spacer()
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .padding(6)
-                    .background(.ultraThinMaterial, in: Circle())
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
-            .padding(.vertical, 12)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Instrument")
-        .accessibilityIdentifier("picker.instrument")
-    } else {
-        // Read-only row for single instrument (no chevron)
-        HStack {
-            Text(instrument?.name ?? "Instrument")
-            Spacer()
-        }
-        .accessibilityLabel(instrument?.name ?? "Instrument")
-    }
-}
-.cardSurface(fillColor: instrumentCardFillColor, strokeColor: instrumentCardStrokeColor)
-                }
+                    } else if hasMultipleInstruments {
+                        // Instrument (always visible if any instruments exist)
+                        Button {
+                            showInstrumentPicker = true
+                        } label: {
+                            HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                                Image(systemName: "music.note")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                                    .frame(width: 22, height: 22)
 
-                // Activity
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Activity").sectionHeader()
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Instrument")
+                                        .font(.footnote.weight(.medium))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                    Text(instrument?.name ?? "Select instrument…")
+                                        .font(Theme.Text.body)
+                                }
+
+                                Spacer(minLength: Theme.Spacing.m)
+
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Instrument")
+                        .accessibilityIdentifier("picker.instrument")
+                    }
+
+                    // Activity
                     Button {
                         showActivityPicker = true
                     } label: {
                         let display = selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? activity.label : selectedCustomName
-                        HStack {
-                            Text(display)
-                                .font(Theme.Text.body)
-                            Spacer()
+                        HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                            Image(systemName: "circle.grid.2x2")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                                .frame(width: 22, height: 22)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Activity")
+                                    .font(.footnote.weight(.medium))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                                Text(display)
+                                    .font(Theme.Text.body)
+                            }
+
+                            Spacer(minLength: Theme.Spacing.m)
+
                             Image(systemName: "chevron.right")
                                 .font(.footnote.weight(.semibold))
                                 .padding(6)
                                 .background(.ultraThinMaterial, in: Circle())
-                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                         }
-                        .padding(.vertical, 12)
+                        .contentShape(Rectangle())
+                        .padding(.vertical, 10)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Activity")
                     .accessibilityIdentifier("picker.activity")
-                }
-                .cardSurface(fillColor: activityCardFillColor, strokeColor: activityCardStrokeColor)
 
-                // Activity description (short detail)
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Description").sectionHeader()
-                    HStack(spacing: 6) {
-                    TextField("Activity description", text: $activityDetail, axis: .vertical)
-                        .focused($isActivityDetailFocused)
-                        .lineLimit(1...3)
-                        .font(Theme.Text.body)
-                        .onChange(of: activityDetail) { _, new in handleActivityDetailChange_v2(new) }
+                    // Activity description (short detail)
+                    HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                        Image(systemName: "text.alignleft")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                            .frame(width: 22, height: 22)
 
-                    if !isActivityDetailFocused {
-                        Image(systemName: "pencil")
-                            .font(.subheadline)
-                            .imageScale(.medium)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .opacity(0.8)
-                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Description")
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                            TextField("Activity description", text: $activityDetail, axis: .vertical)
+                                .focused($isActivityDetailFocused)
+                                .lineLimit(1...3)
+                                .font(Theme.Text.body)
+                                .onChange(of: activityDetail) { _, new in handleActivityDetailChange_v2(new) }
+                        }
+
+                        Spacer(minLength: Theme.Spacing.m)
+
+                        if !isActivityDetailFocused {
+                            Image(systemName: "pencil")
+                                .font(.subheadline)
+                                .imageScale(.medium)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .opacity(0.8)
+                                .accessibilityHidden(true)
+                        }
                     }
-
-                    Spacer(minLength: 0)
-                }                }
-                .cardSurface()
-
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 10)
                 }
 
                 // Thread (owner-only metadata)
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Thread").sectionHeader()
-                    Button {
-                        showThreadPicker = true
-                    } label: {
-                        HStack {
-                            Text((threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? threadLabel! : "None")
-                                .font(Theme.Text.body)
-                                .foregroundStyle((threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false) ? .primary : Theme.Colors.secondaryText)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .padding(6)
-                                .background(.ultraThinMaterial, in: Circle())
+                Button {
+                    showThreadPicker = true
+                } label: {
+                    HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                            .frame(width: 22, height: 22)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Thread")
+                                .font(.footnote.weight(.medium))
                                 .foregroundStyle(Theme.Colors.secondaryText)
+                            if let thread = threadLabel, !thread.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                Text(thread)
+                                    .font(Theme.Text.body)
+                            } else {
+                                Text("None")
+                                    .font(Theme.Text.body)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
                         }
-                        .padding(.vertical, 12)
+
+                        Spacer(minLength: Theme.Spacing.m)
+
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Thread")
-                    .accessibilityIdentifier("picker.thread")
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 10)
                 }
-                .cardSurface()
+                .buttonStyle(.plain)
+                .accessibilityLabel("Thread")
+                .accessibilityIdentifier("picker.thread")
 
                 // Start Time
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Start Time").sectionHeader()
-                    Button {
-                        tempDate = timestamp
-                        showStartPicker = true
-                    } label: {
-                        HStack {
+                Button {
+                    tempDate = timestamp
+                    showStartPicker = true
+                } label: {
+                    HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                            .frame(width: 22, height: 22)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Start Time")
+                                .font(.footnote.weight(.medium))
+                                .foregroundStyle(Theme.Colors.secondaryText)
                             Text(formattedDate(timestamp))
                                 .font(Theme.Text.body)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .padding(6)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .foregroundStyle(Theme.Colors.secondaryText)
                         }
-                        .padding(.vertical, 12)
+
+                        Spacer(minLength: Theme.Spacing.m)
+
+                        Image(systemName: "chevron.right")
+                            .font(.footnote.weight(.semibold))
+                            .padding(6)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                     }
-                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .padding(.vertical, 10)
                 }
-                .cardSurface()
+                .buttonStyle(.plain)
 
                 // Duration
                 if !isThoughtMode {
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Text("Duration").sectionHeader()
-                    Button {
-                        let hm = secondsToHM(durationSeconds)
-                        tempHours = hm.0; tempMinutes = hm.1
-                        showDurationPicker = true
-                    } label: {
-                        HStack {
-                            Text(formattedDuration(durationSeconds))
-                                .font(Theme.Text.body)
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.footnote.weight(.semibold))
-                                .padding(6)
-                                .background(.ultraThinMaterial, in: Circle())
-                                .foregroundStyle(Theme.Colors.secondaryText)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Button {
+                            let hm = secondsToHM(durationSeconds)
+                            tempHours = hm.0; tempMinutes = hm.1
+                            showDurationPicker = true
+                        } label: {
+                            HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                                Image(systemName: "timer")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                                    .frame(width: 22, height: 22)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Duration")
+                                        .font(.footnote.weight(.medium))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                    Text(formattedDuration(durationSeconds))
+                                        .font(Theme.Text.body)
+                                }
+
+                                Spacer(minLength: Theme.Spacing.m)
+
+                                Image(systemName: "chevron.right")
+                                    .font(.footnote.weight(.semibold))
+                                    .padding(6)
+                                    .background(.ultraThinMaterial, in: Circle())
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                            }
+                            .contentShape(Rectangle())
+                            .padding(.vertical, 10)
                         }
-                        .padding(.vertical, 12)
+                        .buttonStyle(.plain)
+
+                        if durationSeconds == 0 {
+                            Text("Duration must be greater than 0")
+                                .font(.footnote)
+                                .foregroundColor(.red.opacity(0.65))
+                                .padding(.leading, 22 + Theme.Spacing.m)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    if durationSeconds == 0 {
-                        Text("Duration must be greater than 0")
-                            .font(.footnote)
-                            .foregroundColor(.red.opacity(0.65))
-                    }
-                }
-                .cardSurface()
                 }
 
                 // ---------- Visibility ----------
-                VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                    Toggle(isOn: $isPublic) {
-                        Text("Share with followers").sectionHeader()
+                HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                    Image(systemName: "person.2")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.63))
+                        .frame(width: 22, height: 22)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Visibility")
+                            .font(.footnote.weight(.medium))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                        Text("Share with followers")
+                            .font(Theme.Text.body)
                     }
-                    .tint(Theme.Colors.accent)
+
+                    Spacer(minLength: Theme.Spacing.m)
+
+                    Toggle("", isOn: $isPublic)
+                        .labelsHidden()
+                        .tint(Theme.Colors.accent)
                 }
-                .cardSurface()
+                .contentShape(Rectangle())
+                .padding(.vertical, 10)
 
                 // Notes
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
