@@ -990,7 +990,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                             .frame(width: 22, height: 22)
 
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Start Time")
+                            Text(isThoughtMode ? "Time" : "Start Time")
                                 .font(.footnote.weight(.medium))
                                 .foregroundStyle(Theme.Colors.secondaryText)
                             Text(formattedDate(timestamp))
