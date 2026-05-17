@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260517_215300_BSDV_EditorialParityRefinement
+// SCOPE: BSDV visual-only parity with green SDV editorial spacing; no tint/thread introduction, backend, routing, media, or action changes.
+// SEARCH-TOKEN: 20260517_215300_BSDV_EditorialParityRefinement
 // CHANGE-ID: 20260505_174500_BackendSessionDetailView_SaveHint
 // SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
 // SEARCH-TOKEN: 20260505_174500_BackendSessionDetailView_SaveHint
@@ -166,16 +169,23 @@ struct BackendSessionDetailView: View {
     }
 
     private var headerLine: String {
-        let line = headerTitle
-        let parts = line.split(separator: "·", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-        guard parts.count == 2 else { return line }
-        let instrument = parts[0]
-        let activity = parts[1]
-        let title = (model.activityDetail ?? "")
-        if title.range(of: activity, options: .caseInsensitive) != nil {
-            return String(instrument)
+        let instrument = model.instrumentLabel ?? ""
+        let activity = model.activityLabel
+
+        guard !instrument.isEmpty, !activity.isEmpty else {
+            return headerTitle
         }
-        return line
+
+        let title = (model.activityDetail ?? "")
+
+        if title.range(
+            of: activity,
+            options: [.caseInsensitive, .diacriticInsensitive]
+        ) != nil {
+            return instrument
+        }
+
+        return "\(instrument): \(activity)"
     }
 
     /// Parity rule: chip text is trimmed; if empty → chip hidden.
@@ -304,14 +314,6 @@ struct BackendSessionDetailView: View {
             identityHeader()
                 .padding(.bottom, model.isThought ? 8 : 4)
 
-            if !model.isThought, !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines))
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .cardSurface()
-            }
-
             if model.isThought {
                 VStack(alignment: .leading, spacing: 8) {
                     Text(metaLine)
@@ -337,21 +339,34 @@ struct BackendSessionDetailView: View {
                     .cardSurface()
                 }
             } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Group {
-                    HStack {
-                        Text(headerLine)
+                VStack(alignment: .leading, spacing: 4) {
+                    if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text(activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines))
+                            .font(Theme.Text.body.weight(.medium))
+                            .foregroundStyle(Color.primary)
+                            .fixedSize(horizontal: false, vertical: true)
                             .accessibilitySortPriority(2)
-                        Spacer()
                     }
-                    Text(metaLine)
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(.secondary)
-                        .accessibilitySortPriority(1)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(headerLine)
+                                .font(Theme.Text.meta.weight(.semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.84))
+                                .accessibilitySortPriority(1)
+                            Spacer(minLength: 0)
+                        }
+
+                        Text(metaLine)
+                            .font(Theme.Text.meta)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.78))
+                            .accessibilitySortPriority(1)
+                    }
                 }
+                .padding(.horizontal, 2)
+                .padding(.top, 0)
+                .padding(.bottom, 2)
                 .accessibilityElement(children: .contain)
-            }
-            .cardSurface()
             }
 
             let originalNotes = model.notes ?? ""
@@ -364,6 +379,7 @@ struct BackendSessionDetailView: View {
                         Spacer(minLength: 0)
                     }
                     Text(displayNotes)
+                        .padding(.bottom, 4)
                 }
                 .cardSurface()
             }
@@ -1002,19 +1018,19 @@ private struct FocusSectionCard: View {
     let dotIndex: Int
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: 6) {
             Text("Focus").sectionHeader()
             HStack {
                 Spacer(minLength: 0)
                 FocusCircleView(storedFocusValue: dotIndex, size: 36)
                     .accessibilityLabel("Focus")
-                    .offset(y: -4)
+                    .offset(y: -2)
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity)
             .frame(height: 36)
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(padding: Theme.Spacing.s)
     }
 }
 
