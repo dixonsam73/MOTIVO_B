@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260517_224800_MeView_VisualRhythmOnly
+// SCOPE: MeView visual rhythm only — tighten compact stat-card padding and lower-page grid spacing; no data, animation, tint, ordering, backend, schema, or behaviour changes.
+// SEARCH-TOKEN: 20260517_224800_MeView_VisualRhythmOnly
+
 // CHANGE-ID: 20260429_152800_MeView_ThreadCardsTint
 // SCOPE: MeView — apply existing card tint treatment to thread-specific insight cards when resolved tint source is Thread only; preserve instrument/activity tint behaviour.
 // SEARCH-TOKEN: 20260429_152800_MeView_ThreadCardsTint
@@ -340,7 +344,7 @@ if let insights, hasVisibleInterpretiveInsights {
         emergingThreadStrokeColor: emergingThreadCardStrokeColor
     )
 }
-                AdaptiveGrid {
+                AdaptiveGrid(spacing: MeViewVisualRhythm.lowerGridSpacing) {
                     StreaksCard(current: currentStreakValue, best: bestStreakValue, bestRangeText: bestStreakRangeText)
                     if let avg = avgSessionSeconds {
                         AverageSessionCard(seconds: avg)
@@ -1522,10 +1526,23 @@ if let insights, hasVisibleInterpretiveInsights {
 
 // MARK: - Adaptive grid container
 fileprivate struct AdaptiveGrid<Content: View>: View {
+    let spacing: CGFloat
     @ViewBuilder var content: () -> Content
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: Theme.Spacing.section)], spacing: Theme.Spacing.section) { content() }
+
+    init(spacing: CGFloat = Theme.Spacing.section, @ViewBuilder content: @escaping () -> Content) {
+        self.spacing = spacing
+        self.content = content
     }
+
+    var body: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: spacing)], spacing: spacing) { content() }
+    }
+}
+
+fileprivate enum MeViewVisualRhythm {
+    static let compactCardPadding: CGFloat = Theme.Spacing.m - 4
+    static let compactInnerSpacing: CGFloat = 6
+    static let lowerGridSpacing: CGFloat = Theme.Spacing.section - 6
 }
 
 fileprivate struct InterpretiveInsightsStack: View {
@@ -1707,12 +1724,12 @@ fileprivate struct AverageSessionCard: View {
     let seconds: Int64
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text("Average session length").sectionHeader()
             Text(StatsHelper.formatDuration(Int(seconds)))
                 .font(.title3.weight(.semibold))
         }
-        .cardSurface(padding: Theme.Spacing.m)
+        .cardSurface(padding: MeViewVisualRhythm.compactCardPadding)
     }
 }
 
@@ -1756,7 +1773,7 @@ fileprivate struct LongestSessionCard: View {
     }()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text("Longest session").sectionHeader()
             Text(StatsHelper.formatDuration(Int(seconds)))
                 .font(.title3.weight(.semibold))
@@ -1765,7 +1782,7 @@ fileprivate struct LongestSessionCard: View {
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
@@ -1819,7 +1836,7 @@ fileprivate struct FirstSessionCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text(title).sectionHeader()
             Text((range == .total ? Self.dfWithYear : Self.dfNoYear).string(from: date))
                 .font(.body).bold()
@@ -1828,7 +1845,7 @@ fileprivate struct FirstSessionCard: View {
                 .truncationMode(.tail)
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
@@ -1931,7 +1948,7 @@ fileprivate struct BestFocusCategoryInsightCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text(title).sectionHeader()
             Text(insight.name)
                 .font(.body).bold()
@@ -1941,7 +1958,7 @@ fileprivate struct BestFocusCategoryInsightCard: View {
 
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
@@ -1969,7 +1986,7 @@ fileprivate struct EmergingThreadCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text("Emerging thread").sectionHeader()
             Text(insight.name)
                 .font(.body).bold()
@@ -1981,7 +1998,7 @@ fileprivate struct EmergingThreadCard: View {
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
@@ -2737,7 +2754,7 @@ fileprivate struct TopTimeWinnerCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text(title).sectionHeader()
             if let w = winner {
                 HStack {
@@ -2758,7 +2775,7 @@ fileprivate struct TopTimeWinnerCard: View {
             }
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
@@ -2794,7 +2811,7 @@ fileprivate struct TopThreadCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+        VStack(alignment: .leading, spacing: MeViewVisualRhythm.compactInnerSpacing) {
             Text("Top thread").sectionHeader()
             if let w = winner {
                 HStack {
@@ -2815,7 +2832,7 @@ fileprivate struct TopThreadCard: View {
             }
         }
         .cardSurface(
-            padding: Theme.Spacing.m,
+            padding: MeViewVisualRhythm.compactCardPadding,
             fillColor: fillColor ?? Theme.Colors.surface(colorScheme),
             strokeColor: strokeColor ?? Theme.Colors.cardStroke(colorScheme)
         )
