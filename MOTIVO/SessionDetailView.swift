@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260517_202400_SDV_FinalVisualPolish
+// SCOPE: Visual-only — reduce Focus card vertical mass, tighten editorial metadata stack spacing, and add slight Notes bottom breathing room. Preserve tint, actions, media, routing, and behaviour.
+// SEARCH-TOKEN: 20260517_202400_SDV_FinalVisualPolish
+// CHANGE-ID: 20260517_201900_SDV_CalibratedSemanticEmphasis
+// SCOPE: Visual-only — calibrate SDV instrument/activity semantic tint emphasis while preserving editorial metadata structure and stabilized thread tint behaviour.
+// SEARCH-TOKEN: 20260517_200400_SDV_StrongSemanticTintAnchor
 // CHANGE-ID: 20260505_174500_SessionDetailView_SaveHint
 // SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
 // SEARCH-TOKEN: 20260505_174500_SessionDetailView_SaveHint
@@ -668,14 +674,6 @@ return AttachmentViewerView(
                 #endif
                 .padding(.bottom, session.isThought ? 8 : 4)
 
-            if !session.isThought, !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text(activityDescriptionText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .cardSurface(fillColor: activityDescriptionCardFillColor, strokeColor: activityDescriptionCardStrokeColor)
-            }
-
             if session.isThought {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(thoughtDateTimeLine)
@@ -712,39 +710,50 @@ return AttachmentViewerView(
                     .cardSurface()
                 }
             } else {
-            VStack(alignment: .leading, spacing: 6) {
-                Group {
-                    HStack {
-                        Text(headerLine)
+                VStack(alignment: .leading, spacing: 4) {
+                    if !activityDescriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        activityDescriptionTextView
                             .accessibilitySortPriority(2)
-                        Spacer()
                     }
-                    // Thread (owner-only) — pill + meta line
-                    if let thread = threadLabelForDisplay {
+
+                    VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(thread)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 2)
-                                .background(Color(uiColor: .tertiarySystemFill))
-                                .clipShape(Capsule())
-                            Text("·")
-                            Text(metaLine)
+                            metadataHeaderLineView
+                                .accessibilitySortPriority(1)
+
+                            Spacer(minLength: 0)
                         }
-                        .font(Theme.Text.meta)
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(metaLineWithThread)
-                        .accessibilitySortPriority(1)
-                    } else {
-                        Text(metaLine)
+
+                        if let thread = threadLabelForDisplay {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(thread)
+                                    .font(Theme.Text.meta.weight(.semibold))
+                                    .foregroundStyle(threadChipTextColor)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 2)
+                                    .background(threadChipFillColor)
+                                    .clipShape(Capsule())
+                                Text("·")
+                                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.56))
+                                Text(metaLine)
+                            }
                             .font(Theme.Text.meta)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.78))
                             .accessibilityLabel(metaLineWithThread)
                             .accessibilitySortPriority(1)
+                        } else {
+                            Text(metaLine)
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.78))
+                                .accessibilityLabel(metaLineWithThread)
+                                .accessibilitySortPriority(1)
+                        }
                     }
                 }
+                .padding(.horizontal, 2)
+                .padding(.top, 0)
+                .padding(.bottom, 2)
                 .accessibilityElement(children: .contain)
-            }
-            .cardSurface(fillColor: metaCardFillColor, strokeColor: metaCardStrokeColor)
             }
 
             let originalNotes = session.notes ?? ""
@@ -766,6 +775,7 @@ return AttachmentViewerView(
                             // REMOVED: no privacy icon here per instructions
                         }
                         Text(displayNotes)
+                            .padding(.bottom, 4)
                     }
                     .cardSurface()
                 }
@@ -970,6 +980,13 @@ return AttachmentViewerView(
         return nil
     }
 
+    private var ownerThreadLabelForTint: String? {
+        let direct = session.threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty { return direct }
+
+        return nil
+    }
+
     private func normalizedInstrumentLabel(for item: Session) -> String? {
         let direct = item.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
         if let direct, !direct.isEmpty {
@@ -993,6 +1010,15 @@ return AttachmentViewerView(
         if let raw = item.value(forKey: "activityType") as? Int16,
            let type = SessionActivityType(rawValue: raw) {
             return Theme.ActivityTint.normalizedLabel(type.label)
+        }
+
+        return nil
+    }
+
+    private func normalizedThreadLabel(for item: Session) -> String? {
+        let direct = item.threadLabel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let direct, !direct.isEmpty {
+            return Theme.ThreadTint.normalizedLabel(direct)
         }
 
         return nil
@@ -1022,6 +1048,7 @@ return AttachmentViewerView(
 
         var instrumentCounts: [String: Int] = [:]
         var activityCounts: [String: Int] = [:]
+        var threadCounts: [String: Int] = [:]
 
         for item in ownerSessions {
             if let instrument = normalizedInstrumentLabel(for: item) {
@@ -1030,14 +1057,26 @@ return AttachmentViewerView(
             if let activity = normalizedActivityLabel(for: item) {
                 activityCounts[activity, default: 0] += 1
             }
+            if let thread = normalizedThreadLabel(for: item) {
+                threadCounts[thread, default: 0] += 1
+            }
         }
 
-        cachedMetaCardTint = Theme.resolvedTint(
-            instrument: ownerInstrumentLabelForTint,
-            activity: ownerActivityLabelForTint,
+        let resolvedSource = Theme.resolvedTintSource(
             tintMode: tintMode,
             instrumentCounts: instrumentCounts,
-            activityCounts: activityCounts
+            activityCounts: activityCounts,
+            threadCounts: threadCounts,
+            persistedAutoSource: nil,
+            persistAutoSource: false
+        )
+
+        cachedMetaCardTint = Theme.ResolvedTint(
+            source: resolvedSource,
+            instrumentLabel: ownerInstrumentLabelForTint,
+            activityLabel: ownerActivityLabelForTint,
+            threadLabel: ownerThreadLabelForTint,
+            threadCounts: [:]
         )
     }
 
@@ -1088,6 +1127,199 @@ return AttachmentViewerView(
             ownerID: auth.currentUserID,
             scheme: colorScheme,
             strength: .cardMediumLight
+        )
+    }
+
+
+    @ViewBuilder
+    private var activityDescriptionTextView: some View {
+        if isActivityDescriptionActive {
+            Text(activityDescriptionText)
+                .font(Theme.Text.body.weight(.semibold))
+                .foregroundStyle(activeMetadataAnchorTextColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(activeMetadataAnchorFillColor, in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(activeMetadataAnchorStrokeColor, lineWidth: 1)
+                )
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            Text(activityDescriptionText)
+                .font(Theme.Text.body.weight(.medium))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var metadataHeaderLineView: some View {
+        if let segments = metadataHeaderSegments {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                metadataSegmentText(
+                    segments.instrument,
+                    isActive: isInstrumentMetadataActive,
+                    fallbackColor: metadataNeutralTextColor
+                )
+                Text("·")
+                    .foregroundStyle(metadataSeparatorTextColor)
+                metadataSegmentText(
+                    segments.activity,
+                    isActive: isActivityMetadataActive,
+                    fallbackColor: metadataNeutralTextColor
+                )
+            }
+            .font(Theme.Text.meta.weight(.semibold))
+        } else {
+            metadataSegmentText(
+                headerLine,
+                isActive: isInstrumentMetadataActive,
+                fallbackColor: metadataNeutralTextColor
+            )
+            .font(Theme.Text.meta.weight(.semibold))
+        }
+    }
+
+    @ViewBuilder
+    private func metadataSegmentText(_ text: String, isActive: Bool, fallbackColor: Color) -> some View {
+        if isActive {
+            Text(text)
+                .foregroundStyle(activeMetadataAnchorTextColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(activeMetadataAnchorFillColor, in: Capsule(style: .continuous))
+                .overlay(
+                    Capsule(style: .continuous)
+                        .stroke(activeMetadataAnchorStrokeColor, lineWidth: 1)
+                )
+        } else {
+            Text(text)
+                .foregroundStyle(fallbackColor)
+        }
+    }
+
+    private var metadataHeaderSegments: (instrument: String, activity: String)? {
+        let parts = headerLine
+            .split(separator: "·", maxSplits: 1)
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+
+        guard parts.count == 2,
+              parts[0].isEmpty == false,
+              parts[1].isEmpty == false else {
+            return nil
+        }
+
+        return (instrument: parts[0], activity: parts[1])
+    }
+
+    private var metadataNeutralTextColor: Color {
+        Theme.Colors.secondaryText.opacity(0.88)
+    }
+
+    private var metadataSeparatorTextColor: Color {
+        Theme.Colors.secondaryText.opacity(0.56)
+    }
+
+    private var isInstrumentMetadataActive: Bool {
+        viewerIsOwner && !session.isThought && cachedMetaCardTint.source == .instrument
+    }
+
+    private var isActivityMetadataActive: Bool {
+        viewerIsOwner && !session.isThought && cachedMetaCardTint.source == .activity
+    }
+
+    private var isActivityDescriptionActive: Bool {
+        viewerIsOwner && !session.isThought && activityTintBelongsOnDescriptionCard
+    }
+
+    private var activeMetadataAnchorFillColor: Color {
+        cachedMetaCardTint.fill(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong
+        )
+    }
+
+    private var activeMetadataAnchorStrokeColor: Color {
+        cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong
+        )
+    }
+
+    private var activeMetadataAnchorTextColor: Color {
+        Color.primary.opacity(0.82)
+    }
+
+    private var resolvedEditorialAccentColor: Color? {
+        cachedMetaCardTint.accent(ownerID: auth.currentUserID, scheme: colorScheme)
+    }
+
+    private var instrumentMetadataTextColor: Color {
+        guard viewerIsOwner, !session.isThought, cachedMetaCardTint.source == .instrument else {
+            return metadataNeutralTextColor
+        }
+
+        return cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong
+        )
+    }
+
+    private var activityMetadataTextColor: Color {
+        guard viewerIsOwner, !session.isThought, cachedMetaCardTint.source == .activity else {
+            return metadataNeutralTextColor
+        }
+
+        return cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong
+        )
+    }
+
+    private var activityDescriptionEditorialColor: Color {
+        guard viewerIsOwner, !session.isThought, activityTintBelongsOnDescriptionCard else {
+            return Color.primary
+        }
+
+        return cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong
+        )
+    }
+
+    private var metadataEditorialPrimaryColor: Color {
+        instrumentMetadataTextColor
+    }
+
+    private var threadChipFillColor: Color {
+        guard viewerIsOwner, cachedMetaCardTint.source == .thread else {
+            return Color(uiColor: .tertiarySystemFill)
+        }
+
+        return cachedMetaCardTint.fill(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong,
+            shouldAssignIfNeeded: false
+        )
+    }
+
+    private var threadChipTextColor: Color {
+        guard viewerIsOwner, cachedMetaCardTint.source == .thread else {
+            return Theme.Colors.secondaryText
+        }
+
+        return cachedMetaCardTint.stroke(
+            ownerID: auth.currentUserID,
+            scheme: colorScheme,
+            strength: .pickerStrong,
+            shouldAssignIfNeeded: false
         )
     }
 
@@ -1168,19 +1400,19 @@ private func extractFocusDotIndex(from notes: String) -> (Int?, String) {
         let dotIndex: Int
 
         var body: some View {
-            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Focus").sectionHeader()
                 HStack {
                     Spacer(minLength: 0)
                     FocusCircleView(storedFocusValue: dotIndex, size: 36)
                         .accessibilityLabel("Focus")
-                        .offset(y: -4)
+                        .offset(y: -2)
                     Spacer(minLength: 0)
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: 36)
             }
-            .cardSurface(padding: Theme.Spacing.m)
+            .cardSurface(padding: Theme.Spacing.s)
         }
     }
 
