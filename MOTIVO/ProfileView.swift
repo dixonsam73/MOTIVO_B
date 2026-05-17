@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260517_221800_ProfileView_SubtleVisualPolish_Fix
+// SCOPE: ProfileView visual polish only — quieter surfaces/dividers/rhythm; no behavior/navigation/persistence changes.
+// SEARCH-TOKEN: 20260517_221800_ProfileView_SubtleVisualPolish_Fix
+
 // CHANGE-ID: 20260515_122500_ThreadSuggestionsToggle
 // SCOPE: ProfileView settings only — add persisted Show thread suggestions toggle; no other UI or logic changes.
 // SEARCH-TOKEN: 20260515_122500_ThreadSuggestionsToggle
@@ -154,7 +158,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
          HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
              Text(title)
                  .font(.callout)
-                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.74))
                  .lineLimit(1)
                  .truncationMode(.tail)
  
@@ -453,7 +457,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
      private var profileSection: some View {
          Section(header: Text("Profile").sectionHeader()) {
-             VStack(alignment: .leading, spacing: 4) {
+             VStack(alignment: .leading, spacing: 2) {
                  VStack(spacing: 0) {
                      HStack(spacing: 12) {
                          Button { showAvatarEditor = true } label: { avatarChip }
@@ -479,8 +483,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      .padding(.vertical, Theme.Spacing.s)
                      .frame(minHeight: 44, alignment: .center)
                      .overlay(alignment: .bottom) {
-                         Divider()
-                             .padding(.leading, 16)
+                         quietDivider()
                      }
 
                      HStack(spacing: 10) {
@@ -499,8 +502,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      .padding(.vertical, Theme.Spacing.s)
                      .frame(minHeight: 44, alignment: .center)
                      .overlay(alignment: .bottom) {
-                         Divider()
-                             .padding(.leading, 16)
+                         quietDivider()
                      }
 
                      HStack(spacing: 10) {
@@ -545,7 +547,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      .padding(.vertical, Theme.Spacing.s)
                      .frame(minHeight: 44, alignment: .center)
                  }
-                 .cardSurface(padding: Theme.Spacing.m)
+                 .cardSurface(padding: profileInnerCardPadding)
 
                  if let msg = accountIDSyncMessage {
                      Text(msg)
@@ -556,6 +558,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              }
          }
          .listRowSeparator(.hidden)
+                .padding(.vertical, profileSectionSpacing / 2)
      }
 
 
@@ -569,8 +572,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                     .frame(minHeight: 44, alignment: .center)
                     .font(Theme.Text.body)
                     .overlay(alignment: .bottom) {
-                        Divider()
-                            .padding(.leading, 16)
+                        quietDivider()
                     }
 
                 Toggle(
@@ -591,8 +593,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                 .frame(minHeight: 44, alignment: .center)
                 .font(Theme.Text.body)
                 .overlay(alignment: .bottom) {
-                    Divider()
-                        .padding(.leading, 16)
+                    quietDivider()
                 }
 
                 Toggle(
@@ -613,8 +614,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                 .frame(minHeight: 44, alignment: .center)
                 .font(Theme.Text.body)
             }
-            .cardSurface(padding: Theme.Spacing.m)
+            .cardSurface(padding: profileInnerCardPadding)
             .listRowSeparator(.hidden)
+                .padding(.vertical, profileSectionSpacing / 2)
         }
     }
 
@@ -630,8 +632,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Button { showActivityManager = true } label: {
@@ -643,8 +644,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Button { showTintModeSelection = true } label: {
@@ -656,8 +656,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Button { showTasksManager = true } label: {
@@ -669,8 +668,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Toggle(isOn: $showMetronomeStrip) {
@@ -681,8 +679,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Toggle(isOn: $showDroneStrip) {
@@ -693,8 +690,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Toggle(isOn: $showTasksPad) {
@@ -705,8 +701,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Toggle(isOn: $showThreadSuggestions) {
@@ -717,8 +712,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Toggle(isOn: $showTuner) {
@@ -729,8 +723,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
              }
-             .cardSurface(padding: Theme.Spacing.m)
+             .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
+                .padding(.vertical, profileSectionSpacing / 2)
          }
      }
 
@@ -747,8 +742,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Button {
@@ -763,8 +757,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .contentShape(Rectangle())
                  .font(Theme.Text.body)
                  .overlay(alignment: .bottom) {
-                     Divider()
-                         .padding(.leading, 16)
+                     quietDivider()
                  }
 
                  Button {
@@ -780,8 +773,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .contentShape(Rectangle())
                  .font(Theme.Text.body)
              }
-             .cardSurface(padding: Theme.Spacing.m)
+             .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
+                .padding(.vertical, profileSectionSpacing / 2)
          }
      }
 
@@ -958,6 +952,20 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
      private var currentTintMode: Theme.TintMode {
          Theme.TintMode(rawValue: tintModeRaw) ?? .auto
      }
+
+     private var profileSectionSpacing: CGFloat { 10 }
+
+     private var profileInnerCardPadding: CGFloat { Theme.Spacing.m - 6 }
+
+     private var quietDividerOpacity: Double { 0.16 }
+
+     @ViewBuilder
+     private func quietDivider(leadingInset: CGFloat = 16) -> some View {
+         Divider()
+             .overlay(Color.primary.opacity(quietDividerOpacity))
+             .padding(.leading, leadingInset)
+             .padding(.vertical, -1)
+     }
  
      private func navigationRow(title: String, value: String? = nil) -> some View {
          HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
@@ -969,7 +977,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              if let value {
                  Text(value)
                      .font(Theme.Text.body)
-                     .foregroundStyle(.primary)
+                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.88))
                      .lineLimit(1)
                      .minimumScaleFactor(0.9)
                      .truncationMode(.tail)
@@ -978,7 +986,10 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
              Image(systemName: "chevron.right")
                  .font(.footnote.weight(.semibold))
                  .padding(6)
-                 .background(.ultraThinMaterial, in: Circle())
+                 .background(
+                    Theme.Colors.surface(colorScheme).opacity(0.82),
+                    in: Circle()
+                )
                  .foregroundStyle(Theme.Colors.secondaryText)
          }
      }
