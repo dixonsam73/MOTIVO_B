@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260325_074500_AboutEtudes_HeartIconRestore
-// SCOPE: AboutEtudesView — restore heart icon inline in Filter sentence using original formatting. No other UI or copy changes.
-// SEARCH-TOKEN: 20260325_074500_AboutEtudes_HeartIconRestore
+// CHANGE-ID: 20260518_132400_AboutEtudes_CopyRefresh
+// SCOPE: AboutEtudesView — refresh helper/about copy to reflect current Études philosophy and feature set (Thoughts, Threads, tint system, private-first model, Insights wording, Timer naming). Preserve existing layout/UI structure and inline heart icon formatting.
+// SEARCH-TOKEN: 20260518_132400_AboutEtudes_CopyRefresh
 
 import SwiftUI
 
@@ -10,80 +10,108 @@ struct AboutEtudesView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 aboutSection("Overview") {
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Études is a modern practice journal. Capture sessions, ideas, and recordings — and build a lasting archive of your musical process.")
+                        Text("Études is a modern practice journal. Capture sessions, ideas, recordings, and reflections — and build a lasting archive of your musical process.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text("Accounts are private by default. Sharing is intentional. There are no public counts, rankings, or popularity metrics.")
+                        Text("Designed for musicians, composers, teachers, and students, Études focuses on continuity rather than performance metrics.")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Text("Études is designed to remain valuable even if nothing is ever shared.")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Text("Accounts are private by default. Sharing is intentional. There are no public counts, rankings, or popularity systems.")
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                        Text("Most sessions will remain private. That’s expected.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
                     }
                 }
 
                 aboutSection("Profile") {
-                    Text("Add your instruments and activities. Choose a primary instrument for faster session setup.")
+                    Text("Add your instruments and activities, and choose a primary instrument for faster session setup.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Set up default task lists in the Tasks Manager — they’ll appear automatically when you start a session. Import tasks by pasting text or scanning.")
+                    Text("Set up reusable task lists in the Tasks Manager — they can appear automatically when you begin a session. Import tasks by pasting text or scanning handwritten notes.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Your Journal remains personal and available even when used entirely offline.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
 
-                aboutSection("Session Timer") {
-                    Text("The Session Timer is the home of the app. Start a session from here, or access your Journal and Feed.")
+                aboutSection("Timer") {
+                    Text("The Timer is where most sessions begin.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Log practice, rehearsal, performance, writing, or recording. Attach photos, record audio or video, and trim before saving. Use the + button to add a session manually if you didn’t log it at the time. You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                    Text("Log practice, rehearsal, performance, writing, recording, listening, score study, or rehearsal preparation. Record or attach photos, audio, and video — and trim recordings before saving.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Use Threads to group related work — for example, recital prep or a recording project. Threads are personal and visible only to you.")
+                    Text("Use the + button to add sessions manually, or create Thoughts — lightweight journal entries for ideas, sketches, reflections, fragments, or unfinished work that doesn’t fit a timed session.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Use Threads to preserve continuity across long-term work — for example recital preparation, a recording project, technical studies, a composition, or an ensemble programme. Threads are personal and visible only to you.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
 
                 aboutSection("Journal & Feed") {
-                    Text("Your Journal is a private, time-based archive of all your sessions, organised by week, month, or year.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-                    
-                    Text("As patterns emerge in your practice, the Journal can subtly reflect them with colour. When there’s a clear signal, differences are highlighted; when there isn’t, it remains neutral. This can be customised in Settings.")
+                    Text("Your Journal is a private, time-based archive of your work, organised by week, month, or year.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll see what they’ve chosen to share.")
+                    Text("As patterns emerge in your practice, the Journal can subtly reflect them through colour. Depending on your settings, tint can respond to instruments, activities, or Threads — while remaining calm and neutral when no strong pattern exists.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
-                    
+
+                    Text("Thoughts appear alongside sessions, allowing ideas, sketches, reflections, and recordings to live within the same long-term archive.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
+                    Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll only see what they’ve intentionally chosen to share.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+
                     Text("Tapping a user’s name in a post filters the Feed to their sessions. Tap again to return to the full Feed.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
                     (
-                        Text("Use the Filter to narrow what you see by instrument, activity, saved sessions (")
+                        Text("Use Filters to narrow what you see by instrument, activity, Threads, ensembles, saved sessions (")
                         + Text(Image(systemName: "heart"))
-                        + Text("), search, and your thread and ensemble filters.")
+                        + Text("), content type, or search.")
                     )
                     .font(Theme.Text.body)
                     .foregroundStyle(Theme.Colors.secondaryText)
-                    
-                    Text("Ensembles group people you follow — for example, students or band members. Selecting one filters the Feed.")
+
+                    Text("Saved sessions are personal bookmarks, not public reactions.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Search helps you quickly find what you’re looking for in your sessions and Feed.")
+                    Text("Ensembles help organise the people you follow into meaningful musical contexts — for example students, collaborators, chamber groups, or bands.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Comments are private conversations between you and the author.")
+                    Text("Comments are private conversations between you and the author — never public threads.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
 
                 aboutSection("Insights") {
-                    Text("Tap the stacked rectangles in the This Week header to view long-term insights and activity trends.")
+                    Text("Insights help reveal patterns in your work over time — including focus, consistency, session rhythm, activities, and Threads — without scores, rankings, or performance pressure.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
@@ -127,4 +155,3 @@ struct AboutEtudesView: View {
         .cardSurface(padding: Theme.Spacing.m)
     }
 }
-
