@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260518_161900_FilterIconTimelinePulse
+// SCOPE: ContentView filter header icon pulse now uses the People button TimelineView sine-wave animation when filters are active and collapsed. No filter logic, layout, navigation, or UI changes outside this icon animation.
+// SEARCH-TOKEN: 20260518_161900_FilterIconTimelinePulse
+
 // CHANGE-ID: 20260518_111500_CV_ThreadChipMicroParity
 // SCOPE: Visual-only — align Journal Thought thread chip selected-state parity with session rows; no filter, leader, Feed, or layout changes.
 // SEARCH-TOKEN: 20260518_111500_CV_ThreadChipMicroParity
@@ -518,7 +522,6 @@ fileprivate struct SessionsRootView: View {
     let backendUserID: String?
 
     @State private var filtersExpanded = false
-    @State private var filterIconPulse = false
     @AppStorage("BackendModeChangeTick_v1") private var backendModeChangeTick: Int = 0
     @State private var selectedInstrument: Instrument? = nil
     @State private var selectedActivity: ActivityFilter = .any
@@ -851,31 +854,23 @@ fileprivate struct SessionsRootView: View {
                         withAnimation { filtersExpanded.toggle() }
                     } label: {
                         HStack(alignment: .center, spacing: Theme.Spacing.inline) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(filterHeaderIndicatorActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
-                                .scaleEffect(
-                                    filterHeaderIndicatorActive
-                                    ? (filterIconPulse ? 0.88 : 1.10)
+                            TimelineView(.animation(paused: !filterHeaderIndicatorActive)) { timeline in
+                                let pulseProgress = filterHeaderIndicatorActive
+                                    ? (sin(timeline.date.timeIntervalSinceReferenceDate * (Double.pi / 1.35)) + 1.0) / 2.0
                                     : 1.0
-                                )
-                                .opacity(
-                                    filterHeaderIndicatorActive
-                                    ? (filterIconPulse ? 0.9 : 1.0)
+                                let pulseScale = filterHeaderIndicatorActive
+                                    ? (0.88 + (0.22 * pulseProgress))
                                     : 1.0
-                                )
-                                .animation(
-                                    filterHeaderIndicatorActive
-                                        ? .easeInOut(duration: 1.35).repeatForever(autoreverses: true)
-                                        : .default,
-                                    value: filterHeaderIndicatorActive
-                                )
-                                .onAppear {
-                                    filterIconPulse = filterHeaderIndicatorActive
-                                }
-                                .onChange(of: filterHeaderIndicatorActive) { _, isActive in
-                                    filterIconPulse = isActive
-                                }
+                                let pulseOpacity = filterHeaderIndicatorActive
+                                    ? (0.9 + (0.1 * pulseProgress))
+                                    : 1.0
+
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(filterHeaderIndicatorActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                                    .scaleEffect(pulseScale)
+                                    .opacity(pulseOpacity)
+                            }
 
                             Spacer(minLength: 0)
 
