@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260518_212100_RelationalUnseenStaticChips
-// SCOPE: Replace People pulse with static unified relational unseen count chip and consume one-time Feed launch override; no store clearing, backend, layout, or routing enum changes.
-// SEARCH-TOKEN: 20260518_212100_RelationalUnseenStaticChips
+// CHANGE-ID: 20260518_223800_RelationalUnseenCountCentralization
+// SCOPE: Centralize relational unseen count derivation via RelationalUnseenCountStore; preserve existing UI, routing, and clearing semantics; backend, layout, or routing enum changes.
+// SEARCH-TOKEN: 20260518_223800_RelationalUnseenCountCentralization
 
 // CHANGE-ID: 20260518_161900_FilterIconTimelinePulse
 // SCOPE: ContentView filter header icon pulse now uses the People button TimelineView sine-wave animation when filters are active and collapsed. No filter logic, layout, navigation, or UI changes outside this icon animation.
@@ -520,8 +520,9 @@ fileprivate struct SessionsRootView: View {
 
 
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
+    @ObservedObject private var relationalUnseenCountStore = RelationalUnseenCountStore.shared
 
-    @StateObject private var sharedWithYouStore = SharedWithYouStore()
+    @StateObject private var sharedWithYouStore = SharedWithYouStore.shared
     let userID: String?
     let backendUserID: String?
 
@@ -1565,8 +1566,8 @@ fileprivate struct SessionsRootView: View {
                                 .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                                 .contentShape(Circle())
 
-                                if relationalUnseenCount > 0 {
-                                    relationalUnseenCountChip(count: relationalUnseenCount)
+                                if relationalUnseenCountStore.relationalUnseenCount > 0 {
+                                    relationalUnseenCountChip(count: relationalUnseenCountStore.relationalUnseenCount)
                                         .offset(x: 7, y: -7)
                                         .allowsHitTesting(false)
                                 }
@@ -2698,14 +2699,6 @@ fileprivate struct SessionsRootView: View {
 
     private var filterHeaderIndicatorActive: Bool {
         hasExplicitFeedNarrowing && !filtersExpanded
-    }
-
-    private var relationalUnseenCount: Int {
-        incomingFollowRequestCount + sharedWithYouStore.unreadShares.count + unreadCommentsStore.unreadGroups.count
-    }
-
-    private var incomingFollowRequestCount: Int {
-        followStore.requests.subtracting(followStore.outgoingRequests).count
     }
 
     @ViewBuilder

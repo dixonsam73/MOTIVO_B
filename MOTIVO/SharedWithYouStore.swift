@@ -1,5 +1,5 @@
-// CHANGE-ID: 20260212_090900_SharedWithYouStore_ResultAPI_GREEN
-// SCOPE: Owner-Only Share — Shared-with-you pointers store (Result-based BackendPostShareService)
+// CHANGE-ID: 20260518_223800_SharedWithYouStore_SharedInstance
+// SCOPE: Add shared singleton for centralized relational unseen count derivation. No semantics or clearing changes.
 
 import Foundation
 import Combine
@@ -10,6 +10,8 @@ import Combine
 /// - It uses the existing Result-based BackendPostShareService contract.
 @MainActor
 final class SharedWithYouStore: ObservableObject {
+
+    static let shared = SharedWithYouStore()
 
     @Published private(set) var unreadShares: [BackendPostSharePointer] = []
     @Published private(set) var lastError: String? = nil

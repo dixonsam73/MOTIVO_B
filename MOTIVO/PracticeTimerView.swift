@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260518_212100_RelationalUnseenStaticChips
-// SCOPE: Add static relational unseen chip to ContentView launcher and one-time Feed launch override when unseen count exists; no timer, recorder, task, or layout behaviour changes.
-// SEARCH-TOKEN: 20260518_212100_RelationalUnseenStaticChips
+// CHANGE-ID: 20260518_223800_RelationalUnseenCountCentralization
+// SCOPE: Centralize relational unseen count derivation via RelationalUnseenCountStore; preserve existing timer, routing, and chip behaviour; no recorder, task, or layout behaviour changes.
+// SEARCH-TOKEN: 20260518_223800_RelationalUnseenCountCentralization
 
 // CHANGE-ID: 20260515_073800_PTV_ControlRevealOpacity
 // SCOPE: Align PTV bottom control reveal animations with Session Meta opacity-only behaviour; no UI or logic changes outside Tasks Pad/+ actions reveal paths.
@@ -185,7 +185,8 @@ struct PracticeTimerView: View {
 
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
-    @StateObject private var sharedWithYouStore = SharedWithYouStore()
+    @ObservedObject private var relationalUnseenCountStore = RelationalUnseenCountStore.shared
+    @StateObject private var sharedWithYouStore = SharedWithYouStore.shared
 
     // Presented as a sheet from ContentView, or as the app's home/root screen.
     @Binding var isPresented: Bool
@@ -1242,7 +1243,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 .accessibilityLabel("Open MeView")
 
                 Button {
-                    if relationalUnseenCount > 0 {
+                    if relationalUnseenCountStore.relationalUnseenCount > 0 {
                         appRoute.pendingContentLaunchScopeOverride = "feed"
                     }
                     appRoute.route = .content
@@ -1257,8 +1258,8 @@ private func loadPracticeDefaultsIfNeeded() {
                             .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary, weight: .regular))
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        if relationalUnseenCount > 0 {
-                            relationalUnseenCountChip(count: relationalUnseenCount)
+                        if relationalUnseenCountStore.relationalUnseenCount > 0 {
+                            relationalUnseenCountChip(count: relationalUnseenCountStore.relationalUnseenCount)
                                 .offset(x: 13, y: -17)
                                 .allowsHitTesting(false)
                         }
@@ -1272,14 +1273,6 @@ private func loadPracticeDefaultsIfNeeded() {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, 0)
         }
-    }
-
-    private var relationalUnseenCount: Int {
-        incomingFollowRequestCount + sharedWithYouStore.unreadShares.count + unreadCommentsStore.unreadGroups.count
-    }
-
-    private var incomingFollowRequestCount: Int {
-        followStore.requests.subtracting(followStore.outgoingRequests).count
     }
 
     @ViewBuilder
@@ -1645,7 +1638,7 @@ private func loadPracticeDefaultsIfNeeded() {
         .onChange(of: showContentView) { _, newValue in
             guard isHomePresentation, newValue else { return }
             showContentView = false
-            if relationalUnseenCount > 0 {
+            if relationalUnseenCountStore.relationalUnseenCount > 0 {
                 appRoute.pendingContentLaunchScopeOverride = "feed"
             }
             appRoute.route = .content

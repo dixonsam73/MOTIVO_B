@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260401_184900_PeopleView_ConnectionsChevronParity
-// SCOPE: PeopleView — visual-only parity tweak for Your Connections rows: replace plain trailing chevrons on Followers/Following with the same circular material chevron treatment used in ProfileView. No other UI, layout, or logic changes.
-// SEARCH-TOKEN: 20260401_184900_PeopleView_ConnectionsChevronParity
+// CHANGE-ID: 20260518_223800_RelationalUnseenCountCentralization
+// SCOPE: Use shared SharedWithYouStore instance for centralized relational unseen count derivation. No UI or semantics changes. the same circular material chevron treatment used in ProfileView. No other UI, layout, or logic changes.
+// SEARCH-TOKEN: 20260518_223800_RelationalUnseenCountCentralization
 
 // CHANGE-ID: 20260317_115600_PeopleView_BackChevronAndInset_Fix
 // SCOPE: PeopleView — align People header inset with card rhythm and replace swipe-only dismissal with explicit back chevron, correctly scoped to PeopleView only. Visual/navigation only.
@@ -68,7 +68,7 @@ struct PeopleView: View {
 
 
     // Owner-Only Share — unread share pointers (recipient-side)
-    @StateObject private var sharedWithYouStore = SharedWithYouStore()
+    @StateObject private var sharedWithYouStore = SharedWithYouStore.shared
     @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
     @State private var responseAuthorDirectory: [String: DirectoryAccount] = [:]
 
