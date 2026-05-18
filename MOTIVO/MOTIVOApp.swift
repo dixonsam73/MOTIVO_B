@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260518_212100_RelationalUnseenStaticChips
+// SCOPE: Add one-time ContentView feed launch override state for relational unseen routing; no route enum or navigation architecture changes.
+// SEARCH-TOKEN: 20260518_212100_RelationalUnseenStaticChips
+
 // CHANGE-ID: 20260313_202600_RecorderHygiene_App_7c3e8c3a
 // SCOPE: Recorder hygiene hardening — targeted launch sweep for motivo_rec_*.m4a and motivo_vid_*.mov; remove staging-wide ephemeral cleanup side effect.
 // SEARCH-TOKEN: 20260313_202600_RecorderHygiene_App_7c3e8c3a
@@ -34,6 +38,7 @@ enum AppRoute {
 final class AppRouteStore: ObservableObject {
     @Published var route: AppRoute = .timer
     @Published var isProfilePresented: Bool = false
+    @Published var pendingContentLaunchScopeOverride: String? = nil
 }
 
 // CHANGE-ID: 20251203_BackendIdentityHandshakeStep5

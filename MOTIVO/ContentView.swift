@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260518_212100_RelationalUnseenStaticChips
+// SCOPE: Replace People pulse with static unified relational unseen count chip and consume one-time Feed launch override; no store clearing, backend, layout, or routing enum changes.
+// SEARCH-TOKEN: 20260518_212100_RelationalUnseenStaticChips
+
 // CHANGE-ID: 20260518_161900_FilterIconTimelinePulse
 // SCOPE: ContentView filter header icon pulse now uses the People button TimelineView sine-wave animation when filters are active and collapsed. No filter logic, layout, navigation, or UI changes outside this icon animation.
 // SEARCH-TOKEN: 20260518_161900_FilterIconTimelinePulse
@@ -1554,26 +1558,18 @@ fileprivate struct SessionsRootView: View {
                                         .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
                                         .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
 
-                                    TimelineView(.animation(paused: !peopleNotificationActive)) { timeline in
-                                        let pulseProgress = peopleNotificationActive
-                                            ? (sin(timeline.date.timeIntervalSinceReferenceDate * (Double.pi / 1.35)) + 1.0) / 2.0
-                                            : 1.0
-                                        let pulseScale = peopleNotificationActive
-                                            ? (0.88 + (0.22 * pulseProgress))
-                                            : 1.0
-                                        let pulseOpacity = peopleNotificationActive
-                                            ? (0.9 + (0.1 * pulseProgress))
-                                            : 1.0
-
-                                        Image(systemName: "person.2")
-                                            .font(.system(size: 19, weight: .regular))
-                                            .foregroundStyle(peopleNotificationActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
-                                            .scaleEffect(pulseScale)
-                                            .opacity(pulseOpacity)
-                                    }
+                                    Image(systemName: "person.2")
+                                        .font(.system(size: 19, weight: .regular))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
                                 }
                                 .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                                 .contentShape(Circle())
+
+                                if relationalUnseenCount > 0 {
+                                    relationalUnseenCountChip(count: relationalUnseenCount)
+                                        .offset(x: 7, y: -7)
+                                        .allowsHitTesting(false)
+                                }
                             }
                         }
                         .contentShape(Rectangle())
@@ -1726,6 +1722,7 @@ fileprivate struct SessionsRootView: View {
             }
             .onAppear {
                 filtersExpanded = false
+                consumePendingContentLaunchScopeOverrideIfNeeded()
             }
             .appBackground()
         }
@@ -2703,8 +2700,38 @@ fileprivate struct SessionsRootView: View {
         hasExplicitFeedNarrowing && !filtersExpanded
     }
 
-    private var peopleNotificationActive: Bool {
-        (!followStore.requests.isEmpty) || sharedWithYouStore.hasUnreadShares || unreadCommentsStore.hasUnread
+    private var relationalUnseenCount: Int {
+        incomingFollowRequestCount + sharedWithYouStore.unreadShares.count + unreadCommentsStore.unreadGroups.count
+    }
+
+    private var incomingFollowRequestCount: Int {
+        followStore.requests.subtracting(followStore.outgoingRequests).count
+    }
+
+    @ViewBuilder
+    private func relationalUnseenCountChip(count: Int) -> some View {
+        let displayCount = count > 99 ? "99+" : "\(count)"
+
+        Text(displayCount)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Theme.Colors.accent)
+            .padding(.horizontal, count > 9 ? 6 : 5)
+            .frame(minWidth: 20, minHeight: 18)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Theme.Colors.accent.opacity(colorScheme == .dark ? 0.20 : 0.13))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Theme.Colors.accent.opacity(colorScheme == .dark ? 0.34 : 0.24), lineWidth: 0.8)
+            )
+    }
+
+    private func consumePendingContentLaunchScopeOverrideIfNeeded() {
+        guard appRoute.pendingContentLaunchScopeOverride == "feed" else { return }
+        appRoute.pendingContentLaunchScopeOverride = nil
+        selectedScope = .all
     }
 
     private var hasExplicitFeedNarrowing: Bool {

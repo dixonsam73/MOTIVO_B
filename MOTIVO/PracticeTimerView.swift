@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260518_212100_RelationalUnseenStaticChips
+// SCOPE: Add static relational unseen chip to ContentView launcher and one-time Feed launch override when unseen count exists; no timer, recorder, task, or layout behaviour changes.
+// SEARCH-TOKEN: 20260518_212100_RelationalUnseenStaticChips
+
 // CHANGE-ID: 20260515_073800_PTV_ControlRevealOpacity
 // SCOPE: Align PTV bottom control reveal animations with Session Meta opacity-only behaviour; no UI or logic changes outside Tasks Pad/+ actions reveal paths.
 // SEARCH-TOKEN: 20260515_073800_PTV_ControlRevealOpacity
@@ -178,6 +182,10 @@ struct PracticeTimerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject var appRoute: AppRouteStore
+
+    @ObservedObject private var followStore = FollowStore.shared
+    @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
+    @StateObject private var sharedWithYouStore = SharedWithYouStore()
 
     // Presented as a sheet from ContentView, or as the app's home/root screen.
     @Binding var isPresented: Bool
@@ -1234,6 +1242,9 @@ private func loadPracticeDefaultsIfNeeded() {
                 .accessibilityLabel("Open MeView")
 
                 Button {
+                    if relationalUnseenCount > 0 {
+                        appRoute.pendingContentLaunchScopeOverride = "feed"
+                    }
                     appRoute.route = .content
                 } label: {
                     ZStack {
@@ -1245,6 +1256,12 @@ private func loadPracticeDefaultsIfNeeded() {
                         Image(systemName: "list.bullet.rectangle")
                             .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary, weight: .regular))
                             .foregroundStyle(Theme.Colors.secondaryText)
+
+                        if relationalUnseenCount > 0 {
+                            relationalUnseenCountChip(count: relationalUnseenCount)
+                                .offset(x: 13, y: -17)
+                                .allowsHitTesting(false)
+                        }
                     }
                     .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
                     .contentShape(Circle())
@@ -1255,6 +1272,40 @@ private func loadPracticeDefaultsIfNeeded() {
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, 0)
         }
+    }
+
+    private var relationalUnseenCount: Int {
+        incomingFollowRequestCount + sharedWithYouStore.unreadShares.count + unreadCommentsStore.unreadGroups.count
+    }
+
+    private var incomingFollowRequestCount: Int {
+        followStore.requests.subtracting(followStore.outgoingRequests).count
+    }
+
+    @ViewBuilder
+    private func relationalUnseenCountChip(count: Int) -> some View {
+        let displayCount = count > 99 ? "99+" : "\(count)"
+
+        Text(displayCount)
+            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(Theme.Colors.accent)
+            .padding(.horizontal, count > 9 ? 6 : 5)
+            .frame(minWidth: 20, minHeight: 18)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Theme.Colors.accent.opacity(colorScheme == .dark ? 0.20 : 0.13))
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Theme.Colors.accent.opacity(colorScheme == .dark ? 0.34 : 0.24), lineWidth: 0.8)
+            )
+    }
+
+    private func refreshRelationalUnseenCountSources() async {
+        await followStore.refreshFromBackendIfPossible()
+        await sharedWithYouStore.refreshUnreadShares()
+        await unreadCommentsStore.refresh(force: true)
     }
 
     private var thoughtEditorSheet: some View {
@@ -1438,6 +1489,7 @@ private func loadPracticeDefaultsIfNeeded() {
             syncActivityChoiceFromState()
             recomputeSessionMetaTint()
             do { try StagingStore.bootstrap() } catch { /* ignore */ }
+            await refreshRelationalUnseenCountSources()
         }
         .onAppear {
             // Always bootstrap the staging store before any hydration that depends on it
@@ -1541,6 +1593,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     mirrorFromStagingStore()
                 }
                 recomputeSessionMetaTint()
+                Task { await refreshRelationalUnseenCountSources() }
             case .inactive, .background:
                 // Commit all buffered title edits before persisting snapshot
                 commitAllAudioTitleBuffersAndPersist()
@@ -1592,6 +1645,9 @@ private func loadPracticeDefaultsIfNeeded() {
         .onChange(of: showContentView) { _, newValue in
             guard isHomePresentation, newValue else { return }
             showContentView = false
+            if relationalUnseenCount > 0 {
+                appRoute.pendingContentLaunchScopeOverride = "feed"
+            }
             appRoute.route = .content
         }
         .task(id: launchGateEvaluationKey) {
