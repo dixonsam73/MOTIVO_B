@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260515_2118_ThoughtLeadTypography
-// SCOPE: Refine Thought row lead typography in ContentView only using lightweight Text composition; no feed logic, layout, filtering, model, or backend changes.
-// SEARCH-TOKEN: 20260515_2118_ThoughtLeadTypography
+// CHANGE-ID: 20260518_111500_CV_ThreadChipMicroParity
+// SCOPE: Visual-only — align Journal Thought thread chip selected-state parity with session rows; no filter, leader, Feed, or layout changes.
+// SEARCH-TOKEN: 20260518_111500_CV_ThreadChipMicroParity
 
 // CHANGE-ID: 20260505_174500_ContentView_SaveHint
 // SCOPE: Add one-time inline Save helper above existing heart action rows only; no save/backend/layout behaviour changes.
@@ -1075,7 +1075,15 @@ fileprivate struct SessionsRootView: View {
                                                     .opacity(0)
 
                                                     if session.isThought {
-                                                        ThoughtRow(session: session, scope: selectedScope, selectedThread: $selectedThread, context: .journalWeek, viewerUserID: effectiveUserID)
+                                                        ThoughtRow(
+                                                                session: session,
+                                                                scope: selectedScope,
+                                                                selectedThread: $selectedThread,
+                                                                context: .journalWeek,
+                                                                viewerUserID: effectiveUserID,
+                                                                threadChipFillColor: journalThoughtThreadChipFillColor(for: session),
+                                                                threadChipTextColor: journalThoughtThreadChipTextColor(for: session)
+                                                            )
                                                             .cardSurface()
                                                             .contentShape(Rectangle())
                                                             .onTapGesture {
@@ -1170,7 +1178,12 @@ fileprivate struct SessionsRootView: View {
 
                                                     Group {
                                                         if session.isThought {
-                                                            MonthThoughtRow(session: session, selectedThread: $selectedThread)
+                                                            MonthThoughtRow(
+                                                                    session: session,
+                                                                    selectedThread: $selectedThread,
+                                                                    threadChipFillColor: journalThoughtThreadChipFillColor(for: session),
+                                                                    threadChipTextColor: journalThoughtThreadChipTextColor(for: session)
+                                                                )
                                                         } else {
                                                             SessionRow(
                                                                 session: session,
@@ -2191,6 +2204,40 @@ fileprivate struct SessionsRootView: View {
         journalResolvedTint(for: session, in: sessions).accent(
             ownerID: journalInstrumentOwnerID(for: session),
             scheme: colorScheme,
+            shouldAssignIfNeeded: false
+        )
+    }
+
+    private func journalThoughtThreadTint(for session: Session) -> Theme.ResolvedTint? {
+        guard journalTintMode == .thread,
+              let thread = journalThreadLabel(for: session),
+              !thread.isEmpty else {
+            return nil
+        }
+
+        return Theme.ResolvedTint(
+            source: .thread,
+            instrumentLabel: nil,
+            activityLabel: nil,
+            threadLabel: thread,
+            threadCounts: journalThreadCounts(in: journalTintContextSessions + [session])
+        )
+    }
+
+    private func journalThoughtThreadChipFillColor(for session: Session) -> Color? {
+        journalThoughtThreadTint(for: session)?.fill(
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .pickerStrong,
+            shouldAssignIfNeeded: false
+        )
+    }
+
+    private func journalThoughtThreadChipTextColor(for session: Session) -> Color? {
+        journalThoughtThreadTint(for: session)?.stroke(
+            ownerID: journalInstrumentOwnerID(for: session),
+            scheme: colorScheme,
+            strength: .pickerStrong,
             shouldAssignIfNeeded: false
         )
     }
@@ -4808,18 +4855,30 @@ fileprivate struct ThoughtRow: View {
     @Binding var selectedThread: String?
     let context: ThoughtRowContext
     let viewerUserID: String?
+    let threadChipFillColor: Color?
+    let threadChipTextColor: Color?
 
     @State private var isSavedLocal: Bool = false
     @AppStorage("hasSeenSaveHint_v1") private var hasSeenSaveHint: Bool = false
     @State private var showSaveHint: Bool = false
     @State private var saveHintToken = UUID()
 
-    init(session: Session, scope: FeedScope, selectedThread: Binding<String?> = .constant(nil), context: ThoughtRowContext = .feed, viewerUserID: String? = nil) {
+    init(
+        session: Session,
+        scope: FeedScope,
+        selectedThread: Binding<String?> = .constant(nil),
+        context: ThoughtRowContext = .feed,
+        viewerUserID: String? = nil,
+        threadChipFillColor: Color? = nil,
+        threadChipTextColor: Color? = nil
+    ) {
         self.session = session
         self.scope = scope
         self._selectedThread = selectedThread
         self.context = context
         self.viewerUserID = viewerUserID
+        self.threadChipFillColor = threadChipFillColor
+        self.threadChipTextColor = threadChipTextColor
     }
 
     private static let timestampFormatter: DateFormatter = {
@@ -4899,7 +4958,25 @@ fileprivate struct ThoughtRow: View {
                         selectedThread = thread
                     }
                 } label: {
-                    ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption, verticalPadding: 1)
+                    if selectedThread == thread {
+                        ThreadMetaPill(title: thread, isSelected: true, font: .caption, verticalPadding: 1)
+                    } else if let threadChipFillColor, let threadChipTextColor {
+                        Text(thread)
+                            .font(Theme.Text.meta.weight(.semibold))
+                            .foregroundStyle(Color.primary.opacity(0.82))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(
+                                threadChipFillColor,
+                                in: Capsule(style: .continuous)
+                            )
+                            .overlay(
+                                Capsule(style: .continuous)
+                                    .stroke(threadChipTextColor.opacity(0.72), lineWidth: 1)
+                            )
+                    } else {
+                        ThreadMetaPill(title: thread, isSelected: false, font: .caption, verticalPadding: 1)
+                    }
                 }
                 .buttonStyle(.plain)
                 .padding(.top, 2)

@@ -1,12 +1,26 @@
-// CHANGE-ID: 20260513_171900_MonthThoughtThreadDisplayParity
-// SCOPE: Add subdued thread chip continuity display to Journal Month Thought rows only; preserve existing compact geometry, neutral timeline anchor, attachments, navigation, analytics, and Year behavior.
-// SEARCH-TOKEN: 20260513_171900_MonthThoughtThreadDisplayParity
+// CHANGE-ID: 20260518_111500_MonthThoughtThreadChipMicroParity
+// SCOPE: Visual-only — align Month Thought thread chip selected-state parity with session rows; no filter, leader, row hierarchy, or layout changes.
+// SEARCH-TOKEN: 20260518_111500_MonthThoughtThreadChipMicroParity
 
 import SwiftUI
 
 struct MonthThoughtRow: View {
     let session: Session
     @Binding var selectedThread: String?
+    let threadChipFillColor: Color?
+    let threadChipTextColor: Color?
+
+    init(
+        session: Session,
+        selectedThread: Binding<String?>,
+        threadChipFillColor: Color? = nil,
+        threadChipTextColor: Color? = nil
+    ) {
+        self.session = session
+        self._selectedThread = selectedThread
+        self.threadChipFillColor = threadChipFillColor
+        self.threadChipTextColor = threadChipTextColor
+    }
 
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -66,9 +80,31 @@ struct MonthThoughtRow: View {
                             selectedThread = thread
                         }
                     } label: {
-                        ThreadMetaPill(title: thread, isSelected: selectedThread == thread, font: .caption2, verticalPadding: 0)
-                            .scaleEffect(0.94)
-                            .opacity(0.92)
+                        if selectedThread == thread {
+                            ThreadMetaPill(title: thread, isSelected: true, font: .caption2, verticalPadding: 0)
+                                .scaleEffect(0.94)
+                                .opacity(0.92)
+                        } else if let threadChipFillColor, let threadChipTextColor {
+                            Text(thread)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color.primary.opacity(0.82))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 2)
+                                .background(
+                                    threadChipFillColor,
+                                    in: Capsule(style: .continuous)
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(threadChipTextColor.opacity(0.72), lineWidth: 1)
+                                )
+                                .scaleEffect(0.94)
+                                .opacity(0.92)
+                        } else {
+                            ThreadMetaPill(title: thread, isSelected: false, font: .caption2, verticalPadding: 0)
+                                .scaleEffect(0.94)
+                                .opacity(0.92)
+                        }
                     }
                     .buttonStyle(.plain)
                     .padding(.top, 1)

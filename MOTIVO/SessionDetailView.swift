@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260518_111500_SDV_ThreadChipMicroParity
+// SCOPE: Visual-only — align SDV Thought thread chip typography with existing SDV session metadata chip; no layout, card, backend, or navigation changes.
+// SEARCH-TOKEN: 20260518_111500_SDV_ThreadChipMicroParity
 // CHANGE-ID: 20260517_202400_SDV_FinalVisualPolish
 // SCOPE: Visual-only — reduce Focus card vertical mass, tighten editorial metadata stack spacing, and add slight Notes bottom breathing room. Preserve tint, actions, media, routing, and behaviour.
 // SEARCH-TOKEN: 20260517_202400_SDV_FinalVisualPolish
@@ -685,12 +688,18 @@ return AttachmentViewerView(
                     VStack(alignment: .leading, spacing: 6) {
                         if let thread = threadLabelForDisplay {
                             Text(thread)
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(.secondary)
+                                .font(Theme.Text.meta.weight(.semibold))
+                                .foregroundStyle(Color.primary.opacity(0.82))
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 2)
-                                .background(Color(uiColor: .tertiarySystemFill))
-                                .clipShape(Capsule())
+                                .background(
+                                    threadChipFillColor,
+                                    in: Capsule(style: .continuous)
+                                )
+                                .overlay(
+                                    Capsule(style: .continuous)
+                                        .stroke(threadChipTextColor.opacity(0.72), lineWidth: 1)
+                                )
                                 .padding(.bottom, 2)
                         }
 
