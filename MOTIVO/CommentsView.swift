@@ -1418,7 +1418,7 @@ private func backendDisplayName(for row: BackendPostComment, ownerUserID: String
         // 2) For each commenter, eligible reply = most recent comment AND not answered.
         var eligible: Set<UUID> = []
 
-        for (author, lastIdx) in lastIndexByAuthor {
+        for lastIdx in lastIndexByAuthor.values {
             let nextIdx = lastIdx + 1
 
             // If there's a next message and it's from the owner, we consider this commenter answered.
