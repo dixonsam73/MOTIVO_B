@@ -5,7 +5,7 @@
 //  [ROLLBACK ANCHOR] v7.8 Maintenance — pre-context-niceties (no name/undo tweaks)
 //
 import Foundation
-import CoreData
+@preconcurrency import CoreData
 
 
 // CHANGE-ID: 20260303_103200_DeleteAccountV2_Stage4_CoreDataReset_FixBatchDelete
@@ -248,7 +248,7 @@ extension PersistenceController {
         // (can crash with "persistent store is not reachable"). Instead, wipe all entities via batch deletes.
         let context = container.viewContext
         let coordinator = container.persistentStoreCoordinator
-        let model = coordinator.managedObjectModel
+        let entityNames = coordinator.managedObjectModel.entities.compactMap(\.name)
 
         var deletedObjectIDs: [NSManagedObjectID] = []
 
@@ -256,8 +256,7 @@ extension PersistenceController {
             // Drop any in-memory references first.
             context.reset()
 
-            for entity in model.entities {
-                guard let name = entity.name else { continue }
+            for name in entityNames {
                 let fetch = NSFetchRequest<NSFetchRequestResult>(entityName: name)
                 let delete = NSBatchDeleteRequest(fetchRequest: fetch)
                 delete.resultType = .resultTypeObjectIDs
