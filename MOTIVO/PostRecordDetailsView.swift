@@ -946,7 +946,7 @@ struct PostRecordDetailsView: View {
             .onChange(of: tintModeRawValue) { _, _ in
                 recomputeInstrumentCardTintIfNeeded()
             }
-            .onChange(of: isPublic) { _ in
+            .onChange(of: isPublic) {
                 persistDraftIsPublic()
             }
             .fullScreenCover(item: $viewerRequest) { request in
