@@ -1345,7 +1345,7 @@ private struct URLImageView: View {
         isLoading = true
         let key = url as NSURL
         if let cached = _ImageCache.shared.cache.object(forKey: key) {
-            await setImage(cached)
+            setImage(cached)
             if Task.isCancelled { return }
             isLoading = false
             return
@@ -1354,15 +1354,15 @@ private struct URLImageView: View {
             let (data, _) = try await URLSession.shared.data(from: url)
             if Task.isCancelled { return }
             if let img = UIImage(data: data) {
-                await setImage(img)
+                setImage(img)
                 _ImageCache.shared.cache.setObject(img, forKey: key)
                 onSuccess?()
             } else {
-                await setImage(UIImage(systemName: "photo"))
+                setImage(UIImage(systemName: "photo"))
                 onFailure?()
             }
         } catch {
-            await setImage(UIImage(systemName: "photo"))
+            setImage(UIImage(systemName: "photo"))
             onFailure?()
         }
         isLoading = false
