@@ -74,15 +74,14 @@ struct ProfilePeekView: View {
         if let canon = AuthManager.canonicalBackendUserID() {
             return canon
         }
-        return (try? PersistenceController.shared.currentUserID) ?? "localUser"
-    }
+        return PersistenceController.shared.currentUserID ?? "localUser"    }
 
     private func normalizeID(_ s: String?) -> String {
         (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
     }
 
     private var localCurrentUserID: String {
-        (try? PersistenceController.shared.currentUserID) ?? "localUser"
+        PersistenceController.shared.currentUserID ?? "localUser"
     }
 
     /// Invariant: self-peek must never render follow gating or “private profile” messaging in any mode.
@@ -296,7 +295,7 @@ struct ProfilePeekView: View {
             .task {
                 // Trigger a one-time backfill only when peeking our own profile
                 if isOwner,
-                   let uid = auth.backendUserID ?? AuthManager.canonicalBackendUserID() ?? (try? PersistenceController.shared.currentUserID) {
+                   let uid = auth.backendUserID ?? AuthManager.canonicalBackendUserID() ?? PersistenceController.shared.currentUserID {
                     await PersistenceController.shared.runOneTimeBackfillIfNeeded(for: uid)
                 }
             }
