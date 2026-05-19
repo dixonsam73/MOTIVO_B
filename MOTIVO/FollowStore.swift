@@ -87,7 +87,7 @@ public final class FollowStore: ObservableObject {
             return override
         }
         #endif
-        return (try? PersistenceController.shared.currentUserID) ?? "local-device"
+        return PersistenceController.shared.currentUserID ?? "local-device"
     }
 
     // MARK: - Local UserDefaults Keys

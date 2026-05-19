@@ -44,7 +44,7 @@ public final class EnsembleStore: ObservableObject {
             return override.lowercased()
         }
         #endif
-        return ((try? PersistenceController.shared.currentUserID) ?? "local-device").lowercased()
+        return (PersistenceController.shared.currentUserID ?? "local-device").lowercased()
     }
 
     private var storageKey: String {

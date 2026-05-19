@@ -1666,7 +1666,7 @@ fileprivate struct AttachmentRow: View {
                 }.foregroundStyle(.secondary)
             }
             Spacer()
-            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
             let isThumb = ((attachment.value(forKey: "isThumbnail") as? Bool) == true)
             if isOwner && !isThumb && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
                 Image(systemName: "eye")
@@ -1738,7 +1738,7 @@ fileprivate struct ThumbCell: View {
             }
 
             // Read-only privacy badge (supports ID-first and URL fallback)
-            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
             if isOwner && !isStarred && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
@@ -1790,7 +1790,7 @@ fileprivate struct VideoThumbCell: View {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             }
-            let isOwner = ((attachment.session?.ownerUserID) ?? "") == ((try? PersistenceController.shared.currentUserID) ?? "")
+            let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
             if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
