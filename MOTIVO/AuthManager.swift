@@ -549,7 +549,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         let namespaceUserID = AttachmentTitlePersistenceKeys.normalize(
             BackendEnvironment.shared.isConnected
                 ? Self.canonicalBackendUserID()
-                : (self.currentUserID ?? ((try? PersistenceController.shared.currentUserID)))
+                : (self.currentUserID ?? PersistenceController.shared.currentUserID)
         )
         if let userID = namespaceUserID {
             UserDefaults.standard.removeObject(forKey: AttachmentTitlePersistenceKeys.audioNamespacedKey(for: userID))
