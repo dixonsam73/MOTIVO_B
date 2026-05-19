@@ -2397,7 +2397,7 @@ private struct PracticeWindowGlyph: View {
         hasAnimated = true
         let delay = useFocusSequenceDelay ? 5.1 : 0.35
         let lineDuration: Double = 5.0
-        let dotDuration: Double = 2.6
+     
 
         withAnimation(.easeOut(duration: lineDuration).delay(delay)) {
             lineRevealProgress = 1

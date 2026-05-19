@@ -115,7 +115,7 @@ final class PublishService: ObservableObject {
                 var sDuration: Int? = nil
                 // Removed line per instructions:
                 // if hasAttr("activityType"), let val = obj.value(forKey: "activityType") as? String { sActivityType = val }
-                var sActivityType: String? = nil
+                let sActivityType: String? = nil
                 var sActivityDetail: String? = nil
                 var sInstrumentLabel: String? = nil
                 var sMood: Int? = nil
