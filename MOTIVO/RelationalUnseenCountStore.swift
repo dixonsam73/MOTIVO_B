@@ -28,8 +28,8 @@ final class RelationalUnseenCountStore: ObservableObject {
         + unreadCommentsStore.unreadGroups.count
     }
 
-    private init(sharedWithYouStore: SharedWithYouStore = .shared) {
-        self.sharedWithYouStore = sharedWithYouStore
+    private init() {
+        self.sharedWithYouStore = SharedWithYouStore.shared
 
         followStore.objectWillChange
             .sink { [weak self] _ in

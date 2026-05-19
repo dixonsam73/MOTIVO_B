@@ -1068,6 +1068,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         return docs.appendingPathComponent(s, isDirectory: false)
     }
 
+    @MainActor
     private func loadIncludedAttachments(for sessionID: UUID) -> [LocalAttachmentUpload] {
         let context = PersistenceController.shared.container.viewContext
 

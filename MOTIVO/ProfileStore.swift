@@ -111,6 +111,7 @@ struct ProfileStore {
 
     /// Best-effort hydration of missing local identity fields from canonical backend directory state.
     /// Fills only missing local values; does not destructively replace existing local data.
+    @MainActor
     static func hydrateMissingLocalIdentity(
         displayName: String?,
         location: String?,
