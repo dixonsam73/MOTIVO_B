@@ -2423,9 +2423,7 @@ private var instrumentPicker: some View {
         let audioNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
 
         // Determine chosen thumbnail (if any)
-        let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
-        var chosenThumbID = selectedThumbnailID
-        // NOTE: Do not force a thumbnail when user has cleared ⭐ (PRDV parity).
+        let chosenThumbID = selectedThumbnailID        // NOTE: Do not force a thumbnail when user has cleared ⭐ (PRDV parity).
         // Feed/detail can still *display* a fallback thumb without persisting isThumbnail.
         // if chosenThumbID == nil, imageIDs.count == 1 { chosenThumbID = imageIDs.first }
 
@@ -2940,7 +2938,6 @@ private func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             return nil
                                         }
                                     }, onRename: { url, newTitle, kind in
-                                        let stem = url.deletingPathExtension().lastPathComponent
                                         let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
                                         switch kind {
                                         case .audio:
@@ -3263,7 +3260,7 @@ fileprivate struct VideoPosterView: View {
         }
         .contentShape(Rectangle())
         .onTapGesture {
-            Task { if let u = await resolvedPlayableURL() { isPresenting = true } }
+            Task { if await resolvedPlayableURL() != nil { isPresenting = true } }
         }
         .sheet(isPresented: $isPresenting) {
             TaskView { // lightweight wrapper to bridge async URL resolution into the sheet
