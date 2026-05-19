@@ -1517,13 +1517,10 @@ private func loadPracticeDefaultsIfNeeded() {
 
             // Determine persisted state after hydration
             let d = UserDefaults.standard
-            let hasPersistedTimer = d.double(forKey: TimerDefaultsKey.startedAtEpoch.rawValue) > 0 || d.integer(forKey: TimerDefaultsKey.accumulated.rawValue) > 0 || d.bool(forKey: TimerDefaultsKey.isRunning.rawValue)
             let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
             let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
             let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
-            let audioIDs = audioIDStrings.compactMap(UUID.init)
-            let videoIDs = videoIDStrings.compactMap(UUID.init)
-            let imageIDs = imageIDStrings.compactMap(UUID.init)
+            
         // Restore staged video titles (metadata only; user-provided; no defaults)
         if let data = d.data(forKey: TimerDefaultsKey.videoTitles.rawValue),
            let decoded = try? JSONDecoder().decode([String: String].self, from: data) {
@@ -1537,7 +1534,7 @@ private func loadPracticeDefaultsIfNeeded() {
         } else {
             self.videoTitles = [:]
         }
-            let hasPersistedStagedIDs = (!audioIDStrings.isEmpty || !videoIDStrings.isEmpty || !imageIDStrings.isEmpty)
+            
 
             // Also check the staging store to avoid clearing attachments that exist on disk
 
@@ -2058,11 +2055,7 @@ private func loadPracticeDefaultsIfNeeded() {
             strength: .cardMedium
         )
 
-        let tintText = Theme.ThreadTint.visibleAccentColor(
-            for: thread,
-            ownerID: auth.currentUserID,
-            scheme: colorScheme
-        )
+      
 
         let isFloatingSelected =
             ambientThreadFloatingThread == thread ||
