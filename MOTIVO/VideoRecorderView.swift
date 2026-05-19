@@ -975,10 +975,7 @@ final class VideoRecorderController: NSObject,
         // All state mutations remain on writerQueue.
 
         // Snapshot the first accepted buffer (latched on writerQueue before this is called).
-        var firstBuf: CMSampleBuffer?
-        writerQueue.sync {
-            firstBuf = pendingFirstAcceptedVideoBuffer
-        }
+     
 
         // Start writer + session on this (non-sample) queue.
         if writer.status == .unknown {
