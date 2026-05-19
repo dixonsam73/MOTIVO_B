@@ -136,7 +136,7 @@ struct BackendSessionDetailView: View {
     private let grid = [GridItem(.adaptive(minimum: 128), spacing: 12)]
 
     private var ownerUserID: String {
-        (model.ownerUserID ?? "").lowercased()
+        model.ownerUserID.lowercased()
     }
 
     private var effectiveViewerUserID: String? {
@@ -161,7 +161,7 @@ struct BackendSessionDetailView: View {
 
     private var headerTitle: String {
         let instrument = (model.instrumentLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let activity = (model.activityLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let activity = model.activityLabel.trimmingCharacters(in: .whitespacesAndNewlines)
         if !instrument.isEmpty && !activity.isEmpty {
             return "\(instrument): \(activity)"
         }
