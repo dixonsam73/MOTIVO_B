@@ -875,9 +875,10 @@ extension MediaTrimView {
                         let dur2 = try await asset.load(.duration)
                         seconds = CMTimeGetSeconds(dur2)
                     }
+                    let resolvedSeconds = seconds
                     await MainActor.run {
                         guard self.loadGeneration == generation else { return }
-                        self.duration = max(0, seconds)
+                        self.duration = max(0, resolvedSeconds)
                         self.startTime = 0
                         self.endTime = self.duration
                         self.scrubPosition = 0

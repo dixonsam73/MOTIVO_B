@@ -1215,8 +1215,9 @@ private struct TaskDocumentScanner: UIViewControllerRepresentable {
                     }
                 }
 
+                let recognizedText = chunks.joined(separator: "\n")
                 await MainActor.run {
-                    onRecognizedText(chunks.joined(separator: "\n"))
+                    onRecognizedText(recognizedText)
                 }
             }
         }
