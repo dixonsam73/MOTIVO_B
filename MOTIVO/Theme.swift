@@ -807,6 +807,8 @@ enum Theme {
                 return Color(red: 0.84, green: 0.81, blue: 0.88)
             case (.lavender, .dark):
                 return Color(red: 0.38, green: 0.34, blue: 0.43)
+            @unknown default:
+                return Theme.Colors.surface(scheme)
             }
         }
 
@@ -823,6 +825,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.14
             case (.monthBar, .light): return 0.24
             case (.monthBar, .dark): return 0.20
+            @unknown default:
+                return 0.14
             }
         }
 
@@ -838,6 +842,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.10
             case (.monthBar, .light): return 0.16
             case (.monthBar, .dark): return 0.14
+            @unknown default:
+                return 0.10
             }
         }
 
@@ -1209,6 +1215,8 @@ enum Theme {
                 return Color(red: 0.83, green: 0.76, blue: 0.84)
             case (.plum, .dark):
                 return Color(red: 0.39, green: 0.31, blue: 0.42)
+            @unknown default:
+                return Theme.Colors.surface(scheme)
             }
         }
 
@@ -1224,6 +1232,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.14
             case (.monthBar, .light): return 0.24
             case (.monthBar, .dark): return 0.20
+            @unknown default:
+                return 0.14
             }
         }
 
@@ -1239,6 +1249,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.10
             case (.monthBar, .light): return 0.16
             case (.monthBar, .dark): return 0.14
+            @unknown default:
+                return 0.10
             }
         }
 
@@ -1429,6 +1441,8 @@ enum Theme {
                 return Color(red: 0.80, green: 0.84, blue: 0.88)
             case (.custom, .dark):
                 return Color(red: 0.34, green: 0.39, blue: 0.44)
+            @unknown default:
+                return Theme.Colors.surface(scheme)
             }
         }
 
@@ -1444,6 +1458,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.14
             case (.monthBar, .light): return 0.24
             case (.monthBar, .dark): return 0.20
+            @unknown default:
+                return 0.14
             }
         }
 
@@ -1459,6 +1475,8 @@ enum Theme {
             case (.cardLight, .dark): return 0.10
             case (.monthBar, .light): return 0.16
             case (.monthBar, .dark): return 0.14
+            @unknown default:
+                return 0.10
             }
         }
 
