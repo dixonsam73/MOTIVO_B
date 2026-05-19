@@ -93,10 +93,7 @@ public struct MediaTrimView: View {
         // Visual hierarchy constants
         let accent = Theme.Colors.accent
         let secondaryText = Theme.Colors.secondaryText
-        let stroke = Color.secondary.opacity(0.25)
         let playFillOpacity: Double = (colorScheme == .dark) ? 0.22 : 0.18
-        let handleStrokeOpacity: Double = 0.60
-        let playheadOpacity: Double = 0.95
         let landscapeVideoPreviewHeight: CGFloat = min(250, max(210, availableHeight * 0.46))
         let mainStackSpacing: CGFloat = isLandscapePhone ? Theme.Spacing.xs : Theme.Spacing.m
         let cardStackSpacing: CGFloat = isLandscapePhone ? Theme.Spacing.xs : Theme.Spacing.m
@@ -596,8 +593,7 @@ private struct TimeRuler: View {
 
     var body: some View {
         GeometryReader { geo in
-            let width = geo.size.width
-
+           
             Canvas { ctx, size in
                 let height = size.height
                 let baselineY = height
