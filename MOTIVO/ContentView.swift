@@ -859,23 +859,18 @@ fileprivate struct SessionsRootView: View {
                         withAnimation { filtersExpanded.toggle() }
                     } label: {
                         HStack(alignment: .center, spacing: Theme.Spacing.inline) {
-                            TimelineView(.animation(paused: !filterHeaderIndicatorActive)) { timeline in
-                                let pulseProgress = filterHeaderIndicatorActive
-                                    ? (sin(timeline.date.timeIntervalSinceReferenceDate * (Double.pi / 1.35)) + 1.0) / 2.0
-                                    : 1.0
-                                let pulseScale = filterHeaderIndicatorActive
-                                    ? (0.88 + (0.22 * pulseProgress))
-                                    : 1.0
-                                let pulseOpacity = filterHeaderIndicatorActive
-                                    ? (0.9 + (0.1 * pulseProgress))
-                                    : 1.0
+                            ZStack {
+                                if filterHeaderIndicatorActive {
+                                    Capsule(style: .continuous)
+                                        .fill(Theme.Colors.accent.opacity(0.14))
+                                        .frame(width: 34, height: 26)
+                                }
 
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundStyle(filterHeaderIndicatorActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
-                                    .scaleEffect(pulseScale)
-                                    .opacity(pulseOpacity)
                             }
+                            .animation(.none, value: filterHeaderIndicatorActive)
 
                             Spacer(minLength: 0)
 
