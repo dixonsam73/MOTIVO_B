@@ -18,7 +18,7 @@ extension Session {
         if let set = attachments as? Set<Attachment> {
             return set.isEmpty == false
         }
-        if let set = attachments as? NSSet {
+        if let set = attachments {
             return set.count > 0
         }
         return false
