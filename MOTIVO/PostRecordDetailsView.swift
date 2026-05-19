@@ -2088,7 +2088,7 @@ isPrivate: { url in
             selectedDotIndex = nil
         } catch {
             // On failure, best-effort: remove any files written during this attempt by scanning attachments without permanent IDs
-            let fm = FileManager.default
+          
             if let set = s.attachments as? Set<Attachment> {
                 for a in set {
                     if a.objectID.isTemporaryID, let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
@@ -2264,9 +2264,7 @@ isPrivate: { url in
     }
 
     private func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
-        let imageIDs = stagedAttachments.filter { $0.kind == .image }.map { $0.id }
-        var chosenThumbID = selectedThumbnailID
-
+        let chosenThumbID = selectedThumbnailID
         // Ensure thumbnail implies included (staged privacy) before migration/commit
         if let tid = chosenThumbID, let thumb = stagedAttachments.first(where: { $0.id == tid }) {
             setPrivate(id: tid, url: surrogateURL(for: thumb), false)
