@@ -1287,7 +1287,6 @@ public enum DebugDump {
         return encodeJSON(payload)
         #endif
 
-        return encodeJSON(snap)
     }
 
     public static func dump(attachments: [Any]) -> String {
