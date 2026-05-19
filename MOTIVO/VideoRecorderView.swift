@@ -221,7 +221,7 @@ public struct VideoRecorderView: View {
             preparingOverlayTask = nil
             showPreparingOverlay = false
             Task {
-                try? await StagingStore.bootstrap()
+                try? StagingStore.bootstrap()
             }
         }
         .toolbar(.hidden, for: .navigationBar)
