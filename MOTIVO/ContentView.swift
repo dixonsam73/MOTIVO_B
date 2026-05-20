@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260520_223500_ContentViewJournalSectionBuilderPass2
+// SCOPE: ContentView Pass 2 — extract Journal section/date/model construction into ContentViewJournalSectionBuilder; preserve UI, filtering, routing, backend behaviour, and state ownership.
+// SEARCH-TOKEN: 20260520_223500_ContentViewJournalSectionBuilderPass2
+
 // CHANGE-ID: 20260520_211500_ContentViewRowExtractionPass1
 // SCOPE: ContentView row subsystem extraction pass 1; remove moved row/support declarations only, preserve orchestration, filtering, routing, and behaviour.
 // SEARCH-TOKEN: 20260520_211500_ContentViewRowExtractionPass1
@@ -2611,82 +2615,38 @@ fileprivate struct SessionsRootView: View {
     }
 
 
-    private struct JournalSection: Identifiable {
-        let id: String
-        let title: String
-        let sessions: [Session]
-    }
-
-    fileprivate struct JournalYearSectionModel: Identifiable {
-        let id: String
-        let year: Int
-        let rows: [JournalYearMonthRowModel]
-    }
+    // JournalSection and JournalYearSectionModel are defined in ContentViewJournalSectionBuilder.swift.
 
     private var journalGroupingCalendar: Calendar {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.locale = .current
-        calendar.firstWeekday = 2
-        calendar.minimumDaysInFirstWeek = 4
-        return calendar
+        ContentViewJournalSectionBuilder.groupingCalendar
     }
 
     private func journalWeekStart(for date: Date) -> Date {
-        let calendar = journalGroupingCalendar
-        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: date)
-        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        ContentViewJournalSectionBuilder.weekStart(for: date)
     }
 
     private func journalDate(for session: Session) -> Date {
-        (session.value(forKey: "timestamp") as? Date) ?? Date.distantPast
+        ContentViewJournalSectionBuilder.date(for: session)
     }
 
     private func journalMonthStart(for date: Date) -> Date {
-        let calendar = journalGroupingCalendar
-        let components = calendar.dateComponents([.year, .month], from: date)
-        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        ContentViewJournalSectionBuilder.monthStart(for: date)
     }
 
     private func journalYearStart(for date: Date) -> Date {
-        let calendar = journalGroupingCalendar
-        let components = calendar.dateComponents([.year], from: date)
-        return calendar.date(from: components) ?? calendar.startOfDay(for: date)
+        ContentViewJournalSectionBuilder.yearStart(for: date)
     }
 
     private func journalWeekHeaderTitle(for weekStart: Date) -> String {
-        let calendar = journalGroupingCalendar
-        let weekEnd = calendar.date(byAdding: .day, value: 6, to: weekStart) ?? weekStart
-        return journalWeekDateRangeText(start: weekStart, end: weekEnd)
+        ContentViewJournalSectionBuilder.weekHeaderTitle(for: weekStart)
     }
 
     private func journalWeekDateRangeText(start: Date, end: Date) -> String {
-        let calendar = journalGroupingCalendar
-
-        let startDay = calendar.component(.day, from: start)
-        let endDay = calendar.component(.day, from: end)
-        let startMonth = Self.journalMonthFormatter.string(from: start)
-        let endMonth = Self.journalMonthFormatter.string(from: end)
-        let startYear = calendar.component(.year, from: start)
-        let endYear = calendar.component(.year, from: end)
-
-        if calendar.isDate(start, equalTo: end, toGranularity: .year),
-           calendar.isDate(start, equalTo: end, toGranularity: .month) {
-            return "\(startDay)–\(endDay) \(startMonth) \(startYear)"
-        }
-
-        if startYear == endYear {
-            return "\(startDay) \(startMonth) – \(endDay) \(endMonth) \(startYear)"
-        }
-
-        return "\(startDay) \(startMonth) \(startYear) – \(endDay) \(endMonth) \(endYear)"
+        ContentViewJournalSectionBuilder.weekDateRangeText(start: start, end: end)
     }
 
     private func journalMonthWeekRangeText(start: Date, end: Date) -> String {
-        let calendar = journalGroupingCalendar
-        let startDay = calendar.component(.day, from: start)
-        let endDay = calendar.component(.day, from: end)
-        let month = Self.journalMonthFormatter.string(from: start)
-        return "\(startDay)–\(endDay) \(month)"
+        ContentViewJournalSectionBuilder.monthWeekRangeText(start: start, end: end)
     }
 
     private var hasAnyJournalContent: Bool {
@@ -2816,348 +2776,51 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func journalWeekSections(sessions: [Session]) -> [JournalSection] {
-        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-        guard !sortedSessions.isEmpty else { return [] }
-
-        let grouped = Dictionary(grouping: sortedSessions) { journalWeekStart(for: journalDate(for: $0)) }
-
-        return grouped.keys
-            .sorted(by: >)
-            .compactMap { weekStart in
-                guard let sessions = grouped[weekStart], !sessions.isEmpty else { return nil }
-                return JournalSection(
-                    id: Self.journalWeekIDFormatter.string(from: weekStart),
-                    title: journalWeekHeaderTitle(for: weekStart),
-                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-                )
-            }
+        ContentViewJournalSectionBuilder.weekSections(sessions: sessions)
     }
 
     private func journalMonthSections(sessions: [Session]) -> [JournalSection] {
-        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-        guard !sortedSessions.isEmpty else { return [] }
-
-        let grouped = Dictionary(grouping: sortedSessions) { session in
-            journalMonthStart(for: journalDate(for: session))
-        }
-
-        return grouped.keys
-            .sorted(by: >)
-            .compactMap { monthStart in
-                guard let sessions = grouped[monthStart], !sessions.isEmpty else { return nil }
-                return JournalSection(
-                    id: "month-\(Self.journalWeekIDFormatter.string(from: monthStart))",
-                    title: Self.journalMonthYearFormatter.string(from: monthStart),
-                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-                )
-            }
+        ContentViewJournalSectionBuilder.monthSections(sessions: sessions)
     }
 
     private func journalYearSections(sessions: [Session]) -> [JournalSection] {
-        let sortedSessions = sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-        guard !sortedSessions.isEmpty else { return [] }
-
-        let grouped = Dictionary(grouping: sortedSessions) { session in
-            journalMonthStart(for: journalDate(for: session))
-        }
-
-        return grouped.keys
-            .sorted(by: >)
-            .compactMap { monthStart in
-                guard let sessions = grouped[monthStart], !sessions.isEmpty else { return nil }
-                return JournalSection(
-                    id: "year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
-                    title: Self.journalMonthYearFormatter.string(from: monthStart),
-                    sessions: sessions.sorted { journalDate(for: $0) > journalDate(for: $1) }
-                )
-            }
+        ContentViewJournalSectionBuilder.yearSections(sessions: sessions)
     }
 
     private func journalCalendarYearSections(sessions: [Session]) -> [JournalYearSectionModel] {
-        let calendar = journalGroupingCalendar
-        let now = Date()
-        let currentMonthStart = journalMonthStart(for: now)
-        let currentYear = calendar.component(.year, from: now)
-
-        let earliestSessionDate = sessions
-            .map { journalDate(for: $0) }
-            .min() ?? now
-        let earliestSessionYear = calendar.component(.year, from: earliestSessionDate)
-        let earliestSessionMonth = calendar.component(.month, from: earliestSessionDate)
-
-        guard earliestSessionYear <= currentYear else { return [] }
-
-        let grouped = Dictionary(grouping: sessions) { session in
-            journalMonthStart(for: journalDate(for: session))
-        }
-
-        let allMonthStarts: [Date] = stride(from: currentYear, through: earliestSessionYear, by: -1).flatMap { year in
-            let months = stride(from: 12, through: 1, by: -1).filter { month in
-                if year == earliestSessionYear {
-                    return month >= earliestSessionMonth
-                }
-                return true
-            }
-
-            return months.compactMap { month in
-                calendar.date(from: DateComponents(year: year, month: month, day: 1))
-            }
-        }
-
-        let maxTotalSeconds = max(
-            allMonthStarts.map { monthStart in
-                grouped[monthStart, default: []].reduce(0) { $0 + journalDurationSeconds(for: $1) }
-            }.max() ?? 0,
-            1
+        ContentViewJournalSectionBuilder.calendarYearSections(
+            sessions: sessions,
+            tintSource: journalResolvedTintSource(in: journalTintContextSessions),
+            fallbackOwnerUserID: effectiveUserID
         )
-
-        let maxSessionCount = max(
-            allMonthStarts.map { grouped[$0, default: []].count }.max() ?? 0,
-            1
-        )
-
-        let rows: [JournalYearMonthRowModel] = allMonthStarts.map { monthStart in
-            let monthSessions = grouped[monthStart, default: []]
-                .sorted { journalDate(for: $0) > journalDate(for: $1) }
-
-            let totalSeconds = monthSessions.reduce(0) { $0 + journalDurationSeconds(for: $1) }
-            let sessionCount = monthSessions.count
-            let dominantInstrument = journalYearDominantInstrument(
-                for: monthSessions,
-                totalSeconds: totalSeconds
-            )
-            let dominantActivity = journalYearDominantActivity(
-                for: monthSessions,
-                totalSeconds: totalSeconds
-            )
-            let dominantThread = journalYearDominantThread(
-                for: monthSessions,
-                totalSeconds: totalSeconds
-            )
-            let metadataText = journalYearMetadataText(
-                for: monthSessions,
-                totalSeconds: totalSeconds,
-                sessionCount: sessionCount
-            )
-            let rowOwnerUserID = monthSessions
-                .compactMap { session in
-                    let ownerID = session.ownerUserID?.trimmingCharacters(in: .whitespacesAndNewlines)
-                    return (ownerID?.isEmpty == false) ? ownerID : nil
-                }
-                .first ?? effectiveUserID
-
-            let rawWidthFraction = CGFloat(totalSeconds) / CGFloat(maxTotalSeconds)
-            let widthFraction: CGFloat = totalSeconds > 0 ? min(max(rawWidthFraction, 0.08), 1.0) : 0.0
-
-            let rawDensityFraction = CGFloat(sessionCount) / CGFloat(maxSessionCount)
-            let densityFraction: CGFloat = sessionCount > 0
-                ? min(rawDensityFraction, 1.0)
-                : 0.0
-
-            return JournalYearMonthRowModel(
-                id: "calendar-year-\(Self.journalWeekIDFormatter.string(from: monthStart))",
-                monthStart: monthStart,
-                year: calendar.component(.year, from: monthStart),
-                monthLabel: Self.journalMonthFormatter.string(from: monthStart),
-                totalSeconds: totalSeconds,
-                sessionCount: sessionCount,
-                metadataText: metadataText,
-                dominantInstrumentLabel: dominantInstrument?.label,
-                dominantActivityLabel: dominantActivity?.label,
-                dominantThreadLabel: dominantThread?.label,
-                ownerUserID: rowOwnerUserID,
-                tintSource: journalResolvedTintSource(in: journalTintContextSessions),
-                widthFraction: widthFraction,
-                densityFraction: densityFraction,
-                isFutureMonth: calendar.component(.year, from: monthStart) == currentYear && monthStart > currentMonthStart,
-                isCurrentMonth: calendar.isDate(monthStart, equalTo: currentMonthStart, toGranularity: .month)
-            )
-        }
-
-        let sections = Dictionary(grouping: rows) { $0.year }
-
-        return sections.keys
-            .sorted(by: >)
-            .compactMap { year in
-                guard let rows = sections[year], !rows.isEmpty else { return nil }
-                return JournalYearSectionModel(
-                    id: "calendar-year-section-\(year)",
-                    year: year,
-                    rows: rows
-                )
-            }
     }
 
     private func journalCurrentMonthAnchorID(in sections: [JournalYearSectionModel]) -> String? {
-        sections
-            .flatMap { $0.rows }
-            .first(where: { $0.isCurrentMonth })?
-            .id
+        ContentViewJournalSectionBuilder.currentMonthAnchorID(in: sections)
     }
 
     private func journalMonthSectionAnchorID(for monthStart: Date) -> String {
-        "journal-month-section-\(Self.journalWeekIDFormatter.string(from: monthStart))"
+        ContentViewJournalSectionBuilder.monthSectionAnchorID(for: monthStart)
     }
 
     private func journalMonthSectionAnchorID(for section: JournalSection) -> String {
-        let monthStart = section.sessions
-            .map { journalDate(for: $0) }
-            .map { journalMonthStart(for: $0) }
-            .max() ?? Date.distantPast
-        return journalMonthSectionAnchorID(for: monthStart)
+        ContentViewJournalSectionBuilder.monthSectionAnchorID(for: section)
     }
 
     private func hasVisibleJournalMonthSection(for monthStart: Date, in sessions: [Session]) -> Bool {
-        journalYearSections(sessions: sessions)
-            .contains { section in
-                section.sessions.contains {
-                    journalMonthStart(for: journalDate(for: $0)) == monthStart
-                }
-            }
-    }
-
-    private struct JournalYearFacetSummary {
-        let label: String
-        let seconds: Int
-        let distinctCount: Int
-    }
-
-    private func journalYearMetadataText(
-        for sessions: [Session],
-        totalSeconds: Int,
-        sessionCount: Int
-    ) -> String? {
-        guard sessionCount > 0, totalSeconds > 0 else { return nil }
-
-        var parts: [String] = [
-            StatsHelper.formatDuration(totalSeconds),
-            sessionCount == 1 ? "1 session" : "\(sessionCount) sessions"
-        ]
-
-        if let instrument = journalYearDominantInstrument(for: sessions, totalSeconds: totalSeconds) {
-            parts.append("\(instrument.label) \(StatsHelper.formatDuration(instrument.seconds))")
-        }
-
-        if let activity = journalYearDominantActivity(for: sessions, totalSeconds: totalSeconds) {
-            parts.append("\(activity.label) \(StatsHelper.formatDuration(activity.seconds))")
-        }
-
-        return parts.joined(separator: " • ")
-    }
-
-    private func journalYearDominantInstrument(
-        for sessions: [Session],
-        totalSeconds: Int
-    ) -> JournalYearFacetSummary? {
-        journalYearDominantFacet(
-            for: sessions,
-            totalSeconds: totalSeconds,
-            label: journalYearInstrumentLabel(for:)
-        )
-    }
-
-    private func journalYearDominantActivity(
-        for sessions: [Session],
-        totalSeconds: Int
-    ) -> JournalYearFacetSummary? {
-        journalYearDominantFacet(
-            for: sessions,
-            totalSeconds: totalSeconds,
-            label: journalYearActivityLabel(for:)
-        )
-    }
-
-    private func journalYearDominantThread(
-        for sessions: [Session],
-        totalSeconds: Int
-    ) -> JournalYearFacetSummary? {
-        journalYearDominantFacet(
-            for: sessions,
-            totalSeconds: totalSeconds,
-            label: journalYearThreadLabel(for:)
-        )
-    }
-
-    private func journalYearDominantFacet(
-        for sessions: [Session],
-        totalSeconds: Int,
-        label: (Session) -> String?
-    ) -> JournalYearFacetSummary? {
-        let totals = sessions.reduce(into: [String: Int]()) { partial, session in
-            guard let rawLabel = label(session) else { return }
-            let trimmed = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            partial[trimmed, default: 0] += journalDurationSeconds(for: session)
-        }
-
-        let sorted = totals.sorted {
-            if $0.value == $1.value {
-                return $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending
-            }
-            return $0.value > $1.value
-        }
-
-        guard let top = sorted.first, top.value > 0 else { return nil }
-
-        let distinctCount = sorted.count
-        // Always use the highest-duration instrument for the month
-        return JournalYearFacetSummary(label: top.key, seconds: top.value, distinctCount: distinctCount)
-    }
-
-    private func journalYearInstrumentLabel(for session: Session) -> String? {
-        let directLabel = ((session.value(forKey: "userInstrumentLabel") as? String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !directLabel.isEmpty { return directLabel }
-
-        let relationshipLabel = session.instrument?.name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return relationshipLabel.isEmpty ? nil : relationshipLabel
-    }
-
-    private func journalYearActivityLabel(for session: Session) -> String? {
-        let directLabel = ((session.value(forKey: "userActivityLabel") as? String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if !directLabel.isEmpty { return directLabel }
-
-        if let code = session.value(forKey: "activityType") as? Int16 {
-            return from(code).label
-        }
-
-        return nil
-    }
-
-    private func journalYearThreadLabel(for session: Session) -> String? {
-        journalThreadLabel(for: session)
-    }
-
-    private func journalYearLabelsMatch(_ lhs: String, _ rhs: String?) -> Bool {
-        guard let rhs else { return false }
-        return lhs.trimmingCharacters(in: .whitespacesAndNewlines)
-            .localizedCaseInsensitiveCompare(rhs.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+        ContentViewJournalSectionBuilder.hasVisibleMonthSection(for: monthStart, in: sessions)
     }
 
     private func journalDurationSeconds(for session: Session) -> Int {
-        let attrs = session.entity.attributesByName
-        if attrs["durationSeconds"] != nil, let n = session.value(forKey: "durationSeconds") as? NSNumber {
-            return max(0, n.intValue)
-        } else if attrs["durationMinutes"] != nil, let n = session.value(forKey: "durationMinutes") as? NSNumber {
-            return max(0, n.intValue * 60)
-        } else if attrs["duration"] != nil, let n = session.value(forKey: "duration") as? NSNumber {
-            return max(0, n.intValue * 60)
-        } else if attrs["lengthMinutes"] != nil, let n = session.value(forKey: "lengthMinutes") as? NSNumber {
-            return max(0, n.intValue * 60)
-        }
-        return 0
+        ContentViewJournalSectionBuilder.durationSeconds(for: session)
     }
 
     private func journalYearMaxDuration(for sessions: [Session]) -> Int {
-        max(sessions.map(journalDurationSeconds(for:)).max() ?? 0, 1)
+        ContentViewJournalSectionBuilder.yearMaxDuration(for: sessions)
     }
 
     private func journalYearSurfaceWidthFraction(for session: Session, maxDuration: Int) -> CGFloat {
-        guard maxDuration > 0 else { return 0.05 }
-        let raw = max(0, CGFloat(journalDurationSeconds(for: session)) / CGFloat(maxDuration))
-        let scaled = pow(raw, 0.75)
-        return scaled
+        ContentViewJournalSectionBuilder.yearSurfaceWidthFraction(for: session, maxDuration: maxDuration)
     }
 
     private static let journalMonthFormatter: DateFormatter = {
