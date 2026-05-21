@@ -223,7 +223,7 @@ struct MOTIVOApp: App {
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
                 }
-                .onChange(of: scenePhase) { phase in
+                .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
