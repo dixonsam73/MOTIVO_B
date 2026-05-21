@@ -172,7 +172,7 @@ struct MediaRecorderRowCard: View {
             guard let isRecording = notification.object as? Bool else { return }
             isAudioRecorderRecording = isRecording
         }
-        .onChange(of: showAudioRecorder) { isShown in
+        .onChange(of: showAudioRecorder) { _, isShown in
             if !isShown {
                 isAudioRecorderRecording = false
             }
