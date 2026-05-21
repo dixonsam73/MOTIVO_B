@@ -141,7 +141,7 @@ public struct AvatarEditorView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onChange(of: proxy.size) { newSize in
+                    .onChange(of: proxy.size) { _, newSize in
                         let diameter = min(newSize.width, newSize.height, 280)
                         editorDiameter = diameter
                     }
