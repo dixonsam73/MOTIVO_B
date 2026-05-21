@@ -1152,6 +1152,32 @@ private func loadPracticeDefaultsIfNeeded() {
         showAppSetUp = false
     }
 
+
+
+    private func applySessionMetaDefaultsIfNoPersistedTimerSnapshot() {
+        let d = UserDefaults.standard
+
+        let hasPersistedTimerSnapshot =
+            d.object(forKey: TimerDefaultsKey.startedAtEpoch.rawValue) != nil ||
+            d.object(forKey: TimerDefaultsKey.accumulated.rawValue) != nil ||
+            d.object(forKey: TimerDefaultsKey.isRunning.rawValue) != nil ||
+            d.object(forKey: TimerDefaultsKey.activityRaw.rawValue) != nil ||
+            d.object(forKey: TimerDefaultsKey.activityDetail.rawValue) != nil
+
+        refreshInstrumentSelectionFromStore()
+        loadUserActivities()
+
+        guard !hasPersistedTimerSnapshot else {
+            syncActivityChoiceFromState()
+            recomputeSessionMetaTint()
+            return
+        }
+
+        applyPrimaryActivityRef()
+        syncActivityChoiceFromState()
+        recomputeSessionMetaTint()
+    }
+
     @ViewBuilder
     private var homeTopBar: some View {
         if isHomePresentation {
@@ -1514,6 +1540,7 @@ private func loadPracticeDefaultsIfNeeded() {
             commitAudioTitleEditingBuffers()
             // Hydrate timer and staged attachments from storage (UserDefaults + StagingStore)
             hydrateTimerFromStorage()
+                applySessionMetaDefaultsIfNoPersistedTimerSnapshot()
 
             // Determine persisted state after hydration
             let d = UserDefaults.standard
@@ -1564,6 +1591,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
                 evaluateAppSetUpGate()
                 hydrateTimerFromStorage()
+                applySessionMetaDefaultsIfNoPersistedTimerSnapshot()
                 startTicker()
                 // Reconcile with StagingStore on resume to repopulate UI if needed
                 do { try StagingStore.bootstrap() } catch { /* ignore */ }
@@ -1597,6 +1625,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 break
             }
         }
+        
         .onDisappear {
             closeTuner()
 
@@ -1641,6 +1670,10 @@ private func loadPracticeDefaultsIfNeeded() {
         .task(id: launchGateEvaluationKey) {
             evaluateSignedOutLaunchGate()
             evaluateAppSetUpGate()
+
+            if isHomePresentation && !appRoute.isProfilePresented && !shouldRenderAppSetUpRoot {
+                applySessionMetaDefaultsIfNoPersistedTimerSnapshot()
+            }
         }
         .toolbar {
             if !isHomePresentation {

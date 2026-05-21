@@ -1567,9 +1567,9 @@ private func initials(from string: String) -> String {
                     locationText = ProfileStore.location(for: auth.backendUserID)
                 }
             }
-             .onChange(of: primaryActivityRef) { _ in
-                 primaryActivityChoice = normalizedPrimaryActivityRef()
-             }
+            .onChange(of: primaryActivityRef) {
+                primaryActivityChoice = normalizedPrimaryActivityRef()
+            }
              .onChange(of: name) { _, _ in
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
              }
