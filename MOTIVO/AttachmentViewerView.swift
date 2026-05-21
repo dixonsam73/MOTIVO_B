@@ -2020,7 +2020,7 @@ private struct VideoPage: View {
     private func mediaControlButton<Label: View>(compact: Bool = false, action: @escaping () -> Void, @ViewBuilder label: () -> Label) -> some View {
         let buttonSize: CGFloat = compact ? 36 : 40
 
-        return Button(action: action) {
+        Button(action: action) {
             ZStack {
                 Circle()
                     .fill(.thinMaterial)
