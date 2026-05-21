@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260521_153000_ContentViewJournalTintResolverPass3
+// SCOPE: ContentView Pass 3 — extract Journal tint derivation into ContentViewJournalTintResolver; preserve UI, filtering, routing, backend behaviour, and state ownership.
+// SEARCH-TOKEN: 20260521_153000_ContentViewJournalTintResolverPass3
+
 // CHANGE-ID: 20260520_223500_ContentViewJournalSectionBuilderPass2
 // SCOPE: ContentView Pass 2 — extract Journal section/date/model construction into ContentViewJournalSectionBuilder; preserve UI, filtering, routing, backend behaviour, and state ownership.
 // SEARCH-TOKEN: 20260520_223500_ContentViewJournalSectionBuilderPass2
@@ -2057,181 +2061,126 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func journalInstrumentLabel(for session: Session) -> String? {
-        let explicitLabel = (session.value(forKey: "userInstrumentLabel") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let explicitLabel, !explicitLabel.isEmpty {
-            return explicitLabel
-        }
-
-        let fallbackName = session.instrument?.name?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let fallbackName, !fallbackName.isEmpty {
-            return fallbackName
-        }
-
-        return nil
+        ContentViewJournalTintResolver.instrumentLabel(for: session)
     }
 
     private func journalActivityLabel(for session: Session) -> String? {
-        let explicitLabel = (session.value(forKey: "userActivityLabel") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let explicitLabel, !explicitLabel.isEmpty {
-            return explicitLabel
-        }
-
-        if let code = session.value(forKey: "activityType") as? Int16 {
-            let fallbackLabel = from(code).label.trimmingCharacters(in: .whitespacesAndNewlines)
-            return fallbackLabel.isEmpty ? nil : fallbackLabel
-        }
-
-        return nil
+        ContentViewJournalTintResolver.activityLabel(for: session)
     }
 
     private func journalInstrumentOwnerID(for session: Session) -> String? {
-        let ownerID = session.ownerUserID?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let ownerID, !ownerID.isEmpty {
-            return ownerID
-        }
-        return effectiveUserID
+        ContentViewJournalTintResolver.instrumentOwnerID(
+            for: session,
+            fallbackUserID: effectiveUserID
+        )
     }
 
     private func journalInstrumentCounts(in sessions: [Session]) -> [String: Int] {
-        Theme.usageCounts(
-            labels: sessions.compactMap {
-                Theme.InstrumentTint.normalizedLabel(journalInstrumentLabel(for: $0))
-            }
-        )
+        ContentViewJournalTintResolver.instrumentCounts(in: sessions)
     }
 
     private func journalActivityCounts(in sessions: [Session]) -> [String: Int] {
-        Theme.usageCounts(
-            labels: sessions.compactMap {
-                Theme.ActivityTint.normalizedLabel(journalActivityLabel(for: $0))
-            }
-        )
+        ContentViewJournalTintResolver.activityCounts(in: sessions)
     }
 
     private func journalThreadLabel(for session: Session) -> String? {
-        let raw = ((session.value(forKey: "threadLabel") as? String) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-
-        guard let sanitized = ThreadLabelSanitizer.sanitize(raw, maxLength: 32),
-              !sanitized.isEmpty else {
-            return nil
-        }
-
-        return sanitized
+        ContentViewJournalTintResolver.threadLabel(for: session)
     }
 
     private func journalThreadCounts(in sessions: [Session]) -> [String: Int] {
-        Theme.usageCounts(
-            labels: sessions.compactMap {
-                Theme.ThreadTint.normalizedLabel(journalThreadLabel(for: $0))
-            }
-        )
+        ContentViewJournalTintResolver.threadCounts(in: sessions)
     }
 
     private func journalResolvedTintSource(in sessions: [Session]) -> Theme.ResolvedTintSource {
-        Theme.resolvedTintSource(
-            tintMode: journalTintMode,
-            instrumentCounts: journalInstrumentCounts(in: sessions),
-            activityCounts: journalActivityCounts(in: sessions),
-            threadCounts: journalThreadCounts(in: sessions),
-            persistAutoSource: false
+        ContentViewJournalTintResolver.resolvedTintSource(
+            in: sessions,
+            tintMode: journalTintMode
         )
     }
 
     private func journalResolvedTint(for session: Session, in sessions: [Session]) -> Theme.ResolvedTint {
-        Theme.resolvedTint(
-            instrument: journalInstrumentLabel(for: session),
-            activity: journalActivityLabel(for: session),
-            thread: journalThreadLabel(for: session),
-            tintMode: journalTintMode,
-            instrumentCounts: journalInstrumentCounts(in: sessions),
-            activityCounts: journalActivityCounts(in: sessions),
-            threadCounts: journalThreadCounts(in: sessions),
-            persistAutoSource: false
+        ContentViewJournalTintResolver.resolvedTint(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode
         )
     }
 
     private func journalWeekCardFillColor(for session: Session, in sessions: [Session]) -> Color {
-        journalResolvedTint(for: session, in: sessions).fill(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .cardMedium
+        ContentViewJournalTintResolver.weekCardFillColor(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
         )
     }
 
     private func journalWeekCardStrokeColor(for session: Session, in sessions: [Session]) -> Color {
-        journalResolvedTint(for: session, in: sessions).stroke(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .cardMedium
+        ContentViewJournalTintResolver.weekCardStrokeColor(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
         )
     }
 
     private func journalMonthBarFillColor(for session: Session, in sessions: [Session]) -> Color {
-        if journalResolvedTint(for: session, in: sessions).accent(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            shouldAssignIfNeeded: false
-        ) != nil {
-            return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
-        }
-        return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.055)
+        ContentViewJournalTintResolver.monthBarFillColor(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
+        )
     }
 
     private func journalMonthBarStrokeColor(for session: Session, in sessions: [Session]) -> Color {
-        if journalResolvedTint(for: session, in: sessions).accent(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            shouldAssignIfNeeded: false
-        ) != nil {
-            return Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
-        }
-        return Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.05)
+        ContentViewJournalTintResolver.monthBarStrokeColor(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
+        )
     }
 
     private func journalMonthBarAccentColor(for session: Session, in sessions: [Session]) -> Color? {
-        journalResolvedTint(for: session, in: sessions).accent(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            shouldAssignIfNeeded: false
+        ContentViewJournalTintResolver.monthBarAccentColor(
+            for: session,
+            in: sessions,
+            tintMode: journalTintMode,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
         )
     }
 
     private func journalThoughtThreadTint(for session: Session) -> Theme.ResolvedTint? {
-        guard journalTintMode == .thread,
-              let thread = journalThreadLabel(for: session),
-              !thread.isEmpty else {
-            return nil
-        }
-
-        return Theme.ResolvedTint(
-            source: .thread,
-            instrumentLabel: nil,
-            activityLabel: nil,
-            threadLabel: thread,
-            threadCounts: journalThreadCounts(in: journalTintContextSessions + [session])
+        ContentViewJournalTintResolver.thoughtThreadTint(
+            for: session,
+            tintMode: journalTintMode,
+            contextSessions: journalTintContextSessions
         )
     }
 
     private func journalThoughtThreadChipFillColor(for session: Session) -> Color? {
-        journalThoughtThreadTint(for: session)?.fill(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .pickerStrong,
-            shouldAssignIfNeeded: false
+        ContentViewJournalTintResolver.thoughtThreadChipFillColor(
+            for: session,
+            tintMode: journalTintMode,
+            contextSessions: journalTintContextSessions,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
         )
     }
 
     private func journalThoughtThreadChipTextColor(for session: Session) -> Color? {
-        journalThoughtThreadTint(for: session)?.stroke(
-            ownerID: journalInstrumentOwnerID(for: session),
-            scheme: colorScheme,
-            strength: .pickerStrong,
-            shouldAssignIfNeeded: false
+        ContentViewJournalTintResolver.thoughtThreadChipTextColor(
+            for: session,
+            tintMode: journalTintMode,
+            contextSessions: journalTintContextSessions,
+            fallbackUserID: effectiveUserID,
+            colorScheme: colorScheme
         )
     }
 
