@@ -1517,9 +1517,7 @@ private func loadPracticeDefaultsIfNeeded() {
 
             // Determine persisted state after hydration
             let d = UserDefaults.standard
-            let audioIDStrings = d.array(forKey: TimerDefaultsKey.stagedAudioIDs.rawValue) as? [String] ?? []
-            let videoIDStrings = d.array(forKey: TimerDefaultsKey.stagedVideoIDs.rawValue) as? [String] ?? []
-            let imageIDStrings = d.array(forKey: TimerDefaultsKey.stagedImageIDs.rawValue) as? [String] ?? []
+           
             
         // Restore staged video titles (metadata only; user-provided; no defaults)
         if let data = d.data(forKey: TimerDefaultsKey.videoTitles.rawValue),
