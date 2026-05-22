@@ -1368,7 +1368,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     }
 
     private func getVideoDuration(url: URL) -> Double {
-        let asset = AVAsset(url: url)
+        let asset = AVURLAsset(url: url)
         return CMTimeGetSeconds(asset.duration)
     }
 
