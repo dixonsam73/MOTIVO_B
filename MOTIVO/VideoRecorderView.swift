@@ -204,7 +204,7 @@ public struct VideoRecorderView: View {
             controller.onAppear()
             startPreparingOverlayTimer()
         }
-        .onChange(of: controller.isInteractiveReady) { ready in
+        .onChange(of: controller.isInteractiveReady) { _, ready in
             if ready {
                 preparingOverlayTask?.cancel()
                 preparingOverlayTask = nil
