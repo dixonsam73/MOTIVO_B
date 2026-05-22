@@ -157,12 +157,36 @@ struct ProfileStore {
                     didChange = true
 
                     do {
-                        _ = try PersistenceController.shared.fetchOrCreateUserInstrument(
-                            named: name,
-                            mapTo: inst,
-                            visibleOnProfile: true,
-                            in: moc
-                        )
+                        let norm = name
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .lowercased()
+
+                        let fr: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
+                        fr.fetchLimit = 1
+                        fr.predicate = NSCompoundPredicate(andPredicateWithSubpredicates: [
+                            NSPredicate(format: "ownerUserID == %@", bid),
+                            NSPredicate(format: "normalizedName == %@", norm)
+                        ])
+
+                        if let existing = try moc.fetch(fr).first {
+                            if existing.coreInstrument != inst {
+                                existing.coreInstrument = inst
+                            }
+
+                            if existing.isVisibleOnProfile != true {
+                                existing.isVisibleOnProfile = true
+                            }
+                        } else {
+                            let ui = UserInstrument(context: moc)
+                            ui.id = UUID()
+                            ui.ownerUserID = bid
+                            ui.displayName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                            ui.normalizedName = norm
+                            ui.isVisibleOnProfile = true
+                            ui.displayOrder = 0
+                            ui.coreInstrument = inst
+                        }
+
                     } catch {
                         NSLog("[ProfileStore] Multi-device bootstrap mirror failed for instrument %@: %@", name, String(describing: error))
                     }
