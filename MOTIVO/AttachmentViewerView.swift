@@ -1852,7 +1852,7 @@ private struct VideoPage: View {
     private func generatePoster() async {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                let asset = AVAsset(url: url)
+                let asset = AVURLAsset(url: url)
                 var resolvedAspectRatio: CGFloat? = nil
                 if let track = asset.tracks(withMediaType: .video).first {
                     let transformed = track.naturalSize.applying(track.preferredTransform)

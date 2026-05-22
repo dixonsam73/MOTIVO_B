@@ -135,7 +135,7 @@ enum StagingStore {
                     let tmp = dir.appendingPathComponent(".tmp_\(UUID().uuidString)")
                     if fm.fileExists(atPath: tmp.path) { try? fm.removeItem(at: tmp) }
                     try moveOrCopy(sourceURL: sourceURL, to: tmp)
-                    try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
+                    _ = try fm.replaceItemAt(abs, withItemAt: tmp, backupItemName: nil, options: [.usingNewMetadataOnly])
 
                     var newRef = ref
                     let finalURL = abs
