@@ -678,14 +678,14 @@ return AnyView(
             .onAppear {
                 maybePerformInitialAutoScroll(proxy: proxy, contentCount: comments.count)
             }
-            .onChange(of: comments.count) { newCount in
+            .onChange(of: comments.count) { _, newCount in
                 maybePerformInitialAutoScroll(proxy: proxy, contentCount: newCount)
             }
             .task(id: directoryKey(for: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])) {
                 await hydrateDirectoryIfNeeded(userIDs: comments.compactMap { store.authorUserID(for: $0.id) } + [ownerID ?? "", viewerID ?? ""])
             }
-            .onChange(of: scrollToBottomNonce) { _ in
-                scheduleScrollToBottom(proxy)
+            .onChange(of: scrollToBottomNonce) {
+                  scheduleScrollToBottom(proxy)
             }
             .accessibilitySortPriority(1)
                 }
@@ -761,13 +761,13 @@ return AnyView(
             .onAppear {
                 maybePerformInitialAutoScroll(proxy: proxy, contentCount: rows.count)
             }
-            .onChange(of: rows.count) { newCount in
+            .onChange(of: rows.count) { _, newCount in
                 maybePerformInitialAutoScroll(proxy: proxy, contentCount: newCount)
             }
             .task(id: directoryKey(for: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])) {
                 await hydrateDirectoryIfNeeded(userIDs: rows.map { $0.authorUserID } + [ownerUserID, viewerUserID])
             }
-            .onChange(of: scrollToBottomNonce) { _ in
+            .onChange(of: scrollToBottomNonce) {
                 scheduleScrollToBottom(proxy)
             }
             .accessibilitySortPriority(1)
