@@ -872,15 +872,18 @@ fileprivate struct SessionsRootView: View {
                                 if filterHeaderIndicatorActive {
                                     Capsule(style: .continuous)
                                         .fill(Theme.Colors.accent.opacity(0.14))
-                                        .frame(width: 34, height: 26)
                                 }
 
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.system(size: 14, weight: .semibold))
-                                    .foregroundStyle(filterHeaderIndicatorActive ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                                    .foregroundStyle(
+                                        filterHeaderIndicatorActive
+                                        ? Theme.Colors.accent
+                                        : Theme.Colors.secondaryText
+                                    )
                             }
+                            .frame(width: 34, height: 26)
                             .animation(.none, value: filterHeaderIndicatorActive)
-
                             Spacer(minLength: 0)
 
                             Image(systemName: filtersExpanded ? "chevron.up" : "chevron.down")
