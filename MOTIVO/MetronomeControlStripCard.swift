@@ -96,7 +96,7 @@ struct MetronomeControlStripCard: View {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
                         .fill(.ultraThinMaterial)
                 )
-                .onChange(of: metronomeBPM) { newBPM in
+                .onChange(of: metronomeBPM) { _, newBPM in
                     let clamped = min(max(newBPM, bpmRange.lowerBound), bpmRange.upperBound)
                     if clamped != metronomeBPM {
                         metronomeBPM = clamped
@@ -132,7 +132,7 @@ struct MetronomeControlStripCard: View {
                                 .fill(Color.orange.opacity(0.18 * accentFlashIntensity))
                         )
                 )
-                .onChange(of: metronomeAccentEvery) { rawValue in
+                .onChange(of: metronomeAccentEvery) { _, rawValue in
                     let clamped = clampAccent(raw: rawValue)
                     if clamped != metronomeAccentEvery {
                         metronomeAccentEvery = clamped
@@ -373,10 +373,10 @@ struct MetronomeCompactTrigger: View {
             metronomeIsOn = metronomeEngine.isRunning
             updateCompactBeatHandler()
         }
-        .onChange(of: shouldAnimateCompactIcon) { _ in
+        .onChange(of: shouldAnimateCompactIcon) {
             updateCompactBeatHandler()
         }
-        .onChange(of: metronomeIsOn) { _ in
+        .onChange(of: metronomeIsOn) {
             updateCompactBeatHandler()
         }
         .onDisappear {
@@ -541,7 +541,7 @@ private struct MetronomeVolumePopover: View {
             .tint(Theme.Colors.accent)
             .rotationEffect(.degrees(-90))
             .frame(width: 88, height: 32)
-            .onChange(of: value) { newVal in
+            .onChange(of: value) { _, newVal in
                 // Clamp + notify
                 let clamped = max(0.0, min(1.0, newVal))
                 if clamped != value {
