@@ -568,8 +568,19 @@ private func loadPracticeDefaultsIfNeeded() {
     guard taskLines.isEmpty, !clearedForSameContext else { return }
 
     // Helper to apply a loaded template and update tracking flags
-    func applyTemplate(_ strings: [String]) {
-        let mapped = strings.map { TaskLine(text: $0, isDone: false, type: .task) }
+    func applyTemplateLines(_ lines: [TaskLine]) {
+        let mapped = lines
+            .map {
+                TaskLine(
+                    text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    isDone: false,
+                    type: $0.type
+                )
+            }
+            .filter { !$0.text.isEmpty }
+
+        guard !mapped.isEmpty else { return }
+
         self.taskLines = mapped
         autoTaskTexts.removeAll()
         for line in mapped {
@@ -578,6 +589,82 @@ private func loadPracticeDefaultsIfNeeded() {
         lastDefaultsActivityRef = contextKey
         userClearedTasksForCurrentContext = false
         unlinkTaskSetForLoadedOrImportedList()
+    }
+
+    func applyTemplate(_ strings: [String]) {
+        applyTemplateLines(strings.map { TaskLine(text: $0, isDone: false, type: .task) })
+    }
+
+    func savedTaskSets(for baseTasksKey: String) -> [SavedTaskSetPadRecord] {
+        var merged: [SavedTaskSetPadRecord] = []
+        var seenIDs = Set<UUID>()
+
+        func merge(_ sets: [SavedTaskSetPadRecord]) {
+            for set in sets {
+                guard !seenIDs.contains(set.id) else { continue }
+                let normalizedItems = set.items
+                    .map {
+                        SavedTaskSetPadLine(
+                            id: $0.id,
+                            text: $0.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                            type: $0.type
+                        )
+                    }
+                    .filter { !$0.text.isEmpty }
+
+                guard !normalizedItems.isEmpty else { continue }
+
+                seenIDs.insert(set.id)
+                merged.append(
+                    SavedTaskSetPadRecord(
+                        id: set.id,
+                        name: set.name,
+                        items: normalizedItems
+                    )
+                )
+            }
+        }
+
+        func decodeSets(from key: String) {
+            guard let data = defaults.data(forKey: key) else { return }
+
+            if let decoded = try? JSONDecoder().decode([SavedTaskSetPadRecord].self, from: data) {
+                merge(decoded)
+            } else if let legacyDecoded = try? JSONDecoder().decode([LegacySavedTaskSetPadRecord].self, from: data) {
+                merge(
+                    legacyDecoded.map {
+                        SavedTaskSetPadRecord(
+                            id: $0.id,
+                            name: $0.name,
+                            items: $0.items.map { SavedTaskSetPadLine(text: $0, type: .task) }
+                        )
+                    }
+                )
+            }
+        }
+
+        decodeSets(from: globalTaskSetsKey)
+        decodeSets(from: baseTasksKey + "::saved_sets_v1")
+        return merged
+    }
+
+    func applyDefaultTaskSetIfAvailable(for baseTasksKey: String) -> Bool {
+        let defaultSetIDKey = baseTasksKey + "::default_set_id_v1"
+        guard let rawID = defaults.string(forKey: defaultSetIDKey),
+              let selectedID = UUID(uuidString: rawID) else {
+            return false
+        }
+
+        guard let selectedSet = savedTaskSets(for: baseTasksKey).first(where: { $0.id == selectedID }) else {
+            return false
+        }
+
+        applyTemplateLines(
+            selectedSet.items.map {
+                TaskLine(text: $0.text, isDone: false, type: $0.type)
+            }
+        )
+        return !taskLines.isEmpty
     }
 
     // 0) Preferred path (when instrument is selected): Instrument×Activity template.
@@ -598,9 +685,21 @@ private func loadPracticeDefaultsIfNeeded() {
             instToggleValue = defaults.bool(forKey: instToggleKey)
         }
 
-        if instToggleValue, let arr = defaults.array(forKey: instTasksKey) as? [String] {
-            applyTemplate(arr)
-            return
+        if instToggleValue {
+            if applyDefaultTaskSetIfAvailable(for: instTasksKey) {
+                return
+            }
+
+            if let data = defaults.data(forKey: instTasksKey),
+               let decoded = decodeTypedTaskPresetLines(from: data) {
+                applyTemplateLines(decoded)
+                return
+            }
+
+            if let arr = defaults.array(forKey: instTasksKey) as? [String] {
+                applyTemplate(arr)
+                return
+            }
         }
         // If no instrument-specific list exists (or it's empty/missing), fall through to activity-only.
     }
@@ -618,17 +717,14 @@ private func loadPracticeDefaultsIfNeeded() {
     }
     guard toggleValue else { return }
 
+    if applyDefaultTaskSetIfAvailable(for: tasksKey) {
+        return
+    }
+
     // 1a) Preferred: per-activity template already exists.
     if let data = defaults.data(forKey: tasksKey),
        let decoded = decodeTypedTaskPresetLines(from: data) {
-        self.taskLines = decoded
-        autoTaskTexts.removeAll()
-        for line in decoded {
-            autoTaskTexts[line.id] = line.text
-        }
-        lastDefaultsActivityRef = contextKey
-        userClearedTasksForCurrentContext = false
-        unlinkTaskSetForLoadedOrImportedList()
+        applyTemplateLines(decoded)
         return
     }
 
