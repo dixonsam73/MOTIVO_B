@@ -249,7 +249,6 @@ struct AudioRecorderView: View {
     // MARK: - Recording Logic
 
     func ensureRecordPermission() async -> Bool {
-        let session = AVAudioSession.sharedInstance()
         switch AVAudioApplication.shared.recordPermission {
         case .granted:
             return true
