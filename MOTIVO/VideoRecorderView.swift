@@ -1423,7 +1423,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     private func generateMidpointThumbnail(for url: URL, completion: @escaping (UIImage?) -> Void) {
         DispatchQueue.global(qos: .userInitiated).async {
-            let asset = AVAsset(url: url)
+            let asset = AVURLAsset(url: url)
             let duration = CMTimeGetSeconds(asset.duration)
             guard duration.isFinite && duration > 0 else {
                 DispatchQueue.main.async { completion(nil) }
