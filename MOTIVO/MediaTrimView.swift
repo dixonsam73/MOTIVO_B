@@ -57,8 +57,8 @@ public struct MediaTrimView: View {
     public var body: some View {
         content
             .onAppear { model.load(url: assetURL, mediaType: mediaType) }
-            .onChange(of: assetURL) { newURL in
-                model.load(url: newURL, mediaType: mediaType)
+            .onChange(of: assetURL) { _, newURL in
+              model.load(url: newURL, mediaType: mediaType)
             }
             .onDisappear { model.teardown() }
             .appBackground()
