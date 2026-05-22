@@ -736,7 +736,12 @@ enum Theme {
         }
 
         private static func normalizedPrimaryInstrumentLabel(ownerID: String?) -> String? {
-            let viewContext = PersistenceController.shared.container.viewContext
+            guard Thread.isMainThread else { return nil }
+
+            let viewContext = MainActor.assumeIsolated {
+                PersistenceController.shared.container.viewContext
+            }
+
             let request = NSFetchRequest<NSManagedObject>(entityName: "Profile")
             request.fetchLimit = 1
 
