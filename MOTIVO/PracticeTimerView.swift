@@ -4272,7 +4272,7 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
                 try? jpg.write(to: p, options: .atomic)
                 posterURL = p
             }
-            let duration = AVAsset(url: tmp).duration.seconds
+            let duration = AVURLAsset(url: tmp).duration.seconds
             Task {
                 do {
                     let ref = try await StagingStore.saveNew(from: tmp, kind: .video, suggestedName: id.uuidString, duration: duration.isFinite ? duration : nil, poster: posterURL)
@@ -4368,7 +4368,7 @@ private func openAudioViewer(_ id: UUID) {
         let tmp = FileManager.default.temporaryDirectory.appendingPathComponent(id.uuidString).appendingPathExtension("mov")
         do {
             try data.write(to: tmp, options: .atomic)
-            let asset = AVAsset(url: tmp)
+            let asset = AVURLAsset(url: tmp)
             let imgGen = AVAssetImageGenerator(asset: asset)
             imgGen.appliesPreferredTrackTransform = true
             imgGen.maximumSize = CGSize(width: 512, height: 512)
