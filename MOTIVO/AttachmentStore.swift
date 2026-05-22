@@ -39,7 +39,7 @@ struct AttachmentStore {
     static func generateVideoPoster(url: URL, at seconds: Double = 0.5) -> UIImage? {
         let key = url.path as NSString
         if let cached = _PosterCache.shared.cache.object(forKey: key) { return cached }
-        let asset = AVAsset(url: url)
+        let asset = AVURLAsset(url: url)
         let gen = AVAssetImageGenerator(asset: asset)
         gen.appliesPreferredTrackTransform = true
         gen.requestedTimeToleranceBefore = .zero
