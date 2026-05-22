@@ -250,7 +250,7 @@ struct AudioRecorderView: View {
 
     func ensureRecordPermission() async -> Bool {
         let session = AVAudioSession.sharedInstance()
-        switch session.recordPermission {
+        switch AVAudioApplication.shared.recordPermission {
         case .granted:
             return true
         case .denied:
@@ -258,7 +258,7 @@ struct AudioRecorderView: View {
         case .undetermined:
             do {
                 return try await withCheckedThrowingContinuation { continuation in
-                    session.requestRecordPermission { granted in
+                    AVAudioApplication.requestRecordPermission { granted in
                         continuation.resume(returning: granted)
                     }
                 }
@@ -273,7 +273,7 @@ struct AudioRecorderView: View {
     func configureSessionIfNeeded() async {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP])
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP, .allowBluetoothA2DP])
             try session.setActive(true, options: [])
         } catch {
             setError("Failed to configure audio session: \(error.localizedDescription)")
