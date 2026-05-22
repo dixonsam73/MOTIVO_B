@@ -60,14 +60,14 @@ struct MediaRecorderRowCard: View {
                         guard !isTunerOpen else { return }
                         stopAttachmentPlayback()
 
-                        let micPerm = AVAudioSession.sharedInstance().recordPermission
-
+                        let micPerm = AVAudioApplication.shared.recordPermission
+                        
                         switch micPerm {
                         case .granted:
                             showAudioRecorder = true
 
                         case .undetermined:
-                            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                            AVAudioApplication.requestRecordPermission { granted in
                                 DispatchQueue.main.async {
                                     if granted {
                                         showAudioRecorder = true
@@ -139,12 +139,12 @@ struct MediaRecorderRowCard: View {
                     }
 
                     func checkMicrophoneThenPresent() {
-                        let micPerm = AVAudioSession.sharedInstance().recordPermission
+                        let micPerm = AVAudioApplication.shared.recordPermission
                         switch micPerm {
                         case .granted:
                             presentVideoRecorder()
                         case .undetermined:
-                            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                            AVAudioApplication.requestRecordPermission { granted in
                                 DispatchQueue.main.async {
                                     if granted {
                                         presentVideoRecorder()
