@@ -774,13 +774,13 @@ fileprivate struct SessionsRootView: View {
         }
         .pickerStyle(.segmented)
         .controlSize(.small)
-        .onChange(of: selectedScope) { newValue in
+        .onChange(of: selectedScope) {  _, newValue in
             #if canImport(UIKit)
             ContentViewKeyboardDismiss.dismiss()
             #endif
             isAwaitingFeedFetchStart = (newValue == .all) && useBackendFeed
         }
-        .onChange(of: backendFeedStore.isFetching) { isFetching in
+        .onChange(of: backendFeedStore.isFetching) {  _, isFetching in
             if isFetching {
                 isAwaitingFeedFetchStart = false
             }
@@ -1438,7 +1438,7 @@ fileprivate struct SessionsRootView: View {
 
                         await performAutoReturnRefreshBundle(scopeKey: scopeKey)
                     }
-                    .onChange(of: selectedScope) { _ in
+                    .onChange(of: selectedScope) {
                         DispatchQueue.main.async {
                             proxy.scrollTo(topID, anchor: .top)
                         }

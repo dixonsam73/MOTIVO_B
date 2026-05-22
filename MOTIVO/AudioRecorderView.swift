@@ -188,10 +188,10 @@ struct AudioRecorderView: View {
             removeObservers()
             postAudioRecorderRecordingState(false)
         }
-        .onChange(of: scenePhase) { newPhase in
+        .onChange(of: scenePhase) { _, newPhase in
             handleScenePhaseChange(newPhase)
         }
-        .onChange(of: state) { newState in
+        .onChange(of: state) { _, newState in
             postAudioRecorderRecordingState(newState == .recording)
         }
     }
