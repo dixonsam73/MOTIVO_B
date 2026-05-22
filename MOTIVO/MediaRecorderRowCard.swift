@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260402_161200_tuner_recorder_gate_v1
-// SCOPE: Tuner scope only — gate audio recorder activation while tuner is open; preserve all existing UI/logic otherwise.
-// SEARCH-TOKEN: 20260402_161200_tuner_recorder_gate_v1
+// CHANGE-ID: 20260522_150900_MRRC_PermissionRecovery
+// SCOPE: MediaRecorderRowCard — replace silent video camera/microphone permission failures with local recovery alerts + Settings route. No UI/logic changes outside permission recovery.
+// SEARCH-TOKEN: 20260522_150900_MRRC_PermissionRecovery
 
 import SwiftUI
 import AVFoundation
@@ -13,6 +13,8 @@ struct MediaRecorderRowCard: View {
     @Binding var droneIsOn: Bool
 
     @State private var isAudioRecorderRecording = false
+    @State private var showCameraDeniedAlert = false
+    @State private var showMicrophoneDeniedAlert = false
 
     let recorderIcon: Color
     let droneEngine: DroneEngine
@@ -57,7 +59,30 @@ struct MediaRecorderRowCard: View {
                     } else {
                         guard !isTunerOpen else { return }
                         stopAttachmentPlayback()
-                        showAudioRecorder = true
+
+                        let micPerm = AVAudioSession.sharedInstance().recordPermission
+
+                        switch micPerm {
+                        case .granted:
+                            showAudioRecorder = true
+
+                        case .undetermined:
+                            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+                                DispatchQueue.main.async {
+                                    if granted {
+                                        showAudioRecorder = true
+                                    } else {
+                                        showMicrophoneDeniedAlert = true
+                                    }
+                                }
+                            }
+
+                        case .denied:
+                            showMicrophoneDeniedAlert = true
+
+                        @unknown default:
+                            showMicrophoneDeniedAlert = true
+                        }
                     }
                 } label: {
                     Image(systemName: "mic.fill")
@@ -124,14 +149,14 @@ struct MediaRecorderRowCard: View {
                                     if granted {
                                         presentVideoRecorder()
                                     } else {
-                                        // denied: do nothing (per scope)
+                                        showMicrophoneDeniedAlert = true
                                     }
                                 }
                             }
                         case .denied:
-                            break
+                            showMicrophoneDeniedAlert = true
                         @unknown default:
-                            break
+                            showMicrophoneDeniedAlert = true
                         }
                     }
 
@@ -145,14 +170,14 @@ struct MediaRecorderRowCard: View {
                                 if granted {
                                     checkMicrophoneThenPresent()
                                 } else {
-                                    // denied: do nothing (per scope)
+                                    showCameraDeniedAlert = true
                                 }
                             }
                         }
                     case .denied, .restricted:
-                        break
+                        showCameraDeniedAlert = true
                     @unknown default:
-                        break
+                        showCameraDeniedAlert = true
                     }
                 } label: {
                     Image(systemName: "video.fill")
@@ -176,6 +201,34 @@ struct MediaRecorderRowCard: View {
             if !isShown {
                 isAudioRecorderRecording = false
             }
+        }
+        .alert(
+            "Camera access denied",
+            isPresented: $showCameraDeniedAlert
+        ) {
+            Button("OK", role: .cancel) {}
+
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        } message: {
+            Text("Enable camera access in Settings to capture media.")
+        }
+        .alert(
+            "Microphone access denied",
+            isPresented: $showMicrophoneDeniedAlert
+        ) {
+            Button("OK", role: .cancel) {}
+
+            Button("Open Settings") {
+                if let url = URL(string: UIApplication.openSettingsURLString) {
+                    UIApplication.shared.open(url)
+                }
+            }
+        } message: {
+            Text("Enable microphone access in Settings to record audio or video.")
         }
     }
 }
