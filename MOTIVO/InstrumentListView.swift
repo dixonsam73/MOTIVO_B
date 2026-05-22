@@ -230,7 +230,6 @@ ToolbarItem(placement: .cancellationAction) {
                     existing.setValue(UUID(), forKey: "id")
                     try? moc.save()
                 }
-                profile = existing
                 return existing
             } else {
                 let p = Profile(context: moc)
@@ -239,7 +238,6 @@ ToolbarItem(placement: .cancellationAction) {
                 p.primaryInstrument = instrumentsForProfileNames().first ?? ""
                 p.defaultPrivacy = false
                 try? moc.save()
-                profile = p
                 return p
             }
         } catch {
@@ -256,6 +254,8 @@ ToolbarItem(placement: .cancellationAction) {
         }
 
         let loadedProfile = loadProfileOnly()
+        profile = loadedProfile
+        
         let availableNames = instrumentsForProfileNames()
         let persisted = (loadedProfile?.primaryInstrument ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
 
