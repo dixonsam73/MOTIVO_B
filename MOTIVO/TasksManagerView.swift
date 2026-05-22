@@ -442,7 +442,7 @@ struct TasksManagerView: View {
                     Toggle("Pre-fill tasks in Session Timer", isOn: $autofillEnabled)
                         .font(Theme.Text.body)
                         .tint(Theme.Colors.accent)
-                        .onChange(of: autofillEnabled) { _ in
+                        .onChange(of: autofillEnabled) {
                             saveToggle()
                         }
 
@@ -593,8 +593,8 @@ struct TasksManagerView: View {
                 }
                 loadAll()
             }
-            .onChange(of: selectedActivityRef) { _ in loadAll() }
-            .onChange(of: selectedInstrumentID) { _ in loadAll() }
+            .onChange(of: selectedActivityRef) { loadAll() }
+            .onChange(of: selectedInstrumentID) { loadAll() }
             .appBackground()
         }
     }
