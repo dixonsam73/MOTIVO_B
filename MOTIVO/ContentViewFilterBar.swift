@@ -349,7 +349,7 @@ struct FilterBar: View {
                         .tint(Theme.Colors.accent.opacity(0.72))
                         .controlSize(.small)
                         .scaleEffect(1.0, anchor: .trailing)
-                        .onChange(of: savedOnly) { _ in
+                        .onChange(of: savedOnly) {
                             #if canImport(UIKit)
                             ContentViewKeyboardDismiss.dismiss()
                             #endif
