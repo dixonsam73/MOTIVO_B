@@ -36,7 +36,7 @@ enum StagingStore {
     // MARK: - Public API
 
     /// Base folder: Application Support/MOTIVO/Staging
-    static var baseURL: URL {
+    nonisolated static var baseURL: URL {
         let fm = FileManager.default
         let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         return appSupport.appendingPathComponent("MOTIVO", isDirectory: true)
@@ -44,7 +44,7 @@ enum StagingStore {
     }
 
     /// Ensure directory exists and is excluded from backups.
-    static func bootstrap() throws {
+    nonisolated static func bootstrap() throws {
         let fm = FileManager.default
         let dir = baseURL
         if !fm.fileExists(atPath: dir.path) {
@@ -248,14 +248,14 @@ enum StagingStore {
         }
     }
 
-    private static func dateFolderName(_ date: Date) -> String {
+    nonisolated private static func dateFolderName(_ date: Date) -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.dateFormat = "yyyy-MM-dd"
         return f.string(from: date)
     }
 
-    private static func relativePath(for url: URL) -> String {
+    nonisolated private static func relativePath(for url: URL) -> String {
         let base = baseURL.standardizedFileURL
         let std = url.standardizedFileURL
         let path = std.path
@@ -268,8 +268,8 @@ enum StagingStore {
         return day + "/" + url.lastPathComponent
     }
 
-    private static func moveOrCopy(sourceURL: URL, to destURL: URL) throws {
-    let fm = FileManager.default
+    nonisolated private static func moveOrCopy(sourceURL: URL, to destURL: URL) throws {
+        let fm = FileManager.default
     if fm.fileExists(atPath: destURL.path) {
         try fm.removeItem(at: destURL)
     }
@@ -299,8 +299,8 @@ enum StagingStore {
     }
 }
 
-private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Bool {
-    let src = sourceURL.standardizedFileURL.path
+    nonisolated private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Bool {
+        let src = sourceURL.standardizedFileURL.path
 
     // temporaryDirectory is always safe (our process owns it)
     let tmpRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
@@ -317,7 +317,7 @@ private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Boo
     return false
 }
 
-    private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
+    nonisolated private static func refByChangingPath(_ ref: StagedAttachmentRef, to newRelative: String) -> StagedAttachmentRef {
         StagedAttachmentRef(id: ref.id, kind: ref.kind, relativePath: newRelative, createdAt: ref.createdAt, duration: ref.duration, posterPath: ref.posterPath, audioUserTitle: ref.audioUserTitle, audioAutoTitle: ref.audioAutoTitle, audioDisplayTitle: ref.audioDisplayTitle)
     }
 
@@ -449,14 +449,14 @@ private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Boo
 
     // MARK: - File-backed JSON storage
 
-    private static func refsFileURL() -> URL {
+    nonisolated private static func refsFileURL() -> URL {
         do {
             try bootstrap()
         } catch {}
         return baseURL.appendingPathComponent("staged.json")
     }
 
-    private static func loadRefs() -> [StagedAttachmentRef] {
+    nonisolated private static func loadRefs() -> [StagedAttachmentRef] {
         let url = refsFileURL()
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path) {
@@ -508,7 +508,7 @@ private static func shouldDeleteSourceAfterCopyFallback(_ sourceURL: URL) -> Boo
         }
     }
 
-    private static func saveRefs(_ refs: [StagedAttachmentRef]) {
+    nonisolated private static func saveRefs(_ refs: [StagedAttachmentRef]) {
         let url = refsFileURL()
         do {
             let data = try JSONEncoder().encode(refs)
