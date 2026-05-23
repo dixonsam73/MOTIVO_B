@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260523_130000_AVV_StateHardening_B1
+// SCOPE: AttachmentViewerView state hardening — remove favourite seeding mutation from body evaluation and run it from lifecycle/index-change paths only. No UI, playback, trim, storage, ordering, navigation, backend, or schema changes.
+// SEARCH-TOKEN: 20260523_130000_AVV_StateHardening_B1
+
 // CHANGE-ID: 20260423_162500_AVV_MediaControlsRefinedx
 // SCOPE: AttachmentViewerView media player polish — unify AirPlay chrome with other floating controls, keep portrait trayless controls, move landscape video controls onto the viewer background surface, and remove duplicate paused-state play button from the video transport row. No playback/scrub/routing logic changes.
 // SEARCH-TOKEN: 20260423_162500_AVV_MediaControlsRefined
@@ -383,10 +387,7 @@ private func currentURL() -> URL? {
         canShare: Bool = true,
         replaceStrategy: ReplaceStrategy = .immediate
     ) {
-        #if DEBUG
-        print("[AttachmentViewer] init image=\(imageURLs.count) video=\(videoURLs.count) audio=\(audioURLs.count) startIndex=\(startIndex)")
-        #endif
-
+       
         self.imageURLs = imageURLs
         self._videoURLs = State(initialValue: videoURLs)
         self._audioURLs = State(initialValue: audioURLs)
@@ -540,14 +541,6 @@ private func currentURL() -> URL? {
     }
 
     var body: some View {
-        #if DEBUG
-        let _ = {
-            let count = media.count
-            print("[AttachmentViewer] body initial media.count=\(count) currentIndex=\(currentIndex)")
-            return 0
-        }()
-        #endif
-
         ZStack {
             Color.clear.appBackground().ignoresSafeArea()
 
@@ -624,6 +617,7 @@ private func currentURL() -> URL? {
                         let url = media[clamped].url
                         cachedURL = url
                         seedPrivacy(for: url)
+                        seedFavouriteIfNeeded()
                         // Note: Private items should not be considered as default thumbnail candidates by the presenter.
                     }
                 }
@@ -646,6 +640,7 @@ private func currentURL() -> URL? {
                         let url = media[idx].url
                         cachedURL = url
                         seedPrivacy(for: url)
+                        seedFavouriteIfNeeded()
                     }
                 }
             }
@@ -680,7 +675,6 @@ private func currentURL() -> URL? {
 
                     if media.indices.contains(currentIndex) {
                         let currentURL = media[currentIndex].url
-                        let _ = seedFavouriteIfNeeded()
                         let isFav = optimisticIsFavourite(currentURL)
                         let isPriv = optimisticIsPrivate(currentURL)
                         let currentAttachmentKind = media[currentIndex].kind
