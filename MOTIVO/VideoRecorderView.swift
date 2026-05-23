@@ -293,7 +293,6 @@ final class VideoRecorderController: NSObject,
     private let dbgID = String(UUID().uuidString.prefix(6))
     private var dbgSawFirstVideoSample = false
     private var dbgDidLogFirstTimerTick: Bool = false
-    private var dbgLastElapsedSeconds: Double? = nil
     private var dbgDidLogWriterStartWriting: Bool = false
     private var dbgDidLogWriterInputsCreated: Bool = false
     private var dbgDidLogFirstBufferedFlush: Bool = false
@@ -633,7 +632,7 @@ final class VideoRecorderController: NSObject,
     // MARK: - Timer
 
     private func startTimer() {
-        dbg("UI timer startTimer() invoked; state=\(state)")
+      
         stopTimer()
         let t = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             self?.timerFired()
@@ -656,15 +655,9 @@ final class VideoRecorderController: NSObject,
 
             if !dbgDidLogFirstTimerTick {
                 dbgDidLogFirstTimerTick = true
-                dbg("UI timer first tick; elapsed=\(String(format: "%.3f", elapsedRecordingTime))s; recordingWallClockStart=\(recordingWallClockStart != nil)")
+             
             }
-            if let last = dbgLastElapsedSeconds {
-                // If elapsed time ever moves backwards, capture it (this matches the 'erratic timer' symptom).
-                if elapsedRecordingTime + 0.050 < last {
-                    dbg("UI timer anomaly: elapsed moved backwards; last=\(String(format: "%.3f", last))s now=\(String(format: "%.3f", elapsedRecordingTime))s")
-                }
-            }
-            dbgLastElapsedSeconds = elapsedRecordingTime
+         
             }
             if elapsedRecordingTime >= 15 * 60 { stopRecording() }
         case .pausedRecording:
@@ -955,7 +948,7 @@ final class VideoRecorderController: NSObject,
         if writer.canAdd(aInput) { writer.add(aInput) }
             if !dbgDidLogWriterInputsCreated {
                 dbgDidLogWriterInputsCreated = true
-                dbg("writer inputs created+added; videoSettings=\(String(describing: vInput.outputSettings)); audioSettings=\(String(describing: aInput.outputSettings))")
+             
             }
 
         self.assetWriter = writer
@@ -995,7 +988,7 @@ final class VideoRecorderController: NSObject,
 
         // Start writer + session on this (non-sample) queue.
         if writer.status == .unknown {
-            dbg("writer.startWriting() at session start; status=\(writer.status.rawValue)")
+          
             writer.startWriting()
         }
 
@@ -1084,12 +1077,10 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
         guard !isRecordStartInProgress && !isArmedToRecord else {
-            dbg("startRecording() ignored; startup already in progress or armed")
             return
         }
 
         isRecordStartInProgress = true
-        dbg("startRecording() tap; state=\(state)")
         // DEBUG: mark record tap time (monotonic) for first-frame timing line
         debugRecordTapMonotonic = CACurrentMediaTime()
         // Reset timer state for a new clip (prevents zero-stuck / backwards anomalies)
@@ -1161,8 +1152,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
         // Stop must be serialized against ongoing sample appends to avoid races/crashes (especially rear camera in landscape).
         // We stop accepting new samples immediately, then finish the writer on writerQueue.
-        dbg("stopRecording() called; writer.status=\(assetWriter?.status.rawValue ?? -1); startTimeSet=\(recordingStartTime != nil)")
-
+       
         pendingStartRecordingToken = nil
         stopTimer()
         recordingWallClockStart = nil
@@ -1192,7 +1182,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                 return
             }
 
-            self.dbg("stopRecording finishing on writerQueue; pendingVideo=\(self.pendingVideoBuffers.count); pendingAudio=\(self.pendingAudioBuffers.count)")
+         
 
             // Best effort: drain any buffered video that can still be appended before closing.
             if let vInput = self.videoInput {
@@ -1473,7 +1463,6 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
                 self.isPreactivatingRecordingAudioSession = false
                 if didPreactivate {
                     self.hasPreactivatedRecordingAudioSession = true
-                    self.dbg("recording audio session preactivated")
                 }
             }
         }
@@ -1882,7 +1871,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         guard let first = pendingVideoBuffers.first else { return }
 
         let pts = CMSampleBufferGetPresentationTimeStamp(first)
-        dbg("startSession(at: pts) about to call; pts=\(pts.seconds); writer.status=\(writer.status.rawValue); pendingVideo=\(pendingVideoBuffers.count); pendingAudio=\(pendingAudioBuffers.count)")
+ 
 
         ensureSessionStarted(with: sessionStartPTS ?? pts)
         if recordingStartTime == nil {
