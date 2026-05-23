@@ -1,3 +1,12 @@
+// CHANGE-ID: 20260523_153400_VideoRecorder_AudioSessionPreactivation
+// SCOPE: VideoRecorder startup lifecycle hardening — preactivate recording AVAudioSession after preview interactive readiness to reduce first-record cold-start delay. Preserve UI, encoding, bitrate, storage, staging, trim, cadence, and timer behavior.
+// SEARCH-TOKEN: 20260523_153400_VideoRecorder_AudioSessionPreactivation
+
+// CHANGE-ID: 20260523_151800_VideoRecorder_PreviewIsolation
+// SCOPE: VideoRecorder startup lifecycle hardening — remove preview-time writer warm-up so first-launch camera monitoring remains isolated; preserve duplicate-start latch. No UI, encoding, bitrate, storage, staging, or trim changes.
+// SEARCH-TOKEN: 20260523_151800_VideoRecorder_PreviewIsolation
+
+
 // CHANGE-ID: 20260313_202600_RecorderHygiene_Video_1b9d5e24
 // SCOPE: Recorder hygiene hardening — add targeted launch sweep helper for abandoned Documents/motivo_vid_*.mov capture files.
 // SEARCH-TOKEN: 20260313_202600_RecorderHygiene_Video_1b9d5e24
@@ -335,7 +344,12 @@ final class VideoRecorderController: NSObject,
     private var interactiveReadyWorkItem: DispatchWorkItem? = nil
     private var hasSetInteractiveReady: Bool = false
 
+    private let audioSessionPreactivationQueue = DispatchQueue(label: "com.motivo.videoRecorder.audioSessionPreactivation")
+    private var hasPreactivatedRecordingAudioSession: Bool = false
+    private var isPreactivatingRecordingAudioSession: Bool = false
+
     private var isArmedToRecord: Bool = false
+    private var isRecordStartInProgress: Bool = false
 
     // Poster thumbnail image
     @Published var previewImage: UIImage? = nil
@@ -435,6 +449,7 @@ final class VideoRecorderController: NSObject,
         }
         isRecorderReady = false
         isArmedToRecord = false
+        isRecordStartInProgress = false
     }
 
     deinit {
@@ -886,6 +901,7 @@ final class VideoRecorderController: NSObject,
                 guard !self.hasSetInteractiveReady else { return }
                 self.hasSetInteractiveReady = true
                 self.isInteractiveReady = true
+                self.preactivateRecordingAudioSessionIfNeeded()
             }
             self.interactiveReadyWorkItem = item
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
@@ -1067,6 +1083,12 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
     private func startRecording() {
         guard state == .idle || state == .pausedRecording else { return }
+        guard !isRecordStartInProgress && !isArmedToRecord else {
+            dbg("startRecording() ignored; startup already in progress or armed")
+            return
+        }
+
+        isRecordStartInProgress = true
         dbg("startRecording() tap; state=\(state)")
         // DEBUG: mark record tap time (monotonic) for first-frame timing line
         debugRecordTapMonotonic = CACurrentMediaTime()
@@ -1147,6 +1169,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
 
         // Prevent any further sample processing as early as possible.
         isArmedToRecord = false
+        isRecordStartInProgress = false
         writerQueue.async { [weak self] in
             self?.isStoppingRecording = true
         }
@@ -1237,6 +1260,18 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
+        isArmedToRecord = false
+        isRecordStartInProgress = false
+        writerQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.isRecordingArmed = false
+            self.isStartingWriterSession = false
+            self.pendingSessionStartPTS = nil
+            self.writerSessionReady = false
+            self.pendingFirstAcceptedVideoBuffer = nil
+            self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
+            self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
+        }
     }
 
     private func finishRecordingWithError() {
@@ -1285,6 +1320,18 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         lastAppendedVideoPTS = nil
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
+        isArmedToRecord = false
+        isRecordStartInProgress = false
+        writerQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.isRecordingArmed = false
+            self.isStartingWriterSession = false
+            self.pendingSessionStartPTS = nil
+            self.writerSessionReady = false
+            self.pendingFirstAcceptedVideoBuffer = nil
+            self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
+            self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
+        }
     }
 
     private func resetState() {
@@ -1307,6 +1354,17 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         pendingVideoBuffers.removeAll(keepingCapacity: true)
         pendingAudioBuffers.removeAll(keepingCapacity: true)
         isArmedToRecord = false
+        isRecordStartInProgress = false
+        writerQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.isRecordingArmed = false
+            self.isStartingWriterSession = false
+            self.pendingSessionStartPTS = nil
+            self.writerSessionReady = false
+            self.pendingFirstAcceptedVideoBuffer = nil
+            self.pendingVideoDuringSessionStart.removeAll(keepingCapacity: true)
+            self.pendingAudioDuringSessionStart.removeAll(keepingCapacity: true)
+        }
         // Note: Do not reset isRecorderReady here to avoid breaking readiness mid-session.
     }
 
@@ -1381,6 +1439,43 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             applyPreferredRecordingInput()
         } catch {
             // Ignore silently
+        }
+    }
+
+    private func preactivateRecordingAudioSessionIfNeeded() {
+        guard !hasPreactivatedRecordingAudioSession && !isPreactivatingRecordingAudioSession else { return }
+
+        isPreactivatingRecordingAudioSession = true
+
+        audioSessionPreactivationQueue.async { [weak self] in
+            let session = AVAudioSession.sharedInstance()
+            var didPreactivate = false
+
+            do {
+                try session.setCategory(.playAndRecord,
+                                        options: [.defaultToSpeaker, .allowBluetoothA2DP])
+                try session.setActive(true)
+
+                let inputs = session.availableInputs ?? []
+                if let usb = inputs.first(where: { $0.portType == .usbAudio }) {
+                    try? session.setPreferredInput(usb)
+                } else if let builtIn = inputs.first(where: { $0.portType == .builtInMic }) {
+                    try? session.setPreferredInput(builtIn)
+                }
+
+                didPreactivate = true
+            } catch {
+                didPreactivate = false
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.isPreactivatingRecordingAudioSession = false
+                if didPreactivate {
+                    self.hasPreactivatedRecordingAudioSession = true
+                    self.dbg("recording audio session preactivated")
+                }
+            }
         }
     }
 
@@ -1636,6 +1731,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         if assetWriter == nil {
             guard let url = recordingURL else {
                 isArmedToRecord = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.isRecordStartInProgress = false
+                }
                 return
             }
             do {
@@ -1643,6 +1741,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             } catch {
                 dbg("setupWriter failed: \(error)")
                 isArmedToRecord = false
+                DispatchQueue.main.async { [weak self] in
+                    self?.isRecordStartInProgress = false
+                }
                 return
             }
         }
