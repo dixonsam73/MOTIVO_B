@@ -1533,21 +1533,31 @@ private func initials(from string: String) -> String {
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
             .onChange(of: auth.currentUserID) { oldValue, newValue in
-               
+
+                // Signed-out gate flow:
+                // after a successful Sign in with Apple from the gate-presented ProfileView,
+                // dismiss the gate and reveal PracticeTimerView directly.
+                if signedOutGateWasVisible,
+                   newValue != nil,
+                   onClose != nil {
+                    onClose?()
+                    return
+                }
 
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
                 // before we clear UI state (location is stored per-user in ProfileStore).
                 if newValue == nil {
-                // Delete Account v2: during a factory reset, never persist per-user location back to ProfileStore.
-                if LocalFactoryReset.isInProgress {
-                    clearUserPresentedStateForSignOut()
-                    return
-                }
+                    // Delete Account v2: during a factory reset, never persist per-user location back to ProfileStore.
+                    if LocalFactoryReset.isInProgress {
+                        clearUserPresentedStateForSignOut()
+                        return
+                    }
 
                     if let oldBackendID = auth.backendUserID {
                         ProfileStore.setLocation(locationText, for: oldBackendID)
                     }
+
                     // Device-level Profile: keep existing behaviour by saving pending edits
                     // before clearing the view's presented state.
                     save()
