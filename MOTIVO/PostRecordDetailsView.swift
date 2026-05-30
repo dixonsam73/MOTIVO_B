@@ -185,6 +185,7 @@ struct PostRecordDetailsView: View {
 
     @FocusState private var isActivityDetailFocused: Bool
     @FocusState private var isNotesFocused: Bool
+    @State private var notesKeyboardInset: CGFloat = 0
     @State private var attachmentTitlesRefreshTick: Int = 0
 
 
@@ -908,6 +909,21 @@ struct PostRecordDetailsView: View {
                 .padding(.bottom, Theme.Spacing.xl)
             }
             .scrollDismissesKeyboard(.interactively)
+            .safeAreaInset(edge: .bottom) {
+                Color.clear
+                    .frame(height: isNotesFocused ? notesKeyboardInset : 0)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+                guard let frame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+                    return
+                }
+
+                let screenHeight = UIScreen.main.bounds.height
+                notesKeyboardInset = max(0, screenHeight - frame.minY)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+                notesKeyboardInset = 0
+            }
             .simultaneousGesture(
                 TapGesture().onEnded {
                     isActivityDetailFocused = false
