@@ -76,20 +76,48 @@ extension BackendSessionViewModel {
 
 enum ThoughtTextParts {
     static func parts(from raw: String?) -> (header: String?, body: String?) {
-        let lines = (raw ?? "")
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let text = (raw ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let headerIndex = lines.firstIndex(where: { !$0.isEmpty }) else {
+        guard text.isEmpty == false else {
             return (nil, nil)
         }
 
-        let header = lines[headerIndex]
-        let body = lines[(headerIndex + 1)...]
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n")
+        let characters = Array(text)
+
+        var splitIndex: Int?
+
+        for index in characters.indices {
+            let character = characters[index]
+
+            guard character == "." || character == "!" || character == "?" else {
+                continue
+            }
+
+            let nextIndex = characters.index(after: index)
+
+            if nextIndex == characters.endIndex ||
+                characters[nextIndex].isWhitespace {
+                splitIndex = index
+                break
+            }
+        }
+
+        guard let splitIndex else {
+            return (text, nil)
+        }
+
+        let header = String(characters[...splitIndex])
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        return (header, body.isEmpty ? nil : body)
+        let bodyStart = characters.index(after: splitIndex)
+
+        let body = bodyStart < characters.endIndex
+            ? String(characters[bodyStart...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            : ""
+
+        return (header.isEmpty ? nil : header,
+                body.isEmpty ? nil : body)
     }
-}
+    }

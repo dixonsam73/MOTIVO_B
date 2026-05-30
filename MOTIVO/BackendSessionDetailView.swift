@@ -324,16 +324,21 @@ struct BackendSessionDetailView: View {
 
                     VStack(alignment: .leading, spacing: 6) {
                         if let header = model.thoughtHeader {
-                            Text(header)
-                                .font(Theme.Text.body.weight(.semibold))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        if let body = model.thoughtBodyPreview {
-                            Text(body)
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                                .fixedSize(horizontal: false, vertical: true)
+                            Group {
+                                if let body = model.thoughtBodyPreview,
+                                   body.isEmpty == false {
+                                    Text(header)
+                                        .font(Theme.Text.body.weight(.semibold))
+                                    +
+                                    Text(" " + body)
+                                        .font(Theme.Text.body)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                } else {
+                                    Text(header)
+                                        .font(Theme.Text.body.weight(.semibold))
+                                }
+                            }
+                            .fixedSize(horizontal: false, vertical: true)
                         }
                     }
                     .cardSurface()
