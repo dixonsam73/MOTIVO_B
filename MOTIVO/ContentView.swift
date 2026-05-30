@@ -892,7 +892,7 @@ fileprivate struct SessionsRootView: View {
                                 .imageScale(.small)
                         }
                         .padding(.horizontal, Theme.Spacing.card)
-                        .padding(.vertical, 9)
+                        .padding(.vertical, 4)
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
