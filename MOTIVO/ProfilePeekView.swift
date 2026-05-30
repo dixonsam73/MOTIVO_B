@@ -48,6 +48,7 @@ struct ProfilePeekView: View {
 
     @State private var revealSelfName = false
     @State private var showUnfollowConfirm = false
+    @State private var showAvatarViewer = false
     @Environment(\.colorScheme) private var colorScheme
 
     let ownerID: String
@@ -137,9 +138,7 @@ struct ProfilePeekView: View {
                     HStack(spacing: Theme.Spacing.m) {
                         // Avatar
                         Button(action: {
-                            if isOwner {
-                                revealSelfName.toggle()
-                            }
+                            showAvatarViewer = true
                         }) {
                             ProfileAvatar(ownerID: ownerID,
                                           displayName: displayName(ownerID),
@@ -181,9 +180,7 @@ struct ProfilePeekView: View {
                         HStack(spacing: Theme.Spacing.m) {
                             // Avatar
                             Button(action: {
-                                if isOwner {
-                                    revealSelfName.toggle()
-                                }
+                                showAvatarViewer = true
                             }) {
                                 ProfileAvatar(ownerID: ownerID,
                                               displayName: displayName(ownerID),
@@ -311,6 +308,54 @@ struct ProfilePeekView: View {
             .padding(.top, Theme.Spacing.m)
             .transition(.move(edge: .bottom).combined(with: .opacity))
         }
+        
+        .sheet(isPresented: $showAvatarViewer) {
+            NavigationStack {
+                VStack {
+                    Spacer(minLength: 20)
+
+                    ProfileAvatar(
+                        ownerID: ownerID,
+                        displayName: displayName(ownerID),
+                        directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                        directoryInstruments: nil
+                    )
+                    .frame(width: 260, height: 260)
+                    .clipShape(Circle())
+
+                    VStack(spacing: 4) {
+                        Text(displayName(ownerID))
+                            .font(.title3.weight(.semibold))
+
+                        if let handle = directoryAccountID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !handle.isEmpty {
+                            Text("@\(handle)")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+
+                        if let location = directoryLocation?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           !location.isEmpty {
+                            Text(location)
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                    }
+
+                    Spacer(minLength: 120)
+                }
+                .padding()
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Done") {
+                            showAvatarViewer = false
+                        }
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+
         .alert("Follow request", isPresented: Binding(
             get: { followStore.followActionMessage != nil },
             set: { newValue in
