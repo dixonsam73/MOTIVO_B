@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260601_145900_PracticeInsightCopyPolish
-// SCOPE: Practice Insight copy polish — natural instrument/activity variants plus refined thread milestone wording. No selector logic/UI/store/card/backend changes.
-// SEARCH-TOKEN: 20260601_145900_PracticeInsightCopyPolish
+// CHANGE-ID: 20260601_181500_PracticeInsightPendingDelivery
+// SCOPE: Practice Insight pending-delivery support — expose ordered candidates so suppressed insights can be delayed, not destroyed. No UI/copy/threshold/archive logic changes.
+// SEARCH-TOKEN: 20260601_181500_PracticeInsightPendingDelivery
 
 import Foundation
 import CoreData
@@ -15,12 +15,24 @@ enum PracticeInsightSelector {
         in context: NSManagedObjectContext,
         excludingInsightKey excludedKey: String?
     ) -> PracticeInsight? {
+        selectCandidates(
+            forNewlySavedSession: session,
+            in: context,
+            excludingInsightKey: excludedKey
+        ).first
+    }
 
-        guard isEligiblePracticeSession(session) else { return nil }
+    static func selectCandidates(
+        forNewlySavedSession session: Session,
+        in context: NSManagedObjectContext,
+        excludingInsightKey excludedKey: String?
+    ) -> [PracticeInsight] {
+
+        guard isEligiblePracticeSession(session) else { return [] }
 
         let ownerUserID = normalized(session.value(forKey: "ownerUserID") as? String)
         let sessions = fetchEligibleSessions(in: context, ownerUserID: ownerUserID)
-        guard sessions.isEmpty == false else { return nil }
+        guard sessions.isEmpty == false else { return [] }
 
         let candidates: [PracticeInsight?] = [
             archiveInsight(for: session, sessions: sessions),
@@ -29,13 +41,9 @@ enum PracticeInsightSelector {
             activityInsight(for: session, sessions: sessions)
         ]
 
-        for candidate in candidates.compactMap({ $0 }) {
-            if candidate.collapsedText != excludedKey {
-                return candidate
-            }
-        }
-
-        return nil
+        return candidates
+            .compactMap { $0 }
+            .filter { $0.collapsedText != excludedKey }
     }
 
     private static func threadInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {

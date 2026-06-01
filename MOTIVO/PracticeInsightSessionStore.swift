@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260530_201500_PracticeInsightV1
-// SCOPE: Practice Insight v1 — memory-only post-save insight lifecycle. One active insight, replaced by next save, cleared on relaunch.
-// SEARCH-TOKEN: 20260530_201500_PracticeInsightV1
+// CHANGE-ID: 20260601_181500_PracticeInsightPendingDelivery
+// SCOPE: Practice Insight pending-delivery support — hold at most one suppressed insight for one future save. No UI/copy/threshold/archive logic changes.
+// SEARCH-TOKEN: 20260601_181500_PracticeInsightPendingDelivery
 
 import Foundation
 import CoreData
@@ -19,17 +19,38 @@ final class PracticeInsightSessionStore: ObservableObject {
 
     private var collapseTask: Task<Void, Never>?
     private var lastInsightKey: String?
+    private var pendingInsight: PracticeInsight?
 
     private init() {}
 
     func generateInsight(forNewlySavedSession session: Session, in context: NSManagedObjectContext) {
         collapseTask?.cancel()
 
-        guard let insight = PracticeInsightSelector.select(
+        let freshInsights = PracticeInsightSelector.selectCandidates(
             forNewlySavedSession: session,
             in: context,
             excludingInsightKey: lastInsightKey
-        ) else {
+        )
+
+        let insightToShow: PracticeInsight?
+
+        if let pendingInsight {
+            if let freshInsight = freshInsights.first,
+               priority(for: freshInsight.kind) < priority(for: pendingInsight.kind) {
+                insightToShow = freshInsight
+            } else {
+                insightToShow = pendingInsight
+            }
+
+            self.pendingInsight = nil
+        } else if let freshInsight = freshInsights.first {
+            insightToShow = freshInsight
+            pendingInsight = freshInsights.dropFirst().first
+        } else {
+            insightToShow = nil
+        }
+
+        guard let insight = insightToShow else {
             currentInsight = nil
             displayState = .collapsed
             return
@@ -54,5 +75,19 @@ final class PracticeInsightSessionStore: ObservableObject {
         collapseTask = nil
         currentInsight = nil
         displayState = .collapsed
+        pendingInsight = nil
+    }
+
+    private func priority(for kind: PracticeInsightKind) -> Int {
+        switch kind {
+        case .archive:
+            return 0
+        case .thread:
+            return 1
+        case .instrument:
+            return 2
+        case .activity:
+            return 3
+        }
     }
 }
