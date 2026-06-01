@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260601_191400_PTV_AmbientThreadSelectedTint
+// SCOPE: PracticeTimerView ambient thread chips only — selected non-thread-tint chips use blue-grey acknowledgement tint; no suggestion, selection, PRDV handoff, layout, or sheet logic changes.
+// SEARCH-TOKEN: 20260601_191400_PTV_AmbientThreadSelectedTint
+
 // CHANGE-ID: 20260518_223800_RelationalUnseenCountCentralization
 // SCOPE: Centralize relational unseen count derivation via RelationalUnseenCountStore; preserve existing timer, routing, and chip behaviour; no recorder, task, or layout behaviour changes.
 // SEARCH-TOKEN: 20260518_223800_RelationalUnseenCountCentralization
@@ -2190,10 +2194,19 @@ private func loadPracticeDefaultsIfNeeded() {
                 ambientThreadFloatingThread == nil &&
                 provisionalThreadLabel == thread
             )
+        let isVisuallyAcknowledged =
+            isFloatingSelected ||
+            ambientThreadCollapseTarget == thread
+
+        let acknowledgementTint = recorderIcon
 
         let fillColor: Color = {
             guard threadTintActive else {
-                return baseSurface.opacity(colorScheme == .dark ? 0.30 : 0.42)
+                if isVisuallyAcknowledged {
+                    return acknowledgementTint.opacity(colorScheme == .dark ? 0.34 : 0.20)
+                } else {
+                    return baseSurface.opacity(colorScheme == .dark ? 0.30 : 0.42)
+                }
             }
 
             if isFloatingSelected {
@@ -2205,7 +2218,11 @@ private func loadPracticeDefaultsIfNeeded() {
 
         let strokeColor: Color = {
             guard threadTintActive else {
-                return baseStroke.opacity(0.72)
+                if isVisuallyAcknowledged {
+                    return acknowledgementTint.opacity(colorScheme == .dark ? 0.58 : 0.42)
+                } else {
+                    return baseStroke.opacity(0.72)
+                }
             }
 
             if isFloatingSelected {
@@ -2217,7 +2234,11 @@ private func loadPracticeDefaultsIfNeeded() {
 
         let textColor: Color = {
             guard threadTintActive else {
-                return Theme.Colors.secondaryText
+                if isVisuallyAcknowledged {
+                    return Color.primary.opacity(colorScheme == .dark ? 0.94 : 0.86)
+                } else {
+                    return Theme.Colors.secondaryText
+                }
             }
 
             if ambientThreadFloatingThread == nil {
