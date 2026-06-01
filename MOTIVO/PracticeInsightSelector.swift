@@ -63,19 +63,38 @@ enum PracticeInsightSelector {
 
     private static func instrumentInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         guard let label = instrumentLabel(for: session) else { return nil }
-        let count = sessions.filter { instrumentLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame }.count
+
+        let distinctInstruments = Set(
+            sessions.compactMap { instrumentLabel(for: $0)?.lowercased() }
+        )
+
+        guard distinctInstruments.count >= 2 else { return nil }
+
+        let count = sessions.filter {
+            instrumentLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame
+        }.count
+
         guard count >= 3 else { return nil }
 
         return PracticeInsight(
             kind: .instrument,
             expandedText: "\(label) has featured more recently",
-            collapsedText: "\(label) featured more recently"
+            collapsedText: "\(label) featured recently"
         )
     }
-
     private static func activityInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         guard let label = activityLabel(for: session) else { return nil }
-        let count = sessions.filter { activityLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame }.count
+
+        let distinctActivities = Set(
+            sessions.compactMap { activityLabel(for: $0)?.lowercased() }
+        )
+
+        guard distinctActivities.count >= 2 else { return nil }
+
+        let count = sessions.filter {
+            activityLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame
+        }.count
+
         guard count >= 3 else { return nil }
 
         return PracticeInsight(
