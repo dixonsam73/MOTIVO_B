@@ -1,31 +1,21 @@
-// CHANGE-ID: 20260601_181500_PracticeInsightPendingDelivery
-// SCOPE: Practice Insight pending-delivery support — hold at most one suppressed insight for one future save. No UI/copy/threshold/archive logic changes.
-// SEARCH-TOKEN: 20260601_181500_PracticeInsightPendingDelivery
+// CHANGE-ID: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
+// SCOPE: Practice Insight lifecycle simplification — keep insights expanded-only and remove collapse timer/display state. Preserve pending delivery, selector, copy, thresholds, archive logic, and UI styling intent.
+// SEARCH-TOKEN: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
 
 import Foundation
 import CoreData
 
 @MainActor
 final class PracticeInsightSessionStore: ObservableObject {
-    enum DisplayState: Equatable {
-        case expanded
-        case collapsed
-    }
-
     static let shared = PracticeInsightSessionStore()
 
     @Published private(set) var currentInsight: PracticeInsight?
-    @Published private(set) var displayState: DisplayState = .collapsed
-
-    private var collapseTask: Task<Void, Never>?
     private var lastInsightKey: String?
     private var pendingInsight: PracticeInsight?
 
     private init() {}
 
     func generateInsight(forNewlySavedSession session: Session, in context: NSManagedObjectContext) {
-        collapseTask?.cancel()
-
         let freshInsights = PracticeInsightSelector.selectCandidates(
             forNewlySavedSession: session,
             in: context,
@@ -52,29 +42,20 @@ final class PracticeInsightSessionStore: ObservableObject {
 
         guard let insight = insightToShow else {
             currentInsight = nil
-            displayState = .collapsed
             return
         }
 
         currentInsight = insight
-        displayState = .expanded
         lastInsightKey = insight.collapsedText
 
-        collapseTask = Task { [weak self] in
-            let nanoseconds = UInt64(PracticeInsightCardTuning.expandedDuration * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: nanoseconds)
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.displayState = .collapsed
-            }
-        }
+    }
+
+    func clearCurrentInsight() {
+        currentInsight = nil
     }
 
     func clear() {
-        collapseTask?.cancel()
-        collapseTask = nil
         currentInsight = nil
-        displayState = .collapsed
         pendingInsight = nil
     }
 

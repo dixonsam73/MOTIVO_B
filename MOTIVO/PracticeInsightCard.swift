@@ -1,18 +1,13 @@
-// CHANGE-ID: 20260530_201500_PracticeInsightV1
-// SCOPE: Practice Insight v1 — text-first post-save reflection card with centralised timing/layout tuning. Fade-only presentation.
-// SEARCH-TOKEN: 20260530_201500_PracticeInsightV1
+// CHANGE-ID: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
+// SCOPE: Practice Insight card simplification — render expanded insight copy only. No selector, pending-delivery, copy, threshold, archive, or placement changes.
+// SEARCH-TOKEN: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
 
 import SwiftUI
 
 enum PracticeInsightCardTuning {
-    static let expandedDuration: TimeInterval = 4.5
-    static let expandFadeDuration: TimeInterval = 0.35
-    static let collapseFadeDuration: TimeInterval = 0.35
-
-    static let expandedMinHeight: CGFloat = 82
-    static let collapsedMinHeight: CGFloat = 42
-    static let expandedVerticalPadding: CGFloat = 12
-    static let collapsedVerticalPadding: CGFloat = 9
+    static let presentationFadeDuration: TimeInterval = 0.35
+    static let minHeight: CGFloat = 82
+    static let verticalPadding: CGFloat = 12
 }
 
 struct PracticeInsightCard: View {
@@ -23,50 +18,33 @@ struct PracticeInsightCard: View {
             if let insight = store.currentInsight {
                 content(for: insight)
                     .transition(.opacity)
-                    .animation(.easeInOut(duration: PracticeInsightCardTuning.expandFadeDuration), value: insight.id)
-                    .animation(.easeInOut(duration: PracticeInsightCardTuning.collapseFadeDuration), value: store.displayState)
+                    .animation(.easeInOut(duration: PracticeInsightCardTuning.presentationFadeDuration), value: insight.id)
             }
         }
     }
 
     @ViewBuilder
     private func content(for insight: PracticeInsight) -> some View {
-        let isExpanded = store.displayState == .expanded
+        VStack(alignment: .leading, spacing: 5) {
+            Text(insight.title)
+                .font(Theme.Text.meta.weight(.semibold))
+                .foregroundStyle(Theme.Colors.secondaryText)
 
-        VStack(alignment: .leading, spacing: isExpanded ? 5 : 0) {
-            if isExpanded {
-                Text(insight.title)
-                    .font(Theme.Text.meta.weight(.semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .transition(.opacity)
-            }
-
-            Text(isExpanded ? insight.expandedText : insight.collapsedText)
+            Text(insight.expandedText)
                 .font(Theme.Text.body)
                 .foregroundStyle(Color.primary)
                 .fixedSize(horizontal: false, vertical: true)
-                .transition(.opacity)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-
-        .frame(minHeight: isExpanded ? PracticeInsightCardTuning.expandedMinHeight : PracticeInsightCardTuning.collapsedMinHeight)
-
+        .frame(minHeight: PracticeInsightCardTuning.minHeight)
         .padding(.horizontal, Theme.Spacing.card)
-
-        .padding(.vertical, isExpanded ? PracticeInsightCardTuning.expandedVerticalPadding : PracticeInsightCardTuning.collapsedVerticalPadding)
-
+        .padding(.vertical, PracticeInsightCardTuning.verticalPadding)
         .background(
-
             Theme.Colors.accent.opacity(0.08)
-
         )
-
         .clipShape(
-
             RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
-
         )
-
         .cardSurface(padding: 0)
     }
 }

@@ -758,6 +758,9 @@ fileprivate struct SessionsRootView: View {
     private var meViewButton: some View {
         NavigationLink {
             MeView()
+                .onAppear {
+                    practiceInsightStore.clearCurrentInsight()
+                }
         } label: {
             Image(systemName: "rectangle.stack")
                 .imageScale(.medium)
@@ -1487,7 +1490,10 @@ fileprivate struct SessionsRootView: View {
             
             .safeAreaInset(edge: .top) {
                 HStack(spacing: TopButtonsUI.spacing) {
-                    Button { appRoute.isProfilePresented = true } label: {
+                    Button {
+                        practiceInsightStore.clearCurrentInsight()
+                        appRoute.isProfilePresented = true
+                    } label: {
                         #if canImport(UIKit)
                         if let uiImage = ProfileStore.avatarImage(for: userID) {
                             Image(uiImage: uiImage)
@@ -1560,6 +1566,7 @@ fileprivate struct SessionsRootView: View {
                     // People (search / follows)
                     if selectedScope == .all {
                         Button {
+                            practiceInsightStore.clearCurrentInsight()
                             showPeople = true
                         } label: {
                             ZStack(alignment: .topTrailing) {
@@ -1591,7 +1598,10 @@ fileprivate struct SessionsRootView: View {
                             .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
                     }
                     Spacer()
-                    Button { appRoute.route = .timer } label: {
+                    Button {
+                        practiceInsightStore.clearCurrentInsight()
+                        appRoute.route = .timer
+                    } label: {
                         ZStack {
                           Circle()
                             .fill(.thinMaterial)
