@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260530_201500_PracticeInsightV1
-// SCOPE: Practice Insight v1 — select one calm post-save reflection biased toward the newly saved session. No thought/note/attachment interpretation.
-// SEARCH-TOKEN: 20260530_201500_PracticeInsightV1
+// CHANGE-ID: 20260601_131900_PracticeInsightMilestones
+// SCOPE: Practice Insight milestone expansion — add first-thread, 10-session, 25-session, and 50-session archive milestones. No UI/store/card/backend changes.
+// SEARCH-TOKEN: 20260601_131900_PracticeInsightMilestones
 
 import Foundation
 import CoreData
@@ -105,6 +105,10 @@ enum PracticeInsightSelector {
     }
 
     private static func archiveInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
+        if let firstThreadInsight = firstThreadMilestone(for: session, sessions: sessions) {
+            return firstThreadInsight
+        }
+
         let count = sessions.count
 
         if count == 1 {
@@ -123,7 +127,47 @@ enum PracticeInsightSelector {
             )
         }
 
+        if count == 10 {
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "You've logged ten sessions",
+                collapsedText: "Ten sessions logged"
+            )
+        }
+
+        if count == 25 {
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your practice journal now contains twenty-five sessions",
+                collapsedText: "Twenty-five sessions logged"
+            )
+        }
+
+        if count == 50 {
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Fifty sessions are now part of your practice journal",
+                collapsedText: "Fifty sessions logged"
+            )
+        }
+
         return nil
+    }
+
+    private static func firstThreadMilestone(for session: Session, sessions: [Session]) -> PracticeInsight? {
+        guard normalized(session.value(forKey: "threadLabel") as? String) != nil else { return nil }
+
+        let threadTaggedSessions = sessions.filter {
+            normalized($0.value(forKey: "threadLabel") as? String) != nil
+        }
+
+        guard threadTaggedSessions.count == 1 else { return nil }
+
+        return PracticeInsight(
+            kind: .archive,
+            expandedText: "You've started your first thread",
+            collapsedText: "First thread created"
+        )
     }
 
     private static func fetchEligibleSessions(in context: NSManagedObjectContext, ownerUserID: String?) -> [Session] {
