@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260601_142400_PracticeInsightHistoricalFocusShift
-// SCOPE: Practice Insight v1.4 — use historical archive leader vs current focus window for instrument/activity focus-shift observations. No UI/store/card/backend changes.
-// SEARCH-TOKEN: 20260601_142400_PracticeInsightHistoricalFocusShift
+// CHANGE-ID: 20260601_145900_PracticeInsightCopyPolish
+// SCOPE: Practice Insight copy polish — natural instrument/activity variants plus refined thread milestone wording. No selector logic/UI/store/card/backend changes.
+// SEARCH-TOKEN: 20260601_145900_PracticeInsightCopyPolish
 
 import Foundation
 import CoreData
@@ -48,21 +48,21 @@ enum PracticeInsightSelector {
         case 2:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "\(label) has appeared again",
-                collapsedText: "\(label) appeared again"
+                expandedText: "The \(label) thread has appeared again",
+                collapsedText: "\(label) thread appeared again"
             )
 
         case 3:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "The \(label) thread is becoming more regular",
-                collapsedText: "\(label) becoming more regular"
+                collapsedText: "\(label) thread becoming more regular"
             )
 
         case 10:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "Ten sessions now belong to the \(label) thread",
+                expandedText: "You've logged ten sessions in the \(label) thread",
                 collapsedText: "\(label) thread reached ten sessions"
             )
 
@@ -76,28 +76,28 @@ enum PracticeInsightSelector {
         case 50:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "Fifty sessions now belong to the \(label) thread",
+                expandedText: "You've logged fifty sessions in the \(label) thread",
                 collapsedText: "\(label) thread reached fifty sessions"
             )
 
         case 100:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "One hundred sessions now belong to the \(label) thread",
+                expandedText: "You've logged one hundred sessions in the \(label) thread",
                 collapsedText: "\(label) thread reached one hundred sessions"
             )
 
         case 200:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "Two hundred sessions now belong to the \(label) thread",
+                expandedText: "You've logged two hundred sessions in the \(label) thread",
                 collapsedText: "\(label) thread reached two hundred sessions"
             )
 
         case 300:
             return PracticeInsight(
                 kind: .thread,
-                expandedText: "Three hundred sessions now belong to the \(label) thread",
+                expandedText: "You've logged three hundred sessions in the \(label) thread",
                 collapsedText: "\(label) thread reached three hundred sessions"
             )
 
@@ -108,22 +108,163 @@ enum PracticeInsightSelector {
 
     private static func instrumentInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         guard let shift = focusShift(in: sessions, labelFor: instrumentLabel(for:)) else { return nil }
+        let text = instrumentInsightText(for: shift.displayLabel)
 
         return PracticeInsight(
             kind: .instrument,
-            expandedText: "\(shift.displayLabel) has featured more recently",
-            collapsedText: "\(shift.displayLabel) featured recently"
+            expandedText: text.expanded,
+            collapsedText: text.collapsed
         )
     }
 
     private static func activityInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         guard let shift = focusShift(in: sessions, labelFor: activityLabel(for:)) else { return nil }
+        let text = activityInsightText(for: shift.displayLabel)
 
         return PracticeInsight(
             kind: .activity,
-            expandedText: "\(shift.displayLabel) has appeared more frequently recently",
-            collapsedText: "\(shift.displayLabel) appearing more frequently"
+            expandedText: text.expanded,
+            collapsedText: text.collapsed
         )
+    }
+
+    private static func instrumentInsightText(for label: String) -> (expanded: String, collapsed: String) {
+        let variants: [(expanded: String, collapsed: String)] = [
+            (
+                expanded: "You've been spending more time on \(label) lately",
+                collapsed: "Spending more time on \(label) recently"
+            ),
+            (
+                expanded: "\(label) has become a greater focus recently",
+                collapsed: "More focus on \(label) lately"
+            ),
+            (
+                expanded: "You've been playing more \(label) recently",
+                collapsed: "Playing more \(label) lately"
+            )
+        ]
+
+        return variants.randomElement() ?? variants[0]
+    }
+
+    private static func activityInsightText(for label: String) -> (expanded: String, collapsed: String) {
+        let variants: [(expanded: String, collapsed: String)]
+
+        switch normalizedKey(label) {
+        case "practice":
+            variants = [
+                (
+                    expanded: "You've been spending more time practicing lately",
+                    collapsed: "Spending more time practicing recently"
+                ),
+                (
+                    expanded: "Practice has become a greater focus recently",
+                    collapsed: "Focusing more on practice lately"
+                ),
+                (
+                    expanded: "You've been practicing more recently",
+                    collapsed: "Practicing more lately"
+                )
+            ]
+
+        case "rehearsal":
+            variants = [
+                (
+                    expanded: "You've been spending more time rehearsing lately",
+                    collapsed: "Spending more time rehearsing recently"
+                ),
+                (
+                    expanded: "Rehearsal has become a greater focus recently",
+                    collapsed: "Focusing more on rehearsal lately"
+                ),
+                (
+                    expanded: "You've been rehearsing more recently",
+                    collapsed: "Rehearsing more lately"
+                )
+            ]
+
+        case "recording":
+            variants = [
+                (
+                    expanded: "You've been spending more time recording lately",
+                    collapsed: "Spending more time recording recently"
+                ),
+                (
+                    expanded: "Recording has become a greater focus recently",
+                    collapsed: "Focusing more on recording lately"
+                ),
+                (
+                    expanded: "You've been recording more recently",
+                    collapsed: "Recording more lately"
+                )
+            ]
+
+        case "lesson":
+            variants = [
+                (
+                    expanded: "You've been spending more time taking lessons lately",
+                    collapsed: "Spending more time taking lessons recently"
+                ),
+                (
+                    expanded: "Lessons have become a greater focus recently",
+                    collapsed: "Focusing more on lessons lately"
+                ),
+                (
+                    expanded: "You've been taking more lessons recently",
+                    collapsed: "Taking more lessons lately"
+                )
+            ]
+
+        case "performance":
+            variants = [
+                (
+                    expanded: "You've been spending more time performing lately",
+                    collapsed: "Spending more time performing recently"
+                ),
+                (
+                    expanded: "Performance has become a greater focus recently",
+                    collapsed: "Focusing more on performance lately"
+                ),
+                (
+                    expanded: "You've been performing more recently",
+                    collapsed: "Performing more lately"
+                )
+            ]
+
+        case "writing":
+            variants = [
+                (
+                    expanded: "You've been spending more time writing lately",
+                    collapsed: "Spending more time writing recently"
+                ),
+                (
+                    expanded: "Writing has become a greater focus recently",
+                    collapsed: "Focusing more on writing lately"
+                ),
+                (
+                    expanded: "You've been writing more recently",
+                    collapsed: "Writing more lately"
+                )
+            ]
+
+        default:
+            variants = [
+                (
+                    expanded: "You've been spending more time on \(label) lately",
+                    collapsed: "Spending more time on \(label) recently"
+                ),
+                (
+                    expanded: "\(label) has become a greater focus recently",
+                    collapsed: "Focusing more on \(label) lately"
+                ),
+                (
+                    expanded: "You've been doing more \(label) recently",
+                    collapsed: "Doing more \(label) lately"
+                )
+            ]
+        }
+
+        return variants.randomElement() ?? variants[0]
     }
 
     private static func archiveInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
