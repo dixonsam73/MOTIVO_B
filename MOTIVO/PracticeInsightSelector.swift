@@ -19,10 +19,10 @@ enum PracticeInsightSelector {
         guard sessions.isEmpty == false else { return nil }
 
         let candidates: [PracticeInsight?] = [
+            archiveInsight(for: session, sessions: sessions),
             threadInsight(for: session, sessions: sessions),
             instrumentInsight(for: session, sessions: sessions),
-            activityInsight(for: session, sessions: sessions),
-            archiveInsight(for: session, sessions: sessions)
+            activityInsight(for: session, sessions: sessions)
         ]
 
         for candidate in candidates.compactMap({ $0 }) {
