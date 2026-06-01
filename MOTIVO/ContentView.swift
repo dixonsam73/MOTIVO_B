@@ -526,6 +526,7 @@ fileprivate struct SessionsRootView: View {
     // Phase 14.1: make follow requests reactive in this view (badge)
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var ensembleStore = EnsembleStore.shared
+    @ObservedObject private var practiceInsightStore = PracticeInsightSessionStore.shared
 
 
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
@@ -926,6 +927,8 @@ fileprivate struct SessionsRootView: View {
                         .fill(Theme.Colors.surface(colorScheme).opacity(colorScheme == .dark ? 0.012 : 0.028))
                         .allowsHitTesting(false)
                 }
+
+                PracticeInsightCard(store: practiceInsightStore)
 // ---------- Sessions List ----------
                 ScrollViewReader { proxy in
                     let topID = "feed-top-anchor"

@@ -1850,6 +1850,7 @@ private var instrumentPicker: some View {
 
     private func save() {
         if isThoughtMode && !canSaveThought { return }
+        let shouldGeneratePracticeInsight = (session == nil && isThoughtMode == false)
         let s = session ?? Session(context: viewContext)
         if (s.value(forKey: "id") as? UUID) == nil {
             s.setValue(UUID(), forKey: "id")
@@ -2018,6 +2019,9 @@ private var instrumentPicker: some View {
             )
 
             viewContext.processPendingChanges()
+            if shouldGeneratePracticeInsight {
+                PracticeInsightSessionStore.shared.generateInsight(forNewlySavedSession: s, in: viewContext)
+            }
             if let onSuccessfulSave {
                 onSuccessfulSave()
             } else {

@@ -2094,6 +2094,8 @@ isPrivate: { url in
             // Also purge any surrogate temp files created for staged items
             purgeStagedTempFiles()
 
+            PracticeInsightSessionStore.shared.generateInsight(forNewlySavedSession: s, in: viewContext)
+
             onSaved?()
             clearDraft()
             // Mark this session ID as seen so reopening within the same session doesn't clear again
