@@ -1,11 +1,15 @@
-// CHANGE-ID: 20260601_131900_PracticeInsightMilestones
-// SCOPE: Practice Insight milestone expansion — add first-thread, 10-session, 25-session, and 50-session archive milestones. No UI/store/card/backend changes.
-// SEARCH-TOKEN: 20260601_131900_PracticeInsightMilestones
+// CHANGE-ID: 20260601_142400_PracticeInsightHistoricalFocusShift
+// SCOPE: Practice Insight v1.4 — use historical archive leader vs current focus window for instrument/activity focus-shift observations. No UI/store/card/backend changes.
+// SEARCH-TOKEN: 20260601_142400_PracticeInsightHistoricalFocusShift
 
 import Foundation
 import CoreData
 
 enum PracticeInsightSelector {
+    private static let focusWindowSize = 10
+    private static let minimumFocusLeaderCount = 5
+    private static let minimumFocusLeaderMargin = 2
+
     static func select(
         forNewlySavedSession session: Session,
         in context: NSManagedObjectContext,
@@ -36,71 +40,89 @@ enum PracticeInsightSelector {
 
     private static func threadInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         guard let label = normalized(session.value(forKey: "threadLabel") as? String) else { return nil }
-        let count = sessions.filter { normalized($0.value(forKey: "threadLabel") as? String)?.caseInsensitiveCompare(label) == .orderedSame }.count
+        let count = sessions.filter {
+            normalized($0.value(forKey: "threadLabel") as? String)?.caseInsensitiveCompare(label) == .orderedSame
+        }.count
 
-        if count >= 3 {
-            return PracticeInsight(
-                kind: .thread,
-                expandedText: "The \(label) thread is becoming more regular",
-                collapsedText: "\(label) becoming more regular"
-            )
-        }
-
-        if count == 2 {
+        switch count {
+        case 2:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "\(label) has appeared again",
                 collapsedText: "\(label) appeared again"
             )
-        }
 
-        if count == 1 {
+        case 3:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "The \(label) thread is becoming more regular",
+                collapsedText: "\(label) becoming more regular"
+            )
+
+        case 10:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "Ten sessions now belong to the \(label) thread",
+                collapsedText: "\(label) thread reached ten sessions"
+            )
+
+        case 25:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "The \(label) thread has become a substantial part of your journal",
+                collapsedText: "\(label) thread has grown"
+            )
+
+        case 50:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "Fifty sessions now belong to the \(label) thread",
+                collapsedText: "\(label) thread reached fifty sessions"
+            )
+
+        case 100:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "One hundred sessions now belong to the \(label) thread",
+                collapsedText: "\(label) thread reached one hundred sessions"
+            )
+
+        case 200:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "Two hundred sessions now belong to the \(label) thread",
+                collapsedText: "\(label) thread reached two hundred sessions"
+            )
+
+        case 300:
+            return PracticeInsight(
+                kind: .thread,
+                expandedText: "Three hundred sessions now belong to the \(label) thread",
+                collapsedText: "\(label) thread reached three hundred sessions"
+            )
+
+        default:
             return nil
         }
-
-        return nil
     }
 
     private static func instrumentInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
-        guard let label = instrumentLabel(for: session) else { return nil }
-
-        let distinctInstruments = Set(
-            sessions.compactMap { instrumentLabel(for: $0)?.lowercased() }
-        )
-
-        guard distinctInstruments.count >= 2 else { return nil }
-
-        let count = sessions.filter {
-            instrumentLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame
-        }.count
-
-        guard count >= 3 else { return nil }
+        guard let shift = focusShift(in: sessions, labelFor: instrumentLabel(for:)) else { return nil }
 
         return PracticeInsight(
             kind: .instrument,
-            expandedText: "\(label) has featured more recently",
-            collapsedText: "\(label) featured recently"
+            expandedText: "\(shift.displayLabel) has featured more recently",
+            collapsedText: "\(shift.displayLabel) featured recently"
         )
     }
+
     private static func activityInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
-        guard let label = activityLabel(for: session) else { return nil }
-
-        let distinctActivities = Set(
-            sessions.compactMap { activityLabel(for: $0)?.lowercased() }
-        )
-
-        guard distinctActivities.count >= 2 else { return nil }
-
-        let count = sessions.filter {
-            activityLabel(for: $0)?.caseInsensitiveCompare(label) == .orderedSame
-        }.count
-
-        guard count >= 3 else { return nil }
+        guard let shift = focusShift(in: sessions, labelFor: activityLabel(for:)) else { return nil }
 
         return PracticeInsight(
             kind: .activity,
-            expandedText: "\(label) has appeared more frequently recently",
-            collapsedText: "\(label) appearing more frequently"
+            expandedText: "\(shift.displayLabel) has appeared more frequently recently",
+            collapsedText: "\(shift.displayLabel) appearing more frequently"
         )
     }
 
@@ -170,6 +192,86 @@ enum PracticeInsightSelector {
         )
     }
 
+    private struct FocusLeader {
+        let key: String
+        let displayLabel: String
+        let count: Int
+    }
+
+    private static func focusShift(in sessions: [Session], labelFor: (Session) -> String?) -> FocusLeader? {
+        guard let currentShift = focusShiftSnapshot(in: sessions, labelFor: labelFor) else { return nil }
+
+        let priorSessions = Array(sessions.dropFirst())
+        if let priorShift = focusShiftSnapshot(in: priorSessions, labelFor: labelFor),
+           priorShift.key == currentShift.key {
+            return nil
+        }
+
+        return currentShift
+    }
+
+    private static func focusShiftSnapshot(in sessions: [Session], labelFor: (Session) -> String?) -> FocusLeader? {
+        guard sessions.count > focusWindowSize else { return nil }
+
+        let currentWindow = Array(sessions.prefix(focusWindowSize))
+        let historicalWindow = Array(sessions.dropFirst(focusWindowSize))
+
+        guard currentWindow.count == focusWindowSize,
+              historicalWindow.isEmpty == false else {
+            return nil
+        }
+
+        guard let currentLeader = focusLeader(in: currentWindow, labelFor: labelFor),
+              let historicalLeader = focusLeader(in: historicalWindow, labelFor: labelFor) else {
+            return nil
+        }
+
+        guard currentLeader.key != historicalLeader.key else { return nil }
+
+        return currentLeader
+    }
+
+    private static func focusLeader(in window: [Session], labelFor: (Session) -> String?) -> FocusLeader? {
+        var counts: [String: (displayLabel: String, count: Int)] = [:]
+
+        for session in window {
+            guard let label = normalized(labelFor(session)),
+                  let key = normalizedKey(label) else {
+                continue
+            }
+
+            if let existing = counts[key] {
+                counts[key] = (displayLabel: existing.displayLabel, count: existing.count + 1)
+            } else {
+                counts[key] = (displayLabel: label, count: 1)
+            }
+        }
+
+        let ranked: [(key: String, displayLabel: String, count: Int)] = counts.map { key, value in
+            (key: key, displayLabel: value.displayLabel, count: value.count)
+        }
+        .sorted { lhs, rhs in
+            if lhs.count != rhs.count {
+                return lhs.count > rhs.count
+            }
+
+            return lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel) == .orderedAscending
+        }
+
+        guard let leader = ranked.first else { return nil }
+
+        let secondPlaceCount = ranked.dropFirst().first?.count ?? 0
+
+        guard leader.count >= minimumFocusLeaderCount else { return nil }
+        guard leader.count - secondPlaceCount >= minimumFocusLeaderMargin else { return nil }
+
+        return FocusLeader(
+            key: leader.key,
+            displayLabel: leader.displayLabel,
+            count: leader.count
+        )
+    }
+
     private static func fetchEligibleSessions(in context: NSManagedObjectContext, ownerUserID: String?) -> [Session] {
         let request: NSFetchRequest<Session> = Session.fetchRequest()
         request.fetchLimit = 500
@@ -234,6 +336,10 @@ enum PracticeInsightSelector {
         case 4: return "Performance"
         default: return nil
         }
+    }
+
+    private static func normalizedKey(_ value: String?) -> String? {
+        normalized(value)?.lowercased()
     }
 
     private static func normalized(_ value: String?) -> String? {
