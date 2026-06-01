@@ -18,13 +18,18 @@ final class PracticeInsightSessionStore: ObservableObject {
     @Published private(set) var displayState: DisplayState = .collapsed
 
     private var collapseTask: Task<Void, Never>?
+    private var lastInsightKey: String?
 
     private init() {}
 
     func generateInsight(forNewlySavedSession session: Session, in context: NSManagedObjectContext) {
         collapseTask?.cancel()
 
-        guard let insight = PracticeInsightSelector.select(forNewlySavedSession: session, in: context) else {
+        guard let insight = PracticeInsightSelector.select(
+            forNewlySavedSession: session,
+            in: context,
+            excludingInsightKey: lastInsightKey
+        ) else {
             currentInsight = nil
             displayState = .collapsed
             return
@@ -32,6 +37,7 @@ final class PracticeInsightSessionStore: ObservableObject {
 
         currentInsight = insight
         displayState = .expanded
+        lastInsightKey = insight.collapsedText
 
         collapseTask = Task { [weak self] in
             let nanoseconds = UInt64(PracticeInsightCardTuning.expandedDuration * 1_000_000_000)

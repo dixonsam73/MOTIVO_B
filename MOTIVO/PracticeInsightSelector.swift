@@ -6,26 +6,32 @@ import Foundation
 import CoreData
 
 enum PracticeInsightSelector {
-    static func select(forNewlySavedSession session: Session, in context: NSManagedObjectContext) -> PracticeInsight? {
+    static func select(
+        forNewlySavedSession session: Session,
+        in context: NSManagedObjectContext,
+        excludingInsightKey excludedKey: String?
+    ) -> PracticeInsight? {
+
         guard isEligiblePracticeSession(session) else { return nil }
 
         let ownerUserID = normalized(session.value(forKey: "ownerUserID") as? String)
         let sessions = fetchEligibleSessions(in: context, ownerUserID: ownerUserID)
         guard sessions.isEmpty == false else { return nil }
 
-        if let insight = threadInsight(for: session, sessions: sessions) {
-            return insight
+        let candidates: [PracticeInsight?] = [
+            threadInsight(for: session, sessions: sessions),
+            instrumentInsight(for: session, sessions: sessions),
+            activityInsight(for: session, sessions: sessions),
+            archiveInsight(for: session, sessions: sessions)
+        ]
+
+        for candidate in candidates.compactMap({ $0 }) {
+            if candidate.collapsedText != excludedKey {
+                return candidate
+            }
         }
 
-        if let insight = instrumentInsight(for: session, sessions: sessions) {
-            return insight
-        }
-
-        if let insight = activityInsight(for: session, sessions: sessions) {
-            return insight
-        }
-
-        return archiveInsight(for: session, sessions: sessions)
+        return nil
     }
 
     private static func threadInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
