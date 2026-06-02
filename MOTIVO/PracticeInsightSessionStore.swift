@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260602_200800_PracticeInsightPendingStaleArchiveFix
-// SCOPE: Practice Insight pending-delivery bug fix — prevent stale archive milestones from surfacing after unrelated saves. No UI/backend/schema changes.
-// SEARCH-TOKEN: 20260602_200800_PracticeInsightPendingStaleArchiveFix
+// CHANGE-ID: 20260602_213500_PracticeInsightObservations
+// SCOPE: Practice Insights Pass 2 — add observation priority while preventing stale archive/observation replay. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260602_213500_PracticeInsightObservations
 
 import Foundation
 import CoreData
@@ -23,7 +23,7 @@ final class PracticeInsightSessionStore: ObservableObject {
         )
 
         let carriedPendingInsights = pendingInsights.filter {
-            $0.kind != .archive && $0.suppressionKey != lastInsightKey
+            $0.kind != .archive && $0.kind != .observation && $0.suppressionKey != lastInsightKey
         }
 
         let orderedFreshInsights = ordered(
@@ -34,7 +34,7 @@ final class PracticeInsightSessionStore: ObservableObject {
             currentInsight = insight
             lastInsightKey = insight.suppressionKey
 
-            let remainingFreshInsights = Array(orderedFreshInsights.dropFirst()).filter { $0.kind != .archive }
+            let remainingFreshInsights = Array(orderedFreshInsights.dropFirst()).filter { $0.kind != .archive && $0.kind != .observation }
             pendingInsights = ordered(
                 deduplicated(
                     remainingFreshInsights + carriedPendingInsights,
@@ -109,12 +109,14 @@ final class PracticeInsightSessionStore: ObservableObject {
         switch kind {
         case .archive:
             return 0
-        case .thread:
+        case .observation:
             return 1
-        case .instrument:
+        case .thread:
             return 2
-        case .activity:
+        case .instrument:
             return 3
+        case .activity:
+            return 4
         }
     }
 }

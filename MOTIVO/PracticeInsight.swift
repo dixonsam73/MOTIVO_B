@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260602_194500_PracticeInsightSuppressionKey
-// SCOPE: Practice Insight identity hardening — add explicit suppression key while preserving collapsed text compatibility. No UI/backend/schema changes.
-// SEARCH-TOKEN: 20260602_194500_PracticeInsightSuppressionKey
+// CHANGE-ID: 20260602_213500_PracticeInsightObservations
+// SCOPE: Practice Insights Pass 2 — add observational insight kind for practice-window and session-length pattern observations. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260602_213500_PracticeInsightObservations
 
 import Foundation
 
@@ -9,6 +9,7 @@ enum PracticeInsightKind: String, Equatable {
     case instrument
     case activity
     case archive
+    case observation
 }
 
 struct PracticeInsight: Identifiable, Equatable {

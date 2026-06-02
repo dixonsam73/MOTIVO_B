@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260602_194500_PracticeInsightPass1ArchiveMilestones
-// SCOPE: Practice Insights Pass 1 — add longest session, total activity hours, continuity record, and cumulative duration leadership archive milestones. Preserve existing insight families/UI/backend/schema.
-// SEARCH-TOKEN: 20260602_194500_PracticeInsightPass1ArchiveMilestones
+// CHANGE-ID: 20260602_213500_PracticeInsightObservations
+// SCOPE: Practice Insights Pass 2 — add practice-window and session-length observational insights using InsightEngine. Preserve existing milestones, recurrence, UI, backend, and schema.
+// SEARCH-TOKEN: 20260602_213500_PracticeInsightObservations
 
 import Foundation
 import CoreData
@@ -10,6 +10,9 @@ enum PracticeInsightSelector {
     private static let minimumFocusLeaderCount = 5
     private static let minimumFocusLeaderMargin = 2
     private static let totalHourThresholds = [10, 25, 50, 100, 250, 500, 1000]
+    private static let observationWindowSize = 8
+    private static let minimumPracticeWindowObservationSessions = 6
+    private static let minimumSessionShapeObservationSessions = 6
 
     static func select(
         forNewlySavedSession session: Session,
@@ -37,6 +40,7 @@ enum PracticeInsightSelector {
 
         let candidates: [PracticeInsight] =
             archiveInsights(for: session, sessions: sessions) +
+            observationInsights(for: session, sessions: sessions) +
             [
                 threadInsight(for: session, sessions: sessions),
                 instrumentInsight(for: session, sessions: sessions),
@@ -45,6 +49,100 @@ enum PracticeInsightSelector {
 
         return candidates
             .filter { $0.suppressionKey != excludedKey }
+    }
+
+
+    private static func observationInsights(for session: Session, sessions: [Session]) -> [PracticeInsight] {
+        var insights: [PracticeInsight] = []
+
+        if let practiceWindow = practiceWindowObservation(for: session, sessions: sessions) {
+            insights.append(practiceWindow)
+        }
+
+        if let sessionShape = sessionShapeObservation(for: session, sessions: sessions) {
+            insights.append(sessionShape)
+        }
+
+        return insights
+    }
+
+    private static func practiceWindowObservation(for session: Session, sessions: [Session]) -> PracticeInsight? {
+        let recentSessions = Array(sessions.prefix(observationWindowSize))
+        guard recentSessions.count >= minimumPracticeWindowObservationSessions else { return nil }
+        guard recentSessions.contains(where: { $0.objectID == session.objectID }) else { return nil }
+
+        let previousRecentSessions = Array(
+            sessions
+                .filter { $0.objectID != session.objectID }
+                .prefix(observationWindowSize)
+        )
+
+        let currentWindow = InsightEngine.insights(from: recentSessions).practiceWindow
+        let previousWindow = previousRecentSessions.count >= minimumPracticeWindowObservationSessions
+            ? InsightEngine.insights(from: previousRecentSessions).practiceWindow
+            : PracticeWindowInsight.insufficientData
+
+        guard currentWindow != previousWindow else { return nil }
+
+        switch currentWindow {
+        case .mornings:
+            return PracticeInsight(
+                kind: .observation,
+                expandedText: "Morning activity is becoming more common",
+                collapsedText: "Morning activity emerging",
+                suppressionKey: "observation.practiceWindow.morning"
+            )
+
+        case .afternoons:
+            return PracticeInsight(
+                kind: .observation,
+                expandedText: "Afternoon activity has appeared more often recently",
+                collapsedText: "Afternoon activity emerging",
+                suppressionKey: "observation.practiceWindow.afternoon"
+            )
+
+        case .evenings:
+            return PracticeInsight(
+                kind: .observation,
+                expandedText: "Recent sessions have tended toward the evening",
+                collapsedText: "Evening activity emerging",
+                suppressionKey: "observation.practiceWindow.evening"
+            )
+
+        case .spreadThroughDay, .insufficientData:
+            return nil
+        }
+    }
+
+    private static func sessionShapeObservation(for session: Session, sessions: [Session]) -> PracticeInsight? {
+        let recentSessions = Array(sessions.prefix(observationWindowSize))
+        guard recentSessions.count >= minimumSessionShapeObservationSessions else { return nil }
+        guard recentSessions.contains(where: { $0.objectID == session.objectID }) else { return nil }
+
+        let recentSessionsWithDuration = recentSessions.filter { Int($0.durationSeconds) > 0 }
+        guard recentSessionsWithDuration.count >= minimumSessionShapeObservationSessions else { return nil }
+
+        let previousRecentSessions = Array(
+            sessions
+                .filter { $0.objectID != session.objectID }
+                .prefix(observationWindowSize)
+        )
+        let previousRecentSessionsWithDuration = previousRecentSessions.filter { Int($0.durationSeconds) > 0 }
+
+        let currentShape = InsightEngine.insights(from: recentSessions).sessionShape
+        let previousShape = previousRecentSessionsWithDuration.count >= minimumSessionShapeObservationSessions
+            ? InsightEngine.insights(from: previousRecentSessions).sessionShape
+            : SessionShapeInsight.insufficientData
+
+        guard currentShape == .consistent else { return nil }
+        guard previousShape != .consistent else { return nil }
+
+        return PracticeInsight(
+            kind: .observation,
+            expandedText: "Recent sessions have settled into a similar length",
+            collapsedText: "Session lengths becoming consistent",
+            suppressionKey: "observation.sessionShape.consistent"
+        )
     }
 
     private static func threadInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
