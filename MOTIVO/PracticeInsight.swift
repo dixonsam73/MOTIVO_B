@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260530_201500_PracticeInsightV1
-// SCOPE: Practice Insight v1 — lightweight post-save reflection model. Text-first, session-only, no backend/schema changes.
-// SEARCH-TOKEN: 20260530_201500_PracticeInsightV1
+// CHANGE-ID: 20260602_194500_PracticeInsightSuppressionKey
+// SCOPE: Practice Insight identity hardening — add explicit suppression key while preserving collapsed text compatibility. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260602_194500_PracticeInsightSuppressionKey
 
 import Foundation
 
@@ -17,18 +17,21 @@ struct PracticeInsight: Identifiable, Equatable {
     let title: String
     let expandedText: String
     let collapsedText: String
+    let suppressionKey: String
 
     init(
         id: UUID = UUID(),
         kind: PracticeInsightKind,
         title: String = "Practice Insight",
         expandedText: String,
-        collapsedText: String
+        collapsedText: String,
+        suppressionKey: String? = nil
     ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.expandedText = expandedText
         self.collapsedText = collapsedText
+        self.suppressionKey = suppressionKey ?? collapsedText
     }
 }

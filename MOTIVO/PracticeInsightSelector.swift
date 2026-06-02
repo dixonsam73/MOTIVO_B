@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260601_181500_PracticeInsightPendingDelivery
-// SCOPE: Practice Insight pending-delivery support — expose ordered candidates so suppressed insights can be delayed, not destroyed. No UI/copy/threshold/archive logic changes.
-// SEARCH-TOKEN: 20260601_181500_PracticeInsightPendingDelivery
+// CHANGE-ID: 20260602_194500_PracticeInsightPass1ArchiveMilestones
+// SCOPE: Practice Insights Pass 1 — add longest session, total activity hours, continuity record, and cumulative duration leadership archive milestones. Preserve existing insight families/UI/backend/schema.
+// SEARCH-TOKEN: 20260602_194500_PracticeInsightPass1ArchiveMilestones
 
 import Foundation
 import CoreData
@@ -9,6 +9,7 @@ enum PracticeInsightSelector {
     private static let focusWindowSize = 10
     private static let minimumFocusLeaderCount = 5
     private static let minimumFocusLeaderMargin = 2
+    private static let totalHourThresholds = [10, 25, 50, 100, 250, 500, 1000]
 
     static func select(
         forNewlySavedSession session: Session,
@@ -34,16 +35,16 @@ enum PracticeInsightSelector {
         let sessions = fetchEligibleSessions(in: context, ownerUserID: ownerUserID)
         guard sessions.isEmpty == false else { return [] }
 
-        let candidates: [PracticeInsight?] = [
-            archiveInsight(for: session, sessions: sessions),
-            threadInsight(for: session, sessions: sessions),
-            instrumentInsight(for: session, sessions: sessions),
-            activityInsight(for: session, sessions: sessions)
-        ]
+        let candidates: [PracticeInsight] =
+            archiveInsights(for: session, sessions: sessions) +
+            [
+                threadInsight(for: session, sessions: sessions),
+                instrumentInsight(for: session, sessions: sessions),
+                activityInsight(for: session, sessions: sessions)
+            ].compactMap { $0 }
 
         return candidates
-            .compactMap { $0 }
-            .filter { $0.collapsedText != excludedKey }
+            .filter { $0.suppressionKey != excludedKey }
     }
 
     private static func threadInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
@@ -275,6 +276,42 @@ enum PracticeInsightSelector {
         return variants.randomElement() ?? variants[0]
     }
 
+    private static func archiveInsights(for session: Session, sessions: [Session]) -> [PracticeInsight] {
+        var insights: [PracticeInsight] = []
+
+        if let existingArchive = archiveInsight(for: session, sessions: sessions) {
+            insights.append(existingArchive)
+        }
+
+        if let longestSession = longestSessionMilestone(for: session, sessions: sessions) {
+            insights.append(longestSession)
+        }
+
+        insights.append(contentsOf: totalHoursMilestones(for: session, sessions: sessions))
+
+     
+
+        if let instrumentLeader = durationLeadershipMilestone(
+            for: session,
+            sessions: sessions,
+            labelFor: instrumentLabel(for:),
+            family: .instrument
+        ) {
+            insights.append(instrumentLeader)
+        }
+
+        if let activityLeader = durationLeadershipMilestone(
+            for: session,
+            sessions: sessions,
+            labelFor: activityLabel(for:),
+            family: .activity
+        ) {
+            insights.append(activityLeader)
+        }
+
+        return insights
+    }
+
     private static func archiveInsight(for session: Session, sessions: [Session]) -> PracticeInsight? {
         if let firstThreadInsight = firstThreadMilestone(for: session, sessions: sessions) {
             return firstThreadInsight
@@ -323,6 +360,195 @@ enum PracticeInsightSelector {
         }
 
         return nil
+    }
+
+    private static func longestSessionMilestone(for session: Session, sessions: [Session]) -> PracticeInsight? {
+        let currentDuration = Int(session.durationSeconds)
+        guard currentDuration > 0 else { return nil }
+
+        let previousLongest = sessions
+            .filter { $0.objectID != session.objectID }
+            .map { Int($0.durationSeconds) }
+            .max() ?? 0
+
+        guard previousLongest > 0 else { return nil }
+        guard currentDuration > previousLongest else { return nil }
+
+        return PracticeInsight(
+            kind: .archive,
+            expandedText: "This was your longest session so far",
+            collapsedText: "Longest session so far",
+            suppressionKey: "archive.longestSession.\(currentDuration)"
+        )
+    }
+
+    private static func totalHoursMilestones(for session: Session, sessions: [Session]) -> [PracticeInsight] {
+        let currentDuration = Int(session.durationSeconds)
+        guard currentDuration > 0 else { return [] }
+
+        let totalSeconds = sessions.reduce(0) { $0 + max(0, Int($1.durationSeconds)) }
+        let previousTotalSeconds = max(0, totalSeconds - currentDuration)
+
+        return totalHourThresholds.compactMap { threshold in
+            let thresholdSeconds = threshold * 60 * 60
+            guard previousTotalSeconds < thresholdSeconds,
+                  totalSeconds >= thresholdSeconds else {
+                return nil
+            }
+
+            return totalHoursMilestone(for: threshold)
+        }
+    }
+
+    private static func totalHoursMilestone(for threshold: Int) -> PracticeInsight {
+        switch threshold {
+        case 10:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal now contains ten hours of activity",
+                collapsedText: "Ten hours of activity logged",
+                suppressionKey: "archive.totalHours.10"
+            )
+
+        case 25:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal now contains twenty-five hours of activity",
+                collapsedText: "Twenty-five hours of activity logged",
+                suppressionKey: "archive.totalHours.25"
+            )
+
+        case 50:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Fifty hours of activity have now been added to your journal",
+                collapsedText: "Fifty hours of activity logged",
+                suppressionKey: "archive.totalHours.50"
+            )
+
+        case 100:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal now contains one hundred hours of recorded activity",
+                collapsedText: "One hundred hours of activity logged",
+                suppressionKey: "archive.totalHours.100"
+            )
+
+        case 250:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal now contains two hundred and fifty hours of recorded activity",
+                collapsedText: "Two hundred and fifty hours of activity logged",
+                suppressionKey: "archive.totalHours.250"
+            )
+
+        case 500:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Five hundred hours of activity have now been added to your journal",
+                collapsedText: "Five hundred hours of activity logged",
+                suppressionKey: "archive.totalHours.500"
+            )
+
+        case 1000:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal now contains one thousand hours of recorded activity",
+                collapsedText: "One thousand hours of activity logged",
+                suppressionKey: "archive.totalHours.1000"
+            )
+
+        default:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "Your journal contains \(threshold) hours of activity",
+                collapsedText: "\(threshold) hours of activity logged",
+                suppressionKey: "archive.totalHours.\(threshold)"
+            )
+        }
+    }
+
+   
+
+    private enum DurationLeadershipFamily {
+        case instrument
+        case activity
+    }
+
+    private static func durationLeadershipMilestone(
+        for session: Session,
+        sessions: [Session],
+        labelFor: (Session) -> String?,
+        family: DurationLeadershipFamily
+    ) -> PracticeInsight? {
+        let previousSessions = sessions.filter { $0.objectID != session.objectID }
+
+        guard let currentLeader = durationLeader(in: sessions, labelFor: labelFor),
+              let previousLeader = durationLeader(in: previousSessions, labelFor: labelFor),
+              currentLeader.key != previousLeader.key else {
+            return nil
+        }
+
+        switch family {
+        case .instrument:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "\(currentLeader.displayLabel) has become your most-practiced instrument",
+                collapsedText: "\(currentLeader.displayLabel) became leading instrument",
+                suppressionKey: "archive.instrumentLeader.\(currentLeader.key).\(currentLeader.seconds)"
+            )
+
+        case .activity:
+            return PracticeInsight(
+                kind: .archive,
+                expandedText: "\(currentLeader.displayLabel) now accounts for the most activity time in your journal",
+                collapsedText: "\(currentLeader.displayLabel) became leading activity",
+                suppressionKey: "archive.activityLeader.\(currentLeader.key).\(currentLeader.seconds)"
+            )
+        }
+    }
+
+    private struct DurationLeader {
+        let key: String
+        let displayLabel: String
+        let seconds: Int
+    }
+
+    private static func durationLeader(in sessions: [Session], labelFor: (Session) -> String?) -> DurationLeader? {
+        var totals: [String: (displayLabel: String, seconds: Int)] = [:]
+
+        for session in sessions {
+            guard let label = normalized(labelFor(session)),
+                  let key = normalizedKey(label) else {
+                continue
+            }
+
+            let seconds = max(0, Int(session.durationSeconds))
+            guard seconds > 0 else { continue }
+
+            if let existing = totals[key] {
+                totals[key] = (displayLabel: existing.displayLabel, seconds: existing.seconds + seconds)
+            } else {
+                totals[key] = (displayLabel: label, seconds: seconds)
+            }
+        }
+
+        return totals
+            .map { key, value in
+                DurationLeader(
+                    key: key,
+                    displayLabel: value.displayLabel,
+                    seconds: value.seconds
+                )
+            }
+            .sorted { lhs, rhs in
+                if lhs.seconds != rhs.seconds {
+                    return lhs.seconds > rhs.seconds
+                }
+
+                return lhs.displayLabel.localizedCaseInsensitiveCompare(rhs.displayLabel) == .orderedAscending
+            }
+            .first
     }
 
     private static func firstThreadMilestone(for session: Session, sessions: [Session]) -> PracticeInsight? {

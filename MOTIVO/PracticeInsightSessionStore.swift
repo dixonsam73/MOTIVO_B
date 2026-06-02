@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
-// SCOPE: Practice Insight lifecycle simplification — keep insights expanded-only and remove collapse timer/display state. Preserve pending delivery, selector, copy, thresholds, archive logic, and UI styling intent.
-// SEARCH-TOKEN: 20260601_190500_PracticeInsightExpandedOnlyLifecycle
+// CHANGE-ID: 20260602_200800_PracticeInsightPendingStaleArchiveFix
+// SCOPE: Practice Insight pending-delivery bug fix — prevent stale archive milestones from surfacing after unrelated saves. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260602_200800_PracticeInsightPendingStaleArchiveFix
 
 import Foundation
 import CoreData
@@ -11,7 +11,7 @@ final class PracticeInsightSessionStore: ObservableObject {
 
     @Published private(set) var currentInsight: PracticeInsight?
     private var lastInsightKey: String?
-    private var pendingInsight: PracticeInsight?
+    private var pendingInsights: [PracticeInsight] = []
 
     private init() {}
 
@@ -22,32 +22,41 @@ final class PracticeInsightSessionStore: ObservableObject {
             excludingInsightKey: lastInsightKey
         )
 
-        let insightToShow: PracticeInsight?
-
-        if let pendingInsight {
-            if let freshInsight = freshInsights.first,
-               priority(for: freshInsight.kind) < priority(for: pendingInsight.kind) {
-                insightToShow = freshInsight
-            } else {
-                insightToShow = pendingInsight
-            }
-
-            self.pendingInsight = nil
-        } else if let freshInsight = freshInsights.first {
-            insightToShow = freshInsight
-            pendingInsight = freshInsights.dropFirst().first
-        } else {
-            insightToShow = nil
+        let carriedPendingInsights = pendingInsights.filter {
+            $0.kind != .archive && $0.suppressionKey != lastInsightKey
         }
 
-        guard let insight = insightToShow else {
+        let orderedFreshInsights = ordered(
+            deduplicated(freshInsights, excludingInsightKey: lastInsightKey)
+        )
+
+        if let insight = orderedFreshInsights.first {
+            currentInsight = insight
+            lastInsightKey = insight.suppressionKey
+
+            let remainingFreshInsights = Array(orderedFreshInsights.dropFirst()).filter { $0.kind != .archive }
+            pendingInsights = ordered(
+                deduplicated(
+                    remainingFreshInsights + carriedPendingInsights,
+                    excludingInsightKey: lastInsightKey
+                )
+            )
+            return
+        }
+
+        let orderedPendingInsights = ordered(
+            deduplicated(carriedPendingInsights, excludingInsightKey: lastInsightKey)
+        )
+
+        guard let insight = orderedPendingInsights.first else {
             currentInsight = nil
+            pendingInsights = []
             return
         }
 
         currentInsight = insight
-        lastInsightKey = insight.collapsedText
-
+        lastInsightKey = insight.suppressionKey
+        pendingInsights = Array(orderedPendingInsights.dropFirst())
     }
 
     func clearCurrentInsight() {
@@ -56,7 +65,44 @@ final class PracticeInsightSessionStore: ObservableObject {
 
     func clear() {
         currentInsight = nil
-        pendingInsight = nil
+        pendingInsights = []
+    }
+
+
+    private func deduplicated(
+        _ insights: [PracticeInsight],
+        excludingInsightKey excludedKey: String?
+    ) -> [PracticeInsight] {
+        var seenKeys = Set<String>()
+        var result: [PracticeInsight] = []
+
+        for insight in insights {
+            let key = insight.suppressionKey
+            guard key != excludedKey else { continue }
+            guard seenKeys.contains(key) == false else { continue }
+
+            seenKeys.insert(key)
+            result.append(insight)
+        }
+
+        return result
+    }
+
+
+    private func ordered(_ insights: [PracticeInsight]) -> [PracticeInsight] {
+        insights
+            .enumerated()
+            .sorted { lhs, rhs in
+                let lhsPriority = priority(for: lhs.element.kind)
+                let rhsPriority = priority(for: rhs.element.kind)
+
+                if lhsPriority != rhsPriority {
+                    return lhsPriority < rhsPriority
+                }
+
+                return lhs.offset < rhs.offset
+            }
+            .map { $0.element }
     }
 
     private func priority(for kind: PracticeInsightKind) -> Int {
