@@ -702,9 +702,16 @@ struct PostRecordDetailsView: View {
                             Text("Description")
                                 .font(.footnote.weight(.medium))
                                 .foregroundStyle(Theme.Colors.secondaryText)
-                            TextField("Activity description", text: $activityDetail, axis: .vertical)
-                                .focused($isActivityDetailFocused)
-                                .lineLimit(1...3)
+                            TextField(
+                                "Activity description",
+                                text: $activityDetail
+                            )
+                            .focused($isActivityDetailFocused)
+                            .lineLimit(1)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                isActivityDetailFocused = false
+                            }
                                 .textInputAutocapitalization(.never)
                                 .font(Theme.Text.body)
                         }
