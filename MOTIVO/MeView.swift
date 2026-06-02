@@ -168,8 +168,8 @@ private func timeDistribution(from sessions: [Session]) -> [ActivitySlice] {
     }
     guard !totals.isEmpty else { return [] }
     let sorted = totals.sorted { $0.value > $1.value }
-    let head = Array(sorted.prefix(7))
-    let tail = sorted.dropFirst(7)
+    let head = Array(sorted.prefix(10))
+    let tail = sorted.dropFirst(10)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -199,8 +199,8 @@ private func threadAnalytics(from sessions: [Session]) -> ThreadAnalyticsResult 
     let sorted = totals.sorted { $0.value > $1.value }
     let uniqueCount = totals.count
 
-    let head = Array(sorted.prefix(7))
-    let tail = sorted.dropFirst(7)
+    let head = Array(sorted.prefix(10))
+    let tail = sorted.dropFirst(10)
     let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
     let otherTotal = tail.reduce(0) { $0 + $1.value }
     let slices = otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -1430,8 +1430,8 @@ if let insights, hasVisibleInterpretiveInsights {
     private func distributionSlices(from totals: [String: Int]) -> [ActivitySlice] {
         guard !totals.isEmpty else { return [] }
         let sorted = totals.sorted { $0.value > $1.value }
-        let head = Array(sorted.prefix(7))
-        let tail = sorted.dropFirst(7)
+        let head = Array(sorted.prefix(10))
+        let tail = sorted.dropFirst(10)
         let headSlices = head.map { ActivitySlice(name: $0.key, seconds: $0.value) }
         let otherTotal = tail.reduce(0) { $0 + $1.value }
         return otherTotal > 0 ? headSlices + [ActivitySlice(name: "Other", seconds: otherTotal)] : headSlices
@@ -2866,7 +2866,11 @@ fileprivate struct TimeDistributionCard: View {
         Color(red: 164.0 / 255.0, green: 91.0 / 255.0, blue: 214.0 / 255.0),   // Purple
         Color(red: 1.0, green: 107.0 / 255.0, blue: 87.0 / 255.0),             // Red
         Color(red: 1.0, green: 214.0 / 255.0, blue: 10.0 / 255.0),             // Yellow
-        Color(red: 1.0, green: 95.0 / 255.0, blue: 162.0 / 255.0)              // Pink
+        Color(red: 1.0, green: 95.0 / 255.0, blue: 162.0 / 255.0),             // Pink
+
+        Color(red: 0.0, green: 170.0 / 255.0, blue: 170.0 / 255.0),            // Teal
+        Color(red: 135.0 / 255.0, green: 120.0 / 255.0, blue: 95.0 / 255.0),   // Taupe
+        Color(red: 150.0 / 255.0, green: 110.0 / 255.0, blue: 75.0 / 255.0)    // Brown
     ]
 
     private static let meViewChartFallback = Color(
