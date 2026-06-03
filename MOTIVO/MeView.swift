@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260603_122700_MeView_PracticeWindowSpreadDots
+// SCOPE: MeView-only Practice Window glyph polish: render three subtle delayed-fade dots for spread-through-day after the existing centre-out line reveal. No InsightEngine, data logic, card layout, timing, Theme, backend, Core Data, or other UI changes.
+// SEARCH-TOKEN: 20260603_122700_MeView_PracticeWindowSpreadDots
+
 // CHANGE-ID: 20260517_224800_MeView_VisualRhythmOnly
 // SCOPE: MeView visual rhythm only — tighten compact stat-card padding and lower-page grid spacing; no data, animation, tint, ordering, backend, schema, or behaviour changes.
 // SEARCH-TOKEN: 20260517_224800_MeView_VisualRhythmOnly
@@ -2475,37 +2479,68 @@ private struct PracticeWindowGlyphCanvas: View, Animatable {
                 style: StrokeStyle(lineWidth: 1.35, lineCap: .round)
             )
 
-            guard shouldRenderDominantDot else { return }
+            switch insight {
+            case .mornings, .afternoons, .evenings:
+                renderDot(
+                    in: context,
+                    at: dotPosition,
+                    availableWidth: availableWidth,
+                    insetX: insetX,
+                    centerY: centerY,
+                    fillOpacity: 0.62,
+                    strokeOpacity: 0.78,
+                    progress: resolvedDotProgress
+                )
 
-            let dotX = insetX + (availableWidth * dotPosition)
-            let radius: CGFloat = 7.6
-            let rect = CGRect(
-                x: dotX - radius,
-                y: centerY - radius,
-                width: radius * 2,
-                height: radius * 2
-            )
-            let dotPath = Path(ellipseIn: rect)
+            case .spreadThroughDay:
+                for position in [CGFloat(0.20), CGFloat(0.50), CGFloat(0.80)] {
+                    renderDot(
+                        in: context,
+                        at: position,
+                        availableWidth: availableWidth,
+                        insetX: insetX,
+                        centerY: centerY,
+                        fillOpacity: 0.32,
+                        strokeOpacity: 0.46,
+                        progress: resolvedDotProgress
+                    )
+                }
 
-            context.fill(
-                dotPath,
-                with: .color(glyphColor.opacity(0.62 * resolvedDotProgress))
-            )
-            context.stroke(
-                dotPath,
-                with: .color(glyphColor.opacity(0.78 * resolvedDotProgress)),
-                lineWidth: 1.25
-            )
+            case .insufficientData:
+                return
+            }
         }
     }
 
-    private var shouldRenderDominantDot: Bool {
-        switch insight {
-        case .mornings, .afternoons, .evenings:
-            return true
-        case .spreadThroughDay, .insufficientData:
-            return false
-        }
+    private func renderDot(
+        in context: GraphicsContext,
+        at position: CGFloat,
+        availableWidth: CGFloat,
+        insetX: CGFloat,
+        centerY: CGFloat,
+        fillOpacity: Double,
+        strokeOpacity: Double,
+        progress: Double
+    ) {
+        let dotX = insetX + (availableWidth * position)
+        let radius: CGFloat = 7.6
+        let rect = CGRect(
+            x: dotX - radius,
+            y: centerY - radius,
+            width: radius * 2,
+            height: radius * 2
+        )
+        let dotPath = Path(ellipseIn: rect)
+
+        context.fill(
+            dotPath,
+            with: .color(glyphColor.opacity(fillOpacity * progress))
+        )
+        context.stroke(
+            dotPath,
+            with: .color(glyphColor.opacity(strokeOpacity * progress)),
+            lineWidth: 1.25
+        )
     }
 
     private var dotPosition: CGFloat {
