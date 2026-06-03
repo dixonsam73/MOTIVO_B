@@ -186,6 +186,7 @@ struct TasksPadCard: View {
             }
             .frame(width: rightControlZoneWidth, alignment: .trailing)
         }
+        .frame(minHeight: 36)
         .padding(.vertical, 1)
     }
 
