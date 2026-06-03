@@ -455,7 +455,7 @@ enum PracticeInsightSelector {
 
         return PracticeInsight(
             kind: .archive,
-            expandedText: "This was your longest session so far.",
+            expandedText: "That last session was your longest yet.",
             collapsedText: "Longest session so far",
             suppressionKey: "archive.longestSession.\(currentDuration)"
         )
