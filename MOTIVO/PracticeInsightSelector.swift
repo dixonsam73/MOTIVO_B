@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260602_222800_PracticeInsightCopyPolish
-// SCOPE: Practice Insight copy polish — refine visible insight language for milestones, observations, thread focus, leadership, and activity recurrence. No selection, suppression, UI, backend, schema, or persistence changes.
-// SEARCH-TOKEN: 20260602_222800_PracticeInsightCopyPolish
+// CHANGE-ID: 20260603_115800_PracticeInsightExplicitSuppression
+// SCOPE: Practice Insight cleanup — remove collapsedText constructor usage and migrate all insight families to explicit suppression keys. No selection/UI/backend/schema changes.
+// SEARCH-TOKEN: 20260603_115800_PracticeInsightExplicitSuppression
 
 import Foundation
 import CoreData
@@ -92,7 +92,6 @@ enum PracticeInsightSelector {
                     "You've been more active in the mornings recently.",
                     "More of your recent activity has been happening in the mornings."
                 ]),
-                collapsedText: "Morning activity emerging",
                 suppressionKey: "observation.practiceWindow.morning"
             )
 
@@ -103,7 +102,6 @@ enum PracticeInsightSelector {
                     "Afternoon activity has been happening more often lately.",
                     "You've been spending more time working in the afternoons recently."
                 ]),
-                collapsedText: "Afternoon activity emerging",
                 suppressionKey: "observation.practiceWindow.afternoon"
             )
 
@@ -114,7 +112,6 @@ enum PracticeInsightSelector {
                     "You've been more active in the evenings recently.",
                     "More of your recent activity has been happening in the evenings."
                 ]),
-                collapsedText: "Evening activity emerging",
                 suppressionKey: "observation.practiceWindow.evening"
             )
 
@@ -149,7 +146,6 @@ enum PracticeInsightSelector {
         return PracticeInsight(
             kind: .observation,
             expandedText: "Recent sessions have settled into a similar length",
-            collapsedText: "Session lengths becoming consistent",
             suppressionKey: "observation.sessionShape.consistent"
         )
     }
@@ -159,62 +155,63 @@ enum PracticeInsightSelector {
         let count = sessions.filter {
             normalized($0.value(forKey: "threadLabel") as? String)?.caseInsensitiveCompare(label) == .orderedSame
         }.count
+        let threadKey = normalizedKey(label) ?? label.lowercased()
 
         switch count {
         case 2:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: randomText(["You've returned to the \(label) thread.", "You've been working on the \(label) thread again."]),
-                collapsedText: "\(label) thread appeared again"
+                suppressionKey: "thread.appearedAgain.\(threadKey)"
             )
 
         case 3:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: randomText(["You've been spending more time on the \(label) thread lately.", "The \(label) thread has been a regular focus recently."]),
-                collapsedText: "\(label) thread becoming more regular"
+                suppressionKey: "thread.regular.\(threadKey)"
             )
 
         case 10:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "You've logged ten entries in the \(label) thread.",
-                collapsedText: "\(label) thread reached ten sessions"
+                suppressionKey: "thread.sessions.10.\(threadKey)"
             )
 
         case 25:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: randomText(["More of your recent activity has centred on the \(label) thread.", "You've been spending a lot of time on the \(label) thread lately."]),
-                collapsedText: "\(label) thread has grown"
+                suppressionKey: "thread.sessions.25.\(threadKey)"
             )
 
         case 50:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "You've logged fifty entries in the \(label) thread.",
-                collapsedText: "\(label) thread reached fifty sessions"
+                suppressionKey: "thread.sessions.50.\(threadKey)"
             )
 
         case 100:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "You've logged one hundred entries in the \(label) thread.",
-                collapsedText: "\(label) thread reached one hundred sessions"
+                suppressionKey: "thread.sessions.100.\(threadKey)"
             )
 
         case 200:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "You've logged two hundred entries in the \(label) thread.",
-                collapsedText: "\(label) thread reached two hundred sessions"
+                suppressionKey: "thread.sessions.200.\(threadKey)"
             )
 
         case 300:
             return PracticeInsight(
                 kind: .thread,
                 expandedText: "You've logged three hundred entries in the \(label) thread.",
-                collapsedText: "\(label) thread reached three hundred sessions"
+                suppressionKey: "thread.sessions.300.\(threadKey)"
             )
 
         default:
@@ -228,8 +225,8 @@ enum PracticeInsightSelector {
 
         return PracticeInsight(
             kind: .instrument,
-            expandedText: text.expanded,
-            collapsedText: text.collapsed
+            expandedText: text,
+            suppressionKey: "instrument.recurrence.\(shift.key)"
         )
     }
 
@@ -239,116 +236,65 @@ enum PracticeInsightSelector {
 
         return PracticeInsight(
             kind: .activity,
-            expandedText: text.expanded,
-            collapsedText: text.collapsed
+            expandedText: text,
+            suppressionKey: "activity.recurrence.\(shift.key)"
         )
     }
 
-    private static func instrumentInsightText(for label: String) -> (expanded: String, collapsed: String) {
-        let variants: [(expanded: String, collapsed: String)] = [
-            (
-                expanded: "You've been spending more time on \(label) lately",
-                collapsed: "Spending more time on \(label) recently"
-            ),
-            (
-                expanded: "\(label) has become a greater focus recently",
-                collapsed: "More focus on \(label) lately"
-            ),
-            (
-                expanded: "You've been playing more \(label) recently",
-                collapsed: "Playing more \(label) lately"
-            )
+    private static func instrumentInsightText(for label: String) -> String {
+        let variants: [String] = [
+            "You've been spending more time on \(label) lately",
+            "\(label) has become a greater focus recently",
+            "You've been playing more \(label) recently"
         ]
 
         return variants.randomElement() ?? variants[0]
     }
 
-    private static func activityInsightText(for label: String) -> (expanded: String, collapsed: String) {
-        let variants: [(expanded: String, collapsed: String)]
+    private static func activityInsightText(for label: String) -> String {
+        let variants: [String]
 
         switch normalizedKey(label) {
         case "practice":
             variants = [
-                (
-                    expanded: "You've been practicing more lately",
-                    collapsed: "Practicing more lately"
-                ),
-                (
-                    expanded: "You've been spending more time practicing recently",
-                    collapsed: "Spending more time practicing recently"
-                )
+                "You've been practicing more lately",
+                "Practice has been showing up more often recently"
             ]
 
         case "rehearsal":
             variants = [
-                (
-                    expanded: "You've been rehearsing more lately",
-                    collapsed: "Rehearsing more lately"
-                ),
-                (
-                    expanded: "You've been spending more time rehearsing recently",
-                    collapsed: "Spending more time rehearsing recently"
-                )
+                "You've been rehearsing more lately",
+                "Rehearsal has been showing up more often recently"
             ]
 
         case "recording":
             variants = [
-                (
-                    expanded: "You've been recording more lately",
-                    collapsed: "Recording more lately"
-                ),
-                (
-                    expanded: "You've been spending more time recording recently",
-                    collapsed: "Spending more time recording recently"
-                )
+                "You've been recording more lately",
+                "You've been spending more time recording recently"
             ]
 
         case "lesson":
             variants = [
-                (
-                    expanded: "You've been having more lessons recently",
-                    collapsed: "Having more lessons recently"
-                ),
-                (
-                    expanded: "You've been logging more lessons lately",
-                    collapsed: "Logging more lessons lately"
-                )
+                "You've been having more lessons recently",
+                "You've been logging more lessons lately"
             ]
 
         case "performance":
             variants = [
-                (
-                    expanded: "You've been performing more lately",
-                    collapsed: "Performing more lately"
-                ),
-                (
-                    expanded: "You've been spending more time performing recently",
-                    collapsed: "Spending more time performing recently"
-                )
+                "You've been performing more lately",
+                "You've been spending more time performing recently"
             ]
 
         case "writing":
             variants = [
-                (
-                    expanded: "You've been writing more lately",
-                    collapsed: "Writing more lately"
-                ),
-                (
-                    expanded: "You've been spending more time writing recently",
-                    collapsed: "Spending more time writing recently"
-                )
+                "You've been writing more lately",
+                "You've been spending more time writing recently"
             ]
 
         default:
             variants = [
-                (
-                    expanded: "You've been spending more time on \(label) lately",
-                    collapsed: "Spending more time on \(label) recently"
-                ),
-                (
-                    expanded: "You've been logging more \(label) recently",
-                    collapsed: "Logging more \(label) recently"
-                )
+                "You've been spending more time on \(label) lately",
+                "You've been logging more \(label) recently"
             ]
         }
 
@@ -402,7 +348,7 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "Your practice journal has begun.",
-                collapsedText: "Practice journal begun"
+                suppressionKey: "archive.sessions.1"
             )
         }
 
@@ -410,7 +356,7 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged five entries in your journal.",
-                collapsedText: "Five sessions logged"
+                suppressionKey: "archive.sessions.5"
             )
         }
 
@@ -418,7 +364,7 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged ten entries in your journal.",
-                collapsedText: "Ten sessions logged"
+                suppressionKey: "archive.sessions.10"
             )
         }
 
@@ -426,7 +372,7 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged twenty-five entries in your journal.",
-                collapsedText: "Twenty-five sessions logged"
+                suppressionKey: "archive.sessions.25"
             )
         }
 
@@ -434,7 +380,7 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged fifty entries in your journal.",
-                collapsedText: "Fifty sessions logged"
+                suppressionKey: "archive.sessions.50"
             )
         }
 
@@ -456,7 +402,6 @@ enum PracticeInsightSelector {
         return PracticeInsight(
             kind: .archive,
             expandedText: "That last session was your longest yet.",
-            collapsedText: "Longest session so far",
             suppressionKey: "archive.longestSession.\(currentDuration)"
         )
     }
@@ -485,7 +430,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged ten hours of activity.",
-                collapsedText: "Ten hours of activity logged",
                 suppressionKey: "archive.totalHours.10"
             )
 
@@ -493,7 +437,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged twenty-five hours of activity.",
-                collapsedText: "Twenty-five hours of activity logged",
                 suppressionKey: "archive.totalHours.25"
             )
 
@@ -501,7 +444,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged fifty hours of activity.",
-                collapsedText: "Fifty hours of activity logged",
                 suppressionKey: "archive.totalHours.50"
             )
 
@@ -509,7 +451,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged one hundred hours of activity.",
-                collapsedText: "One hundred hours of activity logged",
                 suppressionKey: "archive.totalHours.100"
             )
 
@@ -517,7 +458,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged two hundred and fifty hours of activity.",
-                collapsedText: "Two hundred and fifty hours of activity logged",
                 suppressionKey: "archive.totalHours.250"
             )
 
@@ -525,7 +465,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged five hundred hours of activity.",
-                collapsedText: "Five hundred hours of activity logged",
                 suppressionKey: "archive.totalHours.500"
             )
 
@@ -533,7 +472,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged one thousand hours of activity.",
-                collapsedText: "One thousand hours of activity logged",
                 suppressionKey: "archive.totalHours.1000"
             )
 
@@ -541,7 +479,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: "You've logged \(threshold) hours of activity.",
-                collapsedText: "\(threshold) hours of activity logged",
                 suppressionKey: "archive.totalHours.\(threshold)"
             )
         }
@@ -573,7 +510,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: instrumentLeadershipText(for: currentLeader.displayLabel),
-                collapsedText: "\(currentLeader.displayLabel) became leading instrument",
                 suppressionKey: "archive.instrumentLeader.\(currentLeader.key).\(currentLeader.seconds)"
             )
 
@@ -581,7 +517,6 @@ enum PracticeInsightSelector {
             return PracticeInsight(
                 kind: .archive,
                 expandedText: activityLeadershipText(for: currentLeader.displayLabel),
-                collapsedText: "\(currentLeader.displayLabel) became leading activity",
                 suppressionKey: "archive.activityLeader.\(currentLeader.key).\(currentLeader.seconds)"
             )
         }
@@ -669,7 +604,7 @@ enum PracticeInsightSelector {
         return PracticeInsight(
             kind: .archive,
             expandedText: "You've started your first thread.",
-            collapsedText: "First thread created"
+            suppressionKey: "archive.firstThread"
         )
     }
 

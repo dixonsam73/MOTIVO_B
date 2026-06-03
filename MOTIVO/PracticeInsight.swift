@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260602_213500_PracticeInsightObservations
-// SCOPE: Practice Insights Pass 2 — add observational insight kind for practice-window and session-length pattern observations. No UI/backend/schema changes.
-// SEARCH-TOKEN: 20260602_213500_PracticeInsightObservations
+// CHANGE-ID: 20260603_115800_PracticeInsightExplicitSuppression
+// SCOPE: Practice Insight cleanup — remove collapsedText from the model and require explicit suppression keys. No UI/backend/schema changes.
+// SEARCH-TOKEN: 20260603_115800_PracticeInsightExplicitSuppression
 
 import Foundation
 
@@ -17,7 +17,6 @@ struct PracticeInsight: Identifiable, Equatable {
     let kind: PracticeInsightKind
     let title: String
     let expandedText: String
-    let collapsedText: String
     let suppressionKey: String
 
     init(
@@ -25,14 +24,12 @@ struct PracticeInsight: Identifiable, Equatable {
         kind: PracticeInsightKind,
         title: String = "Practice Insight",
         expandedText: String,
-        collapsedText: String,
-        suppressionKey: String? = nil
+        suppressionKey: String
     ) {
         self.id = id
         self.kind = kind
         self.title = title
         self.expandedText = expandedText
-        self.collapsedText = collapsedText
-        self.suppressionKey = suppressionKey ?? collapsedText
+        self.suppressionKey = suppressionKey
     }
 }
