@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260603_160900_TasksManager_ImportControlsFix
-// SCOPE: Restore Tasks Manager add/import/save controls by scoping edit mode to Your Tasks only; polish local import launcher presentation. No scanner/OCR/parser/preset-loading changes.
-// SEARCH-TOKEN: 20260603_160900_TasksManager_ImportControlsFix
+// CHANGE-ID: 20260603_220400_TaskSetEditorTaskPadStyle
+// SCOPE: Task Set editor simplification — remove bottom Actions/Add Task sections, use TaskPad-style task rows with drag handles, add inline + Add line control, move delete set into toolbar menu, and keep a single standard back affordance. No task-set storage, manager assignment, timer, import, parser, backend, or schema changes.
+// SEARCH-TOKEN: 20260603_220400_TaskSetEditorTaskPadStyle
 
 import SwiftUI
 import CoreData
@@ -74,6 +74,11 @@ struct TasksManagerView: View {
     @FocusState private var focusedImportLineID: UUID?
     @FocusState private var focusedManagerLineID: UUID?
     @State private var ignoreNextManagerTapLineID: UUID? = nil
+    @State private var showTaskSetEditor: Bool = false
+    @State private var editingTaskSetID: UUID? = nil
+    @State private var newEditorItemText: String = ""
+    @State private var draggedEditorLineID: UUID? = nil
+    @FocusState private var focusedEditorLineID: UUID?
 
     private let managerDeleteIconWidth: CGFloat = 20
     private let managerDragDeleteSpacing: CGFloat = 16
@@ -368,43 +373,281 @@ struct TasksManagerView: View {
         )
     }
 
-    @ViewBuilder
-    private var selectorSectionContent: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            if showsSingleTopSelector {
-                Text("Activity")
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-            }
 
-            HStack {
-                Menu {
-                    ForEach(allActivityRefs, id: \.self) { ref in
-                        Button {
-                            selectedActivityRef = ref
-                        } label: {
-                            Label(
-                                activityDisplayName(for: ref),
-                                systemImage: ref == selectedActivityRef ? "checkmark" : "circle"
-                            )
-                        }
-                    }
-                } label: {
-                    HStack(spacing: 6) {
-                        Text(activityDisplayName(for: selectedActivityRef))
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.accent)
+    private var editingTaskSet: SavedTaskSet? {
+        guard let editingTaskSetID else { return nil }
+        return savedTaskSets.first(where: { $0.id == editingTaskSetID })
+    }
 
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
+    private func taskSetNameBinding(for setID: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                savedTaskSets.first(where: { $0.id == setID })?.name ?? ""
+            },
+            set: { newValue in
+                guard let index = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
+                savedTaskSets[index].name = newValue
+                saveSavedTaskSets()
+                if selectedTaskSetID == setID {
+                    draftTaskSetName = newValue
+                    saveTaskSetSelectionAndItems()
                 }
             }
-        }
+        )
+    }
 
-        if shouldShowInstrumentSelector {
-            HStack {
+    private func editorLineTextBinding(setID: UUID, lineID: UUID) -> Binding<String> {
+        Binding(
+            get: {
+                guard let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }),
+                      let lineIndex = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == lineID })
+                else { return "" }
+                return savedTaskSets[setIndex].items[lineIndex].text
+            },
+            set: { newValue in
+                guard let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }),
+                      let lineIndex = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == lineID })
+                else { return }
+                savedTaskSets[setIndex].items[lineIndex].text = newValue
+                persistEditedTaskSet(setID)
+            }
+        )
+    }
+
+    private func persistEditedTaskSet(_ setID: UUID) {
+        saveSavedTaskSets()
+        if selectedTaskSetID == setID {
+            saveTaskSetSelectionAndItems()
+        }
+    }
+
+    private func openTaskSetEditor(_ setID: UUID) {
+        editingTaskSetID = setID
+        newEditorItemText = ""
+        showTaskSetEditor = true
+    }
+
+    private func addEmptyEditorLine(to setID: UUID) {
+        guard let index = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
+        let newLine = TaskTemplateLine(text: "", type: .task)
+        savedTaskSets[index].items.append(newLine)
+        persistEditedTaskSet(setID)
+
+        DispatchQueue.main.async {
+            focusedEditorLineID = newLine.id
+        }
+    }
+
+    private func toggleEditorLineType(setID: UUID, lineID: UUID) {
+        guard let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }),
+              let lineIndex = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == lineID })
+        else { return }
+        savedTaskSets[setIndex].items[lineIndex].type = (savedTaskSets[setIndex].items[lineIndex].type == .task) ? .context : .task
+        persistEditedTaskSet(setID)
+
+        #if canImport(UIKit)
+        let generator = UIImpactFeedbackGenerator(style: .light)
+        generator.prepare()
+        generator.impactOccurred(intensity: 0.7)
+        #endif
+    }
+
+    private func deleteEditorLine(setID: UUID, lineID: UUID) {
+        guard let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
+        savedTaskSets[setIndex].items.removeAll { $0.id == lineID }
+        persistEditedTaskSet(setID)
+    }
+
+    private func moveEditorLines(setID: UUID, from source: IndexSet, to destination: Int) {
+        guard let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }) else { return }
+        savedTaskSets[setIndex].items.move(fromOffsets: source, toOffset: destination)
+        persistEditedTaskSet(setID)
+    }
+
+    private func duplicateTaskSet(_ setID: UUID) {
+        guard let set = savedTaskSets.first(where: { $0.id == setID }) else { return }
+        let duplicate = SavedTaskSet(
+            id: UUID(),
+            name: uniqueTaskSetName(from: set.name),
+            items: normalizedTaskTemplateLines(from: set.items)
+        )
+        savedTaskSets.append(duplicate)
+        saveSavedTaskSets()
+    }
+
+    @ViewBuilder
+    private func assignedPill() -> some View {
+        Text("Assigned")
+            .font(Theme.Text.meta.weight(.semibold))
+            .foregroundStyle(Theme.Colors.accent)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Theme.Colors.accent.opacity(0.12))
+            )
+    }
+
+    @ViewBuilder
+    private func taskSetLibraryRow(_ set: SavedTaskSet) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                selectTaskSet(set.id)
+            } label: {
+                HStack(spacing: 12) {
+                    Text(set.name)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+
+                    Spacer(minLength: 8)
+
+                    if selectedTaskSetID == set.id {
+                        assignedPill()
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                openTaskSetEditor(set.id)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    @ViewBuilder
+    private func editorTaskRow(setID: UUID, line: TaskTemplateLine) -> some View {
+        HStack(spacing: 6) {
+            TextField(
+                line.type == .context ? "Context" : "Task",
+                text: editorLineTextBinding(setID: setID, lineID: line.id)
+            )
+            .textFieldStyle(.plain)
+            .font(line.type == .context ? Theme.Text.body.weight(.medium) : Theme.Text.body)
+            .disableAutocorrection(true)
+            .textInputAutocapitalization(.sentences)
+            .focused($focusedEditorLineID, equals: line.id)
+            .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
+            .padding(.vertical, 4)
+            .contentShape(Rectangle())
+            .simultaneousGesture(
+                LongPressGesture(minimumDuration: 0.35)
+                    .onEnded { _ in
+                        focusedEditorLineID = nil
+                        toggleEditorLineType(setID: setID, lineID: line.id)
+                    }
+            )
+
+            Spacer(minLength: 8)
+
+            HStack(spacing: managerDragDeleteSpacing) {
+                Image(systemName: "line.3.horizontal")
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
+                    .frame(width: managerDeleteIconWidth, height: 28)
+                    .contentShape(Rectangle())
+                    .onDrag {
+                        focusedEditorLineID = nil
+                        draggedEditorLineID = line.id
+                        return NSItemProvider(object: NSString(string: line.id.uuidString))
+                    }
+                    .accessibilityLabel("Reorder task")
+
+                Button(role: .destructive) {
+                    deleteEditorLine(setID: setID, lineID: line.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .foregroundStyle(Theme.Colors.secondaryText.opacity(0.9))
+                        .frame(width: managerDeleteIconWidth, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(width: managerDeleteIconWidth + managerDragDeleteSpacing + managerDeleteIconWidth, alignment: .trailing)
+        }
+        .frame(minHeight: 36)
+        .padding(.vertical, 1)
+    }
+
+    @ViewBuilder
+    private var taskSetEditorView: some View {
+        if let set = editingTaskSet {
+            Form {
+                Section(header: Text("Task Set").sectionHeader()) {
+                    TextField("Task set name", text: taskSetNameBinding(for: set.id))
+                        .font(Theme.Text.body)
+                        .textInputAutocapitalization(.words)
+                        .submitLabel(.done)
+                }
+
+                Section(header: Text("Tasks").sectionHeader()) {
+                    ForEach(set.items) { line in
+                        editorTaskRow(setID: set.id, line: line)
+                            .onDrop(
+                                of: [UTType.text],
+                                delegate: EditorTaskLineDropDelegate(
+                                    setID: set.id,
+                                    targetID: line.id,
+                                    savedTaskSets: $savedTaskSets,
+                                    draggedLineID: $draggedEditorLineID,
+                                    onPersistEditedTaskSet: persistEditedTaskSet
+                                )
+                            )
+                    }
+
+                    Button {
+                        addEmptyEditorLine(to: set.id)
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("+")
+                            Text("Add line")
+                        }
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.accent.opacity(0.95))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 4)
+                }
+            }
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Menu {
+                        Button(role: .destructive) {
+                            deleteTaskSet(set.id)
+                            showTaskSetEditor = false
+                            editingTaskSetID = nil
+                        } label: {
+                            Text("Delete Task Set")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.body.weight(.semibold))
+                            .foregroundStyle(.primary)
+                    }
+                    .accessibilityLabel("Task set actions")
+                }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .appBackground()
+        } else {
+            EmptyView()
+        }
+    }
+
+    @ViewBuilder
+    private var selectorSectionContent: some View {
+        VStack(spacing: 0) {
+            if shouldShowInstrumentSelector {
                 Menu {
                     ForEach(instrumentsForProfile, id: \.objectID) { inst in
                         Button {
@@ -417,100 +660,85 @@ struct TasksManagerView: View {
                         }
                     }
                 } label: {
-                    HStack(spacing: 6) {
-                        Text(instrumentDisplayName(for: selectedInstrumentID))
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.accent)
+                    selectorRowLabel(
+                        title: "Instrument",
+                        value: instrumentDisplayName(for: selectedInstrumentID)
+                    )
+                }
+                .buttonStyle(.plain)
 
-                        Image(systemName: "chevron.up.chevron.down")
-                            .font(.caption2)
-                            .foregroundStyle(Theme.Colors.secondaryText)
+                Divider()
+            }
+
+            Menu {
+                ForEach(allActivityRefs, id: \.self) { ref in
+                    Button {
+                        selectedActivityRef = ref
+                    } label: {
+                        Label(
+                            activityDisplayName(for: ref),
+                            systemImage: ref == selectedActivityRef ? "checkmark" : "circle"
+                        )
                     }
                 }
+            } label: {
+                selectorRowLabel(
+                    title: "Activity",
+                    value: activityDisplayName(for: selectedActivityRef)
+                )
             }
+            .buttonStyle(.plain)
         }
+    }
+
+    private func selectorRowLabel(title: String, value: String) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(Theme.Colors.secondaryText)
+
+            Spacer(minLength: Theme.Spacing.m)
+
+            Text(value)
+                .font(Theme.Text.body)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
+        }
+        .padding(.vertical, 4)
+        .contentShape(Rectangle())
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
-                    selectorSectionContent
-                }
-
-                Section(header: Text("Tasks Pad").sectionHeader()) {
-                    Toggle("Pre-fill tasks in Session Timer", isOn: $autofillEnabled)
+                    Toggle("Pre-load task set in timer task pad", isOn: $autofillEnabled)
                         .font(Theme.Text.body)
                         .tint(Theme.Colors.accent)
                         .onChange(of: autofillEnabled) {
                             saveToggle()
                         }
-
-                    HStack {
-                        Text("Default task set")
-                            .font(Theme.Text.body)
-                        Spacer()
-                        Button {
-                            showDefaultTaskSetSheet = true
-                        } label: {
-                            HStack(spacing: 6) {
-                                Text(selectedTaskSet?.name ?? "Current list")
-                                    .font(Theme.Text.body)
-                                    .foregroundStyle(Theme.Colors.accent)
-                                Image(systemName: "chevron.up.chevron.down")
-                                    .font(.caption2)
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    }
                 }
 
-                Section {
-                    Button(action: { showTaskImportLauncher = true }) {
-                        Text("Import tasks")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.accent)
-                    }
+                Section(header: Text("For This Combination").sectionHeader()) {
+                    selectorSectionContent
+                }
 
-                    if canSaveCurrentAsTaskSet {
-                        Button(action: saveCurrentItemsAsTaskSet) {
-                            Text("Save current list as task set")
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.accent)
+                if hasSavedTaskSets {
+                    Section(header: Text("Task Sets").sectionHeader()) {
+                        ForEach(savedTaskSets) { set in
+                            taskSetLibraryRow(set)
                         }
                     }
                 }
-
-                Section(header: Text("Add Task").sectionHeader()) {
-                    HStack {
-                        TextField("Add task", text: $newItemText)
-                            .font(Theme.Text.body)
-                            .textInputAutocapitalization(.sentences)
-                            .submitLabel(.done)
-
-                        if !newItemText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                            Button(action: addItem) {
-                                Text("Add")
-                                    .font(Theme.Text.body)
-                                    .foregroundStyle(Theme.Colors.accent)
-                            }
-                        }
-                    }
-                }
-
-                Section(header: Text("Your Tasks").sectionHeader()) {
-                    ForEach(items) { line in
-                        managerTaskRow(for: line)
-                    }
-                    .onMove(perform: moveManagerLines)
-                }
-               .environment(\.editMode, .constant(.active))
             }
             .scrollDismissesKeyboard(.interactively)
-          
             .navigationTitle("")
-                        .toolbar {
+            .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         dismiss()
@@ -521,65 +749,8 @@ struct TasksManagerView: View {
                     }
                 }
             }
-            
-            .fullScreenCover(isPresented: $showTaskImportLauncher) {
-                TasksManagerImportLauncherSheet(
-                    onCancel: {
-                        showTaskImportLauncher = false
-                    },
-                    onPasteOrType: {
-                        pastedImportText = ""
-                        importDraftItems = []
-                        importDraftLines = []
-                        importDraftTaskSetName = defaultImportedTaskSetName(from: [])
-                        showTaskImportLauncher = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            showTaskImportPasteSheet = true
-                        }
-                    },
-                    onScan: {
-                        importDraftItems = []
-                        importDraftLines = []
-                        importDraftTaskSetName = defaultImportedTaskSetName(from: [])
-                        showTaskImportLauncher = false
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            showTaskImportScanSheet = true
-                        }
-                    }
-                )
-            }
-.sheet(isPresented: $showTaskImportPasteSheet) {
-                taskImportPasteSheet
-            }
-            .sheet(isPresented: $showTaskImportScanSheet) {
-                TasksManagerImportScanSheet { recognizedText in
-                    let parsed = Self.parseImportedTaskLines(from: recognizedText)
-                    importDraftItems = normalizedTaskTemplateLines(from: parsed)
-                    importDraftLines = parsed.map { EditableImportedTaskLine(text: $0) }
-                    importDraftTaskSetName = defaultImportedTaskSetName(from: parsed)
-                    pastedImportText = ""
-                    showTaskImportScanSheet = false
-                    showTaskImportPasteSheet = true
-                }
-                .ignoresSafeArea()
-            }
-            .sheet(isPresented: $showDefaultTaskSetSheet) {
-                defaultTaskSetSheet
-            }
-            .alert("Save task set", isPresented: $showSaveCurrentTaskSetPrompt) {
-                TextField("Task set name", text: $draftTaskSetName)
-                Button("Save") {
-                    commitSaveCurrentItemsAsTaskSet()
-                }
-                Button("Cancel", role: .cancel) {
-                    if let selectedTaskSet {
-                        draftTaskSetName = selectedTaskSet.name
-                    } else {
-                        draftTaskSetName = ""
-                    }
-                }
-            } message: {
-                Text("Save the current list as a reusable task set.")
+            .navigationDestination(isPresented: $showTaskSetEditor) {
+                taskSetEditorView
             }
             .onAppear {
                 selectedActivityRef = normalizedActivityRef(activityRef)
@@ -1187,6 +1358,39 @@ struct TasksManagerView: View {
 }
 
 
+private struct EditorTaskLineDropDelegate: DropDelegate {
+    let setID: UUID
+    let targetID: UUID
+    @Binding var savedTaskSets: [TasksManagerView.SavedTaskSet]
+    @Binding var draggedLineID: UUID?
+    let onPersistEditedTaskSet: (UUID) -> Void
+
+    func dropEntered(info: DropInfo) {
+        guard let draggedLineID,
+              draggedLineID != targetID,
+              let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }),
+              let from = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == draggedLineID }),
+              let to = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == targetID })
+        else { return }
+
+        if savedTaskSets[setIndex].items[to].id != draggedLineID {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                savedTaskSets[setIndex].items.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
+            }
+        }
+    }
+
+    func performDrop(info: DropInfo) -> Bool {
+        draggedLineID = nil
+        onPersistEditedTaskSet(setID)
+        return true
+    }
+
+    func dropUpdated(info: DropInfo) -> DropProposal? {
+        DropProposal(operation: .move)
+    }
+}
+
 private struct TasksManagerImportLauncherSheet: View {
     let onCancel: () -> Void
     let onPasteOrType: () -> Void
@@ -1383,4 +1587,3 @@ private struct TasksManagerImportScanSheet: View {
     }
 }
 #endif
-
