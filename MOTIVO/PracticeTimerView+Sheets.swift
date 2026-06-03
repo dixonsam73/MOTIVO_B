@@ -599,28 +599,38 @@ private struct TaskImportSourceSheet: View {
                 VStack(alignment: .leading, spacing: 10) {
                     Text("Import tasks")
                         .sectionHeader()
+                    Text("Bring tasks into this session from paper, text, or a saved task list.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 8)
 
                     VStack(spacing: 12) {
                         importOptionButton(
-                            title: "Paste or type"
-                        ) {
-                            activeOption = .pasteOrType
-                        }
-
-                        importOptionButton(
-                            title: "Scan"
+                            title: "Scan task list",
+                            subtitle: "Scan a handwritten or printed list",
+                            systemImage: "camera"
                         ) {
                             activeOption = .scan
                         }
 
                         importOptionButton(
+                            title: "Paste or type",
+                            subtitle: "Enter tasks manually",
+                            systemImage: "keyboard"
+                        ) {
+                            activeOption = .pasteOrType
+                        }
+
+                        importOptionButton(
                             title: "Load saved set",
+                            subtitle: "Reuse an existing task list",
+                            systemImage: "list.bullet",
                             isEnabled: savedTaskSets.isEmpty == false
                         ) {
                             activeOption = .loadSavedSet
                         }
                     }
-                    .cardSurface()
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 8)
@@ -680,20 +690,45 @@ private struct TaskImportSourceSheet: View {
     @ViewBuilder
     private func importOptionButton(
         title: String,
+        subtitle: String,
+        systemImage: String,
         isEnabled: Bool = true,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(Theme.Text.body.weight(.semibold))
-                .foregroundStyle(isEnabled ? .primary : Theme.Colors.secondaryText)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                        .fill(Color.secondary.opacity(0.12))
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(isEnabled ? Theme.Colors.accent : Theme.Colors.secondaryText)
+                    .frame(width: 44)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(isEnabled ? .primary : Theme.Colors.secondaryText)
+
+                    Text(subtitle)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.m)
+            .background(
+                RoundedRectangle(
+                    cornerRadius: Theme.Radius.control,
+                    style: .continuous
                 )
-                .contentShape(Rectangle())
+                .fill(Color.secondary.opacity(0.12))
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .disabled(isEnabled == false)
