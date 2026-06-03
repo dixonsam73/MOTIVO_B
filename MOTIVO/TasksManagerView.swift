@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260321_134500_TasksManager_ImportSavedSets_DefaultSelector
-// SCOPE: Add task import (paste/scan), saved task sets, and default-set selector within existing TasksManager system. No Core Data/backend changes.
-// SEARCH-TOKEN: 20260321_134500_TasksManager_ImportSavedSets_DefaultSelector
+// CHANGE-ID: 20260603_160900_TasksManager_ImportControlsFix
+// SCOPE: Restore Tasks Manager add/import/save controls by scoping edit mode to Your Tasks only; polish local import launcher presentation. No scanner/OCR/parser/preset-loading changes.
+// SEARCH-TOKEN: 20260603_160900_TasksManager_ImportControlsFix
 
 import SwiftUI
 import CoreData
@@ -505,14 +505,10 @@ struct TasksManagerView: View {
                     }
                     .onMove(perform: moveManagerLines)
                 }
+               .environment(\.editMode, .constant(.active))
             }
             .scrollDismissesKeyboard(.interactively)
-            .environment(\.editMode, .constant(.active))
-            .simultaneousGesture(
-                TapGesture().onEnded {
-                    dismissManagerKeyboard()
-                }
-            )
+          
             .navigationTitle("")
                         .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1197,73 +1193,96 @@ private struct TasksManagerImportLauncherSheet: View {
     let onScan: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .center, spacing: 12) {
-                Button("Cancel") {
-                    onCancel()
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Import tasks")
+                        .sectionHeader()
+
+                    Text("Bring tasks into this list from paper or text.")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 8)
+
+                    VStack(spacing: 12) {
+                        importOptionButton(
+                            title: "Scan task list",
+                            subtitle: "Import from paper or notes",
+                            systemImage: "camera",
+                            action: onScan
+                        )
+
+                        importOptionButton(
+                            title: "Paste or type",
+                            subtitle: "Enter tasks manually",
+                            systemImage: "keyboard",
+                            action: onPasteOrType
+                        )
+                    }
                 }
-                .font(Theme.Text.body.weight(.medium))
-                .foregroundStyle(.primary)
-                .padding(.horizontal, 18)
-                .frame(height: 56)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(Color.white.opacity(0.72))
-                )
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Spacer()
-
-                Color.clear
-                    .frame(width: 92, height: 56)
-            }
-
-            Text("Import tasks")
-                .sectionHeader()
                 .padding(.horizontal, 16)
-                .padding(.bottom, 18)
-
-            VStack(spacing: 12) {
-                Button(action: onPasteOrType) {
-                    Text("Paste or type")
-                        .font(Theme.Text.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-
-                Button(action: onScan) {
-                    Text("Scan")
-                        .font(Theme.Text.body.weight(.semibold))
-                        .foregroundStyle(.primary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: Theme.Radius.control, style: .continuous)
-                                .fill(Color.secondary.opacity(0.12))
-                        )
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
             }
-            .padding(16)
-            .cardSurface()
-            .padding(.horizontal, 16)
-
-            Spacer(minLength: 0)
+            .appBackground()
+            .navigationTitle("")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        onCancel()
+                    }
+                    .foregroundStyle(Theme.Colors.accent)
+                }
+            }
         }
-        .appBackground()
+    }
+
+    @ViewBuilder
+    private func importOptionButton(
+        title: String,
+        subtitle: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 28, weight: .medium))
+                    .foregroundStyle(Theme.Colors.accent)
+                    .frame(width: 44)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title)
+                        .font(Theme.Text.body)
+                        .foregroundStyle(.primary)
+
+                    Text(subtitle)
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText)
+            }
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.m)
+            .background(
+                RoundedRectangle(
+                    cornerRadius: Theme.Radius.control,
+                    style: .continuous
+                )
+                .fill(Color.secondary.opacity(0.12))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
-
 
 #if canImport(VisionKit) && canImport(UIKit)
 private struct TasksManagerImportScanSheet: UIViewControllerRepresentable {
