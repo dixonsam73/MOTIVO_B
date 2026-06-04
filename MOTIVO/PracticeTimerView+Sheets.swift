@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260604_204500_SelectorCards_PTVSheets
+// SCOPE: Replace PTV session-meta instrument/activity wheel pickers with card-sheet selector rows; preserve inline New instrument/activity creation.
+// SEARCH-TOKEN: 20260604_204500_SelectorCards_PTVSheets
+
 // CHANGE-ID: 20260515_111500_PTV_PickerInlineCreate_Sheets
 // SCOPE: Add lightweight inline New Instrument/New Activity creation controls to PTV picker sheets; no unrelated sheet behaviour changes.
 // SEARCH-TOKEN: 20260515_111500_PTV_PickerInlineCreate_Sheets
@@ -32,92 +36,89 @@ extension PracticeTimerView {
 
     @ViewBuilder
      var instrumentPickerSheet: some View {
-            NavigationView {
+            VStack(spacing: 16) {
+                Text("Instrument")
+                    .font(.headline)
+
                 VStack(spacing: 0) {
-                    Picker("Instrument", selection: $instrumentIndex) {
-                        ForEach(instruments.indices, id: \.self) { i in
-                            Text(instruments[i].name ?? "Instrument").tag(i)
-                        }
-                    }
-                    .pickerStyle(.wheel)
-                    .labelsHidden()
-                    .frame(maxWidth: .infinity, alignment: .top)
-
-                    Divider()
-                        .opacity(0.45)
-
-                    VStack(spacing: Theme.Spacing.xs) {
-                        if isAddingNewInstrumentInPicker {
-                            HStack(spacing: Theme.Spacing.s) {
-                                TextField("New instrument", text: $newInstrumentNameInPicker)
-                                    .font(Theme.Text.body)
-                                    .textInputAutocapitalization(.words)
-                                    .submitLabel(.done)
-                                    .onSubmit {
-                                        createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
-                                    }
-
-                                Button("Add") {
-                                    createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
-                                }
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Theme.Colors.accent)
-                                .disabled(newInstrumentNameInPicker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            }
-                        } else {
-                            Button {
-                                isAddingNewInstrumentInPicker = true
-                            } label: {
-                                HStack {
-                                    Text("+ New instrument")
-                                        .font(Theme.Text.body)
-                                        .foregroundStyle(Theme.Colors.accent)
-                                    Spacer(minLength: 0)
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.horizontal, Theme.Spacing.m)
-                    .padding(.vertical, Theme.Spacing.s)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .padding(.top, Theme.Spacing.s)
-                .appBackground()
-                .navigationTitle("Instrument")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") {
+                    ForEach(instruments.indices, id: \.self) { i in
+                        Button {
+                            instrumentIndex = i
                             applyInstrumentIndex()
-                            showInstrumentSheet = false
-                        }
-                    }
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Cancel") {
                             newInstrumentNameInPicker = ""
                             isAddingNewInstrumentInPicker = false
                             showInstrumentSheet = false
+                        } label: {
+                            pickerSheetRow(
+                                title: instruments[i].name ?? "Instrument",
+                                isSelected: i == instrumentIndex
+                            )
                         }
+                        .buttonStyle(.plain)
+
+                        Divider()
+                    }
+
+                    if isAddingNewInstrumentInPicker {
+                        HStack(spacing: Theme.Spacing.s) {
+                            TextField("New instrument", text: $newInstrumentNameInPicker)
+                                .font(Theme.Text.body)
+                                .textInputAutocapitalization(.words)
+                                .submitLabel(.done)
+                                .onSubmit {
+                                    createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
+                                }
+
+                            Button("Add") {
+                                createAndSelectInstrumentFromPicker(named: newInstrumentNameInPicker)
+                            }
+                            .font(Theme.Text.body)
+                            .foregroundStyle(Theme.Colors.accent)
+                            .disabled(newInstrumentNameInPicker.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                        .padding(.vertical, 8)
+                    } else {
+                        Button {
+                            isAddingNewInstrumentInPicker = true
+                        } label: {
+                            HStack(spacing: Theme.Spacing.m) {
+                                Image(systemName: "plus.circle")
+                                    .font(.body)
+                                    .foregroundStyle(Theme.Colors.accent)
+                                    .frame(width: 24)
+
+                                Text("New instrument")
+                                    .font(Theme.Text.body)
+                                    .foregroundStyle(Theme.Colors.accent)
+
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.vertical, 8)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
+                .cardSurface()
+
+                Spacer(minLength: 0)
             }
+            .padding()
+            .appBackground()
         }
 
     @ViewBuilder
      var activityPickerSheet: some View {
-            ActivityPickerSheet(
+            PTVActivityCardPickerSheet(
                 activityChoice: $activityChoice,
                 showActivitySheet: $showActivitySheet,
                 choices: activityChoicesPinned(),
                 displayName: { activityDisplayName(for: $0) },
                 applyChoice: { choice in
+                    activityChoice = choice
                     applyChoice(choice)
-                },
-                resetTasks: {
-                    // when activity changes in the timer, reset tasks context
                     resetTasksForNewSessionContext()
+                    showActivitySheet = false
                 },
                 createActivityChoice: { name in
                     createActivityChoiceFromPicker(named: name)
@@ -125,6 +126,31 @@ extension PracticeTimerView {
             )
         }
 
+
+    private func pickerSheetRow(title: String, isSelected: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: isSelected ? "checkmark" : "circle")
+                .font(.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+                .frame(width: 24)
+
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
+    }
 
     @ViewBuilder
      var reviewSheet: some View {
@@ -538,6 +564,121 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 ).trimmingCharacters(in: .whitespacesAndNewlines)
             }
             .filter { !$0.isEmpty }
+    }
+}
+
+private struct PTVActivityCardPickerSheet: View {
+    @Binding var activityChoice: String
+    @Binding var showActivitySheet: Bool
+
+    let choices: [String]
+    let displayName: (String) -> String
+    let applyChoice: (String) -> Void
+    let createActivityChoice: (String) -> Void
+
+    @State private var isAddingNewActivity: Bool = false
+    @State private var newActivityName: String = ""
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Activity")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(choices, id: \.self) { choice in
+                    Button {
+                        applyChoice(choice)
+                    } label: {
+                        pickerSheetRow(
+                            title: displayName(choice),
+                            isSelected: choice == activityChoice
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Divider()
+                }
+
+                if isAddingNewActivity {
+                    HStack(spacing: Theme.Spacing.s) {
+                        TextField("New activity", text: $newActivityName)
+                            .font(Theme.Text.body)
+                            .textInputAutocapitalization(.words)
+                            .submitLabel(.done)
+                            .onSubmit {
+                                createNewActivity()
+                            }
+
+                        Button("Add") {
+                            createNewActivity()
+                        }
+                        .font(Theme.Text.body)
+                        .foregroundStyle(Theme.Colors.accent)
+                        .disabled(newActivityName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    .padding(.vertical, 8)
+                } else {
+                    Button {
+                        isAddingNewActivity = true
+                    } label: {
+                        HStack(spacing: Theme.Spacing.m) {
+                            Image(systemName: "plus.circle")
+                                .font(.body)
+                                .foregroundStyle(Theme.Colors.accent)
+                                .frame(width: 24)
+
+                            Text("New activity")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Theme.Colors.accent)
+
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 8)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .cardSurface()
+
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .appBackground()
+    }
+
+    private func createNewActivity() {
+        let trimmed = newActivityName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.isEmpty == false else { return }
+        createActivityChoice(trimmed)
+        newActivityName = ""
+        isAddingNewActivity = false
+        showActivitySheet = false
+    }
+
+    private func pickerSheetRow(title: String, isSelected: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: isSelected ? "checkmark" : "circle")
+                .font(.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+                .frame(width: 24)
+
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 }
 

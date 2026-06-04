@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260604_204500_SelectorCards_PRDV
+// SCOPE: Replace PRDV instrument/activity wheel pickers with card-sheet selector rows only. No persistence/model/date/duration changes.
+// SEARCH-TOKEN: 20260604_204500_SelectorCards_PRDV
+
 // CHANGE-ID: 20260517_164900_PRDV_MetadataMicroPolish
 // SCOPE: PostRecordDetailsView — PRDV-only micro-polish of floating metadata rows: calmer thread icon, slightly softer metadata icons/chevrons, tighter label/value spacing, and modest attachment-action breathing room. Preserve all behaviour and reflective sections.
 // SEARCH-TOKEN: 20260517_164900_PRDV_MetadataMicroPolish
@@ -1654,55 +1658,64 @@ isPrivate: { url in
 
     // Instrument picker sheet
     private var instrumentPicker: some View {
-        NavigationStack {
+        VStack(spacing: 16) {
+            Text("Instrument")
+                .font(.headline)
+
             VStack(spacing: 0) {
-                Picker("Instrument", selection: $instrument) {
-                    Text("Select instrument…").tag(nil as Instrument?)
-                    ForEach(instruments, id: \.self) { inst in
-                        Text(inst.name ?? "").tag(inst as Instrument?)
+                Button {
+                    instrument = nil
+                    showInstrumentPicker = false
+                } label: {
+                    pickerSheetRow(
+                        title: "Select instrument…",
+                        isSelected: instrument == nil
+                    )
+                }
+                .buttonStyle(.plain)
+
+                if instruments.isEmpty == false {
+                    Divider()
+                }
+
+                ForEach(instruments, id: \.self) { inst in
+                    Button {
+                        instrument = inst
+                        showInstrumentPicker = false
+                    } label: {
+                        pickerSheetRow(
+                            title: inst.name ?? "Instrument",
+                            isSelected: instrument == inst
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if inst != instruments.last {
+                        Divider()
                     }
                 }
-                .pickerStyle(.wheel)
-                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.top, Theme.Spacing.s)
-            .appBackground()
-            .navigationTitle("Instrument")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) { Button("Done") { showInstrumentPicker = false } }
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showInstrumentPicker = false } }
-            }
+            .cardSurface()
+
+            Spacer(minLength: 0)
         }
-        .presentationDetents([.medium])
+        .padding()
+        .appBackground()
     }
 
     private var activityPickerPinned: some View {
-        NavigationStack {
+        VStack(spacing: 16) {
+            Text("Activity")
+                .font(.headline)
+
             VStack(spacing: 0) {
                 let choices = activityChoicesPinned()
-                Picker("", selection: $activityChoice) {
-                    ForEach(choices, id: \.self) { choice in
-                        let label = activityDisplayName(for: choice)
-                        Text(label).tag(choice)
-                    }
-                }
-                .pickerStyle(.wheel)
-                .labelsHidden()
-                .frame(maxWidth: .infinity, alignment: .top)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .padding(.top, Theme.Spacing.s)
-            .appBackground()
-            .navigationTitle("Activity")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showActivityPicker = false } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        if activityChoice.hasPrefix("core:") {
-                            if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
+                ForEach(choices, id: \.self) { choice in
+                    Button {
+                        activityChoice = choice
+
+                        if choice.hasPrefix("core:") {
+                            if let raw = Int(choice.split(separator: ":").last ?? "0") {
                                 tempActivity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
                                 activity = tempActivity
                             } else {
@@ -1710,27 +1723,62 @@ isPrivate: { url in
                                 activity = .practice
                             }
                             selectedCustomName = ""
-                        } else if activityChoice.hasPrefix("custom:") {
-                            let name = String(activityChoice.dropFirst("custom:".count))
+                        } else if choice.hasPrefix("custom:") {
+                            let name = String(choice.dropFirst("custom:".count))
                             tempActivity = .practice
                             activity = .practice
                             selectedCustomName = name
                         }
+
                         showActivityPicker = false
                         maybeUpdateActivityDetailFromDefaults()
                         refreshAutoTitleIfNeeded()
+                    } label: {
+                        pickerSheetRow(
+                            title: activityDisplayName(for: choice),
+                            isSelected: choice == activityChoice
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if choice != choices.last {
+                        Divider()
                     }
                 }
             }
-            .onAppear {
-                if !selectedCustomName.isEmpty {
-                    activityChoice = "custom:\(selectedCustomName)"
-                } else {
-                    activityChoice = "core:\(activity.rawValue)"
-                }
-            }
+            .cardSurface()
+
+            Spacer(minLength: 0)
         }
-        .presentationDetents([.medium])
+        .padding()
+        .appBackground()
+        .onAppear { syncActivityChoiceFromState() }
+    }
+
+
+    private func pickerSheetRow(title: String, isSelected: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: isSelected ? "checkmark" : "circle")
+                .font(.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+                .frame(width: 24)
+
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
+        .contentShape(Rectangle())
     }
 
     private var startPicker: some View {
