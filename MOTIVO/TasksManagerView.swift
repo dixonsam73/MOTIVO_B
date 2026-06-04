@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260603_220400_TaskSetEditorTaskPadStyle
-// SCOPE: Task Set editor simplification — remove bottom Actions/Add Task sections, use TaskPad-style task rows with drag handles, add inline + Add line control, move delete set into toolbar menu, and keep a single standard back affordance. No task-set storage, manager assignment, timer, import, parser, backend, or schema changes.
-// SEARCH-TOKEN: 20260603_220400_TaskSetEditorTaskPadStyle
+// CHANGE-ID: 20260604_092950_TaskSetEditorNativeMove
+// SCOPE: Task Set editor reorder fix only — replace editor-only custom drag/drop delegate with native Form onMove using existing moveEditorLines persistence path. Preserve editor row layout, text fields, trash action, add-line flow, task-set storage, import flow, timer, parser, backend, and schema behaviour.
+// SEARCH-TOKEN: 20260604_092950_TaskSetEditorNativeMove
 
 import SwiftUI
 import CoreData
@@ -77,7 +77,6 @@ struct TasksManagerView: View {
     @State private var showTaskSetEditor: Bool = false
     @State private var editingTaskSetID: UUID? = nil
     @State private var newEditorItemText: String = ""
-    @State private var draggedEditorLineID: UUID? = nil
     @FocusState private var focusedEditorLineID: UUID?
 
     private let managerDeleteIconWidth: CGFloat = 20
@@ -553,11 +552,6 @@ struct TasksManagerView: View {
                     .foregroundStyle(Theme.Colors.secondaryText.opacity(0.72))
                     .frame(width: managerDeleteIconWidth, height: 28)
                     .contentShape(Rectangle())
-                    .onDrag {
-                        focusedEditorLineID = nil
-                        draggedEditorLineID = line.id
-                        return NSItemProvider(object: NSString(string: line.id.uuidString))
-                    }
                     .accessibilityLabel("Reorder task")
 
                 Button(role: .destructive) {
@@ -590,16 +584,10 @@ struct TasksManagerView: View {
                 Section(header: Text("Tasks").sectionHeader()) {
                     ForEach(set.items) { line in
                         editorTaskRow(setID: set.id, line: line)
-                            .onDrop(
-                                of: [UTType.text],
-                                delegate: EditorTaskLineDropDelegate(
-                                    setID: set.id,
-                                    targetID: line.id,
-                                    savedTaskSets: $savedTaskSets,
-                                    draggedLineID: $draggedEditorLineID,
-                                    onPersistEditedTaskSet: persistEditedTaskSet
-                                )
-                            )
+                    }
+                    .onMove { source, destination in
+                        focusedEditorLineID = nil
+                        moveEditorLines(setID: set.id, from: source, to: destination)
                     }
 
                     Button {
@@ -637,6 +625,7 @@ struct TasksManagerView: View {
                     .accessibilityLabel("Task set actions")
                 }
             }
+            .environment(\.editMode, .constant(.active))
             .scrollDismissesKeyboard(.interactively)
             .appBackground()
         } else {
@@ -1357,39 +1346,6 @@ struct TasksManagerView: View {
     }
 }
 
-
-private struct EditorTaskLineDropDelegate: DropDelegate {
-    let setID: UUID
-    let targetID: UUID
-    @Binding var savedTaskSets: [TasksManagerView.SavedTaskSet]
-    @Binding var draggedLineID: UUID?
-    let onPersistEditedTaskSet: (UUID) -> Void
-
-    func dropEntered(info: DropInfo) {
-        guard let draggedLineID,
-              draggedLineID != targetID,
-              let setIndex = savedTaskSets.firstIndex(where: { $0.id == setID }),
-              let from = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == draggedLineID }),
-              let to = savedTaskSets[setIndex].items.firstIndex(where: { $0.id == targetID })
-        else { return }
-
-        if savedTaskSets[setIndex].items[to].id != draggedLineID {
-            withAnimation(.easeInOut(duration: 0.18)) {
-                savedTaskSets[setIndex].items.move(fromOffsets: IndexSet(integer: from), toOffset: to > from ? to + 1 : to)
-            }
-        }
-    }
-
-    func performDrop(info: DropInfo) -> Bool {
-        draggedLineID = nil
-        onPersistEditedTaskSet(setID)
-        return true
-    }
-
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-}
 
 private struct TasksManagerImportLauncherSheet: View {
     let onCancel: () -> Void
