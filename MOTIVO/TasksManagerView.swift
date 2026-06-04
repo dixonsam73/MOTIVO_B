@@ -564,7 +564,7 @@ struct TasksManagerView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .frame(width: managerDeleteIconWidth + managerDragDeleteSpacing + managerDeleteIconWidth, alignment: .trailing)
+            .frame(width: managerDeleteIconWidth + managerDragDeleteSpacing, alignment: .trailing)
         }
         .frame(minHeight: 36)
         .padding(.vertical, 1)
@@ -607,25 +607,31 @@ struct TasksManagerView: View {
                 }
             }
             .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Menu {
-                        Button(role: .destructive) {
-                            deleteTaskSet(set.id)
-                            showTaskSetEditor = false
-                            editingTaskSetID = nil
-                        } label: {
-                            Text("Delete Task Set")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(.primary)
-                    }
-                    .accessibilityLabel("Task set actions")
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    deleteTaskSet(set.id)
+                    showTaskSetEditor = false
+                    editingTaskSetID = nil
+                } label: {
+                    Label("Delete Task Set", systemImage: "trash")
+                        .font(Theme.Text.body)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
                 }
+                .buttonStyle(.plain)
+                .background(
+                    Capsule()
+                        .fill(Theme.Colors.accent.opacity(0.12))
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(Color.primary.opacity(0.10), lineWidth: 1)
+                )
+                .padding(.horizontal, 32)
+                .padding(.bottom, 12)
             }
-            .environment(\.editMode, .constant(.active))
+         
             .scrollDismissesKeyboard(.interactively)
             .appBackground()
         } else {
