@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260604_092950_TaskSetEditorNativeMove
-// SCOPE: Task Set editor reorder fix only — replace editor-only custom drag/drop delegate with native Form onMove using existing moveEditorLines persistence path. Preserve editor row layout, text fields, trash action, add-line flow, task-set storage, import flow, timer, parser, backend, and schema behaviour.
-// SEARCH-TOKEN: 20260604_092950_TaskSetEditorNativeMove
+// CHANGE-ID: 20260604_121750_TaskManagerDefaultListUI
+// SCOPE: Main Task Manager default-list UI refinement only — remove separate auto-fill toggle, reframe selector header as "Default Task List When:", replace Assigned status with Default control, and replace chevron editor affordance with explicit Edit button. Preserve Task Set Editor, reorder, import, storage model, and task editing behaviour.
+// SEARCH-TOKEN: 20260604_121750_TaskManagerDefaultListUI
 
 import SwiftUI
 import CoreData
@@ -55,7 +55,6 @@ struct TasksManagerView: View {
     @State private var selectedActivityRef: String = "core:0"
     @State private var items: [TaskTemplateLine] = []
     @State private var newItemText: String = ""
-    @State private var autofillEnabled: Bool = true
     @State private var userActivities: [UserActivity] = []
     @State private var selectedTaskSetID: UUID? = nil
     @State private var savedTaskSets: [SavedTaskSet] = []
@@ -167,13 +166,13 @@ struct TasksManagerView: View {
     }
 
     private var tasksKey: String { "practiceTasks_v1::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
-    private var toggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
+    private var autofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope + "::" + currentNormalizedActivityRef + currentInstrumentKeySuffix }
+    private var legacyAutofillCompatibilityKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
     private var taskSetsKey: String { tasksKey + "::saved_sets_v1" }
     private var globalTaskSetsKey: String { "practiceTasks_saved_sets_v2::" + ownerScope }
     private var defaultTaskSetIDKey: String { tasksKey + "::default_set_id_v1" }
 
     private var legacyTasksKey: String { "practiceTasks_v1::" + ownerScope }
-    private var legacyToggleKey: String { "practiceTasks_autofill_enabled::" + ownerScope }
 
     private func normalizedTaskTemplateLines(from strings: [String]) -> [TaskTemplateLine] {
         strings
@@ -475,15 +474,22 @@ struct TasksManagerView: View {
     }
 
     @ViewBuilder
-    private func assignedPill() -> some View {
-        Text("Assigned")
+    private func defaultPill(isSelected: Bool) -> some View {
+        Text("Default")
             .font(Theme.Text.meta.weight(.semibold))
-            .foregroundStyle(Theme.Colors.accent)
+            .foregroundStyle(isSelected ? Theme.Colors.accent : Theme.Colors.secondaryText)
             .padding(.horizontal, 10)
             .padding(.vertical, 5)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Theme.Colors.accent.opacity(0.12))
+                    .fill(isSelected ? Theme.Colors.accent.opacity(0.12) : Color.clear)
+            )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        isSelected ? Theme.Colors.accent.opacity(0.18) : Theme.Colors.secondaryText.opacity(0.20),
+                        lineWidth: 1
+                    )
             )
     }
 
@@ -491,31 +497,36 @@ struct TasksManagerView: View {
     private func taskSetLibraryRow(_ set: SavedTaskSet) -> some View {
         HStack(spacing: 12) {
             Button {
-                selectTaskSet(set.id)
+                toggleDefaultTaskSet(set.id)
             } label: {
-                HStack(spacing: 12) {
-                    Text(set.name)
-                        .font(Theme.Text.body)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-
-                    Spacer(minLength: 8)
-
-                    if selectedTaskSetID == set.id {
-                        assignedPill()
-                    }
-                }
-                .contentShape(Rectangle())
+                Text(set.name)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+
+            Spacer(minLength: 8)
+
+            if selectedTaskSetID == set.id {
+                Button {
+                    toggleDefaultTaskSet(set.id)
+                } label: {
+                    defaultPill(isSelected: true)
+                }
+                .buttonStyle(.plain)
+            }
 
             Button {
                 openTaskSetEditor(set.id)
             } label: {
-                Image(systemName: "chevron.right")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .frame(width: 28, height: 28)
+                Text("Edit")
+                    .font(Theme.Text.meta.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -710,21 +721,19 @@ struct TasksManagerView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    Toggle("Pre-load task set in timer task pad", isOn: $autofillEnabled)
-                        .font(Theme.Text.body)
-                        .tint(Theme.Colors.accent)
-                        .onChange(of: autofillEnabled) {
-                            saveToggle()
-                        }
-                }
-
-                Section(header: Text("For This Combination").sectionHeader()) {
+                Section(header: Text("Default Task Set When:").sectionHeader()) {
                     selectorSectionContent
                 }
 
                 if hasSavedTaskSets {
-                    Section(header: Text("Task Sets").sectionHeader()) {
+                    Section(header:
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Task Sets").sectionHeader()
+                                Text("Tap a task set to make it the default.")
+                                    .font(Theme.Text.meta)
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                        ) {
                         ForEach(savedTaskSets) { set in
                             taskSetLibraryRow(set)
                         }
@@ -975,6 +984,12 @@ struct TasksManagerView: View {
         saveItems()
     }
 
+    private func syncAutofillCompatibilityFlag() {
+        let defaults = UserDefaults.standard
+        defaults.set(selectedTaskSetID != nil, forKey: autofillCompatibilityKey)
+        defaults.removeObject(forKey: legacyAutofillCompatibilityKey)
+    }
+
     private func loadAll() {
         let defaults = UserDefaults.standard
 
@@ -987,6 +1002,8 @@ struct TasksManagerView: View {
         } else {
             selectedTaskSetID = nil
         }
+
+        syncAutofillCompatibilityFlag()
 
         if let selectedTaskSet {
             items = normalizedTaskTemplateLines(from: selectedTaskSet.items)
@@ -1002,13 +1019,6 @@ struct TasksManagerView: View {
             draftTaskSetName = ""
         }
 
-        if defaults.object(forKey: toggleKey) != nil {
-            autofillEnabled = defaults.bool(forKey: toggleKey)
-        } else if defaults.object(forKey: legacyToggleKey) != nil {
-            autofillEnabled = defaults.bool(forKey: legacyToggleKey)
-        } else {
-            autofillEnabled = true
-        }
     }
 
     private func saveItems() {
@@ -1025,9 +1035,6 @@ struct TasksManagerView: View {
         }
     }
 
-    private func saveToggle() {
-        UserDefaults.standard.set(autofillEnabled, forKey: toggleKey)
-    }
 
     private func loadUserActivities() {
         let req: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
@@ -1116,6 +1123,16 @@ struct TasksManagerView: View {
         return Array(keys)
     }
 
+    private func toggleDefaultTaskSet(_ id: UUID) {
+        if selectedTaskSetID == id {
+            selectedTaskSetID = nil
+            draftTaskSetName = ""
+            saveTaskSetSelectionAndItems()
+        } else {
+            selectTaskSet(id)
+        }
+    }
+
     private func selectTaskSet(_ id: UUID) {
         guard let set = savedTaskSets.first(where: { $0.id == id }) else { return }
         selectedTaskSetID = set.id
@@ -1140,6 +1157,8 @@ struct TasksManagerView: View {
                 defaults.set(data, forKey: tasksKey)
             }
         }
+
+        syncAutofillCompatibilityFlag()
     }
 
     private func commitTaskSetNameIfNeeded() {
