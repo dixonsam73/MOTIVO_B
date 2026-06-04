@@ -121,7 +121,11 @@ extension PracticeTimerView {
                     showActivitySheet = false
                 },
                 createActivityChoice: { name in
-                    createActivityChoiceFromPicker(named: name)
+                    if let created = createActivityChoiceFromPicker(named: name) {
+                        activityChoice = created
+                        applyChoice(created)
+                        resetTasksForNewSessionContext()
+                    }
                 }
             )
         }

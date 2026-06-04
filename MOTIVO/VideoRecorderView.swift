@@ -1238,7 +1238,7 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         isShowingLivePreview = false
 
         Task {
-            try? await StagingStore.bootstrap()
+            try? StagingStore.bootstrap()
         }
 
         // Tear down writer state

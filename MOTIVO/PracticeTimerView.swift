@@ -3402,6 +3402,7 @@ private func loadPracticeDefaultsIfNeeded() {
         showInstrumentSheet = false
     }
 
+    @discardableResult
     func createActivityChoiceFromPicker(named rawName: String) -> String? {
         guard PersistenceController.shared.currentUserID != nil else { return nil }
 
