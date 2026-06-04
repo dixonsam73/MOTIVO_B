@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260604_121750_TaskManagerDefaultListUI
-// SCOPE: Main Task Manager default-list UI refinement only — remove separate auto-fill toggle, reframe selector header as "Default Task List When:", replace Assigned status with Default control, and replace chevron editor affordance with explicit Edit button. Preserve Task Set Editor, reorder, import, storage model, and task editing behaviour.
-// SEARCH-TOKEN: 20260604_121750_TaskManagerDefaultListUI
+// CHANGE-ID: 20260604_132400_UseMediumPickerSheets
+// SCOPE: Present manager instrument/activity pickers using established medium sheet detents
+// SEARCH-TOKEN: 20260604_130600_SelectorSheetsFinal
 
 import SwiftUI
 import CoreData
@@ -92,6 +92,8 @@ struct TasksManagerView: View {
     private var profiles: FetchedResults<Profile>
 
     @State private var selectedInstrumentID: UUID? = nil
+    @State private var showManagerInstrumentPickerSheet: Bool = false
+    @State private var showManagerActivityPickerSheet: Bool = false
 
     fileprivate enum TaskLineType: String, Codable {
         case task
@@ -359,7 +361,7 @@ struct TasksManagerView: View {
             focusedManagerLineID = line.id
         }
         .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
-        .padding(.vertical, 4)
+        .padding(.vertical, 12)
         .contentShape(Rectangle())
         .simultaneousGesture(
             LongPressGesture(minimumDuration: 0.35)
@@ -546,7 +548,7 @@ struct TasksManagerView: View {
             .textInputAutocapitalization(.sentences)
             .focused($focusedEditorLineID, equals: line.id)
             .padding(.leading, line.type == .context ? managerContextTextLeadingInset : 0)
-            .padding(.vertical, 4)
+            .padding(.vertical, 12)
             .contentShape(Rectangle())
             .simultaneousGesture(
                 LongPressGesture(minimumDuration: 0.35)
@@ -614,7 +616,7 @@ struct TasksManagerView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 12)
                 }
             }
             .navigationTitle("")
@@ -654,67 +656,133 @@ struct TasksManagerView: View {
     private var selectorSectionContent: some View {
         VStack(spacing: 0) {
             if shouldShowInstrumentSelector {
-                Menu {
-                    ForEach(instrumentsForProfile, id: \.objectID) { inst in
-                        Button {
-                            selectedInstrumentID = inst.id
-                        } label: {
-                            Label(
-                                inst.name ?? "",
-                                systemImage: (inst.id == selectedInstrumentID) ? "checkmark" : "circle"
-                            )
-                        }
-                    }
+                Button {
+                    showManagerInstrumentPickerSheet = true
                 } label: {
-                    selectorRowLabel(
-                        title: "Instrument",
-                        value: instrumentDisplayName(for: selectedInstrumentID)
-                    )
+                    selectorRowLabel(value: instrumentDisplayName(for: selectedInstrumentID))
                 }
                 .buttonStyle(.plain)
 
                 Divider()
             }
 
-            Menu {
-                ForEach(allActivityRefs, id: \.self) { ref in
-                    Button {
-                        selectedActivityRef = ref
-                    } label: {
-                        Label(
-                            activityDisplayName(for: ref),
-                            systemImage: ref == selectedActivityRef ? "checkmark" : "circle"
-                        )
-                    }
-                }
+            Button {
+                showManagerActivityPickerSheet = true
             } label: {
-                selectorRowLabel(
-                    title: "Activity",
-                    value: activityDisplayName(for: selectedActivityRef)
-                )
+                selectorRowLabel(value: activityDisplayName(for: selectedActivityRef))
             }
             .buttonStyle(.plain)
         }
+        .animation(nil, value: selectedInstrumentID)
+        .animation(nil, value: selectedActivityRef)
     }
 
-    private func selectorRowLabel(title: String, value: String) -> some View {
+    private func selectorRowLabel(value: String) -> some View {
         HStack(spacing: Theme.Spacing.m) {
-            Text(title)
-                .font(Theme.Text.body)
-                .foregroundStyle(Theme.Colors.secondaryText)
-
-            Spacer(minLength: Theme.Spacing.m)
-
             Text(value)
                 .font(Theme.Text.body)
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .transaction { transaction in
+                    transaction.animation = nil
+                }
 
-            Image(systemName: "chevron.right")
+            Image(systemName: "chevron.down")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(Theme.Colors.secondaryText.opacity(0.8))
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private var managerInstrumentPickerSheet: some View {
+        VStack(spacing: 16) {
+            Text("Instrument")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(instrumentsForProfile, id: \.objectID) { inst in
+                    Button {
+                        selectedInstrumentID = inst.id
+                        showManagerInstrumentPickerSheet = false
+                    } label: {
+                        pickerSheetRow(
+                            title: inst.name ?? "Instrument",
+                            isSelected: inst.id == selectedInstrumentID
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if inst.objectID != instrumentsForProfile.last?.objectID {
+                        Divider()
+                    }
+                }
+            }
+            .cardSurface()
+
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .appBackground()
+    }
+
+    private var managerActivityPickerSheet: some View {
+        VStack(spacing: 16) {
+            Text("Activity")
+                .font(.headline)
+
+            VStack(spacing: 0) {
+                ForEach(allActivityRefs, id: \.self) { ref in
+                    Button {
+                        selectedActivityRef = ref
+                        showManagerActivityPickerSheet = false
+                    } label: {
+                        pickerSheetRow(
+                            title: activityDisplayName(for: ref),
+                            isSelected: ref == selectedActivityRef
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    if ref != allActivityRefs.last {
+                        Divider()
+                    }
+                }
+            }
+            .cardSurface()
+
+            Spacer(minLength: 0)
+        }
+        .padding()
+        .appBackground()
+    }
+
+    private func pickerSheetRow(title: String, isSelected: Bool) -> some View {
+        HStack(spacing: Theme.Spacing.m) {
+            Image(systemName: isSelected ? "checkmark" : "circle")
+                .font(.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+                .frame(width: 24)
+
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(
+                    isSelected
+                    ? AnyShapeStyle(.primary)
+                    : AnyShapeStyle(Theme.Colors.secondaryText)
+                )
+
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 8)
         .contentShape(Rectangle())
     }
 
@@ -755,6 +823,14 @@ struct TasksManagerView: View {
             }
             .navigationDestination(isPresented: $showTaskSetEditor) {
                 taskSetEditorView
+            }
+            .sheet(isPresented: $showManagerInstrumentPickerSheet) {
+                managerInstrumentPickerSheet
+                    .presentationDetents([.medium])
+            }
+            .sheet(isPresented: $showManagerActivityPickerSheet) {
+                managerActivityPickerSheet
+                    .presentationDetents([.medium])
             }
             .onAppear {
                 selectedActivityRef = normalizedActivityRef(activityRef)
