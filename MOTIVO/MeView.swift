@@ -456,24 +456,17 @@ if let insights, hasVisibleInterpretiveInsights {
             persistedRangeRaw = newValue.rawValue
         }
         .appBackground()
-        .background {
-            NavigationLink(
-                isActive: Binding(
-                    get: { selectedInsightSession != nil },
-                    set: { isActive in
-                        if !isActive { selectedInsightSession = nil }
-                    }
-                )
-            ) {
-                if let session = selectedInsightSession {
-                    SessionDetailView(session: session)
-                } else {
-                    EmptyView()
-                }
-            } label: {
+        .navigationDestination(isPresented: Binding(
+            get: { selectedInsightSession != nil },
+            set: { isPresented in
+                if !isPresented { selectedInsightSession = nil }
+            }
+        )) {
+            if let session = selectedInsightSession {
+                SessionDetailView(session: session)
+            } else {
                 EmptyView()
             }
-            .hidden()
         }
     }
 
