@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260605_201500_AESV_PickerExtract
+// SCOPE: AddEditSessionView — extract picker sheet/view-builder helpers into AddEditSessionView+Pickers without UI or logic changes.
+// SEARCH-TOKEN: 20260605_201500_AESV_PickerExtract
+
 // CHANGE-ID: 20260604_204500_SelectorCards_AESV
 // SCOPE: Replace AESV instrument/activity wheel pickers with card-sheet selector rows only. No persistence/model/date/duration changes.
 // SEARCH-TOKEN: 20260604_204500_SelectorCards_AESV
@@ -151,11 +155,11 @@ struct AddEditSessionView: View {
     var threadLabelPrefill: String? = nil
 
     // Form state
-    @State private var instruments: [Instrument] = []
-    @State private var instrument: Instrument?
-    @State private var timestamp: Date = Date()
-    @State private var durationSeconds: Int = 0
-    @State private var activity: SessionActivityType = .practice
+    @State var instruments: [Instrument] = []
+    @State var instrument: Instrument?
+    @State var timestamp: Date = Date()
+    @State var durationSeconds: Int = 0
+    @State var activity: SessionActivityType = .practice
 
     // Activity description (short detail) + defaulting logic
     @State private var activityDetail: String = ""
@@ -164,11 +168,11 @@ struct AddEditSessionView: View {
     @State private var userHasEditedActivityDetail: Bool = false
 
     // User-local activities + selection
-    @State private var userActivities: [UserActivity] = []
+    @State var userActivities: [UserActivity] = []
     /// String selector used by the wheel: "core:<raw>" or "custom:<name>"
-    @State private var activityChoice: String = "core:0"
+    @State var activityChoice: String = "core:0"
     /// If user picked a custom activity, hold its name separately (do NOT store in activityDetail)
-    @State private var selectedCustomName: String = ""
+    @State var selectedCustomName: String = ""
 
     // Threads v1 (owner-only metadata)
     @State private var threadLabel: String? = nil
@@ -199,13 +203,13 @@ struct AddEditSessionView: View {
     @State private var notesKeyboardInset: CGFloat = 0
 
     // Wheels
-    @State private var showStartPicker = false
-    @State private var showDurationPicker = false
-    @State private var showActivityPicker = false
-    @State private var showInstrumentPicker = false
-    @State private var tempDate = Date()
-    @State private var tempHours = 0
-    @State private var tempMinutes = 0
+    @State var showStartPicker = false
+    @State var showDurationPicker = false
+    @State var showActivityPicker = false
+    @State var showInstrumentPicker = false
+    @State var tempDate = Date()
+    @State var tempHours = 0
+    @State var tempMinutes = 0
 
     // Attachments
     @State var stagedAttachments: [StagedAttachment] = []
@@ -239,7 +243,7 @@ struct AddEditSessionView: View {
     @State var existingAttachmentURLMap: [UUID: URL] = [:]
 
     // Primary Activity persisted ref
-    @AppStorage("primaryActivityRef") private var primaryActivityRef: String = "core:0"
+    @AppStorage("primaryActivityRef") var primaryActivityRef: String = "core:0"
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
     @State private var cachedMetadataCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
@@ -1511,156 +1515,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         .padding(.bottom, Theme.Spacing.m)
     }
 
-    // Instrument picker sheet (wheel style)
-private var instrumentPicker: some View {
-    VStack(spacing: 16) {
-        Text("Instrument")
-            .font(.headline)
-
-        VStack(spacing: 0) {
-            Button {
-                instrument = nil
-                showInstrumentPicker = false
-            } label: {
-                pickerSheetRow(
-                    title: "Select instrument…",
-                    isSelected: instrument == nil
-                )
-            }
-            .buttonStyle(.plain)
-
-            if instruments.isEmpty == false {
-                Divider()
-            }
-
-            ForEach(instruments, id: \.self) { inst in
-                Button {
-                    instrument = inst
-                    showInstrumentPicker = false
-                } label: {
-                    pickerSheetRow(
-                        title: inst.name ?? "Instrument",
-                        isSelected: instrument == inst
-                    )
-                }
-                .buttonStyle(.plain)
-
-                if inst != instruments.last {
-                    Divider()
-                }
-            }
-        }
-        .cardSurface()
-
-        Spacer(minLength: 0)
-    }
-    .padding()
-    .appBackground()
-}
-
-// MARK: - Subviews (pinned activity wheel + pickers)
-// MARK: - Subviews (pinned activity wheel + pickers)
-
-    private var activityPickerPinned: some View {
-        VStack(spacing: 16) {
-            Text("Activity")
-                .font(.headline)
-
-            VStack(spacing: 0) {
-                let choices = activityChoicesPinned()
-                ForEach(choices, id: \.self) { choice in
-                    Button {
-                        activityChoice = choice
-                        applyActivityChoice()
-                        maybeUpdateActivityDetailFromDefaults_v2()
-                        showActivityPicker = false
-                        // After changing activity/custom, update default description if appropriate.
-                        maybeUpdateActivityDetailFromDefaults()
-                    } label: {
-                        pickerSheetRow(
-                            title: activityDisplayName(for: choice),
-                            isSelected: choice == activityChoice
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    if choice != choices.last {
-                        Divider()
-                    }
-                }
-            }
-            .cardSurface()
-
-            Spacer(minLength: 0)
-        }
-        .padding()
-        .appBackground()
-        .onAppear { syncActivityChoiceFromState() }
-    }
-
-
-    private func pickerSheetRow(title: String, isSelected: Bool) -> some View {
-        HStack(spacing: Theme.Spacing.m) {
-            Image(systemName: isSelected ? "checkmark" : "circle")
-                .font(.body)
-                .foregroundStyle(
-                    isSelected
-                    ? AnyShapeStyle(.primary)
-                    : AnyShapeStyle(Theme.Colors.secondaryText)
-                )
-                .frame(width: 24)
-
-            Text(title)
-                .font(Theme.Text.body)
-                .foregroundStyle(
-                    isSelected
-                    ? AnyShapeStyle(.primary)
-                    : AnyShapeStyle(Theme.Colors.secondaryText)
-                )
-
-            Spacer(minLength: 0)
-        }
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-    }
-
-    private var startPicker: some View {
-        NavigationStack {
-            VStack {
-                DatePicker("", selection: $tempDate, displayedComponents: [.date, .hourAndMinute])
-                    .datePickerStyle(.wheel).labelsHidden()
-                Spacer()
-            }
-            .navigationTitle("Start Time")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showStartPicker = false } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { timestamp = tempDate; showStartPicker = false }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
-
-    private var durationPicker: some View {
-        NavigationStack {
-            VStack {
-                HStack {
-                    Picker("Hours", selection: $tempHours) { ForEach(0..<24, id: \.self) { Text("\($0) h").tag($0) } }.pickerStyle(.wheel)
-                    Picker("Minutes", selection: $tempMinutes) { ForEach(0..<60, id: \.self) { Text("\($0) m").tag($0) } }.pickerStyle(.wheel)
-                }
-                Spacer()
-            }
-            .navigationTitle("Duration")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { showDurationPicker = false } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { durationSeconds = (tempHours * 3600) + (tempMinutes * 60); showDurationPicker = false }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-    }
+    // MARK: - Focus / State
 
     // NEW — State card (read/write)
     @ViewBuilder
@@ -2088,39 +1943,7 @@ private var instrumentPicker: some View {
 
     // MARK: - Pinned activity list + helpers
 
-    private func activityDisplayName(for choice: String) -> String {
-        if choice.hasPrefix("core:") {
-            if let raw = Int(choice.split(separator: ":").last ?? "0"),
-               let t = SessionActivityType(rawValue: Int16(raw)) {
-                return t.label
-            }
-            return SessionActivityType.practice.label
-        } else if choice.hasPrefix("custom:") {
-            return String(choice.dropFirst("custom:".count))
-        }
-        return SessionActivityType.practice.label
-    }
-
-    private func activityChoicesPinned() -> [String] {
-        // Core list
-        let core: [String] = SessionActivityType.allCases.map { "core:\($0.rawValue)" }
-        // Custom list
-        let customs: [String] = userActivities.compactMap { ua in
-            let n = (ua.displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            return n.isEmpty ? nil : "custom:\(n)"
-        }
-
-        // Normalize primary
-        let primary = normalizedPrimary()
-        var result: [String] = []
-
-        if let p = primary { result.append(p) }
-        for c in core where !result.contains(c) { result.append(c) }
-        for cu in customs where !result.contains(cu) { result.append(cu) }
-        return result
-    }
-
-    private func normalizedPrimary() -> String? {
+    func normalizedPrimary() -> String? {
         let raw = primaryActivityRef.trimmingCharacters(in: .whitespacesAndNewlines)
         if raw.hasPrefix("core:") {
             if let v = Int(raw.split(separator: ":").last ?? "0"),
@@ -2139,7 +1962,7 @@ private var instrumentPicker: some View {
         }
     }
 
-    private func applyActivityChoice() {
+    func applyActivityChoice() {
         if activityChoice.hasPrefix("core:") {
             if let raw = Int(activityChoice.split(separator: ":").last ?? "0") {
                 activity = SessionActivityType(rawValue: Int16(raw)) ?? .practice
@@ -2154,7 +1977,7 @@ private var instrumentPicker: some View {
         }
     }
 
-    private func syncActivityChoiceFromState() {
+     func syncActivityChoiceFromState() {
         if selectedCustomName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             activityChoice = "core:\(activity.rawValue)"
         } else {
@@ -2192,7 +2015,7 @@ private var instrumentPicker: some View {
         return activity.label
     }
 
-    private func maybeUpdateActivityDetailFromDefaults_v2() {
+    func maybeUpdateActivityDetailFromDefaults_v2() {
         guard !userHasEditedActivityDetail else { return }
         let auto = editorDefaultDescription(timestamp: timestamp, activityDisplayName: currentActivityDisplayName())
         activityDetail = auto
@@ -2224,7 +2047,7 @@ private var instrumentPicker: some View {
     }
 
     /// Update activityDetail only if it's empty OR still equal to the last auto-generated default
-    private func maybeUpdateActivityDetailFromDefaults() {
+    func maybeUpdateActivityDetailFromDefaults() {
         let newDefault = editorDefaultDescription(timestamp: timestamp, activity: activity, customName: selectedCustomName)
         if activityDetail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || activityDetail == lastAutoActivityDetail {
             lastAutoActivityDetail = newDefault
