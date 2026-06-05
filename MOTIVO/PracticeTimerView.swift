@@ -196,10 +196,7 @@ struct PracticeTimerView: View {
     @Binding var isPresented: Bool
     let presentationMode: PresentationMode
 
-    @FetchRequest(
-        sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)],
-        animation: .default
-    ) private var allInstruments: FetchedResults<Instrument>
+  
 
     // Instruments (profile)
     @State var instruments: [Instrument] = []
