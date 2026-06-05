@@ -1078,15 +1078,6 @@ fileprivate struct SessionsRootView: View {
 
                                             ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
                                                 ZStack {
-                                                    NavigationLink(
-                                                        destination: SessionDetailView(session: session),
-                                                        isActive: Binding(
-                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                            set: { active in if !active { pushSessionID = nil } }
-                                                        )
-                                                    ) { EmptyView() }
-                                                    .opacity(0)
-
                                                     if session.isThought {
                                                         ThoughtRow(
                                                                 session: session,
@@ -1180,15 +1171,6 @@ fileprivate struct SessionsRootView: View {
 
                                             ForEach(Array(section.sessions.enumerated()), id: \.element.objectID) { rowIndex, session in
                                                 ZStack {
-                                                    NavigationLink(
-                                                        destination: SessionDetailView(session: session),
-                                                        isActive: Binding(
-                                                            get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                            set: { active in if !active { pushSessionID = nil } }
-                                                        )
-                                                    ) { EmptyView() }
-                                                    .opacity(0)
-
                                                     Group {
                                                         if session.isThought {
                                                             MonthThoughtRow(
@@ -1319,15 +1301,6 @@ fileprivate struct SessionsRootView: View {
                                     switch item.kind {
                                     case .local(let session):
                                         ZStack {
-                                            NavigationLink(
-                                                destination: SessionDetailView(session: session),
-                                                isActive: Binding(
-                                                    get: { pushSessionID == (session.value(forKey: "id") as? UUID) },
-                                                    set: { active in if !active { pushSessionID = nil } }
-                                                )
-                                            ) { EmptyView() }
-                                            .opacity(0)
-
                                             SessionRow(session: session, scope: selectedScope, selectedThread: $selectedThread, activeUserFilterUserID: $activeUserFilterUserID, activeEnsembleMemberUserIDs: activeEnsembleMemberUserIDs, filtersExpanded: $filtersExpanded)
                                                 .cardSurface()
                                                 .contentShape(Rectangle())
@@ -1365,26 +1338,6 @@ fileprivate struct SessionsRootView: View {
 
                                     case .remote(let post):
                                         ZStack {
-                                            NavigationLink(
-                                                destination: BackendSessionDetailView(
-                                                    model: BackendSessionViewModel(
-                                                        post: post,
-                                                        currentUserID: (effectiveBackendUserID ?? "")
-                                                    )
-                                                ),
-                                                isActive: Binding(
-                                                    get: { pushRemotePostID == post.id },
-                                                    set: { active in
-                                                        if !active {
-                                                            pushRemotePostID = nil
-                                                            BackendDetailPopGate.lastPopAt = Date()
-                                                            remotePrewarmNonce &+= 1
-                                                        }
-                                                    }
-                                                )
-                                            ) { EmptyView() }
-                                            .opacity(0)
-
                                             RemotePostRowTwin(
                                                 post: post,
                                                 scope: selectedScope,
@@ -1672,6 +1625,47 @@ fileprivate struct SessionsRootView: View {
             }
 
 
+
+.navigationDestination(isPresented: Binding(
+    get: { pushSessionID != nil },
+    set: { isPresented in
+        if !isPresented {
+            pushSessionID = nil
+        }
+    }
+)) {
+    if let id = pushSessionID,
+       let session = sessions.first(where: { ($0.value(forKey: "id") as? UUID) == id }) {
+        SessionDetailView(session: session)
+    } else {
+        EmptyView()
+    }
+}
+.navigationDestination(isPresented: Binding(
+    get: { pushRemotePostID != nil },
+    set: { isPresented in
+        if !isPresented {
+            pushRemotePostID = nil
+            BackendDetailPopGate.lastPopAt = Date()
+            remotePrewarmNonce &+= 1
+        }
+    }
+)) {
+    if let postID = pushRemotePostID,
+       let post = ({ () -> BackendPost? in
+           let mine = backendFeedStore.minePosts.first { $0.id == postID }
+           return mine ?? backendFeedStore.allPosts.first { $0.id == postID }
+       })() {
+        BackendSessionDetailView(
+            model: BackendSessionViewModel(
+                post: post,
+                currentUserID: (effectiveBackendUserID ?? "")
+            )
+        )
+    } else {
+        EmptyView()
+    }
+}
             // Sheets
                     
                         
