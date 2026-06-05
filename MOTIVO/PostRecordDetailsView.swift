@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260605_190500_PRDV_StateStripExtract
+// SCOPE: PostRecordDetailsView — extract Focus/state strip view and interaction helpers into PostRecordDetailsView+StateStrip without UI or logic changes.
+// SEARCH-TOKEN: 20260605_190500_PRDV_StateStripExtract
+
 // CHANGE-ID: 20260605_184500_PRDV_PickerExtract
 // SCOPE: PostRecordDetailsView — extract picker sheet/view-builder helpers into PostRecordDetailsView+Pickers without UI or logic changes.
 // SEARCH-TOKEN: 20260605_184500_PRDV_PickerExtract
@@ -265,63 +269,17 @@ struct PostRecordDetailsView: View {
     // v7.9E — 12-dot gradient strip (dark → light) with drag selection
     private let stateDotsCount: Int = 12
 
-    @State private var selectedDotIndex: Int? = nil
+    @State var selectedDotIndex: Int? = nil
     @State private var hoverDotIndex: Int? = nil        // transient dot under finger during drag
     @State private var lastHapticZone: Int? = nil       // throttle haptic to zone changes
 
     // Drag refinements
     @State private var dragX: CGFloat? = nil          // live finger x within the strip
-    @State private var lastHapticDot: Int? = nil      // fire haptic when this changes
+    @State var lastHapticDot: Int? = nil      // fire haptic when this changes
 
-    private let focusSnapCount: Int = 10
-    @State private var liveFocusProgress: CGFloat? = nil
+    let focusSnapCount: Int = 10
+    @State var liveFocusProgress: CGFloat? = nil
 
-    private func storedFocusValue(forVisualFocusValue visualValue: Int) -> Int {
-        FocusCircleView.storedFocusValue(forVisualFocusValue: visualValue)
-    }
-
-    private func visualFocusValue(forStoredFocusValue storedValue: Int?) -> Int? {
-        FocusCircleView.visualFocusValue(forStoredFocusValue: storedValue)
-    }
-
-    private func updateFocusFromTrack(locationX: CGFloat, width: CGFloat) {
-        guard width > 0 else { return }
-
-        let clampedX = max(0, min(locationX, width))
-        let progress = clampedX / width
-        let visualValue = visualFocusValue(forProgress: progress)
-        let storedValue = storedFocusValue(forVisualFocusValue: visualValue)
-
-        liveFocusProgress = progress
-        selectedDotIndex = storedValue
-
-        if lastHapticDot != visualValue {
-            lastHapticDot = visualValue
-            #if canImport(UIKit)
-            UISelectionFeedbackGenerator().selectionChanged()
-            #endif
-        }
-    }
-
-    private func visualFocusValue(forProgress progress: CGFloat) -> Int {
-        max(1, min(focusSnapCount, Int(round(progress * CGFloat(focusSnapCount - 1))) + 1))
-    }
-
-    private func progressForVisualFocusValue(_ visualValue: Int?) -> CGFloat? {
-        guard let visualValue else { return nil }
-        return CGFloat(max(1, min(focusSnapCount, visualValue)) - 1) / CGFloat(focusSnapCount - 1)
-    }
-
-    private func settleFocusTrackAfterDrag() {
-        let snappedProgress = progressForVisualFocusValue(visualFocusValue(forStoredFocusValue: selectedDotIndex))
-        withAnimation(.easeOut(duration: 0.16)) {
-            liveFocusProgress = snappedProgress
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            liveFocusProgress = nil
-        }
-    }
 
     /// DARK ➜ LIGHT across the row. On dark themes this reads as “clearer toward the right”.
     private func opacityForDot(_ i: Int) -> Double {
@@ -1230,91 +1188,6 @@ struct PostRecordDetailsView: View {
         }
     }
 
-    @ViewBuilder
-    private var stateStripCard: some View {
-        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Focus").sectionHeader()
-
-            VStack(spacing: Theme.Spacing.s) {
-                FocusCircleView(normalizedFocus: liveFocusProgress ?? progressForVisualFocusValue(visualFocusValue(forStoredFocusValue: selectedDotIndex)), size: 74)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                    .padding(.top, 2)
-
-                GeometryReader { geo in
-                    let width = geo.size.width
-                    let visualValue = visualFocusValue(forStoredFocusValue: selectedDotIndex)
-                    let progress = liveFocusProgress ?? progressForVisualFocusValue(visualValue)
-                    let knobSize: CGFloat = 18
-                    let knobX = progress.map { min(max($0 * width, knobSize * 0.5), width - knobSize * 0.5) }
-
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(FocusCircleView.baseFocusColor.opacity(0.08))
-                            .frame(height: 5)
-                            .frame(maxWidth: .infinity)
-
-                        if let progress {
-                            Capsule()
-                                .fill(FocusCircleView.baseFocusColor.opacity(0.105))
-                                .frame(width: max(0, width * progress), height: 5)
-                        }
-
-                        if let knobX {
-                            Circle()
-                                .fill(FocusCircleView.baseFocusColor.opacity(0.34))
-                                .overlay(
-                                    Circle()
-                                        .stroke(FocusCircleView.baseFocusColor.opacity(0.15), lineWidth: 1)
-                                )
-                                .frame(width: knobSize, height: knobSize)
-                                .position(x: knobX, y: 18)
-                                .accessibilityHidden(true)
-                        }
-                    }
-                    .frame(height: 36)
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 0)
-                            .onChanged { value in
-                                updateFocusFromTrack(locationX: value.location.x, width: width)
-                            }
-                            .onEnded { _ in
-                                settleFocusTrackAfterDrag()
-                                lastHapticDot = nil
-                            }
-                    )
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Focus")
-                    .accessibilityValue(visualValue.map { "\($0) of 10" } ?? "Unset")
-                    .accessibilityAdjustableAction { direction in
-                        let currentVisual = visualFocusValue(forStoredFocusValue: selectedDotIndex) ?? 5
-                        let nextVisual: Int
-                        switch direction {
-                        case .increment:
-                            nextVisual = min(focusSnapCount, currentVisual + 1)
-                        case .decrement:
-                            nextVisual = max(1, currentVisual - 1)
-                        @unknown default:
-                            return
-                        }
-                        selectedDotIndex = storedFocusValue(forVisualFocusValue: nextVisual)
-                        liveFocusProgress = progressForVisualFocusValue(nextVisual)
-                    }
-                }
-                .frame(height: 36)
-
-                HStack {
-                    Text("Unfocused")
-                    Spacer()
-                    Text("Focused")
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-                .opacity(0.72)
-            }
-        }
-        .cardSurface(padding: Theme.Spacing.m)
-    }
 
     // Instrument picker sheet
 
