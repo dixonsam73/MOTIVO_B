@@ -1732,7 +1732,7 @@ fileprivate struct AttachmentRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(width: 32, height: 42)
+            .frame(width: 72, height: 96)
             .background(Color.secondary.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
             .overlay(
@@ -1750,8 +1750,7 @@ fileprivate struct AttachmentRow: View {
 
     private func generatePDFThumbnailIfNeeded() async {
         if pdfThumbnail != nil { return }
-        guard let path = attachment.fileURL, !path.isEmpty else { return }
-        let url = URL(fileURLWithPath: path)
+        guard let url = resolvedAttachmentURL(from: attachment.fileURL) else { return }
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img = AttachmentStore.generatePDFThumbnail(url: url, size: CGSize(width: 160, height: 210))
@@ -1761,6 +1760,36 @@ fileprivate struct AttachmentRow: View {
                 }
             }
         }
+    }
+
+    private func resolvedAttachmentURL(from stored: String?) -> URL? {
+        guard let s = stored, !s.isEmpty else { return nil }
+
+        if let u = URL(string: s), u.isFileURL, FileManager.default.fileExists(atPath: u.path) {
+            return u
+        }
+
+        if s.hasPrefix("/") {
+            let u = URL(fileURLWithPath: s)
+            if FileManager.default.fileExists(atPath: u.path) { return u }
+        }
+
+        let filename = URL(fileURLWithPath: s).lastPathComponent
+        let fm = FileManager.default
+        let candidateDirs: [URL] = [
+            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
+            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+            fm.temporaryDirectory
+        ].compactMap { $0 }
+
+        for base in candidateDirs {
+            let candidate = base.appendingPathComponent(filename)
+            if fm.fileExists(atPath: candidate.path) { return candidate }
+        }
+
+        return nil
     }
 
     private func icon(for kind: String) -> String {
