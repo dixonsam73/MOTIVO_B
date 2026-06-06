@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260606_171500_AESVDocumentAttachmentCardParity
+// SCOPE: AddEditSessionView — include document attachments (.file and .pdf) in AESV attachment card grid. No persistence/import/viewer/backend changes.
+// SEARCH-TOKEN: 20260606_171500_AESVDocumentAttachmentCardParity
+
 // CHANGE-ID: 20260605_201500_AESV_PickerExtract
 // SCOPE: AddEditSessionView — extract picker sheet/view-builder helpers into AddEditSessionView+Pickers without UI or logic changes.
 // SEARCH-TOKEN: 20260605_201500_AESV_PickerExtract
@@ -1143,7 +1147,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
                     if !stagedAttachments.isEmpty {
-                        let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file && $0.kind != .pdf }
+                        let visuals = stagedAttachments.filter { $0.kind != .audio }
                         let audioOnly = stagedAttachments.filter { $0.kind == .audio }
 
                         if !visuals.isEmpty {
