@@ -1687,10 +1687,12 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
 fileprivate struct AttachmentRow: View {
     let attachment: Attachment
     let onTap: () -> Void
+
+    @State private var pdfThumbnail: UIImage? = nil
+
     var body: some View {
         HStack {
-            Image(systemName: icon(for: attachment.kind ?? "file"))
-                .foregroundStyle(.secondary)
+            leadingIcon
             VStack(alignment: .leading, spacing: 2) {
                 Text(fileName(of: attachment)).lineLimit(1)
                 HStack(spacing: 12) {
@@ -1715,6 +1717,52 @@ fileprivate struct AttachmentRow: View {
         .onTapGesture { onTap() }
         .buttonStyle(.plain)
     }
+
+    @ViewBuilder
+    private var leadingIcon: some View {
+        if (attachment.kind ?? "file") == "pdf" {
+            Group {
+                if let pdfThumbnail {
+                    Image(uiImage: pdfThumbnail)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Image(systemName: "doc")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(width: 32, height: 42)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+            )
+            .task(id: attachment.fileURL ?? "") {
+                await generatePDFThumbnailIfNeeded()
+            }
+        } else {
+            Image(systemName: icon(for: attachment.kind ?? "file"))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func generatePDFThumbnailIfNeeded() async {
+        if pdfThumbnail != nil { return }
+        guard let path = attachment.fileURL, !path.isEmpty else { return }
+        let url = URL(fileURLWithPath: path)
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generatePDFThumbnail(url: url, size: CGSize(width: 160, height: 210))
+                DispatchQueue.main.async {
+                    self.pdfThumbnail = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
     private func icon(for kind: String) -> String {
         switch kind {
         case "audio": return "waveform"

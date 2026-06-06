@@ -17,6 +17,9 @@ import AVFoundation
 #if canImport(UIKit)
 import UIKit
 #endif
+#if canImport(PDFKit)
+import PDFKit
+#endif
 
 enum AttachmentKind: String {
     case audio, video, image, file, pdf
@@ -28,6 +31,12 @@ struct AttachmentStore {
     #if canImport(UIKit)
     private final class _PosterCache {
         static let shared = _PosterCache()
+        let cache = NSCache<NSString, UIImage>()
+        private init() {}
+    }
+
+    private final class _PDFThumbnailCache {
+        static let shared = _PDFThumbnailCache()
         let cache = NSCache<NSString, UIImage>()
         private init() {}
     }
@@ -53,6 +62,50 @@ struct AttachmentStore {
             return img
         } catch {
             return nil
+        }
+    }
+    #endif
+
+    /// Generates (and caches) a page-1 thumbnail for a local PDF URL.
+    /// - Note: Synchronous renderer is intended to be called off-main by callers.
+    #if canImport(UIKit) && canImport(PDFKit)
+    static func generatePDFThumbnail(url: URL, size: CGSize = CGSize(width: 256, height: 256)) -> UIImage? {
+        let key = "pdf-url:\(url.path):\(Int(size.width))x\(Int(size.height))" as NSString
+        if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
+        guard let document = PDFDocument(url: url), let page = document.page(at: 0) else { return nil }
+        let image = renderPDFPage(page, size: size)
+        _PDFThumbnailCache.shared.cache.setObject(image, forKey: key)
+        return image
+    }
+
+    /// Generates (and caches) a page-1 thumbnail for staged PDF data.
+    /// - Note: Synchronous renderer is intended to be called off-main by callers.
+    static func generatePDFThumbnail(data: Data, cacheKey: String, size: CGSize = CGSize(width: 256, height: 256)) -> UIImage? {
+        let key = "pdf-data:\(cacheKey):\(data.count):\(Int(size.width))x\(Int(size.height))" as NSString
+        if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
+        guard let document = PDFDocument(data: data), let page = document.page(at: 0) else { return nil }
+        let image = renderPDFPage(page, size: size)
+        _PDFThumbnailCache.shared.cache.setObject(image, forKey: key)
+        return image
+    }
+
+    private static func renderPDFPage(_ page: PDFPage, size: CGSize) -> UIImage {
+        let bounds = page.bounds(for: .mediaBox)
+        let scale = min(size.width / max(bounds.width, 1), size.height / max(bounds.height, 1))
+        let drawSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let origin = CGPoint(x: (size.width - drawSize.width) / 2, y: (size.height - drawSize.height) / 2)
+
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { context in
+            UIColor.systemBackground.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+
+            context.cgContext.saveGState()
+            context.cgContext.translateBy(x: origin.x, y: origin.y + drawSize.height)
+            context.cgContext.scaleBy(x: scale, y: -scale)
+            context.cgContext.translateBy(x: -bounds.origin.x, y: -bounds.origin.y)
+            page.draw(with: .mediaBox, to: context.cgContext)
+            context.cgContext.restoreGState()
         }
     }
     #endif

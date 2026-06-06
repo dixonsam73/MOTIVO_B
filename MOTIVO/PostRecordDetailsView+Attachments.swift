@@ -881,6 +881,7 @@ fileprivate struct AttachmentThumbCell: View {
     let setPrivate: (_ id: UUID?, _ url: URL?, _ value: Bool) -> Void
 
     @State private var videoPoster: UIImage? = nil
+    @State private var pdfThumbnail: UIImage? = nil
     @State private var isPresentingVideo = false
     @State private var audioDuration: Double? = nil
 
@@ -1042,8 +1043,21 @@ fileprivate struct AttachmentThumbCell: View {
                     try? att.data.write(to: url, options: .atomic)
                 }
             }
-        case .file, .pdf:
+        case .file:
             placeholder(system: "doc")
+        case .pdf:
+            Group {
+                if let thumbnail = pdfThumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    placeholder(system: "doc")
+                }
+            }
+            .task(id: att.id) {
+                await generatePDFThumbnailIfNeeded()
+            }
         }
     }
 
@@ -1055,6 +1069,25 @@ fileprivate struct AttachmentThumbCell: View {
             .padding(24)
     }
 
+
+    private func generatePDFThumbnailIfNeeded() async {
+        if pdfThumbnail != nil { return }
+        let cacheKey = att.id.uuidString
+        let data = att.data
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                #if canImport(UIKit)
+                let img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                #else
+                let img: UIImage? = nil
+                #endif
+                DispatchQueue.main.async {
+                    self.pdfThumbnail = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
 
     private func generatePosterIfNeeded(for url: URL) async {
         if videoPoster != nil { return }

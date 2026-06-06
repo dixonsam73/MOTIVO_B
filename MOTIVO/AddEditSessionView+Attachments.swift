@@ -464,8 +464,10 @@ extension AddEditSessionView {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             }
-        case .file, .pdf:
+        case .file:
             Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
+        case .pdf:
+            PDFStagedThumbnailView(att: att)
         }
     }
 
@@ -1151,6 +1153,45 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ uiViewController: AVPlayerViewController, context: Context) {}
 }
+
+fileprivate struct PDFStagedThumbnailView: View {
+    let att: StagedAttachment
+
+    @State private var thumbnail: UIImage? = nil
+
+    var body: some View {
+        Group {
+            if let thumbnail {
+                Image(uiImage: thumbnail)
+                    .resizable()
+                    .scaledToFill()
+            } else {
+                Image(systemName: "doc")
+                    .imageScale(.large)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .task(id: att.id) {
+            await generateThumbnailIfNeeded()
+        }
+    }
+
+    private func generateThumbnailIfNeeded() async {
+        if thumbnail != nil { return }
+        let cacheKey = att.id.uuidString
+        let data = att.data
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                DispatchQueue.main.async {
+                    self.thumbnail = img
+                    continuation.resume()
+                }
+            }
+        }
+    }
+}
+
 #endif
 
 
