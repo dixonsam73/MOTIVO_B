@@ -98,7 +98,7 @@ fileprivate struct AttachmentThumb: View {
             placeholder(system: "waveform")
         case .video:
             placeholder(system: "video")
-        case .file:
+        case .file, .pdf:
             placeholder(system: "doc")
         }
     }

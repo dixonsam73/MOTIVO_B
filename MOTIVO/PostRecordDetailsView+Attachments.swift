@@ -79,7 +79,7 @@ selectedThumbnailID = nil
             }
             return nil
 
-        case .image, .file:
+        case .image, .file, .pdf:
             return nil
         }
     },
@@ -104,7 +104,7 @@ selectedThumbnailID = nil
             UserDefaults.standard.set(dict, forKey: videoTitlesKey)
             attachmentTitlesRefreshTick &+= 1
 
-        case .image, .file:
+        case .image, .file, .pdf:
             break
         }
     },
@@ -189,7 +189,7 @@ isPrivate: { url in
                                     // Ordering matches the PRDV visual grid (non-audio attachments in stagedAttachments order).
                                     ensureSurrogateFilesExistForViewer()
 
-                                    let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file }
+                                    let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file && $0.kind != .pdf }
 
                                     let imageURLs: [URL] = visuals.compactMap { item in
                                         guard item.kind == .image else { return nil }
@@ -383,6 +383,7 @@ isPrivate: { url in
         case .audio: return "m4a"
         case .video: return "mov"
         case .file:  return "dat"
+        case .pdf:   return "pdf"
         }
     }
 
@@ -392,6 +393,7 @@ isPrivate: { url in
         case .audio: return ["m4a"]
         case .video: return ["mov", "mp4"]
         case .file:  return ["dat"]
+        case .pdf:   return ["pdf"]
         }
     }
 
@@ -523,6 +525,7 @@ isPrivate: { url in
         if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
         if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
+        if ext == "pdf" { return .pdf }
         return .file
     }
 
@@ -555,7 +558,7 @@ let namesKey = "stagedAudioNames_temp"
         // 1) Write files using rollback-safe API and create Attachment objects
         for att in stagedAttachments {
             do {
-                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
                 let baseName: String
                 if let custom = namesDict[att.id.uuidString], !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     baseName = custom
@@ -682,7 +685,7 @@ let stagedURL = surrogateURL(for: att)
                 case .image, .video, .audio:
                     // Write the staged bytes to the surrogate temp URL so the viewer can load by URL
                     try? att.data.write(to: url, options: .atomic)
-                case .file:
+                case .file, .pdf:
                     // Files are not displayed in the full-screen media viewer
                     break
                 }
@@ -803,7 +806,7 @@ let stagedURL = surrogateURL(for: att)
                 stagedAttachments.append(newAtt)
             }
 
-        case .file:
+        case .file, .pdf:
             stagedAttachments.append(newAtt)
         }
 
@@ -947,7 +950,7 @@ fileprivate struct AttachmentThumbCell: View {
 
     private var resolvedURL: URL? {
         // Use a stable, surrogate URL in Caches/Temp using the staged id and an extension by kind.
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
         return FileManager.default.temporaryDirectory
             .appendingPathComponent(att.id.uuidString)
             .appendingPathExtension(ext)
@@ -1039,7 +1042,7 @@ fileprivate struct AttachmentThumbCell: View {
                     try? att.data.write(to: url, options: .atomic)
                 }
             }
-        case .file:
+        case .file, .pdf:
             placeholder(system: "doc")
         }
     }

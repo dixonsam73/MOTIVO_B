@@ -1080,7 +1080,7 @@ private func currentURL() -> URL? {
                                 self.audioURLs = newAudios
                                 currentIndex = currentIndex + 1
                             case .image: break
-                            case .file: break
+                            case .file, .pdf: break
                             }
                             cachedURL = newURL
                             stopAllPlayersToggle.toggle()
@@ -1152,7 +1152,7 @@ private func currentURL() -> URL? {
                                     let upper = media.count - 1
                                     currentIndex = min(max(currentIndex, 0), max(upper, 0))
                                 case .image: break
-                            case .file: break
+                            case .file, .pdf: break
                                 }
                                 cachedURL = finalURL
                                 onReplaceAttachment?(url, finalURL, globalKind)
@@ -1204,7 +1204,7 @@ case .deferred:
                 }
                 self.audioURLs = newAudios
             case .image: break
-            case .file: break
+            case .file, .pdf: break
             }
             cachedURL = finalURL
             onReplaceAttachment?(url, finalURL, globalKind)
@@ -1242,7 +1242,7 @@ case .deferred:
             }
             self.audioURLs = newAudios
         case .image: break
-        case .file: break
+        case .file, .pdf: break
         }
         cachedURL = finalURL
         onReplaceAttachment?(url, finalURL, globalKind)
@@ -1425,7 +1425,7 @@ private struct MediaPage: View {
                     displayTitle: displayTitle,
                     onFailure: { markFailed(original, "Audio failed to load") }
                 )
-            case .file:
+            case .file, .pdf:
                 EmptyView()
             }
         }

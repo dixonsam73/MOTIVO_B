@@ -1143,7 +1143,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
                     if !stagedAttachments.isEmpty {
-                        let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file }
+                        let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file && $0.kind != .pdf }
                         let audioOnly = stagedAttachments.filter { $0.kind == .audio }
 
                         if !visuals.isEmpty {

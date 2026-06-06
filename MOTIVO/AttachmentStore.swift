@@ -19,7 +19,7 @@ import UIKit
 #endif
 
 enum AttachmentKind: String {
-    case audio, video, image, file
+    case audio, video, image, file, pdf
 }
 
 struct AttachmentStore {
@@ -222,6 +222,7 @@ struct AttachmentStore {
         case .video: defaultExt = incomingExt.isEmpty ? "mp4" : incomingExt
         case .image: defaultExt = incomingExt.isEmpty ? "jpg" : incomingExt
         case .file:  defaultExt = incomingExt.isEmpty ? (tempURL.pathExtension.isEmpty ? "dat" : tempURL.pathExtension) : incomingExt
+        case .pdf:   defaultExt = incomingExt.isEmpty ? "pdf" : incomingExt
         }
 
         // Target filename: reuse base name from existingPath when possible to avoid churn.
@@ -264,7 +265,7 @@ struct AttachmentStore {
     /// - Returns: Final path in Documents.
     static func adoptTempExport(_ tempURL: URL, suggestedName: String, kind: AttachmentKind) throws -> String {
         let docs = try ensureDocumentsDir()
-        let ext = tempURL.pathExtension.isEmpty ? (kind == .audio ? "m4a" : kind == .video ? "mp4" : "dat") : tempURL.pathExtension
+        let ext = tempURL.pathExtension.isEmpty ? (kind == .audio ? "m4a" : kind == .video ? "mp4" : kind == .pdf ? "pdf" : "dat") : tempURL.pathExtension
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: docs)
         let finalURL = docs.appendingPathComponent(filename, isDirectory: false)
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
@@ -306,7 +307,7 @@ struct AttachmentStore {
             return
         }
 
-        let exts: Set<String> = ["m4a","mp4","mov","m4v","jpg","jpeg","png","heic","wav","aif","aiff","caf","dat"]
+        let exts: Set<String> = ["m4a","mp4","mov","m4v","jpg","jpeg","png","heic","wav","aif","aiff","caf","dat","pdf"]
         guard let items = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
             print("[AttachmentStore] wipeDocumentsAttachmentsForFactoryReset — unable to list Documents")
             return

@@ -434,7 +434,7 @@ return AttachmentViewerView(
                             return persistedVideoTitle(for: attID, auth: auth)
                         }
                         return nil
-                    case .image, .file:
+                    case .image, .file, .pdf:
                         return nil
                     }
                 },

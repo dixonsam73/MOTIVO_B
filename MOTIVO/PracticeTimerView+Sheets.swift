@@ -376,12 +376,13 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                 guard let id = resolveStagedID(from: url) else { return nil }
                 switch kind {
                 case .audio:
-#if DEBUG
+            #if DEBUG
                     print("[PTV] titleForURL.audio id=\(id) title=\(audioTitles[id] ?? "nil") auto=\(audioAutoTitles[id] ?? "nil")")
-#endif
+            #endif
                     if let t = audioTitles[id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
                     if let t = audioAutoTitles[id]?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty { return t }
                     return nil
+
                 case .video:
                     // Prefer shared staging map used by PRDV for seamless handoff
                     let stagingKey = "stagedVideoTitles_temp"
@@ -392,37 +393,47 @@ func attachmentViewerView(for payload: PTVViewerURL) -> some View {
                     }
                     // Fallback to PTV-local map
                     return videoTitle(for: id)
-                case .image, .file:
+
+                case .image, .file, .pdf:
                     return nil
                 }
             },
             onRename: { url, newTitle, kind in
                 guard let id = resolveStagedID(from: url) else { return }
                 let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+
                 switch kind {
                 case .audio:
                     // LOCKED: audio rename writes into the existing staged audio title store.
                     guard !trimmed.isEmpty else { return }
                     audioTitles[id] = trimmed
-#if DEBUG
+            #if DEBUG
                     print("[PTV] onRename.audio id=\(id) new=\(trimmed)")
-#endif
+            #endif
                     // Keep staged persistence in sync with the same mechanism used elsewhere in PTV.
                     let auto = audioAutoTitles[id] ?? ""
                     let dur = audioDurations[id].map(Double.init)
                     StagingStore.updateAudioMetadata(id: id, title: trimmed, autoTitle: auto, duration: dur)
 
                     persistStagedAttachments()
+
                 case .video:
                     // Video titles are optional; empty means clear.
                     setVideoTitle(trimmed, for: id)
+
                     // Mirror into shared staging map so PRDV can read immediately after finishing timer
                     let stagingKey = "stagedVideoTitles_temp"
                     var dict = (UserDefaults.standard.dictionary(forKey: stagingKey) as? [String: String]) ?? [:]
-                    if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) }
-                    else { dict[id.uuidString] = trimmed }
+
+                    if trimmed.isEmpty {
+                        dict.removeValue(forKey: id.uuidString)
+                    } else {
+                        dict[id.uuidString] = trimmed
+                    }
+
                     UserDefaults.standard.set(dict, forKey: stagingKey)
-                case .image, .file:
+
+                case .image, .file, .pdf:
                     break
                 }
             },

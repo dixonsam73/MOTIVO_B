@@ -253,6 +253,7 @@ extension AddEditSessionView {
         if ["png","jpg","jpeg","heic","heif","gif","bmp","tiff","tif"].contains(ext) { return .image }
         if ["m4a","aac","mp3","wav","aiff","caf"].contains(ext) { return .audio }
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
+        if ext == "pdf" { return .pdf }
         return .file
     }
     // --- PATCH 8G-AESV: migrate staged privacy → persisted attachment keys ---
@@ -298,7 +299,7 @@ extension AddEditSessionView {
                         let e = surl.pathExtension.lowercased()
                         if !e.isEmpty { return e }
                     }
-                    return (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+                    return (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
                 }()
                 let suggestedName: String = {
                     switch att.kind {
@@ -307,7 +308,7 @@ extension AddEditSessionView {
                         let raw = audioNamesDict[att.id.uuidString] ?? ""
                         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
                         return trimmed.isEmpty ? att.id.uuidString : trimmed
-                    case .image, .video, .file:
+                    case .image, .video, .file, .pdf:
                         // Keep existing behavior for non-audio kinds: use UUID stem
                         return att.id.uuidString
                     }
@@ -463,7 +464,7 @@ extension AddEditSessionView {
                     .foregroundStyle(.white)
                     .shadow(radius: 2)
             }
-        case .file:
+        case .file, .pdf:
             Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
         }
     }
@@ -472,7 +473,7 @@ extension AddEditSessionView {
         if let existing = existingSurrogateURL_edit(id: att.id, kind: att.kind) {
             return existing
         }
-        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : "dat")
+        let ext: String = (att.kind == .image ? "jpg" : att.kind == .audio ? "m4a" : att.kind == .video ? "mov" : att.kind == .pdf ? "pdf" : "dat")
         return FileManager.default.temporaryDirectory.appendingPathComponent("\(att.id.uuidString).\(ext)")
     }
 
@@ -489,6 +490,8 @@ extension AddEditSessionView {
             return ["jpg"]
         case .file:
             return ["dat"]
+        case .pdf:
+            return ["pdf"]
         }
     }
 
@@ -642,7 +645,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
             switch att.kind {
             case .image, .video, .audio:
                 do { try att.data.write(to: url, options: .atomic) } catch { return nil }
-            case .file:
+            case .file, .pdf:
                 return nil
             }
         }
@@ -748,7 +751,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                                 }
                                                 return nil
                                             }
-                                        case .image, .file:
+                                        case .image, .file, .pdf:
                                             return nil
                                         }
                                     }, onRename: { url, newTitle, kind in
@@ -809,7 +812,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                                 }
                                             }
                                             return
-                                        case .image, .file:
+                                        case .image, .file, .pdf:
                                             return
                                         }
                                     },
@@ -933,7 +936,7 @@ isPrivate: { url in
                                                 if !extCandidate.isEmpty {
                                                     ext = extCandidate
                                                 } else {
-                                                    ext = (old.kind == .image ? "jpg" : old.kind == .audio ? "m4a" : old.kind == .video ? "mov" : "dat")
+                                                    ext = (old.kind == .image ? "jpg" : old.kind == .audio ? "m4a" : old.kind == .video ? "mov" : old.kind == .pdf ? "pdf" : "dat")
                                                 }
 
                                                 let surrogateTarget = FileManager.default.temporaryDirectory.appendingPathComponent("\(old.id.uuidString).\(ext)")
@@ -1036,7 +1039,7 @@ switch kind {
                                         case .audio:
                                             let lastAudioIndex = stagedAttachments.lastIndex(where: { $0.kind == .audio })
                                             if let lastAudioIndex { stagedAttachments.insert(newAtt, at: lastAudioIndex + 1) } else { stagedAttachments.append(newAtt) }
-                                        case .file:
+                                        case .file, .pdf:
                                             stagedAttachments.append(newAtt)
                                         }
                                         cleanupSurrogateSiblings_tmpOnly_edit(id: newID, keepExt: ext, kind: kind)
