@@ -163,6 +163,7 @@ struct SessionDetailView: View {
     private enum ViewerGalleryMode {
         case visual
         case audio
+        case pdf
     }
 
 
@@ -352,10 +353,16 @@ struct SessionDetailView: View {
                 guard let u = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String) else { return nil }
                 return (a, u)
             }
+            let pdfPairs: [(Attachment, URL)] = others.compactMap { a in
+                guard (a.kind ?? "") == "pdf",
+                      let u = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String) else { return nil }
+                return (a, u)
+            }
 
             let imageURLs: [URL] = imagePairs.map { $0.1 }
             let videoURLs: [URL] = videoPairs.map { $0.1 }
             let audioURLs: [URL] = audioPairs.map { $0.1 }
+            let pdfURLs: [URL] = pdfPairs.map { $0.1 }
 
             let tappedID = req.tappedObjectID
 
@@ -370,21 +377,37 @@ struct SessionDetailView: View {
                 if let i = imagePairs.firstIndex(where: { $0.0.objectID == tappedID }) { return i }
                 if let v = videoPairs.firstIndex(where: { $0.0.objectID == tappedID }) { return imagePairs.count + v }
                 return 0
+            case .pdf:
+                return 0
             }
             }()
 
             let finalImageURLs: [URL]
             let finalVideoURLs: [URL]
             let finalAudioURLs: [URL]
+            let finalPdfURLs: [URL]
             switch mode {
             case .audio:
                 finalImageURLs = []
                 finalVideoURLs = []
                 finalAudioURLs = audioURLs
+                finalPdfURLs = []
             case .visual:
                 finalImageURLs = imageURLs
                 finalVideoURLs = videoURLs
                 finalAudioURLs = []
+                finalPdfURLs = []
+            case .pdf:
+                finalImageURLs = []
+                finalVideoURLs = []
+                finalAudioURLs = []
+                if let selected = pdfPairs.first(where: { $0.0.objectID == tappedID })?.1 {
+                    finalPdfURLs = [selected]
+                } else if let first = pdfURLs.first {
+                    finalPdfURLs = [first]
+                } else {
+                    finalPdfURLs = []
+                }
             }
 
 return AttachmentViewerView(
@@ -392,6 +415,7 @@ return AttachmentViewerView(
                 startIndex: startIndex,
                 videoURLs: finalVideoURLs,
                 audioURLs: finalAudioURLs,
+                pdfURLs: finalPdfURLs,
                 onDelete: { url in
                     // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
                     let set = (session.attachments as? Set<Attachment>) ?? []
@@ -915,7 +939,13 @@ return AttachmentViewerView(
                                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                             )
                         } else {
-                            AttachmentRow(attachment: a) { openQuickLook(a) }
+                            AttachmentRow(attachment: a) {
+                                if kind == "pdf" {
+                                    viewerRequest = SDVAttachmentViewerRequest(mode: .pdf, tappedObjectID: a.objectID)
+                                } else {
+                                    openQuickLook(a)
+                                }
+                            }
                         }
                     }
                 }

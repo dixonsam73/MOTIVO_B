@@ -57,6 +57,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import PDFKit
 
 // CHANGE-ID: 20260424_161900_AVV_ImmersiveChromeRevealFix
 // SCOPE: AttachmentViewerView immersive video playback follow-up only — fade top viewer chrome with immersive playback chrome and make full immersive video surface tap-to-reveal controls. Non-immersive video, audio, playback logic, and attachment actions unchanged.
@@ -72,6 +73,7 @@ import AVFoundation
 
 struct AttachmentViewerView: View {
     let imageURLs: [URL]
+    let pdfURLs: [URL]
     let audioKeys: [String]
     let audioTitlesByKey: [String: String]
     let videoKeys: [String]
@@ -224,6 +226,7 @@ struct AttachmentViewerView: View {
         imageURLs: [URL],
         videoURLs: [URL],
         audioURLs: [URL],
+        pdfURLs: [URL] = [],
         startIndex: Int,
         audioKeys: [String] = [],
         audioTitlesByKey: [String: String] = [:],
@@ -247,6 +250,7 @@ struct AttachmentViewerView: View {
         onRequestFreshURL: ((AttachmentKind, URL) async -> Result<URL, Error>)? = nil
     ) {
         self.imageURLs = imageURLs
+        self.pdfURLs = pdfURLs
         self.audioKeys = audioKeys
         self.audioTitlesByKey = audioTitlesByKey
         self.videoKeys = videoKeys
@@ -367,6 +371,7 @@ private func currentURL() -> URL? {
         themeBackground: Color = Color.clear,
         videoURLs: [URL] = [],
         audioURLs: [URL] = [],
+        pdfURLs: [URL] = [],
         audioKeys: [String] = [],
         audioTitlesByKey: [String: String] = [:],
         videoKeys: [String] = [],
@@ -389,6 +394,7 @@ private func currentURL() -> URL? {
     ) {
        
         self.imageURLs = imageURLs
+        self.pdfURLs = pdfURLs
         self._videoURLs = State(initialValue: videoURLs)
         self._audioURLs = State(initialValue: audioURLs)
         self.audioKeys = audioKeys
@@ -422,6 +428,7 @@ private func currentURL() -> URL? {
         themeBackground: Color = Color.clear,
         videoURLs: [URL] = [],
         audioURLs: [URL] = [],
+        pdfURLs: [URL] = [],
         audioKeys: [String] = [],
         audioTitlesByKey: [String: String] = [:],
         videoKeys: [String] = [],
@@ -444,6 +451,7 @@ private func currentURL() -> URL? {
             themeBackground: themeBackground,
             videoURLs: videoURLs,
             audioURLs: audioURLs,
+            pdfURLs: pdfURLs,
             audioKeys: audioKeys,
             audioTitlesByKey: audioTitlesByKey,
             videoKeys: videoKeys,
@@ -478,6 +486,7 @@ private func currentURL() -> URL? {
         items.append(contentsOf: imageURLs.map { MediaAttachment(kind: .image, url: $0) })
         items.append(contentsOf: videoURLs.map { MediaAttachment(kind: .video, url: $0) })
         items.append(contentsOf: audioURLs.map { MediaAttachment(kind: .audio, url: $0) })
+        items.append(contentsOf: pdfURLs.map { MediaAttachment(kind: .pdf, url: $0) })
         return items
     }
 
@@ -1425,7 +1434,13 @@ private struct MediaPage: View {
                     displayTitle: displayTitle,
                     onFailure: { markFailed(original, "Audio failed to load") }
                 )
-            case .file, .pdf:
+            case .pdf:
+                PDFScoreView(
+                    url: effectiveURL(original),
+                    background: background,
+                    onFailure: { markFailed(original, "PDF failed to load") }
+                )
+            case .file:
                 EmptyView()
             }
         }
