@@ -92,6 +92,9 @@ private enum ThreadLabelSanitizer_Stage6_1 {
 
 
 // MARK: - Attachment Viewer Request (Step 1)
+// CHANGE-ID: 20260607_1820_PDFViewerParity
+// SCOPE: Route staged PDF attachments through AttachmentViewerView/PDFScoreView from PRDV.
+// SEARCH-TOKEN: 20260607_1820-PDF-VIEWER-PARITY
 // Atomic presentation payload for AttachmentViewerView (used starting Step 2).
 // Defined here (PRDV-only scope) to keep this step compiling without touching other files.
 struct PRDVAttachmentViewerRequest: Identifiable {
@@ -108,6 +111,7 @@ struct PRDVAttachmentViewerRequest: Identifiable {
     let imageURLs: [URL]
     let videoURLs: [URL]
     let audioURLs: [URL]
+    let pdfURLs: [URL]
 }
 
 private enum TaskLineType_PRDV_Stage1: String, Decodable {

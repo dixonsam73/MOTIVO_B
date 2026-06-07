@@ -13,6 +13,9 @@ import AVFoundation
 import UIKit
 
 // MARK: - Attachment Viewer Request (AESV)
+// CHANGE-ID: 20260607_1820_PDFViewerParity
+// SCOPE: Include staged PDFs in AESV visual viewer request so they open in PDFScoreView.
+// SEARCH-TOKEN: 20260607_1820-PDF-VIEWER-PARITY
 // Atomic presentation payload for AttachmentViewerView.
 // This is AESV-scoped and matches PRDV’s launch contract: visual (images+videos) vs audio-only.
 struct AESVAttachmentViewerRequest: Identifiable {
@@ -28,6 +31,7 @@ struct AESVAttachmentViewerRequest: Identifiable {
     let imageURLs: [URL]
     let videoURLs: [URL]
     let audioURLs: [URL]
+    let pdfURLs: [URL]
     let viewerAttachmentIDs: [UUID]
 }
 
@@ -417,11 +421,12 @@ extension AddEditSessionView {
         }
     }
 
-    func viewerURLArrays_edit() -> (images: [URL], videos: [URL], audios: [URL]) {
+    func viewerURLArrays_edit() -> (images: [URL], videos: [URL], audios: [URL], pdfs: [URL]) {
         let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { viewerResolvedURL_edit(for: $0) }
         let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { viewerResolvedURL_edit(for: $0) }
         let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { viewerResolvedURL_edit(for: $0) }
-        return (imageURLs, videoURLs, audioURLs)
+        let pdfURLs: [URL] = stagedAttachments.filter { $0.kind == .pdf }.compactMap { viewerResolvedURL_edit(for: $0) }
+        return (imageURLs, videoURLs, audioURLs, pdfURLs)
     }
     func formatClipDuration(_ seconds: Double) -> String {
         let totalSeconds = Int(seconds.rounded())
@@ -674,9 +679,14 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
         let fm = FileManager.default
         if !fm.fileExists(atPath: url.path) {
             switch att.kind {
-            case .image, .video, .audio:
-                do { try att.data.write(to: url, options: .atomic) } catch { return nil }
-            case .file, .pdf:
+            case .image, .video, .audio, .pdf:
+                do {
+                    try att.data.write(to: url, options: .atomic)
+                } catch {
+                    return nil
+                }
+
+            case .file:
                 return nil
             }
         }
@@ -692,6 +702,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
         startIndex: Int,
         videoURLs: [URL],
         audioURLs: [URL],
+        pdfURLs: [URL],
         audioTitles: [String],
         req: AESVAttachmentViewerRequest
     ) -> some View {
@@ -702,6 +713,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                     themeBackground: Color(.systemBackground),
                                     videoURLs: videoURLs,
                                     audioURLs: audioURLs,
+                                    pdfURLs: pdfURLs,
                                     audioTitles: audioTitles,
                                     onDelete: { url in
                                         // Map by staged id from surrogate URL stem
@@ -724,7 +736,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             let namesDict = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
                                             let persistedTitles = loadPersistedAudioTitles()
                                             let indexInCombined: Int? = {
-                                                let all = imageURLs + videoURLs + audioURLs
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                                 return all.firstIndex(where: { $0 == url })
                                             }()
                                             guard let idx = indexInCombined, idx >= 0, idx < req.viewerAttachmentIDs.count else {
@@ -760,9 +772,9 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             let persistedVideoTitles = loadPersistedVideoTitles()
                                             // Determine the index of this URL within the viewer's video section
                                             // The AttachmentViewerView provides (url, kind) but not index directly; infer index within the combined sequence we passed.
-                                            // We built `req.viewerAttachmentIDs` to match the order of (imageURLs + videoURLs + audioURLs).
+                                            // We built `req.viewerAttachmentIDs` to match the order of (imageURLs + videoURLs + audioURLs + pdfURLs).
                                             let indexInCombined: Int? = {
-                                                let all = imageURLs + videoURLs + audioURLs
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                                 return all.firstIndex(where: { $0 == url })
                                             }()
                                             guard let idx = indexInCombined, idx >= 0, idx < req.viewerAttachmentIDs.count else { return nil }
@@ -792,7 +804,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                             // Resolve attachment identity by viewer index → ID, then write to staged/persisted stores.
                                             // This avoids relying on URL stem being a UUID (it often isn't once filenames are user-named).
                                             let indexInCombined: Int? = {
-                                                let all = imageURLs + videoURLs + audioURLs
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                                 return all.firstIndex(where: { $0 == url })
                                             }()
                                             let ids = req.viewerAttachmentIDs
@@ -820,7 +832,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         case .video:
                                             // Resolve attachment identity by viewer index → ID, then route to persisted or staged store only.
                                             let indexInCombined: Int? = {
-                                                let all = imageURLs + videoURLs + audioURLs
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                                 return all.firstIndex(where: { $0 == url })
                                             }()
                                             let ids = req.viewerAttachmentIDs
@@ -849,7 +861,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                     },
                                     onFavourite: { url in
                                         // Resolve attachment identity by viewer index first, fallback to UUID-from-stem
-                                        let all = imageURLs + videoURLs + audioURLs
+                                        let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                         let attID: UUID? = {
                                             if let idx = all.firstIndex(where: { $0 == url }),
                                                idx >= 0,
@@ -878,7 +890,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         }
                                     },
                                     isFavourite: { url in
-                                        let all = imageURLs + videoURLs + audioURLs
+                                        let all = imageURLs + videoURLs + audioURLs + pdfURLs
                                         let attID: UUID? = {
                                             if let idx = all.firstIndex(where: { $0 == url }),
                                                idx >= 0,
@@ -896,7 +908,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
     // Resolve attachment identity by viewer index first (matches imageURLs+videoURLs+audioURLs),
     // falling back to UUID-from-stem when possible.
     let attID: UUID? = {
-        let all = imageURLs + videoURLs + audioURLs
+        let all = imageURLs + videoURLs + audioURLs + pdfURLs
         if let idx = all.firstIndex(where: { $0 == url }),
            idx >= 0,
            idx < req.viewerAttachmentIDs.count {
@@ -916,7 +928,7 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
 },
 isPrivate: { url in
     let attID: UUID? = {
-        let all = imageURLs + videoURLs + audioURLs
+        let all = imageURLs + videoURLs + audioURLs + pdfURLs
         if let idx = all.firstIndex(where: { $0 == url }),
            idx >= 0,
            idx < req.viewerAttachmentIDs.count {

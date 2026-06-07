@@ -725,7 +725,8 @@ struct AddEditSessionView: View {
             let imageURLs: [URL] = (req.mode == .visual) ? req.imageURLs : []
             let videoURLs: [URL] = (req.mode == .visual) ? req.videoURLs : []
             let audioURLs: [URL] = (req.mode == .audio) ? req.audioURLs : []
-            let combined = imageURLs + videoURLs + audioURLs
+            let pdfURLs: [URL] = (req.mode == .visual) ? req.pdfURLs : []
+            let combined = imageURLs + videoURLs + audioURLs + pdfURLs
             let startIndex = min(max(req.startIndex, 0), max(combined.count - 1, 0))
 
             let viewerAttachmentIDs: [UUID] = req.viewerAttachmentIDs
@@ -744,7 +745,7 @@ struct AddEditSessionView: View {
                 return staged.isEmpty ? fallbackStem : staged
             }
 
-attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, audioTitles: audioTitles, req: req)
+attachmentViewer_AESV(imageURLs: imageURLs, startIndex: startIndex, videoURLs: videoURLs, audioURLs: audioURLs, pdfURLs: pdfURLs, audioTitles: audioTitles, req: req)
         }
         .task { hydrate() } // unified first-appearance init
         .onAppear {
@@ -1275,7 +1276,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                 }
                                                                 .contentShape(Rectangle())
                                                                 .onTapGesture {
-                                                                    // Visual gallery: images + videos (audio excluded)
+                                                                    // Visual gallery: images + videos + PDFs (audio/generic files excluded)
                                                                     ensureSurrogateFilesExistForViewer_edit()
 
                                                                     let imageURLs: [URL] = visuals.compactMap { item in
@@ -1288,6 +1289,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                         return viewerResolvedURL_edit(for: item)
                                                                     }
 
+                                                                    let pdfURLs: [URL] = visuals.compactMap { item in
+                                                                        guard item.kind == .pdf else { return nil }
+                                                                        return viewerResolvedURL_edit(for: item)
+                                                                    }
+
                                                                     let orderedVisualIDs: [UUID] = {
                                                                         let imageIDs: [UUID] = visuals.compactMap { item in
                                                                             guard item.kind == .image else { return nil }
@@ -1297,7 +1303,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             guard item.kind == .video else { return nil }
                                                                             return item.id
                                                                         }
-                                                                        return imageIDs + videoIDs
+                                                                        let pdfIDs: [UUID] = visuals.compactMap { item in
+                                                                            guard item.kind == .pdf else { return nil }
+                                                                            return item.id
+                                                                        }
+                                                                        return imageIDs + videoIDs + pdfIDs
                                                                     }()
 
                                                                     let startIndex: Int = {
@@ -1308,6 +1318,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                         case .video:
                                                                             let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
                                                                             return imageURLs.count + idx
+                                                                        case .pdf:
+                                                                            let idx = visuals.filter { $0.kind == .pdf }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                            return imageURLs.count + videoURLs.count + idx
                                                                         default:
                                                                             return 0
                                                                         }
@@ -1319,6 +1332,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                         imageURLs: imageURLs,
                                                                         videoURLs: videoURLs,
                                                                         audioURLs: [],
+                                                                        pdfURLs: pdfURLs,
                                                                         viewerAttachmentIDs: orderedVisualIDs
                                                                     )
                                                                 }
@@ -1362,6 +1376,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                 imageURLs: [],
                                                 videoURLs: [],
                                                 audioURLs: audioURLs,
+                                                pdfURLs: [],
                                                 viewerAttachmentIDs: orderedAudioIDs
                                             )
                                         } label: {

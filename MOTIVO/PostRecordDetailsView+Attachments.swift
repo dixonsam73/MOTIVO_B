@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_1820_PDFViewerParity
+// SCOPE: Include staged PDFs in PRDV visual viewer request so they open in PDFScoreView.
+// SEARCH-TOKEN: 20260607_1820-PDF-VIEWER-PARITY
 // CHANGE-ID: 20260607_1115_AttachmentDisplayName
 // SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
 // SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
@@ -19,11 +22,12 @@ extension PostRecordDetailsView {
 let imageURLs = (request.mode == .visual) ? request.imageURLs : []
 let videoURLs = (request.mode == .visual) ? request.videoURLs : []
 let audioURLs = (request.mode == .audio) ? request.audioURLs : []
+let pdfURLs = (request.mode == .visual) ? request.pdfURLs : []
 
 let combined: [URL] = {
     switch request.mode {
     case .visual:
-        return imageURLs + videoURLs
+        return imageURLs + videoURLs + pdfURLs
     case .audio:
         return audioURLs
     }
@@ -44,6 +48,7 @@ AttachmentViewerView(
     themeBackground: Color(.systemBackground),
     videoURLs: videoURLs,
     audioURLs: audioURLs,
+    pdfURLs: pdfURLs,
 onDelete: { url in
     // Map surrogate URL back to staged attachment by matching staged id in the basename
     let stem = url.deletingPathExtension().lastPathComponent
@@ -188,11 +193,11 @@ isPrivate: { url in
                                 )
                                 .contentShape(Rectangle())
                                 .onTapGesture {
-                                    // Step 3: Visual taps (images + videos) present via viewerRequest only.
-                                    // Ordering matches the PRDV visual grid (non-audio attachments in stagedAttachments order).
+                                    // Step 3: Visual taps (images + videos + PDFs) present via viewerRequest only.
+                                    // Ordering matches the PRDV visual grid (non-audio, non-generic-file attachments in stagedAttachments order).
                                     ensureSurrogateFilesExistForViewer()
 
-                                    let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file && $0.kind != .pdf }
+                                    let visuals = stagedAttachments.filter { $0.kind != .audio && $0.kind != .file }
 
                                     let imageURLs: [URL] = visuals.compactMap { item in
                                         guard item.kind == .image else { return nil }
@@ -204,6 +209,11 @@ isPrivate: { url in
                                         return surrogateURL(for: item)
                                     }
 
+                                    let pdfURLs: [URL] = visuals.compactMap { item in
+                                        guard item.kind == .pdf else { return nil }
+                                        return surrogateURL(for: item)
+                                    }
+
                                     let startIndex: Int = {
                                         switch att.kind {
                                         case .image:
@@ -212,6 +222,9 @@ isPrivate: { url in
                                         case .video:
                                             let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
                                             return imageURLs.count + idx
+                                        case .pdf:
+                                            let idx = visuals.filter { $0.kind == .pdf }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                            return imageURLs.count + videoURLs.count + idx
                                         default:
                                             return 0
                                         }
@@ -222,7 +235,8 @@ isPrivate: { url in
                                         startIndex: startIndex,
                                         imageURLs: imageURLs,
                                         videoURLs: videoURLs,
-                                        audioURLs: []
+                                        audioURLs: [],
+                                        pdfURLs: pdfURLs
                                     )
                                 }
                             }
@@ -271,7 +285,8 @@ isPrivate: { url in
                                         startIndex: startIndex,
                                         imageURLs: [],
                                         videoURLs: [],
-                                        audioURLs: audioURLs
+                                        audioURLs: audioURLs,
+                                        pdfURLs: []
                                     )
                                 } label: {
                                     HStack(spacing: 8) {
@@ -709,22 +724,23 @@ let stagedURL = surrogateURL(for: att)
             guard let url = surrogateURL(for: att) else { continue }
             if !fm.fileExists(atPath: url.path) {
                 switch att.kind {
-                case .image, .video, .audio:
+                case .image, .video, .audio, .pdf:
                     // Write the staged bytes to the surrogate temp URL so the viewer can load by URL
                     try? att.data.write(to: url, options: .atomic)
-                case .file, .pdf:
-                    // Files are not displayed in the full-screen media viewer
+                case .file:
+                    // Generic files are not displayed in the full-screen media viewer
                     break
                 }
             }
         }
     }
 
-    func viewerURLArrays() -> (images: [URL], videos: [URL], audios: [URL]) {
+    func viewerURLArrays() -> (images: [URL], videos: [URL], audios: [URL], pdfs: [URL]) {
         let imageURLs: [URL] = stagedAttachments.filter { $0.kind == .image }.compactMap { surrogateURL(for: $0) }
         let videoURLs: [URL] = stagedAttachments.filter { $0.kind == .video }.compactMap { surrogateURL(for: $0) }
         let audioURLs: [URL] = stagedAttachments.filter { $0.kind == .audio }.compactMap { surrogateURL(for: $0) }
-        return (imageURLs, videoURLs, audioURLs)
+        let pdfURLs: [URL] = stagedAttachments.filter { $0.kind == .pdf }.compactMap { surrogateURL(for: $0) }
+        return (imageURLs, videoURLs, audioURLs, pdfURLs)
     }
 
     func replaceStagedAttachment(originalURL: URL, with newURL: URL, kind: AttachmentKind) {
