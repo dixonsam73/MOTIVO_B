@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260607_222700_AESV_PDF_CAPTION_PARITY
+// SCOPE: AddEditSessionView — move staged PDF display-name caption inside the AESV attachment tile cell so it renders below the thumbnail.
+// SEARCH-TOKEN: 20260607_222700_AESV_PDF_CAPTION_PARITY
+
+// CHANGE-ID: 20260607_213500_AESVPDFDisplayName
+// SCOPE: AddEditSessionView — render staged PDF display names below AESV thumbnail tiles only; no persistence/import/viewer/backend changes.
+// SEARCH-TOKEN: 20260607_213500_AESV_PDF_DISPLAY_NAME
+
 // CHANGE-ID: 20260606_171500_AESVDocumentAttachmentCardParity
 // SCOPE: AddEditSessionView — include document attachments (.file and .pdf) in AESV attachment card grid. No persistence/import/viewer/backend changes.
 // SEARCH-TOKEN: 20260606_171500_AESVDocumentAttachmentCardParity
@@ -1155,67 +1163,111 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                             let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
                             LazyVGrid(columns: columns, spacing: 12) {
                                                             ForEach(visuals) { att in
-                                                                ZStack(alignment: .topTrailing) {
-                                                                    // Tile content
-                                                                    AttachmentTileContent(att: att)
-                                                                        .frame(width: 128, height: 128)
-                                                                        .background(Color.secondary.opacity(0.08))
-                                                                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                                                        .overlay(
-                                                                            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                                                                .stroke(.secondary.opacity(0.15), lineWidth: 1)
-                                                                        )
-
-                                                                    // Right-side vertical controls: Star, Privacy, Delete
-                                                                    VStack(spacing: 6) {
-                                                                        if att.kind == .image || att.kind == .audio || att.kind == .video {
-                                                                            Text(selectedThumbnailID == att.id ? "★" : "☆")
-                                                                                .font(.system(size: 16))
-                                                                                .padding(8)
-                                                                                .background(.ultraThinMaterial, in: Circle())
-                                                                                .onTapGesture {
-                                                                                    let fileURL: URL? = surrogateURL(for: att)
-                                                                                    let privNow: Bool = isPrivate(id: att.id, url: fileURL)
-                                                                                    if selectedThumbnailID == att.id {
-                                                                                        // Toggle OFF
-                                                                                        selectedThumbnailID = nil
-                                                                                    } else {
-                                                                                        if privNow {
-                                                                                            // ⭐ implies 👁 — starring auto-includes.
-                                                                                            setPrivate(id: att.id, url: fileURL, false)
+                                                                VStack(alignment: .leading, spacing: 4) {
+                                                                    ZStack(alignment: .topTrailing) {
+                                                                        // Tile content
+                                                                        AttachmentTileContent(att: att)
+                                                                            .frame(width: 128, height: 128)
+                                                                            .background(Color.secondary.opacity(0.08))
+                                                                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                                                                            .overlay(
+                                                                                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                                                                    .stroke(.secondary.opacity(0.15), lineWidth: 1)
+                                                                            )
+    
+                                                                        // Right-side vertical controls: Star, Privacy, Delete
+                                                                        VStack(spacing: 6) {
+                                                                            if att.kind == .image || att.kind == .audio || att.kind == .video {
+                                                                                Text(selectedThumbnailID == att.id ? "★" : "☆")
+                                                                                    .font(.system(size: 16))
+                                                                                    .padding(8)
+                                                                                    .background(.ultraThinMaterial, in: Circle())
+                                                                                    .onTapGesture {
+                                                                                        let fileURL: URL? = surrogateURL(for: att)
+                                                                                        let privNow: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                                        if selectedThumbnailID == att.id {
+                                                                                            // Toggle OFF
+                                                                                            selectedThumbnailID = nil
+                                                                                        } else {
+                                                                                            if privNow {
+                                                                                                // ⭐ implies 👁 — starring auto-includes.
+                                                                                                setPrivate(id: att.id, url: fileURL, false)
+                                                                                            }
+                                                                                            // Toggle ON
+                                                                                            selectedThumbnailID = att.id
                                                                                         }
-                                                                                        // Toggle ON
-                                                                                        selectedThumbnailID = att.id
+                                                                                    }
+                                                                                    .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
+                                                                            }
+    
+                                                                            let fileURL: URL? = surrogateURL(for: att)
+                                                                            let priv: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                            Button {
+                                                                                let newPriv = !priv
+                                                                                if newPriv, selectedThumbnailID == att.id {
+                                                                                    // Making thumbnail private clears ⭐.
+                                                                                    selectedThumbnailID = nil
+                                                                                }
+                                                                                setPrivate(id: att.id, url: fileURL, newPriv)
+                                                                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                                                            } label: {
+                                                                                // Quiet Mode: show badge only when included (not private)
+                                                                                ZStack {
+                                                                                    Image(systemName: priv ? "eye.slash" : "eye")
+                                                                                        .font(.system(size: 16, weight: .semibold))
+                                                                                        .padding(8)
+                                                                                        .background(.ultraThinMaterial, in: Circle())
+                                                                                }
+                                                                                .opacity((selectedThumbnailID == att.id) ? 0 : 1)
+                                                                            }
+                                                                            .buttonStyle(.plain)
+                                                                            .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+    
+                                                                            Button {
+                                                                                // Preserve existing persistent delete behavior for items sourced from Core Data
+                                                                                if existingAttachmentIDs.contains(att.id), let s = session {
+                                                                                    let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                                                                    req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                                                                    req.fetchLimit = 1
+                                                                                    if let match = try? viewContext.fetch(req).first {
+                                                                                        if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
+                                                                                            AttachmentStore.deleteAttachmentFile(atPath: path)
+                                                                                        }
+                                                                                        viewContext.delete(match)
+                                                                                        do { try viewContext.save() } catch { print("Delete save error: \(error)") }
                                                                                     }
                                                                                 }
-                                                                                .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
-                                                                        }
-
-                                                                        let fileURL: URL? = surrogateURL(for: att)
-                                                                        let priv: Bool = isPrivate(id: att.id, url: fileURL)
-                                                                        Button {
-                                                                            let newPriv = !priv
-                                                                            if newPriv, selectedThumbnailID == att.id {
-                                                                                // Making thumbnail private clears ⭐.
-                                                                                selectedThumbnailID = nil
-                                                                            }
-                                                                            setPrivate(id: att.id, url: fileURL, newPriv)
-                                                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                                                        } label: {
-                                                                            // Quiet Mode: show badge only when included (not private)
-                                                                            ZStack {
-                                                                                Image(systemName: priv ? "eye.slash" : "eye")
+                                                                                removeStagedAttachment(att)
+                                                                            } label: {
+                                                                                Image(systemName: "trash")
                                                                                     .font(.system(size: 16, weight: .semibold))
                                                                                     .padding(8)
                                                                                     .background(.ultraThinMaterial, in: Circle())
                                                                             }
-                                                                            .opacity((selectedThumbnailID == att.id) ? 0 : 1)
+                                                                            .buttonStyle(.plain)
+                                                                            .accessibilityLabel("Delete attachment")
                                                                         }
-                                                                        .buttonStyle(.plain)
-                                                                        .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
-
-                                                                        Button {
-                                                                            // Preserve existing persistent delete behavior for items sourced from Core Data
+                                                                        .padding(6)
+                                                                    }
+                                                                    .contextMenu {
+                                                                        if att.kind == .image || att.kind == .audio || att.kind == .video {
+                                                                            Button("Set as Thumbnail") {
+                                                                                let fileURL: URL? = surrogateURL(for: att)
+                                                                                let privNow: Bool = isPrivate(id: att.id, url: fileURL)
+                                                                                if selectedThumbnailID == att.id {
+                                                                                    // Toggle OFF
+                                                                                    selectedThumbnailID = nil
+                                                                                } else {
+                                                                                    if privNow {
+                                                                                        // ⭐ implies 👁 — starring auto-includes.
+                                                                                        setPrivate(id: att.id, url: fileURL, false)
+                                                                                    }
+                                                                                    // Toggle ON
+                                                                                    selectedThumbnailID = att.id
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                        Button(role: .destructive) {
                                                                             if existingAttachmentIDs.contains(att.id), let s = session {
                                                                                 let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
                                                                                 req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
@@ -1229,113 +1281,82 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                                 }
                                                                             }
                                                                             removeStagedAttachment(att)
-                                                                        } label: {
-                                                                            Image(systemName: "trash")
-                                                                                .font(.system(size: 16, weight: .semibold))
-                                                                                .padding(8)
-                                                                                .background(.ultraThinMaterial, in: Circle())
-                                                                        }
-                                                                        .buttonStyle(.plain)
-                                                                        .accessibilityLabel("Delete attachment")
+                                                                        } label: { Text("Remove") }
                                                                     }
-                                                                    .padding(6)
-                                                                }
-                                                                .contextMenu {
-                                                                    if att.kind == .image || att.kind == .audio || att.kind == .video {
-                                                                        Button("Set as Thumbnail") {
-                                                                            let fileURL: URL? = surrogateURL(for: att)
-                                                                            let privNow: Bool = isPrivate(id: att.id, url: fileURL)
-                                                                            if selectedThumbnailID == att.id {
-                                                                                // Toggle OFF
-                                                                                selectedThumbnailID = nil
-                                                                            } else {
-                                                                                if privNow {
-                                                                                    // ⭐ implies 👁 — starring auto-includes.
-                                                                                    setPrivate(id: att.id, url: fileURL, false)
-                                                                                }
-                                                                                // Toggle ON
-                                                                                selectedThumbnailID = att.id
-                                                                            }
-                                                                        }
-                                                                    }
-                                                                    Button(role: .destructive) {
-                                                                        if existingAttachmentIDs.contains(att.id), let s = session {
-                                                                            let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
-                                                                            req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
-                                                                            req.fetchLimit = 1
-                                                                            if let match = try? viewContext.fetch(req).first {
-                                                                                if let path = match.value(forKey: "fileURL") as? String, !path.isEmpty {
-                                                                                    AttachmentStore.deleteAttachmentFile(atPath: path)
-                                                                                }
-                                                                                viewContext.delete(match)
-                                                                                do { try viewContext.save() } catch { print("Delete save error: \(error)") }
-                                                                            }
-                                                                        }
-                                                                        removeStagedAttachment(att)
-                                                                    } label: { Text("Remove") }
-                                                                }
-                                                                .contentShape(Rectangle())
-                                                                .onTapGesture {
-                                                                    // Visual gallery: images + videos + PDFs (audio/generic files excluded)
-                                                                    ensureSurrogateFilesExistForViewer_edit()
-
-                                                                    let imageURLs: [URL] = visuals.compactMap { item in
-                                                                        guard item.kind == .image else { return nil }
-                                                                        return viewerResolvedURL_edit(for: item)
-                                                                    }
-
-                                                                    let videoURLs: [URL] = visuals.compactMap { item in
-                                                                        guard item.kind == .video else { return nil }
-                                                                        return viewerResolvedURL_edit(for: item)
-                                                                    }
-
-                                                                    let pdfURLs: [URL] = visuals.compactMap { item in
-                                                                        guard item.kind == .pdf else { return nil }
-                                                                        return viewerResolvedURL_edit(for: item)
-                                                                    }
-
-                                                                    let orderedVisualIDs: [UUID] = {
-                                                                        let imageIDs: [UUID] = visuals.compactMap { item in
+                                                                    .contentShape(Rectangle())
+                                                                    .onTapGesture {
+                                                                        // Visual gallery: images + videos + PDFs (audio/generic files excluded)
+                                                                        ensureSurrogateFilesExistForViewer_edit()
+    
+                                                                        let imageURLs: [URL] = visuals.compactMap { item in
                                                                             guard item.kind == .image else { return nil }
-                                                                            return item.id
+                                                                            return viewerResolvedURL_edit(for: item)
                                                                         }
-                                                                        let videoIDs: [UUID] = visuals.compactMap { item in
+    
+                                                                        let videoURLs: [URL] = visuals.compactMap { item in
                                                                             guard item.kind == .video else { return nil }
-                                                                            return item.id
+                                                                            return viewerResolvedURL_edit(for: item)
                                                                         }
-                                                                        let pdfIDs: [UUID] = visuals.compactMap { item in
+    
+                                                                        let pdfURLs: [URL] = visuals.compactMap { item in
                                                                             guard item.kind == .pdf else { return nil }
-                                                                            return item.id
+                                                                            return viewerResolvedURL_edit(for: item)
                                                                         }
-                                                                        return imageIDs + videoIDs + pdfIDs
-                                                                    }()
-
-                                                                    let startIndex: Int = {
-                                                                        switch att.kind {
-                                                                        case .image:
-                                                                            let idx = visuals.filter { $0.kind == .image }.firstIndex(where: { $0.id == att.id }) ?? 0
-                                                                            return idx
-                                                                        case .video:
-                                                                            let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
-                                                                            return imageURLs.count + idx
-                                                                        case .pdf:
-                                                                            let idx = visuals.filter { $0.kind == .pdf }.firstIndex(where: { $0.id == att.id }) ?? 0
-                                                                            return imageURLs.count + videoURLs.count + idx
-                                                                        default:
-                                                                            return 0
-                                                                        }
-                                                                    }()
-
-                                                                    viewerRequest = AESVAttachmentViewerRequest(
-                                                                        mode: .visual,
-                                                                        startIndex: startIndex,
-                                                                        imageURLs: imageURLs,
-                                                                        videoURLs: videoURLs,
-                                                                        audioURLs: [],
-                                                                        pdfURLs: pdfURLs,
-                                                                        viewerAttachmentIDs: orderedVisualIDs
-                                                                    )
+    
+                                                                        let orderedVisualIDs: [UUID] = {
+                                                                            let imageIDs: [UUID] = visuals.compactMap { item in
+                                                                                guard item.kind == .image else { return nil }
+                                                                                return item.id
+                                                                            }
+                                                                            let videoIDs: [UUID] = visuals.compactMap { item in
+                                                                                guard item.kind == .video else { return nil }
+                                                                                return item.id
+                                                                            }
+                                                                            let pdfIDs: [UUID] = visuals.compactMap { item in
+                                                                                guard item.kind == .pdf else { return nil }
+                                                                                return item.id
+                                                                            }
+                                                                            return imageIDs + videoIDs + pdfIDs
+                                                                        }()
+    
+                                                                        let startIndex: Int = {
+                                                                            switch att.kind {
+                                                                            case .image:
+                                                                                let idx = visuals.filter { $0.kind == .image }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                                return idx
+                                                                            case .video:
+                                                                                let idx = visuals.filter { $0.kind == .video }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                                return imageURLs.count + idx
+                                                                            case .pdf:
+                                                                                let idx = visuals.filter { $0.kind == .pdf }.firstIndex(where: { $0.id == att.id }) ?? 0
+                                                                                return imageURLs.count + videoURLs.count + idx
+                                                                            default:
+                                                                                return 0
+                                                                            }
+                                                                        }()
+    
+                                                                        viewerRequest = AESVAttachmentViewerRequest(
+                                                                            mode: .visual,
+                                                                            startIndex: startIndex,
+                                                                            imageURLs: imageURLs,
+                                                                            videoURLs: videoURLs,
+                                                                            audioURLs: [],
+                                                                            pdfURLs: pdfURLs,
+                                                                            viewerAttachmentIDs: orderedVisualIDs
+                                                                        )
+                                                                    }
+                                                                    if att.kind == .pdf,
+                                                                       let displayName = ((UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String])?[att.id.uuidString]?.trimmingCharacters(in: .whitespacesAndNewlines)),
+                                                                       !displayName.isEmpty {
+                                                                        Text(displayName)
+                                                                            .font(.caption2)
+                                                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                                                            .lineLimit(1)
+                                                                            .truncationMode(.tail)
+                                                                            .frame(width: 128, alignment: .leading)
+                                                                    }
                                                                 }
+                                                                .frame(width: 128, alignment: .leading)
                                                             }
                             }
                             .padding(.vertical, 4)

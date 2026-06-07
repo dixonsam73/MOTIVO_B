@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_203500_PRDV_PDFCaptionOutsideTile
+// SCOPE: PRDV staged PDF captions sit outside clipped thumbnail tile; no viewer/persistence changes.
+// SEARCH-TOKEN: 20260607_203500-PRDV-PDF-CAPTION-OUTSIDE-TILE
 // CHANGE-ID: 20260607_1820_PDFViewerParity
 // SCOPE: Include staged PDFs in PRDV visual viewer request so they open in PDFScoreView.
 // SEARCH-TOKEN: 20260607_1820-PDF-VIEWER-PARITY
@@ -178,21 +181,22 @@ isPrivate: { url in
                     let columns = [GridItem(.adaptive(minimum: 128), spacing: 12)]
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(nonAudio) { att in
-                            ZStack(alignment: .topTrailing) {
-                                AttachmentThumbCell(
-                                    att: att,
-                                    isThumbnail: selectedThumbnailID == att.id,
-                                    onMakeThumbnail: { toggleThumbnail(att) },
-                                    onRemove: { removeStagedAttachment(att) },
-                                    isPrivate: { id, url in
-                                        return isPrivate(id: id, url: url)
-                                    },
-                                    setPrivate: { id, url, value in
-                                        setPrivate(id: id, url: url, value)
-                                    }
-                                )
-                                .contentShape(Rectangle())
-                                .onTapGesture {
+                            VStack(alignment: .leading, spacing: 4) {
+                                ZStack(alignment: .topTrailing) {
+                                    AttachmentThumbCell(
+                                        att: att,
+                                        isThumbnail: selectedThumbnailID == att.id,
+                                        onMakeThumbnail: { toggleThumbnail(att) },
+                                        onRemove: { removeStagedAttachment(att) },
+                                        isPrivate: { id, url in
+                                            return isPrivate(id: id, url: url)
+                                        },
+                                        setPrivate: { id, url, value in
+                                            setPrivate(id: id, url: url, value)
+                                        }
+                                    )
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
                                     // Step 3: Visual taps (images + videos + PDFs) present via viewerRequest only.
                                     // Ordering matches the PRDV visual grid (non-audio, non-generic-file attachments in stagedAttachments order).
                                     ensureSurrogateFilesExistForViewer()
@@ -238,6 +242,16 @@ isPrivate: { url in
                                         audioURLs: [],
                                         pdfURLs: pdfURLs
                                     )
+                                    }
+                                }
+
+                                if let caption = stagedAttachmentDisplayName(for: att) {
+                                    Text(caption)
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(width: 128, alignment: .leading)
                                 }
                             }
                         }
@@ -566,6 +580,17 @@ isPrivate: { url in
         let fallback = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
         return fallback.isEmpty ? nil : fallback
     }
+
+    func stagedAttachmentDisplayName(for att: StagedAttachment) -> String? {
+        guard att.kind == .pdf else { return nil }
+
+        let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+        let displayNamesDict = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
+        let trimmed = (displayNamesDict[att.id.uuidString] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
 
     func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
         let chosenThumbID = selectedThumbnailID
