@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_1115_AttachmentDisplayName
+// SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
+// SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
 // CHANGE-ID: 20260605_181000_PRDV_AttachmentRequestNameFix
 // SCOPE: PostRecordDetailsView+Attachments — extracted PRDV attachment viewer/plumbing only. No UI or logic changes.
 // SEARCH-TOKEN: 20260605_181000_PRDV_AttachmentRequestNameFix
@@ -457,7 +460,7 @@ isPrivate: { url in
     }
 
 
-    func stageData(_ data: Data, kind: AttachmentKind) {
+    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil) {
         let id = UUID()
 
         let finalData: Data
@@ -468,6 +471,16 @@ isPrivate: { url in
         }
 
         stagedAttachments.append(StagedAttachment(id: id, data: finalData, kind: kind))
+
+        if kind == .file || kind == .pdf {
+            let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+                var displayNames = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
+                displayNames[id.uuidString] = trimmed
+                UserDefaults.standard.set(displayNames, forKey: displayNamesKey)
+            }
+        }
 
         if kind == .image {
             let imageCount = stagedAttachments.filter { $0.kind == .image }.count
@@ -514,7 +527,8 @@ isPrivate: { url in
                 do {
                     let data = try Data(contentsOf: url)
                     let kind = kindForURL(url)
-                    stageData(data, kind: kind)
+                    let displayName = userFacingDisplayName(for: url)
+                    stageData(data, kind: kind, displayName: displayName)
                 } catch { print("File import failed for \(url): \(error)") }
             }
         }
@@ -527,6 +541,15 @@ isPrivate: { url in
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
         if ext == "pdf" { return .pdf }
         return .file
+    }
+
+    func userFacingDisplayName(for url: URL) -> String? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        let trimmedStem = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStem.isEmpty { return trimmedStem }
+
+        let fallback = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? nil : fallback
     }
 
     func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
@@ -544,6 +567,8 @@ isPrivate: { url in
         var stagedToFinalURL: [UUID: URL] = [:]
 let namesKey = "stagedAudioNames_temp"
         let namesDict = (UserDefaults.standard.dictionary(forKey: namesKey) as? [String: String]) ?? [:]
+        let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+        let displayNamesDict = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
 
         // Read staged video titles captured during timer flow and define persisted store key
         let stagedVideoTitlesKey = "stagedVideoTitles_temp"
@@ -568,8 +593,9 @@ let namesKey = "stagedAudioNames_temp"
                 let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: baseName, ext: ext)
                 rollbacks.append(result.rollback)
 
+                let displayName = displayNamesDict[att.id.uuidString]
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
-                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, ctx: ctx)
+                let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, displayName: displayName, ctx: ctx)
                 if let finalID = (created.value(forKey: "id") as? UUID) {
                     stagedToFinalID[att.id] = finalID
                 }
@@ -665,6 +691,7 @@ let stagedURL = surrogateURL(for: att)
 
         // Note: Do not save the context here; caller will attempt save and handle rollback of files on failure.
         UserDefaults.standard.removeObject(forKey: namesKey)
+        UserDefaults.standard.removeObject(forKey: displayNamesKey)
         UserDefaults.standard.removeObject(forKey: stagedVideoTitlesKey)
     }
 

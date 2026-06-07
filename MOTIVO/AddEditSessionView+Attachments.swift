@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_1115_AttachmentDisplayName
+// SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
+// SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
 // CHANGE-ID: 20260605_192500_AESV_AttachmentPass1
 // SCOPE: AddEditSessionView — extract attachment viewer/plumbing into AddEditSessionView+Attachments without UI or logic changes.
 // SEARCH-TOKEN: 20260605_192500_AESV_AttachmentPass1
@@ -178,7 +181,7 @@ extension AddEditSessionView {
         return nil
     }
 
-    func stageData(_ data: Data, kind: AttachmentKind) {
+    func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil) {
         let id = UUID()
         // For staged videos (e.g. imported from the photo library), write a temporary
         // surrogate file so that VideoPosterView can resolve a real URL and generate
@@ -192,6 +195,17 @@ extension AddEditSessionView {
             try? data.write(to: tempURL, options: .atomic)
         }
         stagedAttachments.append(StagedAttachment(id: id, data: data, kind: kind))
+
+        if kind == .file || kind == .pdf {
+            let trimmed = (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+                var displayNames = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
+                displayNames[id.uuidString] = trimmed
+                UserDefaults.standard.set(displayNames, forKey: displayNamesKey)
+            }
+        }
+
         // No auto-thumbnail: thumbnail is set only via explicit user intent (⭐).
     }
 
@@ -242,7 +256,8 @@ extension AddEditSessionView {
 
                     let data = try Data(contentsOf: url)
                     let kind = kindForURL(url)
-                    stageData(data, kind: kind)
+                    let displayName = userFacingDisplayName(for: url)
+                    stageData(data, kind: kind, displayName: displayName)
                 } catch { print("File import failed for \(url): \(error)") }
             }
         }
@@ -255,6 +270,15 @@ extension AddEditSessionView {
         if ["mov","mp4","m4v","avi"].contains(ext) { return .video }
         if ext == "pdf" { return .pdf }
         return .file
+    }
+
+    func userFacingDisplayName(for url: URL) -> String? {
+        let stem = url.deletingPathExtension().lastPathComponent
+        let trimmedStem = stem.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedStem.isEmpty { return trimmedStem }
+
+        let fallback = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        return fallback.isEmpty ? nil : fallback
     }
     // --- PATCH 8G-AESV: migrate staged privacy → persisted attachment keys ---
     // SEARCH-ANCHOR: func migratePrivacy_AESV(
@@ -281,6 +305,8 @@ extension AddEditSessionView {
     func commitStagedAttachments(to session: Session, ctx: NSManagedObjectContext) {
         // Persist renamed audio stems from the viewer (if any)
         let audioNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: "stagedAudioNames_temp") as? [String: String]) ?? [:]
+        let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+        let displayNamesDict: [String: String] = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
 
         // Determine chosen thumbnail (if any)
         let chosenThumbID = selectedThumbnailID        // NOTE: Do not force a thumbnail when user has cleared ⭐ (PRDV parity).
@@ -315,12 +341,14 @@ extension AddEditSessionView {
                 }()
                 let result = try AttachmentStore.saveDataWithRollback(att.data, suggestedName: suggestedName, ext: ext)
                 rollbacks.append(result.rollback)
+                let displayName = displayNamesDict[att.id.uuidString]
                 let isThumb = (att.kind == .image) && (chosenThumbID == att.id)
                 let created = try AttachmentStore.addAttachment(
                     kind: att.kind,
                     filePath: result.path,
                     to: session,
                     isThumbnail: isThumb,
+                    displayName: displayName,
                     ctx: ctx
                 )
                 createdAttachments.append(created)
@@ -365,6 +393,7 @@ extension AddEditSessionView {
 
         // Clear the staging area after successful commit creation (actual persistence depends on context.save())
         UserDefaults.standard.removeObject(forKey: "stagedAudioNames_temp")
+        UserDefaults.standard.removeObject(forKey: displayNamesKey)
         stagedAttachments.removeAll()
         existingAttachmentIDs.removeAll()
     }

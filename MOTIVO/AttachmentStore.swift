@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_1115_AttachmentDisplayName
+// SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
+// SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
 // CHANGE-ID: 20260303_095600_DeleteAccountV2_Stage3_FileWipes
 // SCOPE: Delete Account v2 Stage 3 — file wipes helpers (Documents media). No behavior changes unless invoked by LocalFactoryReset.
 // SEARCH-TOKEN: 20260303_095600-DELETE-ACCOUNT-V2-STAGE3
@@ -224,6 +227,7 @@ struct AttachmentStore {
                               filePath: String,
                               to session: Session,
                               isThumbnail: Bool,
+                              displayName: String? = nil,
                               ctx: NSManagedObjectContext) throws -> Attachment {
         let att = Attachment(context: ctx)
         if att.value(forKey: "id") == nil { att.setValue(UUID(), forKey: "id") }
@@ -232,6 +236,12 @@ struct AttachmentStore {
         att.setValue(kind.rawValue, forKey: "kind")
         att.setValue(filePath,      forKey: "fileURL")
         att.setValue(isThumbnail,   forKey: "isThumbnail")
+        if let displayName {
+            let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                att.setValue(trimmed, forKey: "displayName")
+            }
+        }
 
         // Inverse relationship is enough; avoid assigning to session.attachments directly.
         att.setValue(session,       forKey: "session")

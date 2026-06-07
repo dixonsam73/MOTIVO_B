@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24299" systemVersion="25D125" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="24901" systemVersion="25F80" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
     <entity name="Attachment" representedClassName="Attachment" syncable="YES" codeGenerationType="class">
         <attribute name="createdAt" attributeType="Date" usesScalarValueType="NO"/>
+        <attribute name="displayName" optional="YES" attributeType="String"/>
         <attribute name="fileURL" attributeType="String"/>
         <attribute name="id" attributeType="UUID" usesScalarValueType="NO"/>
         <attribute name="isThumbnail" attributeType="Boolean" defaultValueString="NO" usesScalarValueType="YES"/>

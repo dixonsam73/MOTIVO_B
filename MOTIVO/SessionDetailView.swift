@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260607_1115_AttachmentDisplayName
+// SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
+// SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
 // CHANGE-ID: 20260518_111500_SDV_ThreadChipMicroParity
 // SCOPE: Visual-only — align SDV Thought thread chip typography with existing SDV session metadata chip; no layout, card, backend, or navigation changes.
 // SEARCH-TOKEN: 20260518_111500_SDV_ThreadChipMicroParity
@@ -1801,6 +1804,11 @@ fileprivate struct AttachmentRow: View {
         }
     }
     private func fileName(of a: Attachment) -> String {
+        if let storedDisplayName = a.value(forKey: "displayName") as? String {
+            let trimmedDisplayName = storedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedDisplayName.isEmpty { return trimmedDisplayName }
+        }
+
         guard let path = a.fileURL, !path.isEmpty else { return "file" }
         let url = URL(fileURLWithPath: path)
         let stem = url.deletingPathExtension().lastPathComponent
