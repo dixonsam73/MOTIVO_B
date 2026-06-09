@@ -1,3 +1,9 @@
+// CHANGE-ID: 20260609_205400_AESVPersistedPDFThumbnailURL
+// SCOPE: AESV — restore persisted PDF attachment thumbnails by using existing file URLs before staged data fallback.
+// SEARCH-TOKEN: 20260609_205400_AESVPersistedPDFThumbnailURL
+// CHANGE-ID: 20260609_201500_AESV_PDFTitleEditing
+// SCOPE: AESV — route PDF score titles through existing AttachmentViewer rename metadata flow.
+// SEARCH-TOKEN: 20260609_201500_AESV_PDFTitleEditing
 // CHANGE-ID: 20260607_1115_AttachmentDisplayName
 // SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
 // SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
@@ -501,7 +507,12 @@ extension AddEditSessionView {
         case .file:
             Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
         case .pdf:
-            PDFStagedThumbnailView(att: att)
+            // CHANGE-ID: 20260609_211900_AESVPersistedPDFThumbnailMap
+            // SCOPE: Prefer the persisted attachment URL map for existing PDFs in AESV edit mode; keep temp-surrogate fallback for staged PDFs.
+            PDFStagedThumbnailView(
+                att: att,
+                sourceURL: existingAttachmentURLMap[att.id] ?? existingSurrogateURL_edit(id: att.id, kind: att.kind)
+            )
         }
     }
 
@@ -794,7 +805,34 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                                 }
                                                 return nil
                                             }
-                                        case .image, .file, .pdf:
+                                        case .pdf:
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            let ids = req.viewerAttachmentIDs
+                                            let attID = (indexInCombined != nil && indexInCombined! >= 0 && indexInCombined! < ids.count) ? ids[indexInCombined!] : UUID(uuidString: stem)
+                                            if let attID {
+                                                if existingAttachmentIDs.contains(attID) {
+                                                    let req = NSFetchRequest<Attachment>(entityName: "Attachment")
+                                                    req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
+                                                    req.fetchLimit = 1
+                                                    if let hit = try? viewContext.fetch(req).first,
+                                                       let stored = hit.value(forKey: "displayName") as? String {
+                                                        let t = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                        if !t.isEmpty { return t }
+                                                    }
+                                                } else {
+                                                    let displayNamesDict = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
+                                                    if let raw = displayNamesDict[attID.uuidString] {
+                                                        let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                        if !t.isEmpty { return t }
+                                                    }
+                                                }
+                                            }
+                                            let fileName = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+                                            return fileName.isEmpty ? "PDF Document" : fileName
+                                        case .image, .file:
                                             return nil
                                         }
                                     }, onRename: { url, newTitle, kind in
@@ -855,7 +893,38 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                                 }
                                             }
                                             return
-                                        case .image, .file, .pdf:
+                                        case .pdf:
+                                            let indexInCombined: Int? = {
+                                                let all = imageURLs + videoURLs + audioURLs + pdfURLs
+                                                return all.firstIndex(where: { $0 == url })
+                                            }()
+                                            let ids = req.viewerAttachmentIDs
+                                            guard let idx = indexInCombined, idx >= 0, idx < ids.count else { return }
+                                            let attID = ids[idx]
+
+                                            if existingAttachmentIDs.contains(attID) {
+                                                let req = NSFetchRequest<Attachment>(entityName: "Attachment")
+                                                req.predicate = NSPredicate(format: "id == %@", attID as CVarArg)
+                                                req.fetchLimit = 1
+                                                if let hit = try? viewContext.fetch(req).first {
+                                                    if trimmed.isEmpty {
+                                                        hit.setValue(nil, forKey: "displayName")
+                                                    } else {
+                                                        hit.setValue(trimmed, forKey: "displayName")
+                                                    }
+                                                    viewContext.processPendingChanges()
+                                                    do { try viewContext.save() } catch { print("PDF title save error: \(error)") }
+                                                }
+                                            } else {
+                                                var dict = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
+                                                if trimmed.isEmpty { dict.removeValue(forKey: attID.uuidString) }
+                                                else { dict[attID.uuidString] = trimmed }
+                                                UserDefaults.standard.set(dict, forKey: "stagedAttachmentDisplayNames_temp")
+                                            }
+
+                                            attachmentTitlesRefreshTick &+= 1
+                                            return
+                                        case .image, .file:
                                             return
                                         }
                                     },
@@ -1197,6 +1266,7 @@ fileprivate struct VideoPlayerSheet_AE: UIViewControllerRepresentable {
 
 fileprivate struct PDFStagedThumbnailView: View {
     let att: StagedAttachment
+    let sourceURL: URL?
 
     @State private var thumbnail: UIImage? = nil
 
@@ -1221,9 +1291,18 @@ fileprivate struct PDFStagedThumbnailView: View {
         if thumbnail != nil { return }
         let cacheKey = att.id.uuidString
         let data = att.data
+        let url = sourceURL
+
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                let img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                let img: UIImage?
+                if let url {
+                    img = AttachmentStore.generatePDFThumbnail(url: url)
+                        ?? AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                } else {
+                    img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                }
+
                 DispatchQueue.main.async {
                     self.thumbnail = img
                     continuation.resume()

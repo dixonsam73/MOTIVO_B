@@ -4,6 +4,9 @@
 // CHANGE-ID: 20260607_1820_PDFViewerParity
 // SCOPE: Include staged PDFs in PRDV visual viewer request so they open in PDFScoreView.
 // SEARCH-TOKEN: 20260607_1820-PDF-VIEWER-PARITY
+// CHANGE-ID: 20260609_201500_PRDV_PDFTitleEditing
+// SCOPE: PRDV — route PDF score titles through existing AttachmentViewer rename metadata flow.
+// SEARCH-TOKEN: 20260609_201500_PRDV_PDFTitleEditing
 // CHANGE-ID: 20260607_1115_AttachmentDisplayName
 // SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
 // SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
@@ -90,7 +93,17 @@ selectedThumbnailID = nil
             }
             return nil
 
-        case .image, .file, .pdf:
+        case .pdf:
+            let displayNamesKey = "stagedAttachmentDisplayNames_temp"
+            let displayNamesDict = (UserDefaults.standard.dictionary(forKey: displayNamesKey) as? [String: String]) ?? [:]
+            if let raw = displayNamesDict[id.uuidString] {
+                let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !t.isEmpty { return t }
+            }
+            let fileName = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+            return fileName.isEmpty ? "PDF Document" : fileName
+
+        case .image, .file:
             return nil
         }
     },
@@ -115,7 +128,14 @@ selectedThumbnailID = nil
             UserDefaults.standard.set(dict, forKey: videoTitlesKey)
             attachmentTitlesRefreshTick &+= 1
 
-        case .image, .file, .pdf:
+        case .pdf:
+            var dict = (UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String]) ?? [:]
+            if trimmed.isEmpty { dict.removeValue(forKey: id.uuidString) }
+            else { dict[id.uuidString] = trimmed }
+            UserDefaults.standard.set(dict, forKey: "stagedAttachmentDisplayNames_temp")
+            attachmentTitlesRefreshTick &+= 1
+
+        case .image, .file:
             break
         }
     },

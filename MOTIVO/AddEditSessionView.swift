@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260609_203500_AESVPDFCardTitleRestore
+// SCOPE: AddEditSessionView — restore AESV PDF attachment-card caption resolution after viewer rename; custom title/displayName first, then imported filename, then generic PDF fallback.
+// SEARCH-TOKEN: 20260609_203500_AESVPDFCardTitleRestore
 // CHANGE-ID: 20260607_222700_AESV_PDF_CAPTION_PARITY
 // SCOPE: AddEditSessionView — move staged PDF display-name caption inside the AESV attachment tile cell so it renders below the thumbnail.
 // SEARCH-TOKEN: 20260607_222700_AESV_PDF_CAPTION_PARITY
@@ -1345,9 +1348,32 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             viewerAttachmentIDs: orderedVisualIDs
                                                                         )
                                                                     }
-                                                                    if att.kind == .pdf,
-                                                                       let displayName = ((UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String])?[att.id.uuidString]?.trimmingCharacters(in: .whitespacesAndNewlines)),
-                                                                       !displayName.isEmpty {
+                                                                    if att.kind == .pdf {
+                                                                        let displayName: String = {
+                                                                            if existingAttachmentIDs.contains(att.id), let s = session {
+                                                                                let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
+                                                                                req.predicate = NSPredicate(format: "session == %@ AND id == %@", s.objectID, att.id as CVarArg)
+                                                                                req.fetchLimit = 1
+                                                                                if let match = try? viewContext.fetch(req).first,
+                                                                                   let stored = match.value(forKey: "displayName") as? String {
+                                                                                    let t = stored.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                                                    if !t.isEmpty { return t }
+                                                                                }
+                                                                            }
+
+                                                                            if let staged = ((UserDefaults.standard.dictionary(forKey: "stagedAttachmentDisplayNames_temp") as? [String: String])?[att.id.uuidString]?.trimmingCharacters(in: .whitespacesAndNewlines)),
+                                                                               !staged.isEmpty {
+                                                                                return staged
+                                                                            }
+
+                                                                            if let existingURL = existingAttachmentURLMap[att.id] {
+                                                                                let filename = existingURL.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                                                if !filename.isEmpty { return filename }
+                                                                            }
+
+                                                                            return "PDF Document"
+                                                                        }()
+
                                                                         Text(displayName)
                                                                             .font(.caption2)
                                                                             .foregroundStyle(Theme.Colors.secondaryText)

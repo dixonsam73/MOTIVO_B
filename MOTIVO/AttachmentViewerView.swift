@@ -1,3 +1,10 @@
+// CHANGE-ID: 20260609_203500_AVV_NoPDFTrim
+// SCOPE: AttachmentViewerView — hide MediaTrimView scissors control for PDF attachments; preserve PDF centre rename and all audio/video trim behaviour.
+// SEARCH-TOKEN: 20260609_203500_AVV_NoPDFTrim
+// CHANGE-ID: 20260609_201500_AVV_PDFRenameCenter
+// SCOPE: AttachmentViewerView — enable PDF score renaming with centred top pencil while preserving existing chrome.
+// SEARCH-TOKEN: 20260609_201500_AVV_PDFRenameCenter
+
 // CHANGE-ID: 20260523_130000_AVV_StateHardening_B1
 // SCOPE: AttachmentViewerView state hardening — remove favourite seeding mutation from body evaluation and run it from lifecycle/index-change paths only. No UI, playback, trim, storage, ordering, navigation, backend, or schema changes.
 // SEARCH-TOKEN: 20260523_130000_AVV_StateHardening_B1
@@ -115,6 +122,7 @@ struct AttachmentViewerView: View {
     @State private var tempFilesToCleanup: Set<URL> = []
     @State private var isRenaming: Bool = false
     @State private var renameTargetURL: URL? = nil
+    @State private var renameTargetKind: AttachmentKind? = nil
     @State private var renameText: String = ""
 
     // Viewer-first title overrides so the UI updates immediately after rename.
@@ -348,7 +356,7 @@ private func currentURL() -> URL? {
     }
     private func canRename(for kind: AttachmentKind, url: URL) -> Bool {
         guard !isReadOnly else { return false }
-        guard kind == .audio || kind == .video else { return false }
+        guard kind == .audio || kind == .video || kind == .pdf else { return false }
         // Require both a title source and a rename handler (either modern or legacy)
         let hasTitleSource = (titleForURL != nil)
         let hasRenameHandler = (onRename != nil) || (onRenameLegacy != nil)
@@ -360,6 +368,34 @@ private func currentURL() -> URL? {
         return (onReplaceAttachment != nil) || (onSaveAsNewAttachment != nil)
     }
     private var canShowShare: Bool { canShare }
+
+    private func beginRename(url: URL, kind: AttachmentKind) {
+        renameTargetURL = url
+        renameTargetKind = kind
+
+        switch kind {
+        case .video:
+            renameText = resolvedTitle(for: url, kind: .video) ?? ""
+        case .pdf:
+            renameText = resolvedTitle(for: url, kind: .pdf)
+                ?? url.lastPathComponent
+        case .audio:
+            renameText = resolvedTitle(for: url, kind: .audio)
+                ?? url.deletingPathExtension().lastPathComponent
+        case .image, .file:
+            renameText = ""
+        }
+
+        isRenaming = true
+        stopAllPlayersToggle.toggle()
+    }
+
+    private func resetRenameState() {
+        isRenaming = false
+        renameTargetURL = nil
+        renameTargetKind = nil
+        renameText = ""
+    }
 
     
     // MARK: - Initializers
@@ -656,8 +692,9 @@ private func currentURL() -> URL? {
 
             // Top controls
             VStack {
-                HStack {
-                    Button {
+                ZStack {
+                    HStack {
+                        Button {
                         stopAllPlayersToggle.toggle()
                         dismiss()
                     } label: {
@@ -677,12 +714,12 @@ private func currentURL() -> URL? {
                         .frame(width: topButtonSize, height: topButtonSize)
                         .contentShape(Circle())
                     }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .contentShape(Rectangle())
 
-                    Spacer()
+                        Spacer()
 
-                    if media.indices.contains(currentIndex) {
+                        if media.indices.contains(currentIndex) {
                         let currentURL = media[currentIndex].url
                         let isFav = optimisticIsFavourite(currentURL)
                         let isPriv = optimisticIsPrivate(currentURL)
@@ -774,19 +811,9 @@ private func currentURL() -> URL? {
                                 .accessibilityLabel(isPriv ? "Only visible to you" : "Included in post")
                             }
 
-                            if canRename(for: currentAttachmentKind, url: currentURL) {
+                            if currentAttachmentKind != .pdf, canRename(for: currentAttachmentKind, url: currentURL) {
                                 Button {
-                                    let url = currentURL
-                                    renameTargetURL = url
-                                    let kind = currentAttachmentKind
-                                    if kind == .video {
-                                        renameText = resolvedTitle(for: url, kind: .video) ?? ""
-                                    } else {
-                                        renameText = resolvedTitle(for: url, kind: .audio)
-                                            ?? url.deletingPathExtension().lastPathComponent
-                                    }
-                                    isRenaming = true
-                                    stopAllPlayersToggle.toggle()
+                                    beginRename(url: currentURL, kind: currentAttachmentKind)
                                 } label: {
                                     ZStack {
                                         Circle()
@@ -896,6 +923,36 @@ private func currentURL() -> URL? {
                                 }
                             }
                         }
+                        }
+                    }
+
+                    if media.indices.contains(currentIndex) {
+                        let currentURL = media[currentIndex].url
+                        let currentAttachmentKind = media[currentIndex].kind
+
+                        if currentAttachmentKind == .pdf, canRename(for: currentAttachmentKind, url: currentURL) {
+                            Button {
+                                beginRename(url: currentURL, kind: currentAttachmentKind)
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
+                                    Image(systemName: "pencil")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Rename score")
+                        }
                     }
                 }
                 .padding(.horizontal, Theme.Spacing.l)
@@ -956,8 +1013,7 @@ private func currentURL() -> URL? {
             cleanupTempFiles()
         }
         .sheet(isPresented: $isRenaming, onDismiss: {
-            renameTargetURL = nil
-            renameText = ""
+            resetRenameState()
         }) {
             NavigationStack {
                 Form {
@@ -970,21 +1026,17 @@ private func currentURL() -> URL? {
                     Section {
                         Button("Save") {
                             guard let target = renameTargetURL else {
-                                isRenaming = false
-                                renameTargetURL = nil
-                                renameText = ""
+                                resetRenameState()
                                 return
                             }
 
-                            let kind = currentAttachmentKind
+                            let kind = renameTargetKind ?? currentAttachmentKind
                             let trimmed = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
 
                             // Audio: empty is a no-op (we never want to show UUID/filenames as "cleared").
                             // Video: empty means "clear title".
                             if kind == .audio, trimmed.isEmpty {
-                                isRenaming = false
-                                renameTargetURL = nil
-                                renameText = ""
+                                resetRenameState()
                                 return
                             }
 
@@ -1001,9 +1053,7 @@ private func currentURL() -> URL? {
                                 cbLegacy(target, trimmed)
                             }
 
-                            isRenaming = false
-                            renameTargetURL = nil
-                            renameText = ""
+                            resetRenameState()
                         }
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.accent)
@@ -1019,9 +1069,7 @@ private func currentURL() -> URL? {
                     }
                     ToolbarItem(placement: .cancellationAction) {
                         Button(action: {
-                            isRenaming = false
-                            renameTargetURL = nil
-                            renameText = ""
+                            resetRenameState()
                         }) {
                             Image(systemName: "chevron.backward")
                                 .font(.body.weight(.semibold))

@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260609_201500_SDV_PDFTitleEditing
+// SCOPE: SessionDetailView — allow persisted PDF score title editing via AttachmentViewer rename flow.
+// SEARCH-TOKEN: 20260609_201500_SDV_PDFTitleEditing
 // CHANGE-ID: 20260607_1115_AttachmentDisplayName
 // SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
 // SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
@@ -461,11 +464,41 @@ return AttachmentViewerView(
                             return persistedVideoTitle(for: attID, auth: auth)
                         }
                         return nil
-                    case .image, .file, .pdf:
+                    case .pdf:
+                        let set = (session.attachments as? Set<Attachment>) ?? []
+                        if let match = set.first(where: { att in
+                            guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                            return resolveAttachmentURL(from: stored) == url
+                        }) {
+                            if let storedDisplayName = match.value(forKey: "displayName") as? String {
+                                let trimmedDisplayName = storedDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                if !trimmedDisplayName.isEmpty { return trimmedDisplayName }
+                            }
+                        }
+                        let filename = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return filename.isEmpty ? "PDF Document" : filename
+                    case .image, .file:
                         return nil
                     }
                 },
                 onRename: { url, newTitle, kind in
+                    if kind == .pdf {
+                        let set = (session.attachments as? Set<Attachment>) ?? []
+                        if let match = set.first(where: { att in
+                            guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                            return resolveAttachmentURL(from: stored) == url
+                        }) {
+                            let trimmed = newTitle.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed.isEmpty {
+                                match.setValue(nil, forKey: "displayName")
+                            } else {
+                                match.setValue(trimmed, forKey: "displayName")
+                            }
+                            do { try viewContext.save() } catch { print("PDF title save error:", error) }
+                            _refreshTick &+= 1
+                        }
+                        return
+                    }
                     guard kind == .video else { return }
                     // Persist video title keyed by Attachment UUID (match by stem to handle extension changes)
                     let stem = url.deletingPathExtension().lastPathComponent
