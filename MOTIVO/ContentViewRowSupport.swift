@@ -4,6 +4,10 @@
 // CHANGE-ID: 20260610_190300_PDFThumbContentViewParity
 // SCOPE: PDF Scores Phase 2C local ContentView thumbnail parity; PDF row previews now use selected-page thumbnail generation where available.
 
+// CHANGE-ID: 20260610_201500_RemoteAttachmentLoaderDeterministic
+// SCOPE: Remote attachment preview loader now passes the resolved signed URL directly into image/video hydration; no UI, cache, backend, or PDF Phase 3A changes.
+// SEARCH-TOKEN: 20260610_201500_RemoteAttachmentLoaderDeterministic
+
 import SwiftUI
 import CoreData
 import Combine
@@ -1000,10 +1004,10 @@ struct RemoteAttachmentPreview: View {
             #endif
         }
         .task(id: cacheKey) {
-            await loadSignedURLIfNeeded()
+            let url = await resolvedSignedURLIfNeeded()
             #if canImport(UIKit)
-            await loadImageThumbIfNeeded()
-            await loadVideoPosterIfNeeded()
+            await loadImageThumbIfNeeded(from: url)
+            await loadVideoPosterIfNeeded(from: url)
             #endif
         }
     }
@@ -1023,13 +1027,13 @@ struct RemoteAttachmentPreview: View {
             .foregroundStyle(Theme.Colors.secondaryText)
     }
 
-    private func loadSignedURLIfNeeded() async {
-        guard (ref.kind == .image) || (ref.kind == .video) else { return }
+    private func resolvedSignedURLIfNeeded() async -> URL? {
+        guard (ref.kind == .image) || (ref.kind == .video) else { return nil }
 
         // Keep the signed URL cached separately (short TTL) so we don't hammer RPCs.
         if let cached = RemoteSignedURLCache.shared.get(cacheKey) {
             if signedURL != cached { signedURL = cached }
-            return
+            return cached
         }
 
         let ttlSeconds = 300
@@ -1040,14 +1044,15 @@ struct RemoteAttachmentPreview: View {
             expiresInSeconds: ttlSeconds
         )
 
-        guard case .success(let url) = result else { return }
+        guard case .success(let url) = result else { return nil }
         RemoteSignedURLCache.shared.set(cacheKey, url: url, ttlSeconds: ttlSeconds)
 
         if signedURL != url { signedURL = url }
+        return url
     }
 
     #if canImport(UIKit)
-    private func loadImageThumbIfNeeded() async {
+    private func loadImageThumbIfNeeded(from url: URL?) async {
         guard ref.kind == .image else { return }
 
         // 1) Prefer immediate in-memory cache.
@@ -1056,8 +1061,8 @@ struct RemoteAttachmentPreview: View {
             return
         }
 
-        // 2) Need a signed URL to fetch bytes.
-        guard let url = signedURL else { return }
+        // 2) Use the resolved URL from this task rather than relying on @State propagation timing.
+        guard let url else { return }
 
         do {
             let (data, resp) = try await URLSession.shared.data(from: url)
@@ -1071,7 +1076,7 @@ struct RemoteAttachmentPreview: View {
         }
     }
 
-    private func loadVideoPosterIfNeeded() async {
+    private func loadVideoPosterIfNeeded(from url: URL?) async {
         guard ref.kind == .video else { return }
 
         // 1) Prefer immediate in-memory cache.
@@ -1080,8 +1085,8 @@ struct RemoteAttachmentPreview: View {
             return
         }
 
-        // 2) Need a signed URL to generate the poster.
-        guard let url = signedURL else { return }
+        // 2) Use the resolved URL from this task rather than relying on @State propagation timing.
+        guard let url else { return }
 
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
