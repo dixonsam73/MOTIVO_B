@@ -1733,6 +1733,9 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
 
 // MARK: - Rows
 
+// CHANGE-ID: 20260610_1718_PDFThumbnailSelection
+// SCOPE: PDF Scores Phase 2B — use first selected PDF page for SessionDetailView PDF thumbnails; preserve entire-document thumbnail behaviour.
+// SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 fileprivate struct AttachmentRow: View {
     let attachment: Attachment
     let onTap: () -> Void
@@ -1796,7 +1799,8 @@ fileprivate struct AttachmentRow: View {
                 RoundedRectangle(cornerRadius: 5, style: .continuous)
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
             )
-            .task(id: attachment.fileURL ?? "") {
+            .task(id: pdfThumbnailTaskID) {
+                pdfThumbnail = nil
                 await generatePDFThumbnailIfNeeded()
             }
         } else {
@@ -1805,12 +1809,22 @@ fileprivate struct AttachmentRow: View {
         }
     }
 
+    private var selectedPDFThumbnailPage: Int? {
+        let id = attachment.value(forKey: "id") as? UUID
+        return id.flatMap { PDFSelectedPagesStore.pages(for: $0)?.first }
+    }
+
+    private var pdfThumbnailTaskID: String {
+        "\(attachment.fileURL ?? "")-page-\(selectedPDFThumbnailPage ?? 1)"
+    }
+
     private func generatePDFThumbnailIfNeeded() async {
         if pdfThumbnail != nil { return }
         guard let url = resolvedAttachmentURL(from: attachment.fileURL) else { return }
+        let page = selectedPDFThumbnailPage
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                let img = AttachmentStore.generatePDFThumbnail(url: url, size: CGSize(width: 160, height: 210))
+                let img = AttachmentStore.generatePDFThumbnail(url: url, size: CGSize(width: 160, height: 210), page: page)
                 DispatchQueue.main.async {
                     self.pdfThumbnail = img
                     continuation.resume()

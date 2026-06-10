@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1718_PDFThumbnailSelection
+// SCOPE: PDF Scores Phase 2B — page-selection-aware PDF thumbnail generation and cache keys; preserve page-1 behaviour for entire-document PDFs.
+// SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 // CHANGE-ID: 20260607_1115_AttachmentDisplayName
 // SCOPE: Attachment display names for imported PDFs/files; persist optional Attachment.displayName and use it in SessionDetailView.
 // SEARCH-TOKEN: 20260607_1115-ATTACHMENT-DISPLAY-NAME
@@ -69,27 +72,35 @@ struct AttachmentStore {
     }
     #endif
 
-    /// Generates (and caches) a page-1 thumbnail for a local PDF URL.
+    /// Generates (and caches) a thumbnail for a local PDF URL.
+    /// - Parameter page: Human-visible PDF page number. `nil` preserves existing page-1 behaviour.
     /// - Note: Synchronous renderer is intended to be called off-main by callers.
     #if canImport(UIKit) && canImport(PDFKit)
-    static func generatePDFThumbnail(url: URL, size: CGSize = CGSize(width: 256, height: 256)) -> UIImage? {
-        let key = "pdf-url:\(url.path):\(Int(size.width))x\(Int(size.height))" as NSString
+    static func generatePDFThumbnail(url: URL, size: CGSize = CGSize(width: 256, height: 256), page: Int? = nil) -> UIImage? {
+        let pageNumber = normalizedPDFThumbnailPage(page)
+        let key = "pdf-url:\(url.path):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
         if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
-        guard let document = PDFDocument(url: url), let page = document.page(at: 0) else { return nil }
-        let image = renderPDFPage(page, size: size)
+        guard let document = PDFDocument(url: url), let pdfPage = document.page(at: pageNumber - 1) else { return nil }
+        let image = renderPDFPage(pdfPage, size: size)
         _PDFThumbnailCache.shared.cache.setObject(image, forKey: key)
         return image
     }
 
-    /// Generates (and caches) a page-1 thumbnail for staged PDF data.
+    /// Generates (and caches) a thumbnail for staged PDF data.
+    /// - Parameter page: Human-visible PDF page number. `nil` preserves existing page-1 behaviour.
     /// - Note: Synchronous renderer is intended to be called off-main by callers.
-    static func generatePDFThumbnail(data: Data, cacheKey: String, size: CGSize = CGSize(width: 256, height: 256)) -> UIImage? {
-        let key = "pdf-data:\(cacheKey):\(data.count):\(Int(size.width))x\(Int(size.height))" as NSString
+    static func generatePDFThumbnail(data: Data, cacheKey: String, size: CGSize = CGSize(width: 256, height: 256), page: Int? = nil) -> UIImage? {
+        let pageNumber = normalizedPDFThumbnailPage(page)
+        let key = "pdf-data:\(cacheKey):\(data.count):page:\(pageNumber):\(Int(size.width))x\(Int(size.height))" as NSString
         if let cached = _PDFThumbnailCache.shared.cache.object(forKey: key) { return cached }
-        guard let document = PDFDocument(data: data), let page = document.page(at: 0) else { return nil }
-        let image = renderPDFPage(page, size: size)
+        guard let document = PDFDocument(data: data), let pdfPage = document.page(at: pageNumber - 1) else { return nil }
+        let image = renderPDFPage(pdfPage, size: size)
         _PDFThumbnailCache.shared.cache.setObject(image, forKey: key)
         return image
+    }
+
+    private static func normalizedPDFThumbnailPage(_ page: Int?) -> Int {
+        max(page ?? 1, 1)
     }
 
     private static func renderPDFPage(_ page: PDFPage, size: CGSize) -> UIImage {

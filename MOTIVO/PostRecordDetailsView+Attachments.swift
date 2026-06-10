@@ -1028,6 +1028,9 @@ fileprivate func formatClipDuration(_ seconds: Double) -> String {
     return String(format: "%d:%02d", m, s)
 }
 
+// CHANGE-ID: 20260610_1718_PDFThumbnailSelection
+// SCOPE: PDF Scores Phase 2B — use first selected PDF page for PRDV staged PDF thumbnails; preserve entire-document thumbnail behaviour.
+// SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 fileprivate struct AttachmentThumbCell: View {
     let att: StagedAttachment
     let isThumbnail: Bool
@@ -1211,10 +1214,19 @@ fileprivate struct AttachmentThumbCell: View {
                     placeholder(system: "doc")
                 }
             }
-            .task(id: att.id) {
+            .task(id: pdfThumbnailTaskID) {
+                pdfThumbnail = nil
                 await generatePDFThumbnailIfNeeded()
             }
         }
+    }
+
+    private var selectedPDFThumbnailPage: Int? {
+        PDFSelectedPagesStore.sanitized(att.selectedPages ?? PDFSelectedPagesStore.pages(for: att.id))?.first
+    }
+
+    private var pdfThumbnailTaskID: String {
+        "\(att.id.uuidString)-page-\(selectedPDFThumbnailPage ?? 1)"
     }
 
     private func placeholder(system: String) -> some View {
@@ -1230,10 +1242,11 @@ fileprivate struct AttachmentThumbCell: View {
         if pdfThumbnail != nil { return }
         let cacheKey = att.id.uuidString
         let data = att.data
+        let page = selectedPDFThumbnailPage
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 #if canImport(UIKit)
-                let img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                let img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey, page: page)
                 #else
                 let img: UIImage? = nil
                 #endif

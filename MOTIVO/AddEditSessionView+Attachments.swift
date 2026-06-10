@@ -533,6 +533,9 @@ extension AddEditSessionView {
         case .file:
             Image(systemName: "doc").imageScale(.large).foregroundStyle(.secondary)
         case .pdf:
+            // CHANGE-ID: 20260610_1718_PDFThumbnailSelection
+            // SCOPE: PDF Scores Phase 2B — use first selected PDF page for staged/existing PDF thumbnails; preserve entire-document thumbnail behaviour.
+            // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
             // CHANGE-ID: 20260609_211900_AESVPersistedPDFThumbnailMap
             // SCOPE: Prefer the persisted attachment URL map for existing PDFs in AESV edit mode; keep temp-surrogate fallback for staged PDFs.
             PDFStagedThumbnailView(
@@ -1315,9 +1318,18 @@ fileprivate struct PDFStagedThumbnailView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .task(id: att.id) {
+        .task(id: thumbnailTaskID) {
+            thumbnail = nil
             await generateThumbnailIfNeeded()
         }
+    }
+
+    private var selectedThumbnailPage: Int? {
+        PDFSelectedPagesStore.sanitized(att.selectedPages ?? PDFSelectedPagesStore.pages(for: att.id))?.first
+    }
+
+    private var thumbnailTaskID: String {
+        "\(att.id.uuidString)-page-\(selectedThumbnailPage ?? 1)"
     }
 
     private func generateThumbnailIfNeeded() async {
@@ -1325,15 +1337,16 @@ fileprivate struct PDFStagedThumbnailView: View {
         let cacheKey = att.id.uuidString
         let data = att.data
         let url = sourceURL
+        let page = selectedThumbnailPage
 
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let img: UIImage?
                 if let url {
-                    img = AttachmentStore.generatePDFThumbnail(url: url)
-                        ?? AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                    img = AttachmentStore.generatePDFThumbnail(url: url, page: page)
+                        ?? AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey, page: page)
                 } else {
-                    img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey)
+                    img = AttachmentStore.generatePDFThumbnail(data: data, cacheKey: cacheKey, page: page)
                 }
 
                 DispatchQueue.main.async {

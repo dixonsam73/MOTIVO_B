@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1759_AESVPDFPageCountSource
+// SCOPE: AESV PDF page-count source fix; only use URL page-count paths when the underlying file exists, otherwise fall back to staged PDF data.
+// SEARCH-TOKEN: 20260610_1759-AESV-PDF-PAGECOUNT-SOURCE
 // CHANGE-ID: 20260610_1430_PDFPhase2A
 // SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
 // SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
@@ -1394,9 +1397,16 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 
                                                                         Button("Select pages") {
                                                                             let pageCount: Int = {
-                                                                                if let url = existingAttachmentURLMap[att.id] ?? surrogateURL(for: att) {
-                                                                                    return PDFSelectedPagesStore.pageCount(for: url)
+                                                                                if let existingURL = existingAttachmentURLMap[att.id],
+                                                                                   FileManager.default.fileExists(atPath: existingURL.path) {
+                                                                                    return PDFSelectedPagesStore.pageCount(for: existingURL)
                                                                                 }
+
+                                                                                if let stagedURL = surrogateURL(for: att),
+                                                                                   FileManager.default.fileExists(atPath: stagedURL.path) {
+                                                                                    return PDFSelectedPagesStore.pageCount(for: stagedURL)
+                                                                                }
+
                                                                                 return PDFSelectedPagesStore.pageCount(for: att.data)
                                                                             }()
                                                                             pdfPageSelectionRequest = PDFPageSelectionRequest(id: att.id, pageCount: pageCount)
