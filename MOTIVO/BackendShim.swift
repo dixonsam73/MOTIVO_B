@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260610_204500_Phase3A_PDFThumbnailAsImage
+// SCOPE: PDF Scores Phase 3A — publish local PDFs as generated selected-page JPEG thumbnails only; no PDF upload, no remote model/UI changes.
+// SEARCH-TOKEN: 20260610_204500_Phase3A_PDFThumbnailAsImage
+
 // CHANGE-ID: 20260430_161500_BackendShim_ThoughtPrivacyFeedGate
 // SCOPE: BackendShim privacy only — keep owner-private backend posts out of all/feed results while preserving mine results; no schema/payload/rendering changes.
 // SEARCH-TOKEN: 20260430_161500_BackendShim_ThoughtPrivacyFeedGate
@@ -88,6 +92,9 @@ extension Notification.Name {
 import Foundation
 import CoreData
 import SwiftUI
+#if canImport(UIKit)
+import UIKit
+#endif
 
 public enum BackendKeys {
     public static let modeKey = "backendMode_v1"
@@ -939,12 +946,27 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         var skippedOversizedCount = 0
 
         uploadLoop: for item in included {
-            let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: item.ext)
-            let upload = await uploadStorageObject(from: item.fileURL, bucket: "attachments", objectPath: objectPath, contentType: item.contentType)
+            guard let prepared = prepareAttachmentForRemoteUpload(item) else {
+                // PDF files remain local-only. If a PDF thumbnail cannot be generated,
+                // skip the remote attachment rather than uploading the PDF as a fallback.
+                if isPDFAttachmentKind(item.kind) {
+                    print("[BackendShim] Skipping PDF attachment \(item.id.uuidString) — thumbnail generation failed; PDF kept local-only.")
+                    continue uploadLoop
+                }
+                continue uploadLoop
+            }
+
+            let objectPath = storageObjectPath(owner: owner, postID: payload.id, attachmentID: item.id, ext: prepared.ext)
+            let upload = await uploadStorageObject(from: prepared.fileURL, bucket: "attachments", objectPath: objectPath, contentType: prepared.contentType)
+
+            if let temporaryFileURL = prepared.temporaryFileURL {
+                try? FileManager.default.removeItem(at: temporaryFileURL)
+            }
+
             switch upload {
             case .success:
                 var ref: [String: String] = [
-                    "kind": item.kind,
+                    "kind": prepared.remoteKind,
                     "bucket": "attachments",
                     "path": objectPath
                 ]
@@ -1043,7 +1065,15 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
         let ext: String
         let contentType: String
         let createdAt: Date?
-    let displayName: String? = nil
+        let displayName: String?
+    }
+
+    private struct PreparedAttachmentUpload {
+        let fileURL: URL
+        let ext: String
+        let contentType: String
+        let remoteKind: String
+        let temporaryFileURL: URL?
     }
 
 
@@ -1097,7 +1127,14 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
             let ext = url.pathExtension.isEmpty ? defaultExtension(for: kind) : url.pathExtension.lowercased()
             let contentType = contentType(for: kind, ext: ext)
             let createdAt = a.value(forKey: "createdAt") as? Date
-items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, contentType: contentType, createdAt: createdAt))
+            let displayName: String?
+            if isPDFAttachmentKind(kind) {
+                displayName = localAttachmentDisplayName(from: a)
+            } else {
+                displayName = nil
+            }
+
+            items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, contentType: contentType, createdAt: createdAt, displayName: displayName))
         }
 
         items.sort {
@@ -1114,6 +1151,60 @@ items.append(LocalAttachmentUpload(id: id, kind: kind, fileURL: url, ext: ext, c
         let safeOwner = owner.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
         let safeExt = ext.isEmpty ? "" : ".\(ext)"
         return "users/\(safeOwner)/\(postID.uuidString)/\(attachmentID.uuidString)\(safeExt)"
+    }
+
+    private func prepareAttachmentForRemoteUpload(_ item: LocalAttachmentUpload) -> PreparedAttachmentUpload? {
+        if isPDFAttachmentKind(item.kind) {
+            return preparePDFThumbnailForRemoteUpload(item)
+        }
+
+        return PreparedAttachmentUpload(
+            fileURL: item.fileURL,
+            ext: item.ext,
+            contentType: item.contentType,
+            remoteKind: item.kind,
+            temporaryFileURL: nil
+        )
+    }
+
+    private func isPDFAttachmentKind(_ kind: String) -> Bool {
+        kind.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased() == "pdf"
+    }
+
+    private func localAttachmentDisplayName(from attachment: NSManagedObject) -> String? {
+        guard let raw = attachment.value(forKey: "displayName") as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func preparePDFThumbnailForRemoteUpload(_ item: LocalAttachmentUpload) -> PreparedAttachmentUpload? {
+        #if canImport(UIKit)
+        let selectedPage = PDFSelectedPagesStore.pages(for: item.id)?.first
+        let renderSize = CGSize(width: 1400, height: 1400)
+        guard let image = AttachmentStore.generatePDFThumbnail(url: item.fileURL, size: renderSize, page: selectedPage),
+              let data = image.jpegData(compressionQuality: 0.88) else {
+            return nil
+        }
+
+        let temporaryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("EtudesPDFRemoteThumbnail-\(item.id.uuidString)-\(UUID().uuidString)")
+            .appendingPathExtension("jpg")
+
+        do {
+            try data.write(to: temporaryURL, options: [.atomic])
+            return PreparedAttachmentUpload(
+                fileURL: temporaryURL,
+                ext: "jpg",
+                contentType: "image/jpeg",
+                remoteKind: "image",
+                temporaryFileURL: temporaryURL
+            )
+        } catch {
+            return nil
+        }
+        #else
+        return nil
+        #endif
     }
 
     private func uploadStorageObject(from localURL: URL, bucket: String, objectPath: String, contentType: String) async -> Result<Void, Error> {
