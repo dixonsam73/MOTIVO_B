@@ -1,6 +1,8 @@
 // CHANGE-ID: 20260520_211500_ContentViewRowExtractionPass1
 // SCOPE: Shared row support extracted from ContentView for row subsystem relocation only; no logic or UI changes.
 // SEARCH-TOKEN: 20260520_211500_ContentViewRowExtractionPass1
+// CHANGE-ID: 20260610_190300_PDFThumbContentViewParity
+// SCOPE: PDF Scores Phase 2C local ContentView thumbnail parity; PDF row previews now use selected-page thumbnail generation where available.
 
 import SwiftUI
 import CoreData
@@ -149,9 +151,13 @@ struct VideoOrIconTile: View {
     }
 }
 
+// CHANGE-ID: 20260610_190300_PDFThumbContentViewParity
+// SCOPE: PDF Scores Phase 2C — render selected-page PDF thumbnails in local ContentView rows using existing page-aware thumbnail infrastructure; preserve photo/video/audio behaviour.
+// SEARCH-TOKEN: 20260610_190300-PDF-CONTENTVIEW-THUMB-PARITY
 struct SingleAttachmentPreview: View {
     let attachment: Attachment
     @State private var poster: UIImage? = nil
+    @State private var pdfThumbnail: UIImage? = nil
 
     var body: some View {
         let kind = attachmentKind(attachment)
@@ -191,6 +197,28 @@ struct SingleAttachmentPreview: View {
                 .background(Color.secondary.opacity(0.08))
                 .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
                 .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
+            } else if kind == "pdf" {
+                ZStack(alignment: .center) {
+                    if let pdfThumbnail {
+                        Image(uiImage: pdfThumbnail)
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: size, height: size)
+                            .clipped()
+                    } else {
+                        Image(systemName: "doc.richtext")
+                            .imageScale(.large)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+                .task(id: pdfThumbnailTaskID) {
+                    pdfThumbnail = nil
+                    await generatePDFThumbnailIfNeeded(size: CGSize(width: size * 2, height: size * 2))
+                }
+                .frame(width: size, height: size)
+                .background(Color.secondary.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: FEED_THUMB_CORNER, style: .continuous).stroke(.black.opacity(0.05), lineWidth: 1))
             } else {
                 Image(systemName: symbolName(for: kind))
                     .imageScale(.large)
@@ -211,6 +239,31 @@ struct SingleAttachmentPreview: View {
         case "video": return "video"
         case "pdf":   return "doc.richtext"
         default:        return "doc"
+        }
+    }
+
+    private var selectedPDFThumbnailPage: Int? {
+        let id = attachment.value(forKey: "id") as? UUID
+        return id.flatMap { PDFSelectedPagesStore.pages(for: $0)?.first }
+    }
+
+    private var pdfThumbnailTaskID: String {
+        let urlKey = attachment.fileURL ?? attachmentFileURL(attachment)?.absoluteString ?? "missing-url"
+        return "\(urlKey)-page-\(selectedPDFThumbnailPage ?? 1)"
+    }
+
+    private func generatePDFThumbnailIfNeeded(size: CGSize) async {
+        if pdfThumbnail != nil { return }
+        guard let url = attachmentFileURL(attachment) else { return }
+        let page = selectedPDFThumbnailPage
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let img = AttachmentStore.generatePDFThumbnail(url: url, size: size, page: page)
+                DispatchQueue.main.async {
+                    self.pdfThumbnail = img
+                    continuation.resume()
+                }
+            }
         }
     }
 
