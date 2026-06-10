@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260609_201500_SDV_PDFTitleEditing
 // SCOPE: SessionDetailView — allow persisted PDF score title editing via AttachmentViewer rename flow.
 // SEARCH-TOKEN: 20260609_201500_SDV_PDFTitleEditing
@@ -422,6 +425,16 @@ return AttachmentViewerView(
                 videoURLs: finalVideoURLs,
                 audioURLs: finalAudioURLs,
                 pdfURLs: finalPdfURLs,
+                pdfSelectedPagesForURL: { url in
+                    let set = (session.attachments as? Set<Attachment>) ?? []
+                    if let match = set.first(where: { att in
+                        guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                        return resolveAttachmentURL(from: stored) == url
+                    }), let attID = match.value(forKey: "id") as? UUID {
+                        return PDFSelectedPagesStore.pages(for: attID)
+                    }
+                    return nil
+                },
                 onDelete: { url in
                     // Attempt to find the matching Attachment in this session by resolving stored fileURL strings
                     let set = (session.attachments as? Set<Attachment>) ?? []
@@ -1737,6 +1750,14 @@ fileprivate struct AttachmentRow: View {
                         Text("★").font(.footnote)
                     }
                 }.foregroundStyle(.secondary)
+
+                if (attachment.kind ?? "file") == "pdf" {
+                    let id = attachment.value(forKey: "id") as? UUID
+                    Text(PDFSelectedPagesFormatter.summary(for: id.flatMap { PDFSelectedPagesStore.pages(for: $0) }))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             Spacer()
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")

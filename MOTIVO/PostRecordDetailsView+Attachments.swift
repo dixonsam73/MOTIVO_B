@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260607_203500_PRDV_PDFCaptionOutsideTile
 // SCOPE: PRDV staged PDF captions sit outside clipped thumbnail tile; no viewer/persistence changes.
 // SEARCH-TOKEN: 20260607_203500-PRDV-PDF-CAPTION-OUTSIDE-TILE
@@ -55,6 +58,11 @@ AttachmentViewerView(
     videoURLs: videoURLs,
     audioURLs: audioURLs,
     pdfURLs: pdfURLs,
+    pdfSelectedPagesForURL: { url in
+        let stem = url.deletingPathExtension().lastPathComponent
+        guard let id = UUID(uuidString: stem) else { return nil }
+        return selectedPages(forPDFID: id)
+    },
 onDelete: { url in
     // Map surrogate URL back to staged attachment by matching staged id in the basename
     let stem = url.deletingPathExtension().lastPathComponent
@@ -254,13 +262,30 @@ isPrivate: { url in
                                         }
                                     }()
 
+                                    let orderedVisualIDs: [UUID] = {
+                                        let imageIDs: [UUID] = visuals.compactMap { item in
+                                            guard item.kind == .image else { return nil }
+                                            return item.id
+                                        }
+                                        let videoIDs: [UUID] = visuals.compactMap { item in
+                                            guard item.kind == .video else { return nil }
+                                            return item.id
+                                        }
+                                        let pdfIDs: [UUID] = visuals.compactMap { item in
+                                            guard item.kind == .pdf else { return nil }
+                                            return item.id
+                                        }
+                                        return imageIDs + videoIDs + pdfIDs
+                                    }()
+
                                     viewerRequest = PRDVAttachmentViewerRequest(
                                         mode: .visual,
                                         startIndex: startIndex,
                                         imageURLs: imageURLs,
                                         videoURLs: videoURLs,
                                         audioURLs: [],
-                                        pdfURLs: pdfURLs
+                                        pdfURLs: pdfURLs,
+                                        viewerAttachmentIDs: orderedVisualIDs
                                     )
                                     }
                                 }
@@ -272,6 +297,22 @@ isPrivate: { url in
                                         .lineLimit(1)
                                         .truncationMode(.tail)
                                         .frame(width: 128, alignment: .leading)
+                                }
+
+                                if att.kind == .pdf {
+                                    Text(PDFSelectedPagesFormatter.summary(for: selectedPages(forPDFID: att.id)))
+                                        .font(.caption2)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .lineLimit(1)
+                                        .truncationMode(.tail)
+                                        .frame(width: 128, alignment: .leading)
+
+                                    Button("Select pages") {
+                                        let pageCount = PDFSelectedPagesStore.pageCount(for: att.data)
+                                        pdfPageSelectionRequest = PDFPageSelectionRequest(id: att.id, pageCount: pageCount)
+                                    }
+                                    .font(.caption2)
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
@@ -414,6 +455,31 @@ isPrivate: { url in
                     .padding(.top, 4)
             }
         }
+        .sheet(item: $pdfPageSelectionRequest) { request in
+            PDFPageSelectionSheet(
+                pageCount: request.pageCount,
+                selectedPages: Binding(
+                    get: { selectedPages(forPDFID: request.id) },
+                    set: { setSelectedPages($0, forPDFID: request.id) }
+                )
+            )
+        }
+    }
+
+
+    func selectedPages(forPDFID id: UUID) -> [Int]? {
+        if let staged = stagedAttachments.first(where: { $0.id == id }) {
+            return PDFSelectedPagesStore.sanitized(staged.selectedPages ?? PDFSelectedPagesStore.pages(for: id))
+        }
+        return PDFSelectedPagesStore.pages(for: id)
+    }
+
+    func setSelectedPages(_ pages: [Int]?, forPDFID id: UUID) {
+        let sanitized = PDFSelectedPagesStore.sanitized(pages)
+        if let idx = stagedAttachments.firstIndex(where: { $0.id == id }) {
+            stagedAttachments[idx].selectedPages = sanitized
+        }
+        PDFSelectedPagesStore.setPages(sanitized, for: id)
     }
 
 
@@ -562,6 +628,7 @@ isPrivate: { url in
 
 
     func removeStagedAttachment(_ a: StagedAttachment) {
+        PDFSelectedPagesStore.setPages(nil, for: a.id)
         stagedAttachments.removeAll { $0.id == a.id }
         if selectedThumbnailID == a.id {
             selectedThumbnailID = stagedAttachments.first(where: { $0.kind == .image })?.id
@@ -658,6 +725,7 @@ let namesKey = "stagedAudioNames_temp"
                 let created: Attachment = try AttachmentStore.addAttachment(kind: att.kind, filePath: result.path, to: session, isThumbnail: isThumb, displayName: displayName, ctx: ctx)
                 if let finalID = (created.value(forKey: "id") as? UUID) {
                     stagedToFinalID[att.id] = finalID
+                    PDFSelectedPagesStore.migratePages(from: att.id, stagedPages: att.selectedPages, to: finalID)
                 }
 
 

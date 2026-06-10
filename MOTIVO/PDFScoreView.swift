@@ -1,8 +1,12 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 import SwiftUI
 import PDFKit
 
 struct PDFScoreView: View {
     let url: URL
+    var selectedPages: [Int]? = nil
     var background: Color = Color.clear
     var onFailure: (() -> Void)? = nil
 
@@ -19,6 +23,7 @@ struct PDFScoreView: View {
 
             PDFScoreRepresentable(
                 url: url,
+                selectedPages: selectedPages,
                 controller: controller,
                 pageIndex: $pageIndex,
                 pageCount: $pageCount,
@@ -120,6 +125,7 @@ private final class PDFScoreController: ObservableObject {
 
 private struct PDFScoreRepresentable: UIViewRepresentable {
     let url: URL
+    let selectedPages: [Int]?
     let controller: PDFScoreController
     @Binding var pageIndex: Int
     @Binding var pageCount: Int
@@ -141,13 +147,14 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         pdfView.autoScales = true
         pdfView.backgroundColor = .clear
         pdfView.displaysPageBreaks = false
-        pdfView.document = PDFDocument(url: url)
+        pdfView.document = makeDocument(url: url, selectedPages: selectedPages)
         pdfView.autoScales = true
         pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
 
         controller.register(pdfView)
         context.coordinator.pdfView = pdfView
         context.coordinator.loadedURL = url
+        context.coordinator.loadedSelectedPages = PDFSelectedPagesStore.sanitized(selectedPages)
         context.coordinator.refreshPageState()
 
         if pdfView.document == nil {
@@ -167,13 +174,15 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
     func updateUIView(_ pdfView: PDFView, context: Context) {
         controller.register(pdfView)
 
-        guard context.coordinator.loadedURL != url else {
+        let sanitizedPages = PDFSelectedPagesStore.sanitized(selectedPages)
+        guard context.coordinator.loadedURL != url || context.coordinator.loadedSelectedPages != sanitizedPages else {
             context.coordinator.refreshPageState()
             return
         }
 
         context.coordinator.loadedURL = url
-        pdfView.document = PDFDocument(url: url)
+        context.coordinator.loadedSelectedPages = sanitizedPages
+        pdfView.document = makeDocument(url: url, selectedPages: sanitizedPages)
         pdfView.autoScales = true
         pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
         context.coordinator.refreshPageState()
@@ -191,6 +200,28 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         )
     }
 
+    private func makeDocument(url: URL, selectedPages: [Int]?) -> PDFDocument? {
+        guard let source = PDFDocument(url: url) else { return nil }
+        guard let clean = PDFSelectedPagesStore.sanitized(selectedPages), !clean.isEmpty else {
+            return source
+        }
+
+        let filtered = PDFDocument()
+        var insertIndex = 0
+
+        for pageNumber in clean {
+            guard pageNumber >= 1,
+                  pageNumber <= source.pageCount,
+                  let page = source.page(at: pageNumber - 1)
+            else { continue }
+
+            filtered.insert(page, at: insertIndex)
+            insertIndex += 1
+        }
+
+        return insertIndex > 0 ? filtered : source
+    }
+
     final class Coordinator: NSObject {
         @Binding private var pageIndex: Int
         @Binding private var pageCount: Int
@@ -198,6 +229,7 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
 
         weak var pdfView: PDFView?
         var loadedURL: URL?
+        var loadedSelectedPages: [Int]?
 
         init(
             pageIndex: Binding<Int>,

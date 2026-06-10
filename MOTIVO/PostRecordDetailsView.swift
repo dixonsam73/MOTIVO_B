@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260605_190500_PRDV_StateStripExtract
 // SCOPE: PostRecordDetailsView — extract Focus/state strip view and interaction helpers into PostRecordDetailsView+StateStrip without UI or logic changes.
 // SEARCH-TOKEN: 20260605_190500_PRDV_StateStripExtract
@@ -112,6 +115,17 @@ struct PRDVAttachmentViewerRequest: Identifiable {
     let videoURLs: [URL]
     let audioURLs: [URL]
     let pdfURLs: [URL]
+    let viewerAttachmentIDs: [UUID]
+
+    init(mode: Mode, startIndex: Int, imageURLs: [URL], videoURLs: [URL], audioURLs: [URL], pdfURLs: [URL], viewerAttachmentIDs: [UUID] = []) {
+        self.mode = mode
+        self.startIndex = startIndex
+        self.imageURLs = imageURLs
+        self.videoURLs = videoURLs
+        self.audioURLs = audioURLs
+        self.pdfURLs = pdfURLs
+        self.viewerAttachmentIDs = viewerAttachmentIDs
+    }
 }
 
 private enum TaskLineType_PRDV_Stage1: String, Decodable {
@@ -232,6 +246,7 @@ struct PostRecordDetailsView: View {
 
     // Step 1: New atomic request state (unused until Step 2).
     @State var viewerRequest: PRDVAttachmentViewerRequest? = nil
+    @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
 
     @AppStorage("primaryActivityRef") var primaryActivityRef: String = "core:0"
 

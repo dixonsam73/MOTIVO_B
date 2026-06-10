@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260609_203500_AVV_NoPDFTrim
 // SCOPE: AttachmentViewerView — hide MediaTrimView scissors control for PDF attachments; preserve PDF centre rename and all audio/video trim behaviour.
 // SEARCH-TOKEN: 20260609_203500_AVV_NoPDFTrim
@@ -86,6 +89,7 @@ struct AttachmentViewerView: View {
     let videoKeys: [String]
     let videoTitlesByKey: [String: String]
     let audioTitles: [String]?
+    let pdfSelectedPagesForURL: ((URL) -> [Int]?)?
     let isReadOnly: Bool
     let canShare: Bool
     @Environment(\.colorScheme) private var colorScheme
@@ -241,6 +245,7 @@ struct AttachmentViewerView: View {
         videoKeys: [String] = [],
         videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
+        pdfSelectedPagesForURL: ((URL) -> [Int]?)? = nil,
         isReadOnly: Bool,
         canShare: Bool,
         themeBackground: Color = Color.clear,
@@ -264,6 +269,7 @@ struct AttachmentViewerView: View {
         self.videoKeys = videoKeys
         self.videoTitlesByKey = videoTitlesByKey
         self.audioTitles = audioTitles
+        self.pdfSelectedPagesForURL = pdfSelectedPagesForURL
         self.isReadOnly = isReadOnly
         self.canShare = canShare
         self.themeBackground = themeBackground
@@ -413,6 +419,7 @@ private func currentURL() -> URL? {
         videoKeys: [String] = [],
         videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
+        pdfSelectedPagesForURL: ((URL) -> [Int]?)? = nil,
         onDelete: ((URL) -> Void)? = nil,
         titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
         onRename: ((URL, String, AttachmentKind) -> Void)? = nil,
@@ -438,6 +445,7 @@ private func currentURL() -> URL? {
         self.videoKeys = videoKeys
         self.videoTitlesByKey = videoTitlesByKey
         self.audioTitles = audioTitles
+        self.pdfSelectedPagesForURL = pdfSelectedPagesForURL
         self._startIndex = State(initialValue: startIndex)
         self._currentIndex = State(initialValue: startIndex)
         self.themeBackground = themeBackground
@@ -470,6 +478,7 @@ private func currentURL() -> URL? {
         videoKeys: [String] = [],
         videoTitlesByKey: [String: String] = [:],
         audioTitles: [String]? = nil,
+        pdfSelectedPagesForURL: ((URL) -> [Int]?)? = nil,
         onDelete: ((URL) -> Void)? = nil,
         onRename: ((URL, String) -> Void)? = nil,
         onFavourite: ((URL) -> Void)? = nil,
@@ -493,6 +502,7 @@ private func currentURL() -> URL? {
             videoKeys: videoKeys,
             videoTitlesByKey: videoTitlesByKey,
             audioTitles: audioTitles,
+            pdfSelectedPagesForURL: pdfSelectedPagesForURL,
             onDelete: onDelete,
             titleForURL: nil,
             onRename: nil,
@@ -603,6 +613,9 @@ private func currentURL() -> URL? {
                             audioTitles: audioTitles,
                             titleForURL: { url, kind in
                                 resolvedTitle(for: url, kind: kind)
+                            },
+                            selectedPagesForURL: { url in
+                                pdfSelectedPagesForURL?(url)
                             },
                             effectiveURL: { original in
                                 effectiveURL(for: original)
@@ -1431,6 +1444,7 @@ private struct MediaPage: View {
     let audioURLs: [URL]
     let audioTitles: [String]?
     let titleForURL: ((URL, AttachmentKind) -> String?)?
+    let selectedPagesForURL: (URL) -> [Int]?
 
     // Step 9F: resilience hooks
     let effectiveURL: (URL) -> URL
@@ -1485,6 +1499,7 @@ private struct MediaPage: View {
             case .pdf:
                 PDFScoreView(
                     url: effectiveURL(original),
+                    selectedPages: selectedPagesForURL(original),
                     background: background,
                     onFailure: { markFailed(original, "PDF failed to load") }
                 )

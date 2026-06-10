@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260609_203500_AESVPDFCardTitleRestore
 // SCOPE: AddEditSessionView — restore AESV PDF attachment-card caption resolution after viewer rename; custom title/displayName first, then imported filename, then generic PDF fallback.
 // SEARCH-TOKEN: 20260609_203500_AESVPDFCardTitleRestore
@@ -239,6 +242,7 @@ struct AddEditSessionView: View {
 
 
     @State var viewerRequest: AESVAttachmentViewerRequest? = nil
+    @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
     @State var attachmentTitlesRefreshTick: Int = 0
 
     // UI stability (instruments empty-state)
@@ -1380,6 +1384,25 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             .lineLimit(1)
                                                                             .truncationMode(.tail)
                                                                             .frame(width: 128, alignment: .leading)
+
+                                                                        Text(PDFSelectedPagesFormatter.summary(for: selectedPages(forPDFID: att.id)))
+                                                                            .font(.caption2)
+                                                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                                                            .lineLimit(1)
+                                                                            .truncationMode(.tail)
+                                                                            .frame(width: 128, alignment: .leading)
+
+                                                                        Button("Select pages") {
+                                                                            let pageCount: Int = {
+                                                                                if let url = existingAttachmentURLMap[att.id] ?? surrogateURL(for: att) {
+                                                                                    return PDFSelectedPagesStore.pageCount(for: url)
+                                                                                }
+                                                                                return PDFSelectedPagesStore.pageCount(for: att.data)
+                                                                            }()
+                                                                            pdfPageSelectionRequest = PDFPageSelectionRequest(id: att.id, pageCount: pageCount)
+                                                                        }
+                                                                        .font(.caption2)
+                                                                        .buttonStyle(.plain)
                                                                     }
                                                                 }
                                                                 .frame(width: 128, alignment: .leading)
@@ -1506,6 +1529,15 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 }
                 .cardSurface(padding: Theme.Spacing.m)
                 .accessibilityLabel("Attachments")
+                .sheet(item: $pdfPageSelectionRequest) { request in
+                    PDFPageSelectionSheet(
+                        pageCount: request.pageCount,
+                        selectedPages: Binding(
+                            get: { selectedPages(forPDFID: request.id) },
+                            set: { setSelectedPages($0, forPDFID: request.id) }
+                        )
+                    )
+                }
 
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack(spacing: 32) {

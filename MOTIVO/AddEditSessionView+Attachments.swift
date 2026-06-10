@@ -1,3 +1,6 @@
+// CHANGE-ID: 20260610_1430_PDFPhase2A
+// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
+// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
 // CHANGE-ID: 20260609_205400_AESVPersistedPDFThumbnailURL
 // SCOPE: AESV — restore persisted PDF attachment thumbnails by using existing file URLs before staged data fallback.
 // SEARCH-TOKEN: 20260609_205400_AESVPersistedPDFThumbnailURL
@@ -97,7 +100,7 @@ extension AddEditSessionView {
             }
 
             // Stage item and remember it's existing to avoid duplication on save.
-            let staged = StagedAttachment(id: id, data: data, kind: kind)
+            let staged = StagedAttachment(id: id, data: data, kind: kind, selectedPages: PDFSelectedPagesStore.pages(for: id))
             stagedAttachments.append(staged)
             existingAttachmentIDs.insert(id)
 
@@ -220,6 +223,7 @@ extension AddEditSessionView {
     }
 
     func removeStagedAttachment(_ a: StagedAttachment) {
+        PDFSelectedPagesStore.setPages(nil, for: a.id)
         // If this staged item corresponds to an existing Core Data Attachment, mark it for deletion on save.
         if existingAttachmentIDs.contains(a.id) {
             deletedExistingAttachmentIDs.insert(a.id)
@@ -373,6 +377,7 @@ extension AddEditSessionView {
                         toNewID: newID,
                         newURL: persistedURL
                     )
+                    PDFSelectedPagesStore.migratePages(from: att.id, stagedPages: att.selectedPages, to: newID)
                 }
                 // --- end PATCH ---
 
@@ -409,6 +414,27 @@ extension AddEditSessionView {
     }
 
     // Added helpers for attachment viewer integration:
+
+
+    func selectedPages(forPDFID id: UUID) -> [Int]? {
+        if let staged = stagedAttachments.first(where: { $0.id == id }) {
+            return PDFSelectedPagesStore.sanitized(staged.selectedPages ?? PDFSelectedPagesStore.pages(for: id))
+        }
+        return PDFSelectedPagesStore.pages(for: id)
+    }
+
+    func setSelectedPages(_ pages: [Int]?, forPDFID id: UUID) {
+        let sanitized = PDFSelectedPagesStore.sanitized(pages)
+        if let idx = stagedAttachments.firstIndex(where: { $0.id == id }) {
+            stagedAttachments[idx].selectedPages = sanitized
+        }
+        if existingAttachmentIDs.contains(id) {
+            PDFSelectedPagesStore.setPages(sanitized, for: id)
+        } else {
+            PDFSelectedPagesStore.setPages(sanitized, for: id)
+        }
+        attachmentTitlesRefreshTick &+= 1
+    }
 
     func stagedIndexForAttachment_edit(_ target: StagedAttachment) -> Int {
         let images = stagedAttachments.filter { $0.kind == .image }
@@ -719,14 +745,21 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
     ) -> some View {
 
         AttachmentViewerView(
-                                    imageURLs: imageURLs,
-                                    startIndex: startIndex,
-                                    themeBackground: Color(.systemBackground),
-                                    videoURLs: videoURLs,
-                                    audioURLs: audioURLs,
-                                    pdfURLs: pdfURLs,
-                                    audioTitles: audioTitles,
-                                    onDelete: { url in
+            imageURLs: imageURLs,
+            startIndex: startIndex,
+            themeBackground: Color(.systemBackground),
+            videoURLs: videoURLs,
+            audioURLs: audioURLs,
+            pdfURLs: pdfURLs,
+            audioTitles: audioTitles,
+            pdfSelectedPagesForURL: { url in
+                let all = imageURLs + videoURLs + audioURLs + pdfURLs
+                guard let idx = all.firstIndex(where: { $0 == url }) else { return nil }
+                let ids = req.viewerAttachmentIDs
+                guard idx >= 0, idx < ids.count else { return nil }
+                return selectedPages(forPDFID: ids[idx])
+            },
+            onDelete: { url in
                                         // Map by staged id from surrogate URL stem
                                         let stem = url.deletingPathExtension().lastPathComponent
                                         if let idx = stagedAttachments.firstIndex(where: { $0.id.uuidString == stem }) {
