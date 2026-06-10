@@ -107,12 +107,14 @@ struct PDFPageSelectionSheet: View {
                         draftSelection.removeAll()
                     } label: {
                         HStack {
-                            Image(systemName: draftSelection.isEmpty ? "checkmark.circle.fill" : "circle")
+                            Image(systemName: draftSelection.isEmpty ? "checkmark.square.fill" : "square")
                             Text("Entire document")
                         }
+                        .foregroundStyle(.primary)
                     }
+                    .buttonStyle(.plain)
                 } footer: {
-                    Text("Leave all pages unselected to attach the entire PDF.")
+                    Text("Page numbers refer to pages within the PDF document. Leave all pages unselected to attach the entire PDF.")
                 }
 
                 Section("Pages") {
@@ -134,7 +136,7 @@ struct PDFPageSelectionSheet: View {
                     }
                 }
             }
-            .navigationTitle("Select Pages")
+            .navigationTitle("Select PDF Pages")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
