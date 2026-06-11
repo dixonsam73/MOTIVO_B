@@ -42,7 +42,7 @@ struct ProfileStore {
             UserDefaults.standard.set(legacy, forKey: key)
             return legacy
         }
-        return 0
+        return 1
     }
 
     static func setDiscoveryModeRaw(_ raw: Int, for backendUserID: String?) {

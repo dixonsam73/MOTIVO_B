@@ -317,7 +317,7 @@ struct AppSetUpView: View {
                 userID: backendID,
                 displayName: trimmedName,
                 accountID: nil,
-                lookupEnabled: false,
+                lookupEnabled: true,
                 followRequestsEnabled: true,
                 location: nil,
                 instruments: instrumentsSorted
@@ -329,7 +329,7 @@ struct AppSetUpView: View {
                     userID: backendID,
                     displayName: trimmedName,
                     localAccountID: ProfileStore.accountID(for: backendID),
-                    lookupEnabled: false,
+                    lookupEnabled: true,
                     followRequestsEnabled: true,
                     location: nil,
                     instruments: instrumentsSorted
