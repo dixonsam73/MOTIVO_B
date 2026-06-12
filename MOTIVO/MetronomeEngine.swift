@@ -1,4 +1,6 @@
 // MetronomeEngine.swift
+// CHANGE-ID: 20260612_123100_METRONOME_TIMING_SR_LOCK
+// SCOPE: Lock metronome BPM timing to the source-node render sample rate; no UI changes.
 // Sample-based click generator with optional accent-every-N-beats.
 //
 // Public API (file-scope):
@@ -22,7 +24,6 @@ final class MetronomeEngine {
 
     /// Source node that generates the metronome click in a sample-accurate way.
     private lazy var sourceNode: AVAudioSourceNode = {
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
         let node = AVAudioSourceNode { [weak self] _, _, frameCount, audioBufferList in
             guard let self = self else { return noErr }
             return self.renderCallback(frameCount: frameCount, audioBufferList: audioBufferList)
@@ -48,7 +49,12 @@ final class MetronomeEngine {
 
     // MARK: - State (audio-thread timing)
 
-    /// Sample rate of the audio graph.
+    /// Stable sample rate used for sample-based beat timing.
+    ///
+    /// This must match the AVAudioSourceNode render format used when the node is
+    /// connected. Do not refresh it from the main mixer during live BPM updates;
+    /// some routes report a different mixer/device rate, which makes displayed
+    /// BPM drift from the rendered click tempo.
     private var sampleRate: Double = 44_100
 
     /// Number of samples between beats.
@@ -75,7 +81,8 @@ final class MetronomeEngine {
     // MARK: - Init
 
     init() {
-        // Attach + connect source node once up-front using the mixer’s format.
+        // Attach + connect source node once up-front using the mixer’s current
+        // format, then lock tempo timing to that source-node render rate.
         let format = engine.mainMixerNode.outputFormat(forBus: 0)
         sampleRate = format.sampleRate > 0 ? format.sampleRate : 44_100
 
@@ -227,15 +234,17 @@ final class MetronomeEngine {
 
     // MARK: - Timing helpers
 
-    /// Recompute samplesPerBeat when BPM or sampleRate changes.
+    /// Recompute samplesPerBeat when BPM changes.
     private func updateTiming() {
-        let format = engine.mainMixerNode.outputFormat(forBus: 0)
-        let sr = format.sampleRate > 0 ? format.sampleRate : sampleRate
-        sampleRate = sr
-
+        let sr = sampleRate > 0 ? sampleRate : 44_100
         let raw = sr * 60.0 / max(bpm, 30.0)
         let spb = max(1, Int64(raw.rounded()))
         samplesPerBeat = AVAudioFramePosition(spb)
+
+        #if DEBUG
+        let intervalSeconds = Double(spb) / sr
+        print("[MetronomeEngine] timing bpm=\(bpm) sampleRate=\(sr) samplesPerBeat=\(spb) interval=\(intervalSeconds)")
+        #endif
 
         // If we somehow ended up with no countdown, ensure we have something
         // sensible to avoid division by zero or runaway scheduling.
