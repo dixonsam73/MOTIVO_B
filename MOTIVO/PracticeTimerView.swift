@@ -2800,14 +2800,22 @@ private func loadPracticeDefaultsIfNeeded() {
                         Image(systemName: "book.closed")
                             .symbolRenderingMode(.monochrome)
                             .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(hasActiveScore ? tasksAccentIcon : recorderIcon)
+                            .foregroundStyle(
+                                hasActiveScore
+                                    ? Theme.Colors.primaryAction
+                                    : recorderIcon
+                            )
                             .frame(width: 48, height: 48)
                             .contentShape(Circle())
                     }
                     .buttonStyle(.bordered)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(hasActiveScore ? tasksAccent.opacity(0.26) : Color.clear)
+                            .fill(
+                                hasActiveScore
+                                    ? Theme.Colors.primaryAction.opacity(0.18)
+                                    : Color.clear
+                            )
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(hasActiveScore ? "Resume active score" : "Open scores")
