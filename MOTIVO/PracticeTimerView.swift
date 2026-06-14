@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_145200_ScoresPhase1_TimerEntry
+// SCOPE: Scores V1 Phase 1 — add Timer-owned Scores Library presentation and temporary book.closed utility button. No AppRoute, PDF viewer, PRDV/AESV/SDV, recorder, task, or attachment persistence changes.
+// SEARCH-TOKEN: 20260614_145200_SCORES_PHASE1_TIMER_ENTRY
+
 // CHANGE-ID: 20260601_191400_PTV_AmbientThreadSelectedTint
 // SCOPE: PracticeTimerView ambient thread chips only — selected non-thread-tint chips use blue-grey acknowledgement tint; no suggestion, selection, PRDV handoff, layout, or sheet logic changes.
 // SEARCH-TOKEN: 20260601_191400_PTV_AmbientThreadSelectedTint
@@ -216,6 +220,7 @@ struct PracticeTimerView: View {
     @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
     @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
     @AppStorage("appSettings_showTasksPad") private var showTasksButton: Bool = true
+    @AppStorage("appSettings_showScores") private var showScoresButton: Bool = true
     @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
@@ -272,6 +277,7 @@ struct PracticeTimerView: View {
     @State var showReviewSheet = false
     @State private var showManualAddSheet: Bool = false
     @State private var showThoughtEditorSheet: Bool = false
+    @State private var showScoresLibrary: Bool = false
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -1924,6 +1930,9 @@ private func loadPracticeDefaultsIfNeeded() {
         .sheet(isPresented: $showThoughtEditorSheet) {
             thoughtEditorSheet
         }
+        .sheet(isPresented: $showScoresLibrary) {
+            ScoresLibraryView()
+        }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
             if oldValue == true && newValue == false && didSaveFromReview == false {
@@ -2687,6 +2696,30 @@ private func loadPracticeDefaultsIfNeeded() {
                     )
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(showTasksPad ? "Hide tasks" : "Show tasks")
+                }
+
+                if showScoresButton {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.18)) {
+                            showTasksPad = false
+                            showAddEntryActions = false
+                        }
+                        showScoresLibrary = true
+                    } label: {
+                        Image(systemName: "book.closed")
+                            .symbolRenderingMode(.monochrome)
+                            .font(.system(size: 22, weight: .semibold))
+                            .foregroundStyle(recorderIcon)
+                            .frame(width: 48, height: 48)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(.bordered)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(Color.clear)
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                    .accessibilityLabel("Open scores")
                 }
 
                 if shouldRenderIdleAddEntryButton {
