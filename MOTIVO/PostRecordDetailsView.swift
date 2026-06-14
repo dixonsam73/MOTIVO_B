@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_181500_ScoresPhase6_PRDVScoreSelection
+// SCOPE: Scores V1 Phase 6 — PRDV-only selectable Scores Used rows using existing PDFPageSelectionSheet; store score page selections in PRDV state only. No attachment creation, persistence, save-path, SDV, AESV, backend, or file-copy changes.
+// SEARCH-TOKEN: 20260614_181500_SCORES_PHASE6_PRDV_SCORE_SELECTION
+
 // CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
 // SCOPE: Scores Phase 4 — accept silently tracked live-session score IDs from PTV for later PRDV Scores Used UI. No UI, attachment, save, or persistence changes.
 // SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
@@ -169,6 +173,12 @@ private struct PersistedTaskLine_PRDV_Stage1: Decodable {
 
 
 
+
+private struct PRDVScorePageSelection: Equatable {
+    var pages: [Int]?
+    var hasSelection: Bool
+}
+
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) var viewContext
     @Environment(\.colorScheme) private var colorScheme
@@ -251,6 +261,8 @@ struct PostRecordDetailsView: View {
     // Step 1: New atomic request state (unused until Step 2).
     @State var viewerRequest: PRDVAttachmentViewerRequest? = nil
     @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
+    @State private var scorePageSelectionRequest: PDFPageSelectionRequest? = nil
+    @State private var scorePageSelections: [UUID: PRDVScorePageSelection] = [:]
 
     @AppStorage("primaryActivityRef") var primaryActivityRef: String = "core:0"
 
@@ -607,9 +619,59 @@ struct PostRecordDetailsView: View {
     }
 
     
-    private var usedScoreTitles: [String] {
-        let lookup = Dictionary(uniqueKeysWithValues: ScoreLibraryStore.shared.items.map { ($0.id, $0.title) })
+    private var usedScoreItems: [ScoreLibraryItem] {
+        let lookup = Dictionary(uniqueKeysWithValues: ScoreLibraryStore.shared.items.map { ($0.id, $0) })
         return usedScoreIDsPrefill.compactMap { lookup[$0] }
+    }
+
+    private func selectedPagesForUsedScore(_ id: UUID) -> [Int]? {
+        PDFSelectedPagesStore.sanitized(scorePageSelections[id]?.pages)
+    }
+
+    private func setSelectedPagesForUsedScore(_ pages: [Int]?, id: UUID) {
+        scorePageSelections[id] = PRDVScorePageSelection(
+            pages: PDFSelectedPagesStore.sanitized(pages),
+            hasSelection: true
+        )
+    }
+
+    private func selectionSummaryForUsedScore(_ id: UUID) -> String? {
+        guard let selection = scorePageSelections[id], selection.hasSelection else { return nil }
+        return PDFSelectedPagesFormatter.summary(for: selection.pages)
+    }
+
+    @ViewBuilder
+    private func usedScoreRow(_ score: ScoreLibraryItem) -> some View {
+        Button {
+            scorePageSelectionRequest = PDFPageSelectionRequest(
+                id: score.id,
+                pageCount: max(score.pageCount, 1)
+            )
+        } label: {
+            HStack(alignment: .center, spacing: Theme.Spacing.m) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(score.title)
+                        .font(Theme.Text.body)
+
+                    if let summary = selectionSummaryForUsedScore(score.id) {
+                        Text(summary)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(
+                        Theme.Colors.secondaryText.opacity(0.55)
+                    )
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 2)
+        }
+        .buttonStyle(.plain)
     }
 
 var body: some View {
@@ -869,18 +931,13 @@ var body: some View {
                     .padding(.vertical, 10)
 
 
-                    if !usedScoreTitles.isEmpty {
+                    if !usedScoreItems.isEmpty {
                         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                             Text("Scores Used").sectionHeader()
 
                             VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                                ForEach(usedScoreTitles, id: \.self) { title in
-                                    HStack {
-                                        Text(title)
-                                            .font(Theme.Text.body)
-
-                                        Spacer(minLength: 0)
-                                    }
+                                ForEach(usedScoreItems) { score in
+                                    usedScoreRow(score)
                                 }
                             }
                         }
@@ -1024,6 +1081,15 @@ var body: some View {
                 }
             }
             .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+            .sheet(item: $scorePageSelectionRequest) { request in
+                PDFPageSelectionSheet(
+                    pageCount: request.pageCount,
+                    selectedPages: Binding(
+                        get: { selectedPagesForUsedScore(request.id) },
+                        set: { setSelectedPagesForUsedScore($0, id: request.id) }
+                    )
+                )
+            }
             .sheet(isPresented: $showCamera) { CameraCaptureView { image in
                 if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
             } }
