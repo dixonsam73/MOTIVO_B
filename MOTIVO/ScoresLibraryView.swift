@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260614_163800_ScoresPhase2B_UnifiedActiveViewer
+// SCOPE: Scores V1 Phase 2B — remove the library-owned PDF viewer path so first-open score selection hands off to the Timer-owned active-score viewer with Timer + Library controls immediately. No attachment PDF viewer, store, AppRoute, page restoration, PRDV/AESV/SDV changes.
+// SEARCH-TOKEN: 20260614_163800_SCORES_PHASE2B_UNIFIED_ACTIVE_VIEWER
+
+// CHANGE-ID: 20260614_154500_ScoresPhase2_LibraryViewer
+// SCOPE: Scores V1 Phase 2 — tapping or resuming a library score marks it active and opens PDFScoreView; Close clears active score. No session attachment, AppRoute, or PDF page restoration changes.
+// SEARCH-TOKEN: 20260614_154500_SCORES_PHASE2_LIBRARY_VIEWER
+
 // CHANGE-ID: 20260614_145200_ScoresPhase1_LibraryView
 // SCOPE: Scores V1 Phase 1 — dedicated local Scores Library UI with search, PDF import, Scan Music PDF creation, rename, favourite, delete, and active-score card shell. No session attachment, backend, AppRoute, or PDF viewer changes.
 // SEARCH-TOKEN: 20260614_145200_SCORES_PHASE1_LIBRARY_VIEW
@@ -9,6 +17,13 @@ import VisionKit
 
 struct ScoresLibraryView: View {
     @Environment(\.dismiss) private var dismiss
+
+    private let onOpenActiveScore: ((ScoreLibraryItem) -> Void)?
+
+    init(onOpenActiveScore: ((ScoreLibraryItem) -> Void)? = nil) {
+        self.onOpenActiveScore = onOpenActiveScore
+    }
+
     @StateObject private var store = ScoreLibraryStore.shared
 
     @State private var searchText: String = ""
@@ -216,6 +231,12 @@ struct ScoresLibraryView: View {
 
                 Spacer(minLength: 0)
 
+                Button("Resume") {
+                    openScore(item)
+                }
+                .font(Theme.Text.meta.weight(.semibold))
+                .foregroundStyle(Theme.Colors.accent)
+
                 Button("Close") {
                     store.clearActiveScore()
                 }
@@ -330,6 +351,9 @@ struct ScoresLibraryView: View {
         }
         .padding(.vertical, 2)
         .contentShape(Rectangle())
+        .onTapGesture {
+            openScore(item)
+        }
         .cardSurface()
     }
 
@@ -365,6 +389,11 @@ struct ScoresLibraryView: View {
                 }
             }
         )
+    }
+
+    private func openScore(_ item: ScoreLibraryItem) {
+        store.markOpened(item)
+        onOpenActiveScore?(item)
     }
 
     private func pageCountLabel(for item: ScoreLibraryItem) -> String {

@@ -1,3 +1,15 @@
+// CHANGE-ID: 20260614_163800_ScoresPhase2B_UnifiedActiveViewer
+// SCOPE: Scores V1 Phase 2B — route score selection from Scores Library into the Timer-owned active-score viewer so first-open and resume use the same Timer + Library controls. No attachment viewer, store, AppRoute, page restoration, PRDV/AESV/SDV changes.
+// SEARCH-TOKEN: 20260614_163800_SCORES_PHASE2B_UNIFIED_ACTIVE_VIEWER
+
+// CHANGE-ID: 20260614_161500_ScoresPhase2A_ViewerLibraryExit
+// SCOPE: Scores V1 Phase 2A — add Library escape route from Timer-launched active score viewer so active score can be resumed or closed from Scores Library. No attachment viewer, AppRoute, store, page restoration, PRDV/AESV/SDV changes.
+// SEARCH-TOKEN: 20260614_161500_SCORES_PHASE2A_VIEWER_LIBRARY_EXIT
+
+// CHANGE-ID: 20260614_154500_ScoresPhase2_ActiveViewer
+// SCOPE: Scores V1 Phase 2 — wire active score viewer launch from Timer, green Scores button state, and direct active-score resume. No AppRoute, PRDV/AESV/SDV, PDF page restoration, or session attachment changes.
+// SEARCH-TOKEN: 20260614_154500_SCORES_PHASE2_ACTIVE_VIEWER
+
 // CHANGE-ID: 20260614_145200_ScoresPhase1_TimerEntry
 // SCOPE: Scores V1 Phase 1 — add Timer-owned Scores Library presentation and temporary book.closed utility button. No AppRoute, PDF viewer, PRDV/AESV/SDV, recorder, task, or attachment persistence changes.
 // SEARCH-TOKEN: 20260614_145200_SCORES_PHASE1_TIMER_ENTRY
@@ -179,6 +191,12 @@ struct TaskLine: Identifiable, Codable {
     var type: TaskLineType = .task
 }
 
+private struct TimerScoreViewerRequest: Identifiable {
+    let id: UUID
+    let title: String
+    let url: URL
+}
+
 struct PracticeTimerView: View {
     enum PresentationMode {
         case sheet
@@ -195,6 +213,7 @@ struct PracticeTimerView: View {
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
     @ObservedObject private var relationalUnseenCountStore = RelationalUnseenCountStore.shared
     @StateObject private var sharedWithYouStore = SharedWithYouStore.shared
+    @StateObject private var scoreLibraryStore = ScoreLibraryStore.shared
 
     // Presented as a sheet from ContentView, or as the app's home/root screen.
     @Binding var isPresented: Bool
@@ -278,6 +297,7 @@ struct PracticeTimerView: View {
     @State private var showManualAddSheet: Bool = false
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
+    @State private var scoreViewerRequest: TimerScoreViewerRequest? = nil
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -1931,7 +1951,33 @@ private func loadPracticeDefaultsIfNeeded() {
             thoughtEditorSheet
         }
         .sheet(isPresented: $showScoresLibrary) {
-            ScoresLibraryView()
+            ScoresLibraryView { item in
+                showScoresLibrary = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    openScoreFromTimer(item)
+                }
+            }
+        }
+        .fullScreenCover(item: $scoreViewerRequest) { request in
+            NavigationStack {
+                PDFScoreView(url: request.url, background: Color(.systemBackground))
+                    .navigationTitle(request.title)
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Timer") {
+                                scoreViewerRequest = nil
+                            }
+                        }
+
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Library") {
+                                scoreViewerRequest = nil
+                                showScoresLibrary = true
+                            }
+                        }
+                    }
+            }
         }
         .onChange(of: showReviewSheet) { oldValue, newValue in
             // If the review sheet was closed and no save occurred, reset timer for next opening
@@ -2637,6 +2683,15 @@ private func loadPracticeDefaultsIfNeeded() {
         preserveIdleAddEntryGeometry || (isIdleAddEntryAvailable && !lowerUtilityRowRecentering)
     }
 
+    private func openScoreFromTimer(_ item: ScoreLibraryItem) {
+        scoreLibraryStore.markOpened(item)
+        scoreViewerRequest = TimerScoreViewerRequest(
+            id: item.id,
+            title: item.title,
+            url: scoreLibraryStore.url(for: item)
+        )
+    }
+
     private var idleAddEntryOpacity: Double {
         showOutgoingIdleAddEntry ? 1 : 0
     }
@@ -2699,27 +2754,34 @@ private func loadPracticeDefaultsIfNeeded() {
                 }
 
                 if showScoresButton {
+                    let hasActiveScore = scoreLibraryStore.activeItem != nil
+
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showTasksPad = false
                             showAddEntryActions = false
                         }
-                        showScoresLibrary = true
+
+                        if let activeScore = scoreLibraryStore.activeItem {
+                            openScoreFromTimer(activeScore)
+                        } else {
+                            showScoresLibrary = true
+                        }
                     } label: {
                         Image(systemName: "book.closed")
                             .symbolRenderingMode(.monochrome)
                             .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(recorderIcon)
+                            .foregroundStyle(hasActiveScore ? tasksAccentIcon : recorderIcon)
                             .frame(width: 48, height: 48)
                             .contentShape(Circle())
                     }
                     .buttonStyle(.bordered)
                     .background(
                         Capsule(style: .continuous)
-                            .fill(Color.clear)
+                            .fill(hasActiveScore ? tasksAccent.opacity(0.26) : Color.clear)
                     )
                     .clipShape(Capsule(style: .continuous))
-                    .accessibilityLabel("Open scores")
+                    .accessibilityLabel(hasActiveScore ? "Resume active score" : "Open scores")
                 }
 
                 if shouldRenderIdleAddEntryButton {
