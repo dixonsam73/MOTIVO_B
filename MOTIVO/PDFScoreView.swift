@@ -1,13 +1,15 @@
-// CHANGE-ID: 20260610_1430_PDFPhase2A
-// SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
-// SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
+// CHANGE-ID: 20260614_171200_ScoresPhase3A_PageMemory_PDFViewer
+// SCOPE: Scores V1 Phase 3A — add optional initial page restoration and page-change reporting for active score page memory. No zoom, viewport, attachment workflow, or UI changes.
+// SEARCH-TOKEN: 20260614_171200_SCORES_PHASE3A_PAGE_MEMORY
 import SwiftUI
 import PDFKit
 
 struct PDFScoreView: View {
     let url: URL
     var selectedPages: [Int]? = nil
+    var initialPage: Int? = nil
     var background: Color = Color.clear
+    var onPageChange: ((Int) -> Void)? = nil
     var onFailure: (() -> Void)? = nil
 
     @StateObject private var controller = PDFScoreController()
@@ -27,6 +29,8 @@ struct PDFScoreView: View {
                 controller: controller,
                 pageIndex: $pageIndex,
                 pageCount: $pageCount,
+                initialPage: initialPage,
+                onPageChange: onPageChange,
                 onFailure: onFailure
             )
             .ignoresSafeArea()
@@ -129,12 +133,16 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
     let controller: PDFScoreController
     @Binding var pageIndex: Int
     @Binding var pageCount: Int
+    let initialPage: Int?
+    var onPageChange: ((Int) -> Void)?
     var onFailure: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
             pageIndex: $pageIndex,
             pageCount: $pageCount,
+            initialPage: initialPage,
+            onPageChange: onPageChange,
             onFailure: onFailure
         )
     }
@@ -155,6 +163,8 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         context.coordinator.pdfView = pdfView
         context.coordinator.loadedURL = url
         context.coordinator.loadedSelectedPages = PDFSelectedPagesStore.sanitized(selectedPages)
+        context.coordinator.updateCallbacks(initialPage: initialPage, onPageChange: onPageChange)
+        context.coordinator.restoreInitialPageIfNeeded()
         context.coordinator.refreshPageState()
 
         if pdfView.document == nil {
@@ -173,18 +183,22 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
 
     func updateUIView(_ pdfView: PDFView, context: Context) {
         controller.register(pdfView)
+        context.coordinator.updateCallbacks(initialPage: initialPage, onPageChange: onPageChange)
 
         let sanitizedPages = PDFSelectedPagesStore.sanitized(selectedPages)
         guard context.coordinator.loadedURL != url || context.coordinator.loadedSelectedPages != sanitizedPages else {
+            context.coordinator.restoreInitialPageIfNeeded()
             context.coordinator.refreshPageState()
             return
         }
 
         context.coordinator.loadedURL = url
         context.coordinator.loadedSelectedPages = sanitizedPages
+        context.coordinator.resetInitialPageRestoration()
         pdfView.document = makeDocument(url: url, selectedPages: sanitizedPages)
         pdfView.autoScales = true
         pdfView.minScaleFactor = pdfView.scaleFactorForSizeToFit
+        context.coordinator.restoreInitialPageIfNeeded()
         context.coordinator.refreshPageState()
 
         if pdfView.document == nil {
@@ -225,7 +239,11 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
     final class Coordinator: NSObject {
         @Binding private var pageIndex: Int
         @Binding private var pageCount: Int
+        private var initialPage: Int?
+        private var onPageChange: ((Int) -> Void)?
         private let onFailure: (() -> Void)?
+        private var hasRestoredInitialPage = false
+        private var lastReportedPage: Int?
 
         weak var pdfView: PDFView?
         var loadedURL: URL?
@@ -234,11 +252,46 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
         init(
             pageIndex: Binding<Int>,
             pageCount: Binding<Int>,
+            initialPage: Int?,
+            onPageChange: ((Int) -> Void)?,
             onFailure: (() -> Void)?
         ) {
             self._pageIndex = pageIndex
             self._pageCount = pageCount
+            self.initialPage = initialPage
+            self.onPageChange = onPageChange
             self.onFailure = onFailure
+        }
+
+        func updateCallbacks(initialPage: Int?, onPageChange: ((Int) -> Void)?) {
+            self.initialPage = initialPage
+            self.onPageChange = onPageChange
+        }
+
+        func resetInitialPageRestoration() {
+            hasRestoredInitialPage = false
+            lastReportedPage = nil
+        }
+
+        func restoreInitialPageIfNeeded() {
+            guard !hasRestoredInitialPage else { return }
+            guard let pdfView,
+                  let document = pdfView.document,
+                  document.pageCount > 0
+            else { return }
+
+            hasRestoredInitialPage = true
+
+            guard let initialPage else {
+                return
+            }
+
+            let boundedPage = min(max(initialPage, 1), document.pageCount)
+            guard let targetPage = document.page(at: boundedPage - 1) else {
+                return
+            }
+
+            pdfView.go(to: targetPage)
         }
 
         @objc func pageChanged(_ notification: Notification) {
@@ -247,7 +300,7 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
 
         func refreshPageState() {
             guard let pdfView else { return }
-            
+
             let fittedScale = pdfView.scaleFactorForSizeToFit
 
             if fittedScale > 0 {
@@ -261,10 +314,22 @@ private struct PDFScoreRepresentable: UIViewRepresentable {
             }
 
             pageCount = document.pageCount
+            let newPageIndex: Int
+
             if let currentPage = pdfView.currentPage {
-                pageIndex = max(0, document.index(for: currentPage))
+                newPageIndex = max(0, document.index(for: currentPage))
             } else {
-                pageIndex = 0
+                newPageIndex = 0
+            }
+
+            pageIndex = newPageIndex
+
+            let visiblePage = newPageIndex + 1
+            if visiblePage >= 1,
+               visiblePage <= document.pageCount,
+               lastReportedPage != visiblePage {
+                lastReportedPage = visiblePage
+                onPageChange?(visiblePage)
             }
         }
     }

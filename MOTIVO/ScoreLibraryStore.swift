@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260614_150800_ScoresPhase1_StoreMainActorFix
-// SCOPE: Scores V1 Phase 1 — local JSON/UserDefaults-backed PDF score library store with import, scan-save, rename, favourite, delete, active-score bookkeeping, and main-actor isolation for Swift 6 compatibility. No Core Data, backend, or session attachment changes.
-// SEARCH-TOKEN: 20260614_150800_SCORES_PHASE1_STORE_MAINACTOR_FIX
+// CHANGE-ID: 20260614_171200_ScoresPhase3A_PageMemory_Store
+// SCOPE: Scores V1 Phase 3A — persist last viewed page per library score for active score page restoration. No Core Data, backend, session attachment, zoom, or viewport changes.
+// SEARCH-TOKEN: 20260614_171200_SCORES_PHASE3A_PAGE_MEMORY
 
 import Foundation
 import Combine
@@ -69,7 +69,8 @@ final class ScoreLibraryStore: ObservableObject {
             thumbnailPage: 1,
             isFavourite: false,
             createdAt: Date(),
-            lastOpenedAt: nil
+            lastOpenedAt: nil,
+            lastViewedPage: nil
         )
 
         items.append(item)
@@ -92,7 +93,8 @@ final class ScoreLibraryStore: ObservableObject {
             thumbnailPage: 1,
             isFavourite: false,
             createdAt: Date(),
-            lastOpenedAt: nil
+            lastOpenedAt: nil,
+            lastViewedPage: nil
         )
 
         items.append(item)
@@ -109,6 +111,15 @@ final class ScoreLibraryStore: ObservableObject {
 
     func clearActiveScore() {
         activeScoreID = nil
+        persist()
+    }
+
+
+    func updateLastViewedPage(for itemID: UUID, page: Int) {
+        guard let index = items.firstIndex(where: { $0.id == itemID }) else { return }
+        let boundedPage = min(max(page, 1), max(items[index].pageCount, 1))
+        guard items[index].lastViewedPage != boundedPage else { return }
+        items[index].lastViewedPage = boundedPage
         persist()
     }
 

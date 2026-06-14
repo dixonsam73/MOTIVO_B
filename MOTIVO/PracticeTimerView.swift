@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_171200_ScoresPhase3A_PageMemory_Timer
+// SCOPE: Scores V1 Phase 3A — pass stored active-score page into PDFScoreView and persist page changes from the Timer-owned score viewer. No zoom, viewport, attachment workflow, PRDV/AESV/SDV, or AppRoute changes.
+// SEARCH-TOKEN: 20260614_171200_SCORES_PHASE3A_PAGE_MEMORY
+
 // CHANGE-ID: 20260614_163800_ScoresPhase2B_UnifiedActiveViewer
 // SCOPE: Scores V1 Phase 2B — route score selection from Scores Library into the Timer-owned active-score viewer so first-open and resume use the same Timer + Library controls. No attachment viewer, store, AppRoute, page restoration, PRDV/AESV/SDV changes.
 // SEARCH-TOKEN: 20260614_163800_SCORES_PHASE2B_UNIFIED_ACTIVE_VIEWER
@@ -195,6 +199,7 @@ private struct TimerScoreViewerRequest: Identifiable {
     let id: UUID
     let title: String
     let url: URL
+    let initialPage: Int?
 }
 
 struct PracticeTimerView: View {
@@ -1960,7 +1965,14 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         .fullScreenCover(item: $scoreViewerRequest) { request in
             NavigationStack {
-                PDFScoreView(url: request.url, background: Color(.systemBackground))
+                PDFScoreView(
+                    url: request.url,
+                    initialPage: request.initialPage,
+                    background: Color(.systemBackground),
+                    onPageChange: { page in
+                        scoreLibraryStore.updateLastViewedPage(for: request.id, page: page)
+                    }
+                )
                     .navigationTitle(request.title)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
@@ -2688,7 +2700,8 @@ private func loadPracticeDefaultsIfNeeded() {
         scoreViewerRequest = TimerScoreViewerRequest(
             id: item.id,
             title: item.title,
-            url: scoreLibraryStore.url(for: item)
+            url: scoreLibraryStore.url(for: item),
+            initialPage: item.lastViewedPage
         )
     }
 
