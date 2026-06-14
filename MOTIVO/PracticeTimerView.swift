@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
+// SCOPE: Scores Phase 4 — silently track score IDs used during a live timer session and pass them to PRDV. No UI, attachment, score-store, PDF viewer, or persistence changes.
+// SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
+
 // CHANGE-ID: 20260614_171200_ScoresPhase3A_PageMemory_Timer
 // SCOPE: Scores V1 Phase 3A — pass stored active-score page into PDFScoreView and persist page changes from the Timer-owned score viewer. No zoom, viewport, attachment workflow, PRDV/AESV/SDV, or AppRoute changes.
 // SEARCH-TOKEN: 20260614_171200_SCORES_PHASE3A_PAGE_MEMORY
@@ -303,6 +307,7 @@ struct PracticeTimerView: View {
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
     @State private var scoreViewerRequest: TimerScoreViewerRequest? = nil
+    @State var usedScoreIDsThisSession: [UUID] = []
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -2695,8 +2700,19 @@ private func loadPracticeDefaultsIfNeeded() {
         preserveIdleAddEntryGeometry || (isIdleAddEntryAvailable && !lowerUtilityRowRecentering)
     }
 
+    private var isTrackingLiveScoreUsage: Bool {
+        isRunning || startDate != nil || accumulatedSeconds > 0 || elapsedSeconds > 0
+    }
+
+    private func recordScoreUsedThisSessionIfNeeded(_ item: ScoreLibraryItem) {
+        guard isTrackingLiveScoreUsage else { return }
+        guard !usedScoreIDsThisSession.contains(item.id) else { return }
+        usedScoreIDsThisSession.append(item.id)
+    }
+
     private func openScoreFromTimer(_ item: ScoreLibraryItem) {
         scoreLibraryStore.markOpened(item)
+        recordScoreUsedThisSessionIfNeeded(item)
         scoreViewerRequest = TimerScoreViewerRequest(
             id: item.id,
             title: item.title,
@@ -3934,6 +3950,7 @@ private func loadPracticeDefaultsIfNeeded() {
         startDate = nil
         accumulatedSeconds = 0
         elapsedSeconds = 0
+        usedScoreIDsThisSession.removeAll()
         showAddEntryActions = false
         provisionalThreadLabel = nil
         activity = .practice

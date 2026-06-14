@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
+// SCOPE: Scores Phase 4 — accept silently tracked live-session score IDs from PTV for later PRDV Scores Used UI. No UI, attachment, save, or persistence changes.
+// SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
+
 // CHANGE-ID: 20260610_1430_PDFPhase2A
 // SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
 // SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
@@ -386,6 +390,7 @@ struct PostRecordDetailsView: View {
     var onSaved: (() -> Void)?
     var onCancel: () -> Void = {}
 
+    private let usedScoreIDsPrefill: [UUID]
     private let prefillAttachments: [StagedAttachment]?
     private let prefillAttachmentNames: [UUID: String]?
 
@@ -398,6 +403,7 @@ struct PostRecordDetailsView: View {
         activityDetailPrefill: String? = nil,
         notesPrefill: String? = nil,
         threadLabelPrefill: String? = nil,
+        usedScoreIDsPrefill: [UUID] = [],
         prefillAttachments: [StagedAttachment]? = nil,
         prefillAttachmentNames: [UUID: String]? = nil,
         onSaved: (() -> Void)? = nil,
@@ -436,6 +442,7 @@ struct PostRecordDetailsView: View {
         if let raw = activityTypeRaw { self._activity = State(initialValue: SessionActivityType(rawValue: raw) ?? .practice) }
         self._notes = State(initialValue: notesPrefill ?? "")
         self._threadLabel = State(initialValue: ThreadLabelSanitizer_Stage6_1.sanitize(threadLabelPrefill ?? ""))
+        self.usedScoreIDsPrefill = usedScoreIDsPrefill
         self.prefillAttachments = prefillAttachments
         self.prefillAttachmentNames = prefillAttachmentNames
         self.onSaved = onSaved
@@ -599,7 +606,13 @@ struct PostRecordDetailsView: View {
         )
     }
 
-    var body: some View {
+    
+    private var usedScoreTitles: [String] {
+        let lookup = Dictionary(uniqueKeysWithValues: ScoreLibraryStore.shared.items.map { ($0.id, $0.title) })
+        return usedScoreIDsPrefill.compactMap { lookup[$0] }
+    }
+
+var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Spacing.section) {
@@ -854,6 +867,25 @@ struct PostRecordDetailsView: View {
                     }
                     .contentShape(Rectangle())
                     .padding(.vertical, 10)
+
+
+                    if !usedScoreTitles.isEmpty {
+                        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                            Text("Scores Used").sectionHeader()
+
+                            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                                ForEach(usedScoreTitles, id: \.self) { title in
+                                    HStack {
+                                        Text(title)
+                                            .font(Theme.Text.body)
+
+                                        Spacer(minLength: 0)
+                                    }
+                                }
+                            }
+                        }
+                        .cardSurface()
+                    }
 
                     // ---------- Notes ----------
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {

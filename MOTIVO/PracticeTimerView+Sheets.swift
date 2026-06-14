@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
+// SCOPE: Scores Phase 4 — pass silently tracked live-session score IDs into PRDV. No UI, attachment, score-store, PDF viewer, or persistence changes.
+// SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
+
 // CHANGE-ID: 20260604_204500_SelectorCards_PTVSheets
 // SCOPE: Replace PTV session-meta instrument/activity wheel pickers with card-sheet selector rows; preserve inline New instrument/activity creation.
 // SEARCH-TOKEN: 20260604_204500_SelectorCards_PTVSheets
@@ -167,6 +171,7 @@ extension PracticeTimerView {
                 activityDetailPrefill: activityDetail.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ? nil : activityDetail,
                 notesPrefill: nil,
                 threadLabelPrefill: selectedProvisionalThreadLabelForReview,
+                usedScoreIDsPrefill: usedScoreIDsThisSession,
                 prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                 prefillAttachmentNames: audioTitles,
                 onSaved: {
