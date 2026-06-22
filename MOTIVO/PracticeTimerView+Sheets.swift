@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260622_205500_SCORES_PHASE8_MEANINGFUL_PAGES
+// SCOPE: Scores V1 Phase 8 — pass session-scoped meaningful score page suggestions into PRDV. No persistence, schema, backend, score storage, or attachment pipeline changes.
+// SEARCH-TOKEN: 20260622_205500_SCORES_PHASE8
+
 // CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
 // SCOPE: Scores Phase 4 — pass silently tracked live-session score IDs into PRDV. No UI, attachment, score-store, PDF viewer, or persistence changes.
 // SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
@@ -172,6 +176,8 @@ extension PracticeTimerView {
                 notesPrefill: nil,
                 threadLabelPrefill: selectedProvisionalThreadLabelForReview,
                 usedScoreIDsPrefill: usedScoreIDsThisSession,
+                meaningfulScorePagesPrefill: meaningfulScorePagesThisSession,
+                lastMeaningfulScorePagePrefill: lastMeaningfulScorePageThisSession,
                 prefillAttachments: (stagedImages + stagedAudio + stagedVideos),
                 prefillAttachmentNames: audioTitles,
                 onSaved: {

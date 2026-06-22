@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260622_205500_SCORES_PHASE8_MEANINGFUL_PAGES
+// SCOPE: Scores V1 Phase 8 — track session-scoped meaningful score pages from existing PDF page-change callbacks and pass suggestions into PRDV. No persistence, schema, backend, score storage, or attachment pipeline changes.
+// SEARCH-TOKEN: 20260622_205500_SCORES_PHASE8
+
 // CHANGE-ID: 20260614_174200_ScoresPhase4_UsageTracking
 // SCOPE: Scores Phase 4 — silently track score IDs used during a live timer session and pass them to PRDV. No UI, attachment, score-store, PDF viewer, or persistence changes.
 // SEARCH-TOKEN: 20260614_174200_SCORES_PHASE4_USAGE_TRACKING
@@ -206,6 +210,10 @@ private struct TimerScoreViewerRequest: Identifiable {
     let initialPage: Int?
 }
 
+private enum ScoreMeaningfulPageTracking {
+    static let meaningfulThreshold: TimeInterval = 30
+}
+
 struct PracticeTimerView: View {
     enum PresentationMode {
         case sheet
@@ -308,6 +316,11 @@ struct PracticeTimerView: View {
     @State private var showScoresLibrary: Bool = false
     @State private var scoreViewerRequest: TimerScoreViewerRequest? = nil
     @State var usedScoreIDsThisSession: [UUID] = []
+    @State var meaningfulScorePagesThisSession: [UUID: [Int]] = [:]
+    @State var lastMeaningfulScorePageThisSession: [UUID: Int] = [:]
+    @State private var currentScorePageByID: [UUID: Int] = [:]
+    @State private var currentScorePageEnteredAtByID: [UUID: Date] = [:]
+    @State private var accumulatedScorePageDwellByID: [UUID: [Int: TimeInterval]] = [:]
     @State var didSaveFromReview: Bool = false
     @State var didCancelFromReview: Bool = false
     // === DRONE STATE (insert below existing @State vars) ===
@@ -1976,19 +1989,25 @@ private func loadPracticeDefaultsIfNeeded() {
                     background: Color(.systemBackground),
                     onPageChange: { page in
                         scoreLibraryStore.updateLastViewedPage(for: request.id, page: page)
+                        recordMeaningfulScorePageChange(scoreID: request.id, page: page)
                     }
                 )
+                    .onDisappear {
+                        flushMeaningfulScorePageTracking(for: request.id)
+                    }
                     .navigationTitle(request.title)
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
                             Button("Timer") {
+                                flushMeaningfulScorePageTracking(for: request.id)
                                 scoreViewerRequest = nil
                             }
                         }
 
                         ToolbarItem(placement: .topBarTrailing) {
                             Button("Library") {
+                                flushMeaningfulScorePageTracking(for: request.id)
                                 scoreViewerRequest = nil
                                 showScoresLibrary = true
                             }
@@ -2708,6 +2727,51 @@ private func loadPracticeDefaultsIfNeeded() {
         guard isTrackingLiveScoreUsage else { return }
         guard !usedScoreIDsThisSession.contains(item.id) else { return }
         usedScoreIDsThisSession.append(item.id)
+    }
+
+    private func recordMeaningfulScorePageChange(scoreID: UUID, page: Int) {
+        flushMeaningfulScorePageTracking(for: scoreID, nextPage: page)
+        currentScorePageByID[scoreID] = page
+        currentScorePageEnteredAtByID[scoreID] = Date()
+    }
+
+    private func flushMeaningfulScorePageTracking(for scoreID: UUID, nextPage: Int? = nil) {
+        guard let page = currentScorePageByID[scoreID],
+              let enteredAt = currentScorePageEnteredAtByID[scoreID] else {
+            if let nextPage {
+                currentScorePageByID[scoreID] = nextPage
+                currentScorePageEnteredAtByID[scoreID] = Date()
+            }
+            return
+        }
+
+        let dwell = max(0, Date().timeIntervalSince(enteredAt))
+        var accumulated = accumulatedScorePageDwellByID[scoreID] ?? [:]
+        accumulated[page, default: 0] += dwell
+        accumulatedScorePageDwellByID[scoreID] = accumulated
+
+        if (accumulated[page] ?? 0) >= ScoreMeaningfulPageTracking.meaningfulThreshold {
+            var meaningful = Set(meaningfulScorePagesThisSession[scoreID] ?? [])
+            meaningful.insert(page)
+            meaningfulScorePagesThisSession[scoreID] = meaningful.sorted()
+            lastMeaningfulScorePageThisSession[scoreID] = page
+        }
+
+        if let nextPage {
+            currentScorePageByID[scoreID] = nextPage
+            currentScorePageEnteredAtByID[scoreID] = Date()
+        } else {
+            currentScorePageByID.removeValue(forKey: scoreID)
+            currentScorePageEnteredAtByID.removeValue(forKey: scoreID)
+        }
+    }
+
+    private func clearMeaningfulScorePageTracking() {
+        meaningfulScorePagesThisSession.removeAll()
+        lastMeaningfulScorePageThisSession.removeAll()
+        currentScorePageByID.removeAll()
+        currentScorePageEnteredAtByID.removeAll()
+        accumulatedScorePageDwellByID.removeAll()
     }
 
     private func openScoreFromTimer(_ item: ScoreLibraryItem) {
@@ -3959,6 +4023,7 @@ private func loadPracticeDefaultsIfNeeded() {
         accumulatedSeconds = 0
         elapsedSeconds = 0
         usedScoreIDsThisSession.removeAll()
+        clearMeaningfulScorePageTracking()
         showAddEntryActions = false
         provisionalThreadLabel = nil
         activity = .practice

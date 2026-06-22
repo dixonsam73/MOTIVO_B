@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260622_205500_SCORES_PHASE8_MEANINGFUL_PAGES
+// SCOPE: Scores V1 Phase 8 — show meaningful score page attachment suggestions in PRDV using existing page-selection state. No persistence, schema, backend, score storage, or attachment pipeline changes.
+// SEARCH-TOKEN: 20260622_205500_SCORES_PHASE8
+
 // CHANGE-ID: 20260622_175900_SCORES_PHASE7_V2
 // SCOPE: Scores V1 Phase 7 v2 — persist used score PDFs as normal session Attachment rows from PRDV save path; reference Documents/Scores originals; persist selected-page metadata; no UI/schema/backend changes.
 // SEARCH-TOKEN: 20260622_175900_SCORES_PHASE7_V2
@@ -407,6 +411,8 @@ struct PostRecordDetailsView: View {
     var onCancel: () -> Void = {}
 
     private let usedScoreIDsPrefill: [UUID]
+    private let meaningfulScorePagesPrefill: [UUID: [Int]]
+    private let lastMeaningfulScorePagePrefill: [UUID: Int]
     private let prefillAttachments: [StagedAttachment]?
     private let prefillAttachmentNames: [UUID: String]?
 
@@ -420,6 +426,8 @@ struct PostRecordDetailsView: View {
         notesPrefill: String? = nil,
         threadLabelPrefill: String? = nil,
         usedScoreIDsPrefill: [UUID] = [],
+        meaningfulScorePagesPrefill: [UUID: [Int]] = [:],
+        lastMeaningfulScorePagePrefill: [UUID: Int] = [:],
         prefillAttachments: [StagedAttachment]? = nil,
         prefillAttachmentNames: [UUID: String]? = nil,
         onSaved: (() -> Void)? = nil,
@@ -459,6 +467,8 @@ struct PostRecordDetailsView: View {
         self._notes = State(initialValue: notesPrefill ?? "")
         self._threadLabel = State(initialValue: ThreadLabelSanitizer_Stage6_1.sanitize(threadLabelPrefill ?? ""))
         self.usedScoreIDsPrefill = usedScoreIDsPrefill
+        self.meaningfulScorePagesPrefill = meaningfulScorePagesPrefill
+        self.lastMeaningfulScorePagePrefill = lastMeaningfulScorePagePrefill
         self.prefillAttachments = prefillAttachments
         self.prefillAttachmentNames = prefillAttachmentNames
         self.onSaved = onSaved
@@ -680,15 +690,86 @@ struct PostRecordDetailsView: View {
         return PDFSelectedPagesFormatter.summary(for: selection.pages)
     }
 
+    private func meaningfulPagesForUsedScore(_ id: UUID) -> [Int] {
+        PDFSelectedPagesStore.sanitized(meaningfulScorePagesPrefill[id]) ?? []
+    }
+
+    private func lastMeaningfulPageForUsedScore(_ id: UUID) -> Int? {
+        guard let page = lastMeaningfulScorePagePrefill[id], page > 0 else { return nil }
+        return page
+    }
+
+    private func isScoreSelection(_ id: UUID, matching pages: [Int]?) -> Bool {
+        guard let selection = scorePageSelections[id], selection.hasSelection else {
+            return PDFSelectedPagesStore.sanitized(pages) == nil
+        }
+        return PDFSelectedPagesStore.sanitized(selection.pages) == PDFSelectedPagesStore.sanitized(pages)
+    }
+
     @ViewBuilder
-    private func usedScoreRow(_ score: ScoreLibraryItem) -> some View {
+    private func scoreSelectionOption(title: String, pages: [Int]?, id: UUID) -> some View {
+        Button {
+            setSelectedPagesForUsedScore(pages, id: id)
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: isScoreSelection(id, matching: pages) ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        isScoreSelection(id, matching: pages)
+                        ? AnyShapeStyle(Theme.Colors.accent)
+                        : AnyShapeStyle(Theme.Colors.secondaryText.opacity(0.65))
+                    )
+                    .frame(width: 22, height: 22)
+
+                Text(title)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func scoreCustomSelectionOption(_ score: ScoreLibraryItem) -> some View {
         Button {
             scorePageSelectionRequest = PDFPageSelectionRequest(
                 id: score.id,
                 pageCount: max(score.pageCount, 1)
             )
         } label: {
-            HStack(alignment: .center, spacing: Theme.Spacing.m) {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.65))
+                    .frame(width: 22, height: 22)
+
+                Text("Custom…")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func usedScoreRow(_ score: ScoreLibraryItem) -> some View {
+        let meaningfulPages = meaningfulPagesForUsedScore(score.id)
+        let lastMeaningfulPage = lastMeaningfulPageForUsedScore(score.id)
+
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(score.title)
                         .font(Theme.Text.body)
@@ -701,17 +782,33 @@ struct PostRecordDetailsView: View {
                 }
 
                 Spacer(minLength: 0)
-
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(
-                        Theme.Colors.secondaryText.opacity(0.55)
-                    )
             }
-            .contentShape(Rectangle())
-            .padding(.vertical, 2)
+
+            VStack(alignment: .leading, spacing: 2) {
+                scoreSelectionOption(title: "Entire document", pages: nil, id: score.id)
+
+                if meaningfulPages.count == 1, let page = meaningfulPages.first {
+                    scoreSelectionOption(title: "Page \(page)", pages: [page], id: score.id)
+                } else if meaningfulPages.count > 1 {
+                    if let lastMeaningfulPage {
+                        scoreSelectionOption(
+                            title: "Last meaningful page (\(lastMeaningfulPage))",
+                            pages: [lastMeaningfulPage],
+                            id: score.id
+                        )
+                    }
+
+                    scoreSelectionOption(
+                        title: "Meaningful pages (\(meaningfulPages.map(String.init).joined(separator: ", ")))",
+                        pages: meaningfulPages,
+                        id: score.id
+                    )
+                }
+
+                scoreCustomSelectionOption(score)
+            }
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 2)
     }
 
 var body: some View {
