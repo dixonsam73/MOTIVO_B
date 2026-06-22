@@ -1,3 +1,11 @@
+// CHANGE-ID: 20260622_185500_SCORES_PHASE7_ROLLBACK_FIX
+// SCOPE: Scores V1 Phase 7 rollback hardening — protect Documents/Scores files from all attachment deletion helpers; no UI/schema/backend changes.
+// SEARCH-TOKEN: 20260622_185500_SCORES_PHASE7_ROLLBACK_FIX
+
+// CHANGE-ID: 20260622_175900_SCORES_PHASE7_V2
+// SCOPE: Scores V1 Phase 7 v2 — persist used score PDFs as normal session Attachment rows from PRDV save path; reference Documents/Scores originals; persist selected-page metadata; no UI/schema/backend changes.
+// SEARCH-TOKEN: 20260622_175900_SCORES_PHASE7_V2
+
 // CHANGE-ID: 20260610_1718_PDFThumbnailSelection
 // SCOPE: PDF Scores Phase 2B — page-selection-aware PDF thumbnail generation and cache keys; preserve page-1 behaviour for entire-document PDFs.
 // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
@@ -159,8 +167,17 @@ struct AttachmentStore {
 // Best-effort removal helper (safe no-op if missing)
     static func removeIfExists(path: String) {
         let fm = FileManager.default
-        if fm.fileExists(atPath: path) {
-            try? fm.removeItem(atPath: path)
+        let target = URL(fileURLWithPath: path).standardizedFileURL
+
+        if isProtectedScoreLibraryURL(target) {
+            #if DEBUG
+            print("[AttachmentStore] removeIfExists — protected score-library file from rollback deletion: \(target.path)")
+            #endif
+            return
+        }
+
+        if fm.fileExists(atPath: target.path) {
+            try? fm.removeItem(at: target)
         }
     }
 
@@ -196,6 +213,16 @@ struct AttachmentStore {
         guard normalized.path.hasPrefix(rootPath) else {
             #if DEBUG
             print("[AttachmentStore] deleteAttachmentFile — refusing to delete outside Documents: \(normalized.path)")
+            #endif
+            return
+        }
+
+        // Score-library PDFs are source documents, not attachment-owned media.
+        // Phase 7 score attachments reference Documents/Scores originals directly;
+        // attachment cleanup paths must never remove those source PDFs.
+        if isProtectedScoreLibraryURL(normalized) {
+            #if DEBUG
+            print("[AttachmentStore] deleteAttachmentFile — protected score-library file from attachment deletion: \(normalized.path)")
             #endif
             return
         }
@@ -351,6 +378,14 @@ struct AttachmentStore {
     }
 
     // MARK: - Helpers
+
+    private static func isProtectedScoreLibraryURL(_ url: URL) -> Bool {
+        guard let documents = try? ensureDocumentsDir().standardizedFileURL else { return false }
+        let target = url.standardizedFileURL
+        let scoresDirectory = documents.appendingPathComponent("Scores", isDirectory: true).standardizedFileURL
+        let scoresRoot = scoresDirectory.path.hasSuffix("/") ? scoresDirectory.path : scoresDirectory.path + "/"
+        return target.path.hasPrefix(scoresRoot)
+    }
 
     private static func ensureDocumentsDir() throws -> URL {
         guard let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {

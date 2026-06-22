@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260622_175900_SCORES_PHASE7_V2
+// SCOPE: Scores V1 Phase 7 v2 — persist used score PDFs as normal session Attachment rows from PRDV save path; reference Documents/Scores originals; persist selected-page metadata; no UI/schema/backend changes.
+// SEARCH-TOKEN: 20260622_175900_SCORES_PHASE7_V2
+
 // CHANGE-ID: 20260614_181500_ScoresPhase6_PRDVScoreSelection
 // SCOPE: Scores V1 Phase 6 — PRDV-only selectable Scores Used rows using existing PDFPageSelectionSheet; store score page selections in PRDV state only. No attachment creation, persistence, save-path, SDV, AESV, backend, or file-copy changes.
 // SEARCH-TOKEN: 20260614_181500_SCORES_PHASE6_PRDV_SCORE_SELECTION
@@ -633,6 +637,42 @@ struct PostRecordDetailsView: View {
             pages: PDFSelectedPagesStore.sanitized(pages),
             hasSelection: true
         )
+    }
+
+    private func commitUsedScoreAttachments(to session: Session, ctx: NSManagedObjectContext) {
+        let fileManager = FileManager.default
+        var committedScoreIDs = Set<UUID>()
+
+        for score in usedScoreItems {
+            guard committedScoreIDs.insert(score.id).inserted else { continue }
+
+            let url = ScoreLibraryStore.shared.url(for: score)
+            guard fileManager.fileExists(atPath: url.path) else {
+                #if DEBUG
+                print("Scores Phase 7 skipped missing score PDF: \(url.path)")
+                #endif
+                continue
+            }
+
+            do {
+                let created = try AttachmentStore.addAttachment(
+                    kind: .pdf,
+                    filePath: url.path,
+                    to: session,
+                    isThumbnail: false,
+                    displayName: score.title,
+                    ctx: ctx
+                )
+
+                if let finalID = created.value(forKey: "id") as? UUID {
+                    PDFSelectedPagesStore.setPages(selectedPagesForUsedScore(score.id), for: finalID)
+                }
+            } catch {
+                #if DEBUG
+                print("Scores Phase 7 failed to attach score PDF: \(error)")
+                #endif
+            }
+        }
     }
 
     private func selectionSummaryForUsedScore(_ id: UUID) -> String? {
@@ -1566,6 +1606,7 @@ var body: some View {
         if let uid = __effectiveUID, !uid.isEmpty {
             s.setValue(uid, forKey: "ownerUserID")
         }
+        commitUsedScoreAttachments(to: s, ctx: viewContext)
         commitStagedAttachments(to: s, ctx: viewContext)
         do {
             try viewContext.save()
