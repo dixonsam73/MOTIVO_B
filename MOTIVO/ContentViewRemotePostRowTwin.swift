@@ -272,9 +272,8 @@ struct RemotePostRowTwin: View {
         return (timeFormatter.string(from: date), dateFormatter.string(from: date))
     }
 
-private var extraAttachmentCount: Int {
-        let total = model.attachmentRefs.count
-        return max(total - 1, 0)
+    private var extraAttachmentCount: Int {
+        model.attachmentRefs.count
     }
 
     private var favAttachmentRef: BackendSessionViewModel.BackendAttachmentRef? {

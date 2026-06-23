@@ -427,8 +427,7 @@ struct SessionRow: View {
     }
 
     private var extraAttachmentCount: Int {
-        let total = visibleAttachments.count
-        return max(total - 1, 0)
+        visibleAttachments.count
     }
 
     private var viewerIsOwner: Bool {
