@@ -72,7 +72,7 @@ struct ScoresLibraryView: View {
                     scoreListSection
                 }
                 .padding(.horizontal, Theme.Spacing.m)
-                .padding(.top, Theme.Spacing.m)
+                .padding(.top, Theme.Spacing.xs)
                 .padding(.bottom, Theme.Spacing.xl)
             }
             .appBackground()
@@ -232,6 +232,7 @@ struct ScoresLibraryView: View {
 
     private func activeScoreSection(_ item: ScoreLibraryItem) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+
             Text("Currently Open")
                 .font(Theme.Text.meta.weight(.semibold))
                 .foregroundStyle(Theme.Colors.secondaryText)
@@ -264,8 +265,8 @@ struct ScoresLibraryView: View {
                 .font(Theme.Text.meta.weight(.semibold))
                 .foregroundStyle(Theme.Colors.secondaryText)
             }
+            .cardSurface()
         }
-        .cardSurface()
     }
 
     private var scoreListSection: some View {
