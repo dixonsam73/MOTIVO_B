@@ -76,11 +76,15 @@ struct ScoresLibraryView: View {
                 .padding(.bottom, Theme.Spacing.xl)
             }
             .appBackground()
-            .navigationTitle(mode == .attach ? "Attach Score" : "Scores")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationTitle(mode == .attach ? "Attach Score" : "")
+            .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("Done") { dismiss() }
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
                 }
 
                 ToolbarItem(placement: .topBarTrailing) {
@@ -228,7 +232,7 @@ struct ScoresLibraryView: View {
 
     private func activeScoreSection(_ item: ScoreLibraryItem) -> some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            Text("Currently Active")
+            Text("Currently Open")
                 .font(Theme.Text.meta.weight(.semibold))
                 .foregroundStyle(Theme.Colors.secondaryText)
 
