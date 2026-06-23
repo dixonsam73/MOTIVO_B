@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260623_151500_ManualScoreAttach
+// SCOPE: PRDV manual first-class score references via ScoresLibraryView attach mode; merge/dedupe with timer-used scores; no generic staged score attachments.
+// SEARCH-TOKEN: 20260623_MANUAL_SCORE_ATTACH_PRDV
+
 // CHANGE-ID: 20260622_205500_SCORES_PHASE8_MEANINGFUL_PAGES
 // SCOPE: Scores V1 Phase 8 — show meaningful score page attachment suggestions in PRDV using existing page-selection state. No persistence, schema, backend, score storage, or attachment pipeline changes.
 // SEARCH-TOKEN: 20260622_205500_SCORES_PHASE8
@@ -271,6 +275,8 @@ struct PostRecordDetailsView: View {
     @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
     @State private var scorePageSelectionRequest: PDFPageSelectionRequest? = nil
     @State private var scorePageSelections: [UUID: PRDVScorePageSelection] = [:]
+    @State private var showScoreAttachLibrary: Bool = false
+    @State private var manuallyAttachedScoreIDs: [UUID] = []
 
     @AppStorage("primaryActivityRef") var primaryActivityRef: String = "core:0"
 
@@ -635,7 +641,17 @@ struct PostRecordDetailsView: View {
     
     private var usedScoreItems: [ScoreLibraryItem] {
         let lookup = Dictionary(uniqueKeysWithValues: ScoreLibraryStore.shared.items.map { ($0.id, $0) })
-        return usedScoreIDsPrefill.compactMap { lookup[$0] }
+        var seen = Set<UUID>()
+        let combinedIDs = usedScoreIDsPrefill + manuallyAttachedScoreIDs
+        return combinedIDs.compactMap { id in
+            guard seen.insert(id).inserted else { return nil }
+            return lookup[id]
+        }
+    }
+
+    private func attachManualScore(_ score: ScoreLibraryItem) {
+        guard !usedScoreIDsPrefill.contains(score.id), !manuallyAttachedScoreIDs.contains(score.id) else { return }
+        manuallyAttachedScoreIDs.append(score.id)
     }
 
     private func selectedPagesForUsedScore(_ id: UUID) -> [Int]? {
@@ -1227,6 +1243,14 @@ var body: some View {
                     )
                 )
             }
+            .sheet(isPresented: $showScoreAttachLibrary) {
+                ScoresLibraryView(
+                    mode: .attach,
+                    onAttachScore: { score in
+                        attachManualScore(score)
+                    }
+                )
+            }
             .sheet(isPresented: $showCamera) { CameraCaptureView { image in
                 if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
             } }
@@ -1430,7 +1454,25 @@ var body: some View {
                             )
                     }
                 }
-                .accessibilityLabel("Add file (PDF, score, etc.)")
+                .accessibilityLabel("Add file")
+                .contentShape(Circle())
+                .buttonStyle(.plain)
+                .tint(.accentColor)
+
+                Button(action: { showScoreAttachLibrary = true }) {
+                    ZStack {
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 24, weight: .semibold))
+                            .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62)) // slate blue-grey
+                            .frame(width: 56, height: 56)
+                            .background(
+                                Circle()
+                                    .fill(Color.secondary.opacity(0.18))
+                                    .frame(width: 64, height: 64)
+                            )
+                    }
+                }
+                .accessibilityLabel("Attach score")
                 .contentShape(Circle())
                 .buttonStyle(.plain)
                 .tint(.accentColor)

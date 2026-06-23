@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260623_151500_ManualScoreAttach
+// SCOPE: AESV/Thought first-class manual score references via ScoresLibraryView attach mode. Adds score state/sheets/buttons and commits score-library PDFs by reference, not staged generic PDFs.
+// SEARCH-TOKEN: 20260623_MANUAL_SCORE_ATTACH_AESV
+
 // CHANGE-ID: 20260610_1759_AESVPDFPageCountSource
 // SCOPE: AESV PDF page-count source fix; only use URL page-count paths when the underlying file exists, otherwise fall back to staged PDF data.
 // SEARCH-TOKEN: 20260610_1759-AESV-PDF-PAGECOUNT-SOURCE
@@ -246,7 +250,12 @@ struct AddEditSessionView: View {
 
     @State var viewerRequest: AESVAttachmentViewerRequest? = nil
     @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
+    @State var scorePageSelectionRequest_AESV: PDFPageSelectionRequest? = nil
     @State var attachmentTitlesRefreshTick: Int = 0
+    @State var showScoreAttachLibrary: Bool = false
+    @State var attachedScoreIDs_AESV: [UUID] = []
+    @State var scorePageSelections_AESV: [UUID: AESVScorePageSelection] = [:]
+    @State var existingScoreAttachmentIDsByScoreID_AESV: [UUID: UUID] = [:]
 
     // UI stability (instruments empty-state)
     @State private var instrumentsGateArmed = false
@@ -721,6 +730,23 @@ struct AddEditSessionView: View {
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item], allowsMultipleSelection: true, onCompletion: handleFileImport)
+        .sheet(isPresented: $showScoreAttachLibrary) {
+            ScoresLibraryView(
+                mode: .attach,
+                onAttachScore: { score in
+                    attachScore_AESV(score)
+                }
+            )
+        }
+        .sheet(item: $scorePageSelectionRequest_AESV) { request in
+            PDFPageSelectionSheet(
+                pageCount: request.pageCount,
+                selectedPages: Binding(
+                    get: { selectedPagesForScore_AESV(request.id) },
+                    set: { setSelectedPagesForScore_AESV($0, id: request.id) }
+                )
+            )
+        }
         .sheet(isPresented: $showCamera) {
             CameraCaptureView { image in
                 if let data = image.jpegData(compressionQuality: 0.8) { stageData(data, kind: .image) }
@@ -1162,6 +1188,11 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 }
 
                 
+                if !scoreAttachmentItems_AESV.isEmpty {
+                    scoreAttachmentsSection_AESV
+                        .cardSurface()
+                }
+
                 // Attachments grid
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     Text("Attachments").sectionHeader()
@@ -1582,7 +1613,25 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                     )
                             }
                         }
-                        .accessibilityLabel("Add file (PDF, score, etc.)")
+                        .accessibilityLabel("Add file")
+                        .contentShape(Circle())
+                        .buttonStyle(.plain)
+                        .tint(.accentColor)
+
+                        Button(action: { showScoreAttachLibrary = true }) {
+                            ZStack {
+                                Image(systemName: "book.closed")
+                                    .font(.system(size: 24, weight: .semibold))
+                                    .foregroundColor(Color(red: 0.38, green: 0.48, blue: 0.62))
+                                    .frame(width: 56, height: 56)
+                                    .background(
+                                        Circle()
+                                            .fill(Color.secondary.opacity(0.18))
+                                            .frame(width: 64, height: 64)
+                                    )
+                            }
+                        }
+                        .accessibilityLabel("Attach score")
                         .contentShape(Circle())
                         .buttonStyle(.plain)
                         .tint(.accentColor)
@@ -1851,7 +1900,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
 // MARK: - Actions
 
     private var canSaveThought: Bool {
-        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !stagedAttachments.isEmpty
+        !notes.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !stagedAttachments.isEmpty || !scoreAttachmentItems_AESV.isEmpty
     }
 
     private func save() {
@@ -1973,6 +2022,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
         // Cleanup runs only after a successful save (hardening; no user-visible behavior changes).
         let __tmpCleanupSnapshot: [(UUID, AttachmentKind)] = stagedAttachments.map { ($0.id, $0.kind) }
 
+        commitScoreAttachments_AESV(to: s, ctx: viewContext)
         commitStagedAttachments(to: s, ctx: viewContext)
 
         do {

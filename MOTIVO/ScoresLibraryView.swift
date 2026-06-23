@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260623_151500_ManualScoreAttach
+// SCOPE: Scores Library attach mode for first-class score references from PRDV/AESV. Browse/open behaviour remains default; no storage/schema/backend changes.
+// SEARCH-TOKEN: 20260623_MANUAL_SCORE_ATTACH
+
 // CHANGE-ID: 20260614_163800_ScoresPhase2B_UnifiedActiveViewer
 // SCOPE: Scores V1 Phase 2B — remove the library-owned PDF viewer path so first-open score selection hands off to the Timer-owned active-score viewer with Timer + Library controls immediately. No attachment PDF viewer, store, AppRoute, page restoration, PRDV/AESV/SDV changes.
 // SEARCH-TOKEN: 20260614_163800_SCORES_PHASE2B_UNIFIED_ACTIVE_VIEWER
@@ -15,13 +19,26 @@ import UniformTypeIdentifiers
 import UIKit
 import VisionKit
 
+enum ScoresLibraryMode {
+    case browse
+    case attach
+}
+
 struct ScoresLibraryView: View {
     @Environment(\.dismiss) private var dismiss
 
+    private let mode: ScoresLibraryMode
     private let onOpenActiveScore: ((ScoreLibraryItem) -> Void)?
+    private let onAttachScore: ((ScoreLibraryItem) -> Void)?
 
-    init(onOpenActiveScore: ((ScoreLibraryItem) -> Void)? = nil) {
+    init(
+        mode: ScoresLibraryMode = .browse,
+        onOpenActiveScore: ((ScoreLibraryItem) -> Void)? = nil,
+        onAttachScore: ((ScoreLibraryItem) -> Void)? = nil
+    ) {
+        self.mode = mode
         self.onOpenActiveScore = onOpenActiveScore
+        self.onAttachScore = onAttachScore
     }
 
     @StateObject private var store = ScoreLibraryStore.shared
@@ -48,7 +65,7 @@ struct ScoresLibraryView: View {
                 VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                     searchField
 
-                    if let activeItem = store.activeItem {
+                    if mode == .browse, let activeItem = store.activeItem {
                         activeScoreSection(activeItem)
                     }
 
@@ -59,7 +76,7 @@ struct ScoresLibraryView: View {
                 .padding(.bottom, Theme.Spacing.xl)
             }
             .appBackground()
-            .navigationTitle("Scores")
+            .navigationTitle(mode == .attach ? "Attach Score" : "Scores")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -352,7 +369,7 @@ struct ScoresLibraryView: View {
         .padding(.vertical, 2)
         .contentShape(Rectangle())
         .onTapGesture {
-            openScore(item)
+            selectScore(item)
         }
         .cardSurface()
     }
@@ -389,6 +406,16 @@ struct ScoresLibraryView: View {
                 }
             }
         )
+    }
+
+    private func selectScore(_ item: ScoreLibraryItem) {
+        switch mode {
+        case .browse:
+            openScore(item)
+        case .attach:
+            onAttachScore?(item)
+            dismiss()
+        }
     }
 
     private func openScore(_ item: ScoreLibraryItem) {

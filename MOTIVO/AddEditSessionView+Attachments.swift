@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260623_151500_ManualScoreAttach
+// SCOPE: AESV score-reference attachment helpers: score card UI, page selection state, existing score detection, and commit-by-reference path.
+// SEARCH-TOKEN: 20260623_MANUAL_SCORE_ATTACH_AESV_ATTACHMENTS
+
 // CHANGE-ID: 20260610_1430_PDFPhase2A
 // SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
 // SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
@@ -44,7 +48,196 @@ struct AESVAttachmentViewerRequest: Identifiable {
     let viewerAttachmentIDs: [UUID]
 }
 
+struct AESVScorePageSelection {
+    var pages: [Int]?
+    var hasSelection: Bool
+}
+
 extension AddEditSessionView {
+
+    // MARK: - Score Attachments (first-class score references)
+
+    var scoreAttachmentItems_AESV: [ScoreLibraryItem] {
+        let lookup = Dictionary(uniqueKeysWithValues: ScoreLibraryStore.shared.items.map { ($0.id, $0) })
+        var seen = Set<UUID>()
+        return attachedScoreIDs_AESV.compactMap { id in
+            guard seen.insert(id).inserted else { return nil }
+            return lookup[id]
+        }
+    }
+
+    func attachScore_AESV(_ score: ScoreLibraryItem) {
+        guard !attachedScoreIDs_AESV.contains(score.id) else { return }
+        attachedScoreIDs_AESV.append(score.id)
+    }
+
+    func selectedPagesForScore_AESV(_ id: UUID) -> [Int]? {
+        PDFSelectedPagesStore.sanitized(scorePageSelections_AESV[id]?.pages)
+    }
+
+    func setSelectedPagesForScore_AESV(_ pages: [Int]?, id: UUID) {
+        scorePageSelections_AESV[id] = AESVScorePageSelection(
+            pages: PDFSelectedPagesStore.sanitized(pages),
+            hasSelection: true
+        )
+    }
+
+    func selectionSummaryForScore_AESV(_ id: UUID) -> String? {
+        guard let selection = scorePageSelections_AESV[id], selection.hasSelection else { return nil }
+        return PDFSelectedPagesFormatter.summary(for: selection.pages)
+    }
+
+    func isScoreSelection_AESV(_ id: UUID, matching pages: [Int]?) -> Bool {
+        guard let selection = scorePageSelections_AESV[id], selection.hasSelection else {
+            return PDFSelectedPagesStore.sanitized(pages) == nil
+        }
+        return PDFSelectedPagesStore.sanitized(selection.pages) == PDFSelectedPagesStore.sanitized(pages)
+    }
+
+    @ViewBuilder
+    func scoreSelectionOption_AESV(title: String, pages: [Int]?, id: UUID) -> some View {
+        Button {
+            setSelectedPagesForScore_AESV(pages, id: id)
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: isScoreSelection_AESV(id, matching: pages) ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        isScoreSelection_AESV(id, matching: pages)
+                        ? AnyShapeStyle(Theme.Colors.accent)
+                        : AnyShapeStyle(Theme.Colors.secondaryText.opacity(0.65))
+                    )
+                    .frame(width: 22, height: 22)
+
+                Text(title)
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    func scoreCustomSelectionOption_AESV(_ score: ScoreLibraryItem) -> some View {
+        Button {
+            scorePageSelectionRequest_AESV = PDFPageSelectionRequest(
+                id: score.id,
+                pageCount: max(score.pageCount, 1)
+            )
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.65))
+                    .frame(width: 22, height: 22)
+
+                Text("Custom…")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                Spacer(minLength: 0)
+
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.55))
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    func scoreAttachmentRow_AESV(_ score: ScoreLibraryItem) -> some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            HStack(alignment: .firstTextBaseline, spacing: Theme.Spacing.m) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(score.title)
+                        .font(Theme.Text.body)
+
+                    if let summary = selectionSummaryForScore_AESV(score.id) {
+                        Text(summary)
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                    }
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                scoreSelectionOption_AESV(title: "Entire document", pages: nil, id: score.id)
+                scoreCustomSelectionOption_AESV(score)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    var scoreAttachmentsSection_AESV: some View {
+        VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+            Text("Scores").sectionHeader()
+
+            VStack(alignment: .leading, spacing: Theme.Spacing.s) {
+                ForEach(scoreAttachmentItems_AESV) { score in
+                    scoreAttachmentRow_AESV(score)
+                }
+            }
+        }
+    }
+
+    func scoreLibraryItemMatchingURL_AESV(_ url: URL) -> ScoreLibraryItem? {
+        let targetPath = url.standardizedFileURL.path
+        return ScoreLibraryStore.shared.items.first { item in
+            ScoreLibraryStore.shared.url(for: item).standardizedFileURL.path == targetPath
+        }
+    }
+
+    func commitScoreAttachments_AESV(to session: Session, ctx: NSManagedObjectContext) {
+        let fileManager = FileManager.default
+        var committedScoreIDs = Set<UUID>()
+
+        for score in scoreAttachmentItems_AESV {
+            guard committedScoreIDs.insert(score.id).inserted else { continue }
+
+            if let existingAttachmentID = existingScoreAttachmentIDsByScoreID_AESV[score.id] {
+                PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: existingAttachmentID)
+                continue
+            }
+
+            let url = ScoreLibraryStore.shared.url(for: score)
+            guard fileManager.fileExists(atPath: url.path) else {
+                #if DEBUG
+                print("AESV manual score attach skipped missing score PDF: \(url.path)")
+                #endif
+                continue
+            }
+
+            do {
+                let created = try AttachmentStore.addAttachment(
+                    kind: .pdf,
+                    filePath: url.path,
+                    to: session,
+                    isThumbnail: false,
+                    displayName: score.title,
+                    ctx: ctx
+                )
+
+                if let finalID = created.value(forKey: "id") as? UUID {
+                    PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: finalID)
+                    existingScoreAttachmentIDsByScoreID_AESV[score.id] = finalID
+                }
+            } catch {
+                #if DEBUG
+                print("AESV manual score attach failed: \(error)")
+                #endif
+            }
+        }
+    }
+
     // MARK: - Attachments (preload, stage & commit)
 
     /// Preload existing Core Data attachments so they appear in the grid during Edit (no duplication on save).
@@ -76,6 +269,18 @@ extension AddEditSessionView {
             if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
                 if let url = resolveStoredFileURL(at: path) {
                     existingAttachmentURLMap[id] = url
+
+                    if kind == .pdf, let score = scoreLibraryItemMatchingURL_AESV(url) {
+                        if !attachedScoreIDs_AESV.contains(score.id) {
+                            attachedScoreIDs_AESV.append(score.id)
+                        }
+                        existingScoreAttachmentIDsByScoreID_AESV[score.id] = id
+                        scorePageSelections_AESV[score.id] = AESVScorePageSelection(
+                            pages: PDFSelectedPagesStore.sanitized(PDFSelectedPagesStore.pages(for: id)),
+                            hasSelection: PDFSelectedPagesStore.sanitized(PDFSelectedPagesStore.pages(for: id)) != nil
+                        )
+                        continue
+                    }
                 }
             }
 
