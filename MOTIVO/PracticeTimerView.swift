@@ -1491,6 +1491,56 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     @ViewBuilder
+    private func scoreViewerDestinationOverlay(request: TimerScoreViewerRequest) -> some View {
+        HStack {
+            Button {
+                flushMeaningfulScorePageTracking(for: request.id)
+                scoreViewerRequest = nil
+            } label: {
+                scoreViewerDestinationControl(
+                    systemName: "record.circle.fill",
+                    tint: .red.opacity(0.75)
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Return to session timer")
+
+            Spacer()
+
+            Button {
+                flushMeaningfulScorePageTracking(for: request.id)
+                scoreViewerRequest = nil
+                showScoresLibrary = true
+            } label: {
+                scoreViewerDestinationControl(
+                    systemName: "book.closed",
+                    tint: Theme.Colors.secondaryText
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open scores library")
+        }
+        .padding(.horizontal, Theme.Spacing.l)
+        .padding(.top, Theme.Spacing.m)
+        .allowsHitTesting(true)
+    }
+
+    private func scoreViewerDestinationControl(systemName: String, tint: Color) -> some View {
+        ZStack {
+            Circle()
+                .fill(.thinMaterial)
+                .opacity(colorScheme == .dark ? PracticeTimerTopButtonsUI.fillOpacityDark : PracticeTimerTopButtonsUI.fillOpacityLight)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+
+            Image(systemName: systemName)
+                .symbolRenderingMode(.monochrome)
+                .font(.system(size: PracticeTimerTopButtonsUI.iconPrimary, weight: .regular))
+                .foregroundStyle(tint)
+        }
+        .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+        .contentShape(Circle())
+    }
+
     var body: some View {
         if shouldRenderAppSetUpRoot {
             AppSetUpView(onComplete: {
@@ -1995,23 +2045,9 @@ private func loadPracticeDefaultsIfNeeded() {
                     .onDisappear {
                         flushMeaningfulScorePageTracking(for: request.id)
                     }
-                    .navigationTitle(request.title)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Timer") {
-                                flushMeaningfulScorePageTracking(for: request.id)
-                                scoreViewerRequest = nil
-                            }
-                        }
-
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Library") {
-                                flushMeaningfulScorePageTracking(for: request.id)
-                                scoreViewerRequest = nil
-                                showScoresLibrary = true
-                            }
-                        }
+                    .toolbar(.hidden, for: .navigationBar)
+                    .overlay(alignment: .top) {
+                        scoreViewerDestinationOverlay(request: request)
                     }
             }
         }
