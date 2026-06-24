@@ -2036,7 +2036,7 @@ private func loadPracticeDefaultsIfNeeded() {
                 PDFScoreView(
                     url: request.url,
                     initialPage: request.initialPage,
-                    background: Color(.systemBackground),
+                    background: Theme.Colors.background(colorScheme),
                     onPageChange: { page in
                         scoreLibraryStore.updateLastViewedPage(for: request.id, page: page)
                         recordMeaningfulScorePageChange(scoreID: request.id, page: page)
