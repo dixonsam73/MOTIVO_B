@@ -758,12 +758,8 @@ struct PostRecordDetailsView: View {
             )
         } label: {
             HStack(spacing: Theme.Spacing.m) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.65))
-                    .frame(width: 22, height: 22)
 
-                Text("Custom…")
+                Text("Custom range…")
                     .font(.footnote)
                     .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -808,14 +804,14 @@ struct PostRecordDetailsView: View {
                 } else if meaningfulPages.count > 1 {
                     if let lastMeaningfulPage {
                         scoreSelectionOption(
-                            title: "Last meaningful page (\(lastMeaningfulPage))",
+                            title: "Page \(lastMeaningfulPage)",
                             pages: [lastMeaningfulPage],
                             id: score.id
                         )
                     }
 
                     scoreSelectionOption(
-                        title: "Meaningful pages (\(meaningfulPages.map(String.init).joined(separator: ", ")))",
+                        title: "Pages \(meaningfulPages.map(String.init).joined(separator: ", "))",
                         pages: meaningfulPages,
                         id: score.id
                     )
