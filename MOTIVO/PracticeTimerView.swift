@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260625_174900_PTV_AdaptiveUtilityAddLayout
+// SCOPE: PracticeTimerView layout only — adapt the idle + button placement when Tasks or Scores is hidden so utility controls compose as 3-2 rather than 3-1-1; preserve existing actions, sheets, styling, opacity fade, pyramid layout when all utilities are visible, and running-state behaviour. No recorder, score, task, persistence, or backend changes.
+// SEARCH-TOKEN: 20260625_174900_PTV_AdaptiveUtilityAddLayout
+
 // CHANGE-ID: 20260625_171900_PTV_AddButtonPyramidLayout
 // SCOPE: PracticeTimerView layout only — move idle + button onto its own centered row beneath Tasks/Scores for a 3-2-1 timer control pyramid; preserve existing button actions, sheets, styling, opacity fade, and task/score behaviours. No recorder, score, task, persistence, or backend changes.
 // SEARCH-TOKEN: 20260625_171900_PTV_AddButtonPyramidLayout
@@ -2833,6 +2837,36 @@ private func loadPracticeDefaultsIfNeeded() {
         showOutgoingIdleAddEntry ? 1 : 0
     }
 
+    private var shouldPlaceIdleAddEntryInUtilityRow: Bool {
+        shouldRenderIdleAddEntryButton && (showTasksButton != showScoresButton)
+    }
+
+    @ViewBuilder
+    private var idleAddEntryButton: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                showTasksPad = false
+                showAddEntryActions.toggle()
+            }
+        } label: {
+            Image(systemName: "plus")
+                .symbolRenderingMode(.monochrome)
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(showAddEntryActions ? tasksAccentIcon : recorderIcon)
+                .frame(width: 48, height: 48)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.bordered)
+        .background(
+            Capsule(style: .continuous)
+                .fill(showAddEntryActions ? tasksAccent.opacity(0.26) : Color.clear)
+        )
+        .clipShape(Capsule(style: .continuous))
+        .opacity(idleAddEntryOpacity)
+        .allowsHitTesting(isIdleAddEntryAvailable)
+        .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
+    }
+
     @ViewBuilder
     private var bottomActionSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
@@ -2928,33 +2962,16 @@ private func loadPracticeDefaultsIfNeeded() {
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(hasActiveScore ? "Resume active score" : "Open scores")
                 }
+
+                if shouldPlaceIdleAddEntryInUtilityRow {
+                    idleAddEntryButton
+                }
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-            if shouldRenderIdleAddEntryButton {
+            if shouldRenderIdleAddEntryButton && !shouldPlaceIdleAddEntryInUtilityRow {
                 HStack(spacing: Theme.Spacing.m) {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            showTasksPad = false
-                            showAddEntryActions.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "plus")
-                            .symbolRenderingMode(.monochrome)
-                            .font(.system(size: 22, weight: .semibold))
-                            .foregroundStyle(showAddEntryActions ? tasksAccentIcon : recorderIcon)
-                            .frame(width: 48, height: 48)
-                            .contentShape(Circle())
-                    }
-                    .buttonStyle(.bordered)
-                    .background(
-                        Capsule(style: .continuous)
-                            .fill(showAddEntryActions ? tasksAccent.opacity(0.26) : Color.clear)
-                    )
-                    .clipShape(Capsule(style: .continuous))
-                    .opacity(idleAddEntryOpacity)
-                    .allowsHitTesting(isIdleAddEntryAvailable)
-                    .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
+                    idleAddEntryButton
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
             }
