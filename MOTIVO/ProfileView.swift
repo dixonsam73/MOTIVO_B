@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260625_173400_Profile_ShowScoresToggle
+// SCOPE: ProfileView settings only — add persisted Show Scores toggle using existing appSettings_showScores preference; no other UI, navigation, persistence, or timer logic changes.
+// SEARCH-TOKEN: 20260625_173400_Profile_ShowScoresToggle
+
 // CHANGE-ID: 20260517_221800_ProfileView_SubtleVisualPolish_Fix
 // SCOPE: ProfileView visual polish only — quieter surfaces/dividers/rhythm; no behavior/navigation/persistence changes.
 // SEARCH-TOKEN: 20260517_221800_ProfileView_SubtleVisualPolish_Fix
@@ -193,6 +197,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @AppStorage("appSettings_showDroneStrip") private var showDroneStrip: Bool = true
      @AppStorage("appSettings_showMetronomeStrip") private var showMetronomeStrip: Bool = true
      @AppStorage("appSettings_showTasksPad") private var showTasksPad: Bool = true
+    @AppStorage("appSettings_showScores") private var showScores: Bool = true
     @AppStorage("appSettings_showThreadSuggestions") private var showThreadSuggestions: Bool = true
     @AppStorage("appSettings_showTuner") private var showTuner: Bool = true
     @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
@@ -695,6 +700,17 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
                  Toggle(isOn: $showTasksPad) {
                      Text("Show Tasks Pad")
+                 }
+                 .tint(Theme.Colors.accent)
+                 .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 Toggle(isOn: $showScores) {
+                     Text("Show Scores")
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)
