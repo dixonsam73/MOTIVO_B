@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260625_171900_PTV_AddButtonPyramidLayout
+// SCOPE: PracticeTimerView layout only — move idle + button onto its own centered row beneath Tasks/Scores for a 3-2-1 timer control pyramid; preserve existing button actions, sheets, styling, opacity fade, and task/score behaviours. No recorder, score, task, persistence, or backend changes.
+// SEARCH-TOKEN: 20260625_171900_PTV_AddButtonPyramidLayout
+
 // CHANGE-ID: 20260622_205500_SCORES_PHASE8_MEANINGFUL_PAGES
 // SCOPE: Scores V1 Phase 8 — track session-scoped meaningful score pages from existing PDF page-change callbacks and pass suggestions into PRDV. No persistence, schema, backend, score storage, or attachment pipeline changes.
 // SEARCH-TOKEN: 20260622_205500_SCORES_PHASE8
@@ -2924,8 +2928,11 @@ private func loadPracticeDefaultsIfNeeded() {
                     .clipShape(Capsule(style: .continuous))
                     .accessibilityLabel(hasActiveScore ? "Resume active score" : "Open scores")
                 }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
 
-                if shouldRenderIdleAddEntryButton {
+            if shouldRenderIdleAddEntryButton {
+                HStack(spacing: Theme.Spacing.m) {
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             showTasksPad = false
@@ -2949,43 +2956,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     .allowsHitTesting(isIdleAddEntryAvailable)
                     .accessibilityLabel(showAddEntryActions ? "Hide add actions" : "Show add actions")
                 }
-            }
-            .frame(maxWidth: .infinity, alignment: .center)
-            .onAppear {
-                showOutgoingIdleAddEntry = isIdleAddEntryAvailable
-            }
-            .onChange(of: isIdleAddEntryAvailable) { _, isAvailable in
-                if isAvailable {
-                    if !lowerUtilityRowRecentering {
-                        withAnimation(.easeInOut(duration: 0.82)) {
-                            preserveIdleAddEntryGeometry = true
-                        }
-                    }
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
-                        withAnimation(.easeInOut(duration: 0.48)) {
-                            showOutgoingIdleAddEntry = true
-                        }
-                    }
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.86) {
-                        lowerUtilityRowRecentering = false
-                        preserveIdleAddEntryGeometry = false
-                    }
-                } else {
-                    lowerUtilityRowRecentering = false
-                    preserveIdleAddEntryGeometry = true
-
-                    withAnimation(.easeInOut(duration: 0.48)) {
-                        showOutgoingIdleAddEntry = false
-                    }
-
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.54) {
-                        withAnimation(.easeInOut(duration: 0.78)) {
-                            preserveIdleAddEntryGeometry = false
-                        }
-                    }
-                }
+                .frame(maxWidth: .infinity, alignment: .center)
             }
 
             if showAddEntryActions && isIdleAddEntryAvailable {
@@ -3055,6 +3026,42 @@ private func loadPracticeDefaultsIfNeeded() {
                     }
                 )
                 .transition(.opacity)
+            }
+        }
+        .onAppear {
+            showOutgoingIdleAddEntry = isIdleAddEntryAvailable
+        }
+        .onChange(of: isIdleAddEntryAvailable) { _, isAvailable in
+            if isAvailable {
+                if !lowerUtilityRowRecentering {
+                    withAnimation(.easeInOut(duration: 0.82)) {
+                        preserveIdleAddEntryGeometry = true
+                    }
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.50) {
+                    withAnimation(.easeInOut(duration: 0.48)) {
+                        showOutgoingIdleAddEntry = true
+                    }
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.86) {
+                    lowerUtilityRowRecentering = false
+                    preserveIdleAddEntryGeometry = false
+                }
+            } else {
+                lowerUtilityRowRecentering = false
+                preserveIdleAddEntryGeometry = true
+
+                withAnimation(.easeInOut(duration: 0.48)) {
+                    showOutgoingIdleAddEntry = false
+                }
+
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.54) {
+                    withAnimation(.easeInOut(duration: 0.78)) {
+                        preserveIdleAddEntryGeometry = false
+                    }
+                }
             }
         }
     }
