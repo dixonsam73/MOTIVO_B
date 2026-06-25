@@ -2024,12 +2024,15 @@ private func loadPracticeDefaultsIfNeeded() {
             thoughtEditorSheet
         }
         .sheet(isPresented: $showScoresLibrary) {
-            ScoresLibraryView { item in
-                showScoresLibrary = false
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    openScoreFromTimer(item)
+            ScoresLibraryView(
+                onOpenActiveScore: { item in
+                    showScoresLibrary = false
+
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        openScoreFromTimer(item)
+                    }
                 }
-            }
+            )
         }
         .fullScreenCover(item: $scoreViewerRequest) { request in
             NavigationStack {
@@ -2813,6 +2816,7 @@ private func loadPracticeDefaultsIfNeeded() {
     private func openScoreFromTimer(_ item: ScoreLibraryItem) {
         scoreLibraryStore.markOpened(item)
         recordScoreUsedThisSessionIfNeeded(item)
+
         scoreViewerRequest = TimerScoreViewerRequest(
             id: item.id,
             title: item.title,
