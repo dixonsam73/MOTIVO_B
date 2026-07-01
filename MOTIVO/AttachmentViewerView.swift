@@ -68,6 +68,9 @@ import SwiftUI
 import AVKit
 import AVFoundation
 import PDFKit
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // CHANGE-ID: 20260424_161900_AVV_ImmersiveChromeRevealFix
 // SCOPE: AttachmentViewerView immersive video playback follow-up only — fade top viewer chrome with immersive playback chrome and make full immersive video surface tap-to-reveal controls. Non-immersive video, audio, playback logic, and attachment actions unchanged.
@@ -124,6 +127,8 @@ struct AttachmentViewerView: View {
 
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
     @State private var tempFilesToCleanup: Set<URL> = []
+    @State private var sharePayload: SharePayload? = nil
+    @State private var isPreparingShare: Bool = false
     @State private var isRenaming: Bool = false
     @State private var renameTargetURL: URL? = nil
     @State private var renameTargetKind: AttachmentKind? = nil
@@ -375,6 +380,40 @@ private func currentURL() -> URL? {
     }
     private var canShowShare: Bool { canShare }
 
+    private func prepareShare(for url: URL, kind: AttachmentKind) {
+        guard !isPreparingShare else { return }
+        isPreparingShare = true
+        stopAllPlayersToggle.toggle()
+
+        do {
+            if kind == .pdf, let selectedPages = PDFSelectedPagesStore.sanitized(pdfSelectedPagesForURL?(url)) {
+                let exportURL = try PDFSubsetExporter.export(from: url, selectedPages: selectedPages)
+                registerTemp(exportURL)
+                sharePayload = SharePayload(url: exportURL, temporaryURL: exportURL)
+            } else {
+                sharePayload = SharePayload(url: url, temporaryURL: nil)
+            }
+        } catch {
+            #if DEBUG
+            print("[AttachmentViewer] PDF subset export failed; sharing original PDF: \(error)")
+            #endif
+            sharePayload = SharePayload(url: url, temporaryURL: nil)
+        }
+
+        isPreparingShare = false
+    }
+
+    private func cleanupSharePayload() {
+        if let temporaryURL = sharePayload?.temporaryURL {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: temporaryURL.path) {
+                do { try fm.removeItem(at: temporaryURL) } catch { /* best-effort cleanup */ }
+            }
+            tempFilesToCleanup.remove(temporaryURL)
+        }
+        sharePayload = nil
+    }
+
     private func beginRename(url: URL, kind: AttachmentKind) {
         renameTargetURL = url
         renameTargetKind = kind
@@ -525,6 +564,12 @@ private func currentURL() -> URL? {
         let id = UUID()
         let kind: AttachmentKind
         let url: URL
+    }
+
+    private struct SharePayload: Identifiable {
+        let id = UUID()
+        let url: URL
+        let temporaryURL: URL?
     }
 
     private var media: [MediaAttachment] {
@@ -908,7 +953,9 @@ private func currentURL() -> URL? {
                             }
 
                             if canShowShare {
-                                ShareLink(item: currentURL) {
+                                Button {
+                                    prepareShare(for: currentURL, kind: currentAttachmentKind)
+                                } label: {
                                     ZStack {
                                         Circle()
                                             .fill(.thinMaterial)
@@ -927,13 +974,8 @@ private func currentURL() -> URL? {
                                 }
                                 .buttonStyle(.plain)
                                 .contentShape(Rectangle())
-                                .onAppear {
-                                    // If a temp surrogate is used as the share item, ensure we clean it up on dismiss
-                                    let tmp = FileManager.default.temporaryDirectory
-                                    if currentURL.isFileURL, currentURL.path.hasPrefix(tmp.path) {
-                                        registerTemp(currentURL)
-                                    }
-                                }
+                                .disabled(isPreparingShare)
+                                .accessibilityLabel("Share attachment")
                             }
                         }
                         }
@@ -1024,6 +1066,11 @@ private func currentURL() -> URL? {
             } catch { }
             // Storage Safety: Ensure any temp surrogates created by the viewer are removed on dismiss
             cleanupTempFiles()
+        }
+        .sheet(item: $sharePayload, onDismiss: {
+            cleanupSharePayload()
+        }) { payload in
+            ActivityView(activityItems: [payload.url])
         }
         .sheet(isPresented: $isRenaming, onDismiss: {
             resetRenameState()
@@ -2799,6 +2846,18 @@ private struct AttachmentWaveformView: View {
         : Theme.Colors.secondaryText.opacity(0.35)
     }
 }
+#if canImport(UIKit)
+private struct ActivityView: UIViewControllerRepresentable {
+    let activityItems: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) { }
+}
+#endif
+
 // MARK: - Helpers
 private extension Comparable {
     func clamped(to range: ClosedRange<Self>) -> Self {
