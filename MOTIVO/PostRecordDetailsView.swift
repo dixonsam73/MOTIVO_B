@@ -691,6 +691,7 @@ struct PostRecordDetailsView: View {
                 )
 
                 if let finalID = created.value(forKey: "id") as? UUID {
+                    AttachmentPrivacy.setPrivate(id: finalID, url: url, false)
                     PDFSelectedPagesStore.setPages(selectedPagesForUsedScore(score.id), for: finalID)
                 }
             } catch {

@@ -204,6 +204,8 @@ extension AddEditSessionView {
             guard committedScoreIDs.insert(score.id).inserted else { continue }
 
             if let existingAttachmentID = existingScoreAttachmentIDsByScoreID_AESV[score.id] {
+                let url = ScoreLibraryStore.shared.url(for: score)
+                AttachmentPrivacy.setPrivate(id: existingAttachmentID, url: url, false)
                 PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: existingAttachmentID)
                 continue
             }
@@ -227,6 +229,7 @@ extension AddEditSessionView {
                 )
 
                 if let finalID = created.value(forKey: "id") as? UUID {
+                    AttachmentPrivacy.setPrivate(id: finalID, url: url, false)
                     PDFSelectedPagesStore.setPages(selectedPagesForScore_AESV(score.id), for: finalID)
                     existingScoreAttachmentIDsByScoreID_AESV[score.id] = finalID
                 }
