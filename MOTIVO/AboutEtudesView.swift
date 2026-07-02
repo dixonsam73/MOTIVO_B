@@ -10,15 +10,11 @@ struct AboutEtudesView: View {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
                 aboutSection("Overview") {
                     VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-                        Text("Études is a modern practice journal. Capture sessions, ideas, recordings, and reflections — and build a lasting archive of your musical process.")
+                        Text("Études is a journal for musicians. Capture practice sessions, rehearsals, performances, ideas, recordings, reflections, and scores — and build a lasting archive of your musical life.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text("Designed for musicians, composers, teachers, and students, Études focuses on continuity rather than performance metrics.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
-
-                        Text("Études is designed to remain valuable even if nothing is ever shared.")
+                        Text("Designed for musicians, composers, teachers, and students, Études adapts to the way you work — whether you’re practising alone, teaching, composing, performing, or collaborating.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -26,9 +22,6 @@ struct AboutEtudesView: View {
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text("Most sessions will remain private. That’s expected.")
-                            .font(Theme.Text.body)
-                            .foregroundStyle(Theme.Colors.secondaryText)
                     }
                 }
 
@@ -41,7 +34,7 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Your Journal remains personal and available even when used entirely offline.")
+                    Text("Your Journal, Tasks, and personal score library remain available even when used entirely offline.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
@@ -51,7 +44,7 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Log practice, rehearsal, performance, writing, recording, listening, score study, or rehearsal preparation. Record or attach photos, audio, and video — and trim recordings before saving.")
+                    Text("Log practice, rehearsal, performance, writing, recording, listening, score study, or rehearsal preparation. Open scores from your personal library, pick up where you left off, and attach the pages you worked on to your Journal. Record or attach photos, audio, and video — and trim recordings before saving.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -59,7 +52,7 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("You control visibility per session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                    Text("You control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -77,15 +70,11 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Thoughts appear alongside sessions, allowing ideas, sketches, reflections, and recordings to live within the same long-term archive.")
+                    Text("Thoughts appear alongside sessions, allowing ideas, sketches, reflections, and recordings to become part of the same long-term archive.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
                     Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll only see what they’ve intentionally chosen to share.")
-                        .font(Theme.Text.body)
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                    Text("Tapping a user’s name in a post filters the Feed to their sessions. Tap again to return to the full Feed.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -111,7 +100,7 @@ struct AboutEtudesView: View {
                 }
 
                 aboutSection("Insights") {
-                    Text("Insights help reveal patterns in your work over time — including focus, consistency, session rhythm, activities, and Threads — without scores, rankings, or performance pressure.")
+                    Text("Insights help reveal patterns in your work over time — including your focus, consistency, session rhythm, activities, and Threads — without scores, rankings, or performance pressure.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }

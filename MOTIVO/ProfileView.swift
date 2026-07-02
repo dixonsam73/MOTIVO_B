@@ -653,7 +653,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  }
 
                  Button { showTintModeSelection = true } label: {
-                     navigationRow(title: "Tint Mode", value: currentTintMode.displayName)
+                     navigationRow(title: "Journal Tint", value: currentTintMode.displayName)
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
