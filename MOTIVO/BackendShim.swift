@@ -1024,6 +1024,7 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
     private func persistedDisplayNameForAttachment(kind: String, attachmentID: UUID, namespaceUserID: String?) -> String? {
         let k = kind.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).lowercased()
         let titleKind: AttachmentTitlePersistenceKeys.Kind
+
         switch k {
         case "audio":
             titleKind = .audio
@@ -1035,25 +1036,25 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
 
         let defaults = UserDefaults.standard
         let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: titleKind)
+        let legacy = (defaults.dictionary(forKey: legacyKey) as? [String: String]) ?? [:]
 
         let dict: [String: String]
+
         if let userID = namespaceUserID {
             let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: titleKind, userID: userID)
-            if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
-                dict = namespaced
-            } else if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
-                defaults.set(legacy, forKey: namespacedKey)
-                defaults.removeObject(forKey: legacyKey)
-                dict = legacy
-            } else {
-                dict = [:]
+            let namespaced = (defaults.dictionary(forKey: namespacedKey) as? [String: String]) ?? [:]
+
+            // Merge for backwards compatibility.
+            // Namespaced values take precedence where present.
+            dict = legacy.merging(namespaced) { _, namespacedValue in
+                namespacedValue
             }
         } else {
-            dict = (defaults.dictionary(forKey: legacyKey) as? [String: String]) ?? [:]
+            dict = legacy
         }
 
         let raw = dict[attachmentID.uuidString]
-        let trimmed = (raw ?? "").trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
