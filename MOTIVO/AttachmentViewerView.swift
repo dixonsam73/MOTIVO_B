@@ -1522,8 +1522,15 @@ private struct MediaPage: View {
                     background: background
                 )
             case .video:
+                let displayTitle: String? = {
+                    let raw = titleForURL?(original, .video)
+                    let t = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                    return t.isEmpty ? nil : t
+                }()
+
                 VideoPage(
                     url: effectiveURL(original),
+                    displayTitle: displayTitle,
                     isAnyPlayerActive: $isAnyPlayerActive,
                     onRequestStopAll: $onRequestStopAll,
                     immersivePlaybackChromeVisible: $immersivePlaybackChromeVisible,
@@ -1600,6 +1607,7 @@ private struct ImagePage: View {
 
 private struct VideoPage: View {
     let url: URL
+    let displayTitle: String?
     @Binding var isAnyPlayerActive: Bool
     @Binding var onRequestStopAll: Bool
     @Binding var immersivePlaybackChromeVisible: Bool
@@ -1661,6 +1669,8 @@ private struct VideoPage: View {
                         .padding(.top, mediaTopInset)
                         .padding(.bottom, mediaBottomInset)
                         .layoutPriority(1)
+                        
+                 
 
                         videoTransportControls(
                             controlCompact: controlCompact,

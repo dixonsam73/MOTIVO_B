@@ -114,20 +114,19 @@ private func sessionDetailNamespaceUserID(auth: AuthManager) -> String? {
 @MainActor
 private func loadPersistedTitles(kind: AttachmentTitlePersistenceKeys.Kind, auth: AuthManager) -> [String: String] {
     let defaults = UserDefaults.standard
-    if let userID = sessionDetailNamespaceUserID(auth: auth) {
-        let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
-        if let namespaced = defaults.dictionary(forKey: namespacedKey) as? [String: String] {
-            return namespaced
-        }
-        let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: kind)
-        if let legacy = defaults.dictionary(forKey: legacyKey) as? [String: String] {
-            defaults.set(legacy, forKey: namespacedKey)
-            defaults.removeObject(forKey: legacyKey)
-            return legacy
-        }
-        return [:]
+    let legacyKey = AttachmentTitlePersistenceKeys.legacyKey(for: kind)
+    let legacy = (defaults.dictionary(forKey: legacyKey) as? [String: String]) ?? [:]
+
+    guard let userID = sessionDetailNamespaceUserID(auth: auth) else {
+        return legacy
     }
-    return (defaults.dictionary(forKey: AttachmentTitlePersistenceKeys.legacyKey(for: kind)) as? [String: String]) ?? [:]
+
+    let namespacedKey = AttachmentTitlePersistenceKeys.namespacedKey(for: kind, userID: userID)
+    let namespaced = (defaults.dictionary(forKey: namespacedKey) as? [String: String]) ?? [:]
+
+    // Preserve compatibility with older/current save paths that still write the legacy store.
+    // Namespaced values win if both exist for the same attachment UUID.
+    return legacy.merging(namespaced) { _, namespacedValue in namespacedValue }
 }
 
 @MainActor
@@ -466,13 +465,10 @@ return AttachmentViewerView(
                         let trimmed = stem.trimmingCharacters(in: .whitespacesAndNewlines)
                         return trimmed.isEmpty ? nil : trimmed
                     case .video:
-                        // Match by stable basename (UUID-like) ignoring extension
-                        let stem = url.deletingPathExtension().lastPathComponent
                         let set = (session.attachments as? Set<Attachment>) ?? []
                         if let match = set.first(where: { att in
-                            guard let stored = att.value(forKey: "fileURL") as? String, !stored.isEmpty else { return false }
-                            let storedStem = URL(fileURLWithPath: stored).deletingPathExtension().lastPathComponent
-                            return storedStem == stem
+                            guard let stored = att.value(forKey: "fileURL") as? String else { return false }
+                            return resolveAttachmentURL(from: stored) == url
                         }), let attID = match.value(forKey: "id") as? UUID {
                             return persistedVideoTitle(for: attID, auth: auth)
                         }
