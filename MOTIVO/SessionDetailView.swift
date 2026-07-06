@@ -1559,23 +1559,23 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
     private func resolveAttachmentURL(from stored: String?) -> URL? {
         guard let s = stored, !s.isEmpty else { return nil }
 
-        // Case 1: Already a valid file URL string
-        if let u = URL(string: s), u.isFileURL {
+        let fm = FileManager.default
+
+        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
             return u
         }
 
-        // Case 2: Absolute POSIX path
         if s.hasPrefix("/") {
             let u = URL(fileURLWithPath: s)
-            if FileManager.default.fileExists(atPath: u.path) { return u }
+            if fm.fileExists(atPath: u.path) { return u }
         }
 
-        // Case 3: Bare filename or relative path → search common app folders
         let filename = URL(fileURLWithPath: s).lastPathComponent
-        let fm = FileManager.default
+        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
 
         let candidateDirs: [URL] = [
-            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            documents,
+            documents?.appendingPathComponent("Scores", isDirectory: true),
             fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
             fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
             fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
@@ -1835,33 +1835,39 @@ fileprivate struct AttachmentRow: View {
 
     private func resolvedAttachmentURL(from stored: String?) -> URL? {
         guard let s = stored, !s.isEmpty else { return nil }
-
-        if let u = URL(string: s), u.isFileURL, FileManager.default.fileExists(atPath: u.path) {
-            return u
-        }
-
-        if s.hasPrefix("/") {
-            let u = URL(fileURLWithPath: s)
-            if FileManager.default.fileExists(atPath: u.path) { return u }
-        }
-
-        let filename = URL(fileURLWithPath: s).lastPathComponent
-        let fm = FileManager.default
-        let candidateDirs: [URL] = [
-            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
-            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-            fm.temporaryDirectory
-        ].compactMap { $0 }
-
-        for base in candidateDirs {
-            let candidate = base.appendingPathComponent(filename)
-            if fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-
-        return nil
-    }
+        
+         let fm = FileManager.default
+        
+         if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
+             return u
+         }
+        
+         if s.hasPrefix("/") {
+             let u = URL(fileURLWithPath: s)
+             if fm.fileExists(atPath: u.path) { return u }
+         }
+        
+         let filename = URL(fileURLWithPath: s).lastPathComponent
+         let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
+        
+         let candidateDirs: [URL] = [
+             documents,
+             documents?.appendingPathComponent("Scores", isDirectory: true),
+             fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+             fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
+             fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
+             fm.temporaryDirectory
+         ].compactMap { $0 }
+        
+         for base in candidateDirs {
+             let candidate = base.appendingPathComponent(filename)
+             if fm.fileExists(atPath: candidate.path) {
+                 return candidate
+             }
+         }
+        
+         return nil
+     }
 
     private func icon(for kind: String) -> String {
         switch kind {
