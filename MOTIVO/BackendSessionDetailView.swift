@@ -597,11 +597,32 @@ struct BackendSessionDetailView: View {
 
                         ForEach(videoItems, id: \.key) { item in
                             let ref = item.ref
-                            BackendThumbCell(kind: .video, bucket: ref.bucket, path: ref.path, url: thumbSignedURLs[cacheKey(ref)], showViewIcon: false)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    Task { await presentViewer(tapped: ref) }
+                            let title = (ref.displayName ?? "")
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                            VStack(spacing: 4) {
+                                BackendThumbCell(
+                                    kind: .video,
+                                    bucket: ref.bucket,
+                                    path: ref.path,
+                                    url: thumbSignedURLs[cacheKey(ref)],
+                                    showViewIcon: false
+                                )
+
+                                if !title.isEmpty {
+                                    Text(title)
+                                        .font(.caption)
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                        .multilineTextAlignment(.center)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .frame(maxWidth: .infinity)
                                 }
+                            }
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                Task { await presentViewer(tapped: ref) }
+                            }
                         }
                     }
                     .padding(.vertical, 4)

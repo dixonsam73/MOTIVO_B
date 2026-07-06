@@ -903,13 +903,28 @@ return AttachmentViewerView(
                             // Then videos
                             ForEach(Array(videos.enumerated()), id: \.element.objectID) { (idx, a) in
                                 let url = resolveAttachmentURL(from: a.value(forKey: "fileURL") as? String)
-                                VideoThumbCell(fileURL: url, attachment: a)
-                                    .contentShape(Rectangle())
-                                    .onTapGesture {
-                                        if let _ = url {
-                                            viewerRequest = SDVAttachmentViewerRequest(mode: .visual, tappedObjectID: a.objectID)
-                                        }
+                                let title = (a.id.flatMap { persistedVideoTitle(for: $0, auth: auth) } ?? "")
+                                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                                VStack(spacing: 4) {
+                                    VideoThumbCell(fileURL: url, attachment: a)
+
+                                    if !title.isEmpty {
+                                        Text(title)
+                                            .font(.caption)
+                                            .foregroundStyle(Theme.Colors.secondaryText)
+                                            .multilineTextAlignment(.center)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                            .frame(maxWidth: .infinity)
                                     }
+                                }
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    if let _ = url {
+                                        viewerRequest = SDVAttachmentViewerRequest(mode: .visual, tappedObjectID: a.objectID)
+                                    }
+                                }
                             }
                         }
                         .padding(.vertical, 4)
