@@ -68,6 +68,7 @@ struct MOTIVOApp: App {
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
     @StateObject private var appRoute = AppRouteStore()
+    @StateObject private var appModeManager = AppModeManager()
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -210,6 +211,7 @@ struct MOTIVOApp: App {
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
                 .environmentObject(auth)
                 .environmentObject(appRoute)
+                .environmentObject(appModeManager)
                 .onAppear {
                     // Phase 14.2.2: Session liveness — refresh Supabase session on launch to prevent zombie auth.
                     Task {

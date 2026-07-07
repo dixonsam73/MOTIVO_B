@@ -63,6 +63,7 @@ extension DebugDump {
 
 public struct DebugViewerView: View {
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
     @Environment(\.managedObjectContext) private var viewContext
     private let title: String
     @Binding private var jsonString: String
@@ -891,6 +892,27 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
         SyncQueueSection()
     }
 
+
+    @ViewBuilder private var appExperienceBlock: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("App Experience")
+                .font(.headline)
+
+            Text("Temporary Milestone 0 selector. This updates AppModeManager only; no capability gating is active yet.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
+            Picker("App Experience", selection: $appModeManager.mode) {
+                ForEach(AppMode.allCases) { mode in
+                    Text(mode.displayName).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("App Experience")
+        }
+        .padding(.horizontal)
+    }
+
     @ViewBuilder private var backendStep6ABlock: some View {
         // Precompute mode line to ease type-checking
         let modeRaw: String = BackendEnvironment.shared.mode.rawValue
@@ -987,6 +1009,8 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                 jsonDumpBlock
 
                 backendControlsBlock
+
+                appExperienceBlock
 
                 backendStep6ABlock
 
