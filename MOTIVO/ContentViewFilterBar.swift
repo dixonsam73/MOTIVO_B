@@ -143,6 +143,7 @@ struct FilterBar: View {
     @Binding var selectedEnsembleID: String?
     let threadOptions: [String]
     let ensembles: [Ensemble]
+    let showEnsembleFilter: Bool
 
 
     private var sortedEnsembles: [Ensemble] {
@@ -282,36 +283,38 @@ struct FilterBar: View {
                     .modifier(FilterSelectorTrailingControlStyle())
                 }
 
-                FilterCardDivider()
-                    .padding(.horizontal, Theme.Spacing.card)
+                if showEnsembleFilter {
+                    FilterCardDivider()
+                        .padding(.horizontal, Theme.Spacing.card)
 
-                FilterCardRow(label: "Ensemble") {
-                    Menu {
-                        Button("Any") {
-                            #if canImport(UIKit)
-                            ContentViewKeyboardDismiss.dismiss()
-                            #endif
-                            selectedEnsembleID = nil
-                        }
-                        ForEach(sortedEnsembles) { ensemble in
-                            Button(ensemble.name) {
+                    FilterCardRow(label: "Ensemble") {
+                        Menu {
+                            Button("Any") {
                                 #if canImport(UIKit)
                                 ContentViewKeyboardDismiss.dismiss()
                                 #endif
-                                selectedEnsembleID = ensemble.id
+                                selectedEnsembleID = nil
                             }
+                            ForEach(sortedEnsembles) { ensemble in
+                                Button(ensemble.name) {
+                                    #if canImport(UIKit)
+                                    ContentViewKeyboardDismiss.dismiss()
+                                    #endif
+                                    selectedEnsembleID = ensemble.id
+                                }
+                            }
+                        } label: {
+                            FilterSelectorValueControl(valueText: selectedEnsembleName)
                         }
-                    } label: {
-                        FilterSelectorValueControl(valueText: selectedEnsembleName)
+                        .simultaneousGesture(
+                            TapGesture().onEnded {
+                                #if canImport(UIKit)
+                                ContentViewKeyboardDismiss.dismiss()
+                                #endif
+                            }
+                        )
+                        .modifier(FilterSelectorTrailingControlStyle())
                     }
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                            #if canImport(UIKit)
-                            ContentViewKeyboardDismiss.dismiss()
-                            #endif
-                        }
-                    )
-                    .modifier(FilterSelectorTrailingControlStyle())
                 }
 
                 FilterCardDivider()

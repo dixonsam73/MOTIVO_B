@@ -518,6 +518,7 @@ fileprivate struct SessionsRootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appRoute: AppRouteStore
+    @EnvironmentObject private var appModeManager: AppModeManager
 
     @State private var showPublishSkipOversizeAlert = false
     @State private var publishSkipOversizeMessage = ""
@@ -770,26 +771,29 @@ fileprivate struct SessionsRootView: View {
         .buttonStyle(.plain)
     }
 
+    @ViewBuilder
     private var modeSelectorControl: some View {
-        Picker("Mode", selection: $selectedScope) {
-            ForEach(FeedScope.allCases) { scope in
-                Text(scope.rawValue).tag(scope)
+        if appModeManager.canViewFeed {
+            Picker("Mode", selection: $selectedScope) {
+                ForEach(FeedScope.allCases) { scope in
+                    Text(scope.rawValue).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .controlSize(.small)
+            .onChange(of: selectedScope) {  _, newValue in
+                #if canImport(UIKit)
+                ContentViewKeyboardDismiss.dismiss()
+                #endif
+                isAwaitingFeedFetchStart = (newValue == .all) && useBackendFeed
+            }
+            .onChange(of: backendFeedStore.isFetching) {  _, isFetching in
+                if isFetching {
+                    isAwaitingFeedFetchStart = false
+                }
             }
         }
-        .pickerStyle(.segmented)
-        .controlSize(.small)
-        .onChange(of: selectedScope) {  _, newValue in
-            #if canImport(UIKit)
-            ContentViewKeyboardDismiss.dismiss()
-            #endif
-            isAwaitingFeedFetchStart = (newValue == .all) && useBackendFeed
-        }
-        .onChange(of: backendFeedStore.isFetching) {  _, isFetching in
-            if isFetching {
-                isAwaitingFeedFetchStart = false
-            }
-        }
-      }
+    }
 
     @ViewBuilder
     private var journalSummaryBaselineContent: some View {
@@ -915,7 +919,8 @@ fileprivate struct SessionsRootView: View {
                         selectedThread: $selectedThread,
                         selectedEnsembleID: $selectedEnsembleID,
                         threadOptions: existingThreadOptions,
-                        ensembles: ensembleStore.ensembles
+                        ensembles: ensembleStore.ensembles,
+                        showEnsembleFilter: appModeManager.canViewFeed
                     )
                 }
                 .contentShape(Rectangle())
@@ -1517,7 +1522,7 @@ fileprivate struct SessionsRootView: View {
                     }
                     .accessibilityLabel("Open profile")
                     // People (search / follows)
-                    if selectedScope == .all {
+                    if appModeManager.canViewFeed && selectedScope == .all {
                         Button {
                             practiceInsightStore.clearCurrentInsight()
                             showPeople = true
@@ -1737,7 +1742,11 @@ fileprivate struct SessionsRootView: View {
             }
             .onAppear {
                 filtersExpanded = false
+                enforceJournalOnlyModeIfNeeded()
                 consumePendingContentLaunchScopeOverrideIfNeeded()
+            }
+            .onChange(of: appModeManager.mode) { _, _ in
+                enforceJournalOnlyModeIfNeeded()
             }
             .appBackground()
         }
@@ -2636,9 +2645,18 @@ fileprivate struct SessionsRootView: View {
             )
     }
 
+    private func enforceJournalOnlyModeIfNeeded() {
+        guard appModeManager.canViewFeed == false else { return }
+        selectedScope = .mine
+        selectedEnsembleID = nil
+        activeUserFilterUserID = nil
+        isAwaitingFeedFetchStart = false
+    }
+
     private func consumePendingContentLaunchScopeOverrideIfNeeded() {
         guard appRoute.pendingContentLaunchScopeOverride == "feed" else { return }
         appRoute.pendingContentLaunchScopeOverride = nil
+        guard appModeManager.canViewFeed else { return }
         selectedScope = .all
     }
 

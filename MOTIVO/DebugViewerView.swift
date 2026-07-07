@@ -903,7 +903,7 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
                 .foregroundStyle(.secondary)
 
             Picker("App Experience", selection: $appModeManager.mode) {
-                ForEach(AppMode.allCases) { mode in
+                ForEach(AppMode.allCases, id: \.self) { mode in
                     Text(mode.displayName).tag(mode)
                 }
             }
