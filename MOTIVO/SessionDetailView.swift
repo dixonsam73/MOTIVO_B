@@ -148,6 +148,7 @@ struct SessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
     @AppStorage("appSettings_tintMode") private var tintModeRaw: String = Theme.TintMode.auto.rawValue
 
     @ObservedObject private var commentsStore = CommentsStore.shared
@@ -1696,41 +1697,47 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
             .accessibilityLabel("Open comments")
 
 
-            // Comment
-            Button {
-                // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
-                if sessionIDForComments != nil, canOpenComments {
-                    isCommentsPresented = true
-                } else {
-                    // Fail closed: do nothing.
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: hasComments ? "text.bubble" : "bubble.right")
-                        .font(.system(size: 20, weight: .regular))
-                        .foregroundStyle(Theme.Colors.secondaryText)
-
-                }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Open comments")            // Share
-            Group {
-                let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
-                if isOwner {
-                    Button {
-                        isShareSheetPresented = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            Image(systemName: "square.and.arrow.up")
-                                .font(.system(size: 20, weight: .regular))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .contentShape(Rectangle())
+            if appModeManager.canComment {
+                // Comment
+                Button {
+                    // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
+                    if sessionIDForComments != nil, canOpenComments {
+                        isCommentsPresented = true
+                    } else {
+                        // Fail closed: do nothing.
                     }
-                    .buttonStyle(.plain)
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: hasComments ? "text.bubble" : "bubble.right")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+
+                    }
+                    .frame(maxWidth: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Open comments")
+            }
+
+            if appModeManager.canForwardPost {
+                // Share
+                Group {
+                    let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
+                    if isOwner {
+                        Button {
+                            isShareSheetPresented = true
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.system(size: 20, weight: .regular))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }

@@ -37,6 +37,7 @@ struct SessionRow: View {
 
     @Environment(\.managedObjectContext) private var ctx
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
 
     // Force refresh when any Attachment belonging to this session changes (e.g., isThumbnail toggled in Add/Edit)
     @State private var _refreshTick: Int = 0
@@ -952,31 +953,33 @@ struct SessionRow: View {
             .accessibilityLabel(isSavedLocal ? "Unsave" : "Save")
 
             if scope != .mine {
-                // Comment (opens comments sheet)
-                Button(action: {
-                    // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
-                    if sessionIDForComments != nil {
-                        if viewerIsOwner {
-                            isCommentsPresented = true
-                        } else if let owner = session.ownerUserID, FollowStore.shared.isFollowing(owner) {
-                            isCommentsPresented = true
-                        } else {
-                            // Fail closed: do nothing.
+                if appModeManager.canComment {
+                    // Comment (opens comments sheet)
+                    Button(action: {
+                        // 9D.2: gate comment entry points based on backend follow state (until comments are server-backed)
+                        if sessionIDForComments != nil {
+                            if viewerIsOwner {
+                                isCommentsPresented = true
+                            } else if let owner = session.ownerUserID, FollowStore.shared.isFollowing(owner) {
+                                isCommentsPresented = true
+                            } else {
+                                // Fail closed: do nothing.
+                            }
                         }
-                    }
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: hasComments ? "text.bubble" : "bubble.right")
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                    }
-                    .font(.system(size: 18, weight: .semibold))
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: hasComments ? "text.bubble" : "bubble.right")
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        .font(.system(size: 18, weight: .semibold))
 
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Comments")
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Comments")
 
                 // Share (owner-only)
-                if viewerIsOwner {
+                if appModeManager.canForwardPost && viewerIsOwner {
                     Button(action: {
                         isShareSheetPresented = true
                     }) {

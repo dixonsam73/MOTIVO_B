@@ -1,9 +1,18 @@
-import Foundation
-import SwiftUI
+//
+//  AppModeManager.swift
+//  MOTIVO
+//
+//  Milestone 0: Études / Études Connected architectural foundation.
+//
 
-public enum AppMode: String, CaseIterable {
+import Foundation
+import Combine
+
+public enum AppMode: String, CaseIterable, Identifiable {
     case solo
     case connected
+
+    public var id: String { rawValue }
 
     public var displayName: String {
         switch self {
@@ -23,10 +32,20 @@ public final class AppModeManager: ObservableObject {
         self.mode = mode
     }
 
-    /// Milestone 1:
-    /// Connected-only capability used by ContentView to determine
-    /// whether feed-related UI should be available.
+    // MARK: - Capabilities
+
+    /// Milestone 1
     public var canViewFeed: Bool {
+        mode == .connected
+    }
+
+    /// Milestone 2
+    public var canComment: Bool {
+        mode == .connected
+    }
+
+    /// Milestone 2
+    public var canForwardPost: Bool {
         mode == .connected
     }
 }
