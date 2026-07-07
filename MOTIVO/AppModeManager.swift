@@ -48,4 +48,19 @@ public final class AppModeManager: ObservableObject {
     public var canForwardPost: Bool {
         mode == .connected
     }
+
+    /// Milestone 3
+    public var canShareWithFollowers: Bool {
+        mode == .connected
+    }
+
+    /// Milestone 3
+    public var canUseAttachmentPrivacy: Bool {
+        mode == .connected
+    }
+
+    /// Milestone 3
+    public var canUseNotesPrivacy: Bool {
+        mode == .connected
+    }
 }

@@ -172,6 +172,7 @@ struct AddEditSessionView: View {
     @Environment(\.managedObjectContext) var viewContext
     @Environment(\.dismiss) var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject var appModeManager: AppModeManager
 
     // Editing existing session or creating new
     var session: Session? = nil
@@ -1120,6 +1121,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     }
                 }
 
+                if appModeManager.canShareWithFollowers {
                 // ---------- Visibility ----------
                 HStack(alignment: .center, spacing: Theme.Spacing.m) {
                     Image(systemName: "person.2")
@@ -1143,12 +1145,14 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 }
                 .contentShape(Rectangle())
                 .padding(.vertical, 10)
+                }
 
                 // Notes
                 VStack(alignment: .leading, spacing: Theme.Spacing.s) {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Notes").sectionHeader()
                         Spacer(minLength: 0)
+                        if appModeManager.canUseNotesPrivacy {
                         Button(action: {
                             areNotesPrivate_edit.toggle()
                             #if canImport(UIKit)
@@ -1162,8 +1166,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(areNotesPrivate_edit ? "Make notes visible to others" : "Make notes private")
+                        }
                     }
-                    if areNotesPrivate_edit {
+                    if appModeManager.canUseNotesPrivacy && areNotesPrivate_edit {
                         Text("Only you will see these notes.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.secondaryText)
@@ -1241,6 +1246,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                                     .accessibilityLabel(selectedThumbnailID == att.id ? "Thumbnail (selected)" : "Set as Thumbnail")
                                                                             }
     
+                                                                            if appModeManager.canUseAttachmentPrivacy {
                                                                             let fileURL: URL? = surrogateURL(for: att)
                                                                             let priv: Bool = isPrivate(id: att.id, url: fileURL)
                                                                             Button {
@@ -1263,6 +1269,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                                                             }
                                                                             .buttonStyle(.plain)
                                                                             .accessibilityLabel(priv ? "Mark attachment public" : "Mark attachment private")
+                                                                            }
     
                                                                             Button {
                                                                                 // Preserve existing persistent delete behavior for items sourced from Core Data
@@ -1531,6 +1538,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                             .buttonStyle(.plain)
                                             .accessibilityLabel(selectedThumbnailID == att.id ? "Unset thumbnail" : "Set as thumbnail")
 
+                                            if appModeManager.canUseAttachmentPrivacy {
                                             let privURL = url
                                             let isPriv = isPrivate(id: att.id, url: privURL)
                                             Button {
@@ -1544,6 +1552,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                                             }
                                             .buttonStyle(.plain)
                                             .accessibilityLabel("Toggle privacy")
+                                            }
 
                                             Button(role: .destructive) {
                                                 removeStagedAttachment(att)

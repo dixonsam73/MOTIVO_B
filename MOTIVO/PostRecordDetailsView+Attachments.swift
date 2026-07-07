@@ -221,7 +221,8 @@ isPrivate: { url in
                                         },
                                         setPrivate: { id, url, value in
                                             setPrivate(id: id, url: url, value)
-                                        }
+                                        },
+                                        showPrivacy: appModeManager.canUseAttachmentPrivacy
                                     )
                                     .contentShape(Rectangle())
                                     .onTapGesture {
@@ -401,6 +402,7 @@ isPrivate: { url in
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(selectedThumbnailID == att.id ? "Unset as thumbnail" : "Set as thumbnail")
 
+                                    if appModeManager.canUseAttachmentPrivacy {
                                     // Privacy toggle
                                     let privURL = url
                                     Button {
@@ -414,6 +416,7 @@ isPrivate: { url in
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(isPrivate(id: att.id, url: privURL) ? "Mark attachment public" : "Mark attachment private")
+                                    }
 
                                     // Delete
                                     Button(role: .destructive) {
@@ -1038,6 +1041,7 @@ fileprivate struct AttachmentThumbCell: View {
     let onRemove: () -> Void
     let isPrivate: (_ id: UUID?, _ url: URL?) -> Bool
     let setPrivate: (_ id: UUID?, _ url: URL?, _ value: Bool) -> Void
+    let showPrivacy: Bool
 
     @State private var videoPoster: UIImage? = nil
     @State private var pdfThumbnail: UIImage? = nil
@@ -1071,6 +1075,7 @@ fileprivate struct AttachmentThumbCell: View {
                         .accessibilityLabel(isThumbnail ? "Thumbnail (selected)" : "Set as Thumbnail")
                 }
 
+                if showPrivacy {
                 // Privacy toggle (ID-first, URL fallback)
                 let priv = isPrivate(att.id, resolvedURL)
                 Button {
@@ -1085,6 +1090,7 @@ fileprivate struct AttachmentThumbCell: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(priv ? "Mark attachment shared" : "Mark attachment private")
+                }
 
                 // Delete
                 Button {

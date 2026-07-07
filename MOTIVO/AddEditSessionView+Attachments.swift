@@ -1217,42 +1217,42 @@ func guaranteedSurrogateURL_edit(for att: StagedAttachment) -> URL? {
                                         guard stagedAttachments.contains(where: { $0.id == id }) else { return false }
                                         return selectedThumbnailID == id
                                     },
-                                    onTogglePrivacy: { url in
-    // Resolve attachment identity by viewer index first (matches imageURLs+videoURLs+audioURLs),
-    // falling back to UUID-from-stem when possible.
-    let attID: UUID? = {
-        let all = imageURLs + videoURLs + audioURLs + pdfURLs
-        if let idx = all.firstIndex(where: { $0 == url }),
-           idx >= 0,
-           idx < req.viewerAttachmentIDs.count {
-            return req.viewerAttachmentIDs[idx]
-        }
-        let stem = url.deletingPathExtension().lastPathComponent
-        return UUID(uuidString: stem)
-    }()
-    guard let id = attID else { return }
-    let priv = isPrivate(id: id, url: url)
-    let newPriv = !priv
-    if newPriv, selectedThumbnailID == id {
-        // Making thumbnail private clears ⭐.
-        selectedThumbnailID = nil
-    }
-    setPrivate(id: id, url: url, newPriv)
-},
+            onTogglePrivacy: appModeManager.canUseAttachmentPrivacy ? { url in
+// Resolve attachment identity by viewer index first (matches imageURLs+videoURLs+audioURLs),
+// falling back to UUID-from-stem when possible.
+let attID: UUID? = {
+let all = imageURLs + videoURLs + audioURLs + pdfURLs
+if let idx = all.firstIndex(where: { $0 == url }),
+idx >= 0,
+idx < req.viewerAttachmentIDs.count {
+return req.viewerAttachmentIDs[idx]
+}
+let stem = url.deletingPathExtension().lastPathComponent
+return UUID(uuidString: stem)
+}()
+guard let id = attID else { return }
+let priv = isPrivate(id: id, url: url)
+let newPriv = !priv
+if newPriv, selectedThumbnailID == id {
+// Making thumbnail private clears ⭐.
+selectedThumbnailID = nil
+}
+setPrivate(id: id, url: url, newPriv)
+} : nil,
 isPrivate: { url in
-    let attID: UUID? = {
-        let all = imageURLs + videoURLs + audioURLs + pdfURLs
-        if let idx = all.firstIndex(where: { $0 == url }),
-           idx >= 0,
-           idx < req.viewerAttachmentIDs.count {
-            return req.viewerAttachmentIDs[idx]
-        }
-        let stem = url.deletingPathExtension().lastPathComponent
-        return UUID(uuidString: stem)
-    }()
-    // Default is private when identity cannot be resolved.
-    guard let id = attID else { return true }
-    return isPrivate(id: id, url: url)
+let attID: UUID? = {
+let all = imageURLs + videoURLs + audioURLs + pdfURLs
+if let idx = all.firstIndex(where: { $0 == url }),
+idx >= 0,
+idx < req.viewerAttachmentIDs.count {
+return req.viewerAttachmentIDs[idx]
+}
+let stem = url.deletingPathExtension().lastPathComponent
+return UUID(uuidString: stem)
+}()
+// Default is private when identity cannot be resolved.
+guard let id = attID else { return true }
+return isPrivate(id: id, url: url)
 },
 
                                     onReplaceAttachment: { originalURL, newURL, kind in

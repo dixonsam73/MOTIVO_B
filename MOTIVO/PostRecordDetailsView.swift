@@ -194,6 +194,7 @@ private struct PRDVScorePageSelection: Equatable {
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) var viewContext
     @Environment(\.colorScheme) private var colorScheme
+    @EnvironmentObject var appModeManager: AppModeManager
     @AppStorage("appSettings_tintMode") private var tintModeRawValue: String = Theme.TintMode.auto.rawValue
     @State private var cachedInstrumentCardTint: Theme.ResolvedTint = Theme.ResolvedTint(source: .off, instrumentLabel: nil, activityLabel: nil)
 
@@ -1056,6 +1057,7 @@ var body: some View {
                         }
                     }
 
+                    if appModeManager.canShareWithFollowers {
                     // ---------- Visibility ----------
                     HStack(alignment: .center, spacing: Theme.Spacing.m) {
                         Image(systemName: "person.2")
@@ -1079,6 +1081,7 @@ var body: some View {
                     }
                     .contentShape(Rectangle())
                     .padding(.vertical, 10)
+                    }
 
 
                     if !usedScoreItems.isEmpty {
@@ -1099,6 +1102,7 @@ var body: some View {
                         HStack(alignment: .firstTextBaseline) {
                             Text("Notes").sectionHeader()
                             Spacer()
+                            if appModeManager.canUseNotesPrivacy {
                             Button(action: {
                                 areNotesPrivate.toggle()
                                 #if canImport(UIKit)
@@ -1112,8 +1116,9 @@ var body: some View {
                             }
                             .buttonStyle(.plain)
                             .accessibilityLabel(areNotesPrivate ? "Make notes visible to others" : "Make notes private")
+                            }
                         }
-                        if areNotesPrivate {
+                        if appModeManager.canUseNotesPrivacy && areNotesPrivate {
                             Text("Only you will see these notes.")
                                 .font(.footnote)
                                 .foregroundStyle(Theme.Colors.secondaryText)

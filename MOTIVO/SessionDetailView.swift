@@ -258,6 +258,7 @@ struct SessionDetailView: View {
     // Added private computed properties for session UUID and privacy
     private var sessionUUID: UUID? { session.value(forKey: "id") as? UUID }
     private var isPrivatePost: Bool { session.isPublic == false }
+    private var showAttachmentPrivacy: Bool { appModeManager.canUseAttachmentPrivacy }
     private var areNotesPrivate: Bool {
         // Only touch KVC if the attribute exists on this entity; otherwise, default to false.
         let entity = session.entity
@@ -419,6 +420,8 @@ struct SessionDetailView: View {
                 }
             }
 
+            let shouldShowAttachmentPrivacy = showAttachmentPrivacy
+
 return AttachmentViewerView(
                 imageURLs: finalImageURLs,
                 startIndex: startIndex,
@@ -554,7 +557,7 @@ return AttachmentViewerView(
                     }
                     return false
                 },
-                onTogglePrivacy: { url in
+                onTogglePrivacy: shouldShowAttachmentPrivacy ? { url in
                     let set = (session.attachments as? Set<Attachment>) ?? []
                     let match = set.first { att in
                         guard let stored = att.value(forKey: "fileURL") as? String else { return false }
@@ -562,15 +565,15 @@ return AttachmentViewerView(
                     }
                     togglePrivacy(id: (match?.value(forKey: "id") as? UUID), url: url)
                     _refreshTick &+= 1
-                },
-                isPrivate: { url in
+                } : nil,
+                isPrivate: shouldShowAttachmentPrivacy ? { url in
                     let set = (session.attachments as? Set<Attachment>) ?? []
                     let match = set.first { att in
                         guard let stored = att.value(forKey: "fileURL") as? String else { return false }
                         return resolveAttachmentURL(from: stored) == url
                     }
                     return isPrivateAttachment(id: (match?.value(forKey: "id") as? UUID), url: url)
-                },
+                } : nil,
                 onReplaceAttachment: { originalURL, newURL, kind in
                     // Match by stable basename (UUID-like) ignoring extension, since replace moves .mov -> .mp4
                     let originalStem = originalURL.deletingPathExtension().lastPathComponent
@@ -890,6 +893,7 @@ return AttachmentViewerView(
                                     image: img,
                                     isStarred: starred,
                                     fileURL: url,
+                                    showAttachmentPrivacy: showAttachmentPrivacy,
                                     attachment: a
                                 )
                                 .contentShape(Rectangle())
@@ -908,7 +912,7 @@ return AttachmentViewerView(
                                     .trimmingCharacters(in: .whitespacesAndNewlines)
 
                                 VStack(spacing: 4) {
-                                    VideoThumbCell(fileURL: url, attachment: a)
+                                    VideoThumbCell(fileURL: url, attachment: a, showAttachmentPrivacy: showAttachmentPrivacy)
 
                                     if !title.isEmpty {
                                         Text(title)
@@ -982,7 +986,7 @@ return AttachmentViewerView(
                                 .accessibilityLabel("Open audio clip \(title)")
                                 Spacer(minLength: 8)
                                 let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
-                                if isOwner && !AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
+                                if showAttachmentPrivacy && isOwner && !AttachmentPrivacy.isPrivate(id: (a.value(forKey: "id") as? UUID), url: nil) {
                                     Image(systemName: "eye")
                                         .imageScale(.small)
                                         .foregroundStyle(Theme.Colors.secondaryText)
@@ -1000,7 +1004,7 @@ return AttachmentViewerView(
                                     .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
                             )
                         } else {
-                            AttachmentRow(attachment: a) {
+                            AttachmentRow(attachment: a, showAttachmentPrivacy: showAttachmentPrivacy) {
                                 if kind == "pdf" {
                                     viewerRequest = SDVAttachmentViewerRequest(mode: .pdf, tappedObjectID: a.objectID)
                                 } else {
@@ -1756,6 +1760,7 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
 // SEARCH-TOKEN: 20260610_1718-PDF-THUMBNAIL-SELECTION
 fileprivate struct AttachmentRow: View {
     let attachment: Attachment
+    let showAttachmentPrivacy: Bool
     let onTap: () -> Void
 
     @State private var pdfThumbnail: UIImage? = nil
@@ -1783,7 +1788,7 @@ fileprivate struct AttachmentRow: View {
             Spacer()
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
             let isThumb = ((attachment.value(forKey: "isThumbnail") as? Bool) == true)
-            if isOwner && !isThumb && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
+            if showAttachmentPrivacy && isOwner && !isThumb && !AttachmentPrivacy.isPrivate(id: (attachment.value(forKey: "id") as? UUID), url: nil) {
                 Image(systemName: "eye")
                     .imageScale(.small)
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -1915,6 +1920,7 @@ fileprivate struct ThumbCell: View {
     let image: UIImage?
     let isStarred: Bool
     let fileURL: URL?
+    let showAttachmentPrivacy: Bool
 
     private var attachmentID: UUID? {
         // KVC-safe lookup for id field
@@ -1951,7 +1957,7 @@ fileprivate struct ThumbCell: View {
 
             // Read-only privacy badge (supports ID-first and URL fallback)
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
-            if isOwner && !isStarred && !isPrivateAttachment(id: attachmentID, url: fileURL) {
+            if showAttachmentPrivacy && isOwner && !isStarred && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
                     .foregroundStyle(Theme.Colors.secondaryText)
@@ -1969,6 +1975,7 @@ import AVKit
 fileprivate struct VideoThumbCell: View {
     let fileURL: URL?
     let attachment: Attachment
+    let showAttachmentPrivacy: Bool
     @State private var poster: UIImage? = nil
 
     private var attachmentID: UUID? { (attachment.value(forKey: "id") as? UUID) }
@@ -2003,7 +2010,7 @@ fileprivate struct VideoThumbCell: View {
                     .shadow(radius: 2)
             }
             let isOwner = ((attachment.session?.ownerUserID) ?? "") == (PersistenceController.shared.currentUserID ?? "")
-            if isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
+            if showAttachmentPrivacy && isOwner && !isPrivateAttachment(id: attachmentID, url: fileURL) {
                 Image(systemName: "eye")
                     .imageScale(.small)
                     .foregroundStyle(Theme.Colors.secondaryText)
