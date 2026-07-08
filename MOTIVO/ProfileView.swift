@@ -719,7 +719,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
      }
 
      private var connectedPromoSection: some View {
-         Section(header: Text("Études Connected").sectionHeader()) {
+         Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showConnectedPlaceholder = true } label: {
                      navigationRow(title: "Explore Connected")
