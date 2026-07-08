@@ -203,10 +203,10 @@ struct ThoughtRow: View {
 
     private var saveHintView: some View {
         VStack(spacing: 2) {
-            Text("Saved for later")
+            Text("Added to Favourites")
                 .font(Theme.Text.meta)
                 .foregroundStyle(.primary)
-            Text("Use Filter to find saved posts")
+            Text("Use the Favourites filter to find it again.")
                 .font(.caption2)
                 .foregroundStyle(Theme.Colors.secondaryText)
         }
