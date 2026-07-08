@@ -1195,6 +1195,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
         // Phase 14.3H (B2) — Never attempt account_directory upsert unless we have a valid Supabase bearer token.
         // Prevents unauthenticated upsert attempts during the sign-in transition (which can leave ProfileView in an empty limbo on first sign-in).
         let auth = _auth.wrappedValue
+        guard appModeManager.canShowConnectedAccountManagement else { return }
         guard BackendEnvironment.shared.isConnected else { return }
         guard auth.hasSupabaseAccessToken else { return }
 
@@ -1309,6 +1310,8 @@ case .failure(let error):
 
      @MainActor
      private func persistAvatarToBackendIfPossible(jpegData: Data) async {
+         guard appModeManager.canShowConnectedAccountManagement else { return }
+         guard appModeManager.canShowConnectedAccountManagement else { return }
          guard BackendEnvironment.shared.isConnected else { return }
          let auth = _auth.wrappedValue
          guard auth.hasSupabaseAccessToken else { return }

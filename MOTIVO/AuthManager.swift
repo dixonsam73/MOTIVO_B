@@ -220,8 +220,9 @@ final class AuthManager: NSObject, ObservableObject {
             return await self.ensureValidSession(reason: "network-auth-challenge")
         }
 
-        scheduleDirectoryHydrationIfNeeded(reason: "init")
-        scheduleAccountIDBackfillIfNeeded(reason: "init")
+        // Milestone 5C: do not establish or hydrate Connected identity from AuthManager init.
+        // Connected identity hydration/backfill is started by Connected-mode orchestration
+        // through explicit session refresh/sign-in paths.
 
 }
 
