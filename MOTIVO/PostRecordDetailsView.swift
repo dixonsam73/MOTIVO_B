@@ -295,12 +295,12 @@ struct PostRecordDetailsView: View {
     }
 
     private func loadDraftIsPublicIfNeeded() {
-        // Default is ON (true). If user flipped OFF and the view was recreated before Save,
-        // rehydrate from draft storage to avoid snapping back to true.
+        // If the user already has an unsaved draft, restore it.
         if UserDefaults.standard.object(forKey: draftIsPublicKey) != nil {
             isPublic = UserDefaults.standard.bool(forKey: draftIsPublicKey)
         } else {
-            // Keep existing default (true) unless a future caller explicitly sets it.
+            // Brand new draft — honour the user's default posting preference.
+            isPublic = !fetchDefaultPostingIsPrivate()
         }
     }
 
@@ -1854,6 +1854,17 @@ var body: some View {
             }
         } catch { print("Profile fetch failed: \(error)") }
         return nil
+    }
+
+    private func fetchDefaultPostingIsPrivate() -> Bool {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+        req.fetchLimit = 1
+        do {
+            if let profile = try viewContext.fetch(req).first {
+                return (profile.value(forKey: "defaultPrivacy") as? Bool) ?? false
+            }
+        } catch { print("Profile fetch failed: \(error)") }
+        return false
     }
 
     private func secondsToHM(_ seconds: Int) -> (Int, Int) {

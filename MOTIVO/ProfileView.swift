@@ -302,9 +302,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                         Form {
                      Group {
                          profileSection
-                         if appModeManager.canShowConnectedAccountManagement {
-                             privacySection
-                         }
                          sessionSetupSection
                      }
                      Group {
@@ -582,23 +579,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
      }
 
 
-@ViewBuilder
-    private var privacySection: some View {
-        Section(header: Text("Privacy & connection").sectionHeader()) {
-            VStack(spacing: 0) {
-                Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                    .tint(Theme.Colors.accent)
-                    .padding(.vertical, Theme.Spacing.s)
-                    .frame(minHeight: 44, alignment: .center)
-                    .font(Theme.Text.body)
-            }
-            .cardSurface(padding: profileInnerCardPadding)
-            .listRowSeparator(.hidden)
-                .padding(.vertical, profileSectionSpacing / 2)
-        }
-    }
-
-     private var sessionSetupSection: some View {
+private var sessionSetupSection: some View {
          Section(header: Text("Settings").sectionHeader()) {
              VStack(spacing: 0) {
                  Button { showInstrumentManager = true } label: {
@@ -625,6 +606,17 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                      quietDivider()
                  }
 
+
+                  if appModeManager.canShowConnectedAccountManagement {
+                 Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                    .tint(Theme.Colors.accent)
+                    .padding(.vertical, Theme.Spacing.s)
+                    .frame(minHeight: 44, alignment: .center)
+                    .font(Theme.Text.body)
+                    .overlay(alignment: .bottom) {
+                        quietDivider()
+                    }
+                  }
                  Button { showTintModeSelection = true } label: {
                      navigationRow(title: "Journal Tint", value: currentTintMode.displayName)
                  }
@@ -703,6 +695,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  .overlay(alignment: .bottom) {
                      quietDivider()
                  }
+
 
                  Toggle(isOn: $showTuner) {
                      Text("Show Tuner")

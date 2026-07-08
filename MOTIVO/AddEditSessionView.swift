@@ -1826,7 +1826,7 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             // New mode defaults
             timestamp = Date()
             durationSeconds = 0
-            isPublic = !isThoughtMode
+            isPublic = isThoughtMode ? false : !fetchDefaultPostingIsPrivate()
 
             // Threads v1 (owner-only metadata)
             threadLabel = sanitizeThreadLabel_v1(threadLabelPrefill)
@@ -2247,6 +2247,19 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             print("Profile fetch failed: \(error)")
         }
         return nil
+    }
+
+    private func fetchDefaultPostingIsPrivate() -> Bool {
+        let req = NSFetchRequest<NSManagedObject>(entityName: "Profile")
+        req.fetchLimit = 1
+        do {
+            if let profile = try viewContext.fetch(req).first {
+                return (profile.value(forKey: "defaultPrivacy") as? Bool) ?? false
+            }
+        } catch {
+            print("Profile fetch failed: \(error)")
+        }
+        return false
     }
 
     private func defaultTitle(for inst: Instrument? = nil, activity: SessionActivityType) -> String {
