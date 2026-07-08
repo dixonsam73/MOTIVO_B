@@ -213,8 +213,9 @@ struct MOTIVOApp: App {
                 .environmentObject(appRoute)
                 .environmentObject(appModeManager)
                 .onAppear {
-                    // Phase 14.2.2: Session liveness — refresh Supabase session on launch to prevent zombie auth.
+                    // Phase 14.2.2: Session liveness — refresh Supabase session only when the Connected runtime is allowed.
                     Task {
+                        guard appModeManager.canViewFeed else { return }
                         if auth.isSigningIn {
                             NSLog("[App] launch: sign-in in flight; skipping ensureValidSession")
                         } else {
@@ -230,6 +231,7 @@ struct MOTIVOApp: App {
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
                     // Phase 14.2: Connected-mode liveness trigger (idempotent apply + lightweight refresh/flush)
+                    guard appModeManager.canViewFeed else { return }
                     BackendConfig.apply()
                     guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }
                     Task {

@@ -233,6 +233,7 @@ struct PracticeTimerView: View {
     @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject var appRoute: AppRouteStore
+    @EnvironmentObject private var appModeManager: AppModeManager
 
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var unreadCommentsStore = UnreadCommentsStore.shared
@@ -1476,6 +1477,7 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private func refreshRelationalUnseenCountSources() async {
+        guard appModeManager.canViewFeed else { return }
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
         await unreadCommentsStore.refresh(force: true)

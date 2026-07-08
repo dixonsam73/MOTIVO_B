@@ -653,11 +653,16 @@ fileprivate struct SessionsRootView: View {
     @ObservedObject private var commentPresence = CommentPresenceStore.shared
     @State private var isAwaitingFeedFetchStart: Bool = false
 
-    private var useBackendFeed: Bool {
+    private var canStartConnectedRuntime: Bool {
         _ = backendModeChangeTick
-        return BackendEnvironment.shared.isConnected &&
+        return appModeManager.canViewFeed &&
+        BackendEnvironment.shared.isConnected &&
         BackendConfig.isConfigured &&
         (NetworkManager.shared.baseURL != nil)
+    }
+
+    private var useBackendFeed: Bool {
+        canStartConnectedRuntime
     }
 
     private var shouldDeferFeedEmptyState: Bool {
@@ -1589,6 +1594,10 @@ fileprivate struct SessionsRootView: View {
             }
             #if canImport(UIKit)
             .task(id: toolbarAvatarKeyNormalized) {
+                guard canStartConnectedRuntime else {
+                    toolbarRemoteAvatar = nil
+                    return
+                }
                 guard !toolbarAvatarKeyNormalized.isEmpty else {
                     toolbarRemoteAvatar = nil
                     return
@@ -1714,6 +1723,7 @@ fileprivate struct SessionsRootView: View {
 // Debounce lifecycle
             .task {
                 setUpDebounce()
+                guard canStartConnectedRuntime else { return }
                 await sharedWithYouStore.refreshUnreadShares()
                 await unreadCommentsStore.refresh(force: true)
                
@@ -1733,6 +1743,7 @@ fileprivate struct SessionsRootView: View {
             .onChange(of: scenePhase) { _, phase in
                 // Phase 14.1: refresh incoming follow requests when returning to foreground (no polling)
                 guard phase == .active else { return }
+                guard canStartConnectedRuntime else { return }
                
                 Task { @MainActor in
                     await followStore.refreshFromBackendIfPossible()
@@ -1789,13 +1800,13 @@ fileprivate struct SessionsRootView: View {
     // SCOPE: Reuse existing refresh bundle on pull-to-refresh; add debounced notification refresh on return-to-feed (no UI changes).
     private func performUserInitiatedRefreshBundle() async {
         // User-initiated refresh (pull-to-refresh)
-        if useBackendFeed {
+        if canStartConnectedRuntime {
             let scopeKey: String = (selectedScope == .mine) ? "mine" : "all"
             _ = await BackendEnvironment.shared.publish.fetchFeed(scope: scopeKey)
+            await followStore.refreshFromBackendIfPossible()
+            await sharedWithYouStore.refreshUnreadShares()
+            await unreadCommentsStore.refresh(force: true)
         }
-        await followStore.refreshFromBackendIfPossible()
-        await sharedWithYouStore.refreshUnreadShares()
-        await unreadCommentsStore.refresh(force: true)
         await MainActor.run {
             refreshStats()
         }
@@ -1805,6 +1816,7 @@ fileprivate struct SessionsRootView: View {
         // PeopleView is the modal surface that clears People notifications.
         // Refresh this ContentView's notification stores immediately on return,
         // without the feed-pop suppression/debounce used for general feed refreshes.
+        guard canStartConnectedRuntime else { return }
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
         await unreadCommentsStore.refresh(force: true)
@@ -1813,6 +1825,7 @@ fileprivate struct SessionsRootView: View {
     private func performAutoReturnRefreshBundle(scopeKey: String) async {
         // Auto refresh when returning to the feed: notifications only (posts refresh already handled separately).
         // Keep the same BSDV back-pop suppression window to avoid one-frame list rebind/flash.
+        guard canStartConnectedRuntime else { return }
         if Date().timeIntervalSince(BackendDetailPopGate.lastPopAt) < 0.75 {
             return
         }
