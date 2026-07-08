@@ -18,7 +18,7 @@ struct AboutEtudesView: View {
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text("Accounts are private by default. Sharing is intentional. There are no public counts, rankings, or popularity systems.")
+                        Text("Études is private by default. If you choose to enable Études Connected, sharing remains entirely intentional. There are no public counts, rankings or popularity systems.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -52,7 +52,7 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("You control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default — tap the eye icon to include them.")
+                    Text("In Études Connected, you control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default and can be included individually when publishing.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -74,27 +74,27 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Your Feed shows shared sessions in chronological order. If you follow other musicians, you’ll only see what they’ve intentionally chosen to share.")
+                    Text("If you choose to enable Études Connected, your Feed shows shared sessions in chronological order. You’ll only see what other musicians have intentionally chosen to share.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
                     (
-                        Text("Use Filters to narrow what you see by instrument, activity, Threads, ensembles, saved sessions (")
+                        Text("Use Filters to narrow your Journal by instrument, activity, Threads, Favourites (")
                         + Text(Image(systemName: "heart"))
-                        + Text("), content type, or search.")
+                        + Text("), content type, or search. Études Connected adds additional filters for shared content and Ensembles.")
                     )
                     .font(Theme.Text.body)
                     .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Saved sessions are personal bookmarks, not public reactions.")
+                    Text("Favourited Sessions and Thoughts are personal bookmarks, never public reactions.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Ensembles help organise the people you follow into meaningful musical contexts — for example students, collaborators, chamber groups, or bands.")
+                    Text("In Études Connected, Ensembles help organise the people you follow into meaningful musical contexts — for example students, collaborators, chamber groups, or bands.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("Comments are private conversations between you and the author — never public threads.")
+                    Text("In Études Connected, comments are private conversations between you and the author — never public threads.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
                 }
