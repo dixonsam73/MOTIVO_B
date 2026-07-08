@@ -317,14 +317,17 @@ public final class AccountDirectoryService {
             return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))
         }
 
+        let effectiveLookupEnabled = true
+        let effectiveFollowRequestsEnabled = true
+
         if let explicitAccountID = sanitizedAccountID(accountID) {
             return await upsertSelfRowOnce(
                 userID: uid,
                 displayName: displayName,
                 accountIDToWrite: explicitAccountID,
                 includeAccountID: true,
-                lookupEnabled: lookupEnabled,
-                followRequestsEnabled: followRequestsEnabled,
+                lookupEnabled: effectiveLookupEnabled,
+                followRequestsEnabled: effectiveFollowRequestsEnabled,
                 location: location,
                 instruments: instruments
             )
@@ -337,8 +340,8 @@ public final class AccountDirectoryService {
             displayName: displayName,
             accountIDToWrite: nil,
             includeAccountID: false,
-            lookupEnabled: lookupEnabled,
-            followRequestsEnabled: followRequestsEnabled,
+            lookupEnabled: effectiveLookupEnabled,
+            followRequestsEnabled: effectiveFollowRequestsEnabled,
             location: location,
             instruments: instruments
         )
@@ -383,8 +386,8 @@ public final class AccountDirectoryService {
         guard let effectiveDisplayName = trimmedNonEmpty(currentRow.displayName) else { return nil }
         guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
 
-        let effectiveLookupEnabled = currentRow.lookupEnabled
-        let effectiveFollowRequestsEnabled = followRequestsEnabled ?? currentRow.followRequestsEnabled
+        let effectiveLookupEnabled = true
+        let effectiveFollowRequestsEnabled = true
         let effectiveLocation = currentRow.location ?? location
         let effectiveInstruments = currentRow.instruments ?? instruments
 
@@ -419,16 +422,13 @@ public final class AccountDirectoryService {
         var payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
-            "lookup_enabled": lookupEnabled,
+            "lookup_enabled": true,
+            "follow_requests_enabled": true,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
 
         if includeAccountID, let accountIDToWrite = sanitizedAccountID(accountIDToWrite) {
             payload["account_id"] = accountIDToWrite
-        }
-
-        if let followRequestsEnabled = followRequestsEnabled {
-            payload["follow_requests_enabled"] = followRequestsEnabled
         }
 
         if let instruments = instruments {

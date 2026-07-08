@@ -591,48 +591,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                     .padding(.vertical, Theme.Spacing.s)
                     .frame(minHeight: 44, alignment: .center)
                     .font(Theme.Text.body)
-                    .overlay(alignment: .bottom) {
-                        quietDivider()
-                    }
-
-                Toggle(
-                    "Allow follow requests",
-                    isOn: Binding(
-                        get: {
-                            (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual) == .manual
-                        },
-                        set: { isOn in
-                            followRequestModeRaw = isOn
-                                ? FollowRequestMode.manual.rawValue
-                                : FollowRequestMode.autoApproveContacts.rawValue
-                        }
-                    )
-                )
-                .tint(Theme.Colors.accent)
-                .padding(.vertical, Theme.Spacing.s)
-                .frame(minHeight: 44, alignment: .center)
-                .font(Theme.Text.body)
-                .overlay(alignment: .bottom) {
-                    quietDivider()
-                }
-
-                Toggle(
-                    "Searchable by name",
-                    isOn: Binding(
-                        get: {
-                            (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-                        },
-                        set: { isOn in
-                            discoveryModeRawPerUser = isOn
-                                ? DiscoveryMode.search.rawValue
-                                : DiscoveryMode.none.rawValue
-                        }
-                    )
-                )
-                .tint(Theme.Colors.accent)
-                .padding(.vertical, Theme.Spacing.s)
-                .frame(minHeight: 44, alignment: .center)
-                .font(Theme.Text.body)
             }
             .cardSurface(padding: profileInnerCardPadding)
             .listRowSeparator(.hidden)
@@ -930,8 +888,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          refreshAvatarDisplay()
          self.locationText = ProfileStore.location(for: auth.backendUserID)
 
-         // Phase 12C: per-backend-user lookup state (per-user; legacy allowDiscovery_v1 adopted as initial default)
-         discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
+         // Connected discovery is no longer user-configurable; keep local legacy state aligned for compatibility.
+         discoveryModeRawPerUser = DiscoveryMode.search.rawValue
+         ProfileStore.setDiscoveryModeRaw(DiscoveryMode.search.rawValue, for: auth.backendUserID)
          accountIDText = ProfileStore.accountID(for: auth.backendUserID)
      }
 
@@ -1201,10 +1160,9 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
 
          guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
          let display = name.trimmingCharacters(in: .whitespacesAndNewlines)
-         // If user hasn’t opted in, ensure lookup is disabled (row may still exist).
-         let enabled = (DiscoveryMode(rawValue: discoveryModeRawPerUser) ?? .none) == .search
-         let frm = (FollowRequestMode(rawValue: followRequestModeRaw) ?? .manual)
-         let followRequestsEnabled = !(frm == .autoApproveContacts || frm == .closed)
+         // Connected discovery is always enabled. Relationship privacy is handled by explicit follow approval.
+         let enabled = true
+         let followRequestsEnabled = true
          let acct = accountIDText.trimmingCharacters(in: .whitespacesAndNewlines)
          let storedAccountID = ProfileStore.accountID(for: backendID).trimmingCharacters(in: .whitespacesAndNewlines)
          // Account ID is user-scoped. During sign-out/delete/recreate transitions, accountIDText can briefly
@@ -1221,7 +1179,7 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
          }
 
          let instrumentsFP = instrumentsSorted.joined(separator: ",")
-         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|\(enabled ? "1" : "0")|fr:\(followRequestsEnabled ? "1" : "0")|i:\(instrumentsFP)"
+         let fingerprint = "\(backendID)|\(display)|\(locOrNil ?? "nil")|\(acctOrNil ?? "nil")|connectedDiscovery:1|fr:1|i:\(instrumentsFP)"
          if fingerprint == lastDirectorySyncFingerprint { return }
          let result = await AccountDirectoryService.shared.upsertSelfRow(
              userID: backendID,
@@ -1634,9 +1592,10 @@ private func initials(from string: String) -> String {
                 // Phase 12C: user-scoped lookup state (per backend identity)
                 if newValue == nil {
                     accountIDText = ""
-                    discoveryModeRawPerUser = DiscoveryMode.none.rawValue
+                    discoveryModeRawPerUser = DiscoveryMode.search.rawValue
                 } else {
-                    discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
+                    discoveryModeRawPerUser = DiscoveryMode.search.rawValue
+                    ProfileStore.setDiscoveryModeRaw(DiscoveryMode.search.rawValue, for: auth.backendUserID)
                     accountIDText = ProfileStore.accountID(for: auth.backendUserID)
                     locationText = ProfileStore.location(for: auth.backendUserID)
                 }
@@ -1659,14 +1618,6 @@ private func initials(from string: String) -> String {
              }
              .onChange(of: locationText) { _, _ in
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
-             }
-             .onChange(of: discoveryModeRawPerUser) { _, newValue in
-                 ProfileStore.setDiscoveryModeRaw(newValue, for: auth.backendUserID)
-                 Task { await syncDirectoryFromCurrentState() }
-             }
-             .onChange(of: followRequestModeRaw) { _, _ in
-                 // Hardening: push follow-request preference immediately to backend (no restart dependency).
-                 Task { await syncDirectoryFromCurrentState() }
              }
              .alert("Primary Activity reset", isPresented: $showPrimaryFallbackAlert) {
                  Button("OK", role: .cancel) {}

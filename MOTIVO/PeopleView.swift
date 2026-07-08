@@ -411,7 +411,7 @@ struct PeopleView: View {
             Text("Find").sectionHeader()
 
             HStack(spacing: Theme.Spacing.s) {
-                TextField("Search name or account ID", text: $searchText)
+                TextField("Search by name or instrument", text: $searchText)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled(true)
                     .font(Theme.Text.meta)
@@ -449,7 +449,7 @@ struct PeopleView: View {
                     .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .disabled(isSearching || searchText.trimmingCharacters(in: .whitespacesAndNewlines).count < 3)
+                .disabled(isSearching || searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 .accessibilityLabel("Lookup user")
             }
 
@@ -506,8 +506,7 @@ struct PeopleView: View {
         searchResults = []
 
         let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard q.count >= 3 else {
-            searchError = "Enter at least 3 characters."
+        guard !q.isEmpty else {
             return
         }
 
