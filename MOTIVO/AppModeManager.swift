@@ -63,4 +63,9 @@ public final class AppModeManager: ObservableObject {
     public var canUseNotesPrivacy: Bool {
         mode == .connected
     }
+
+    /// Milestone 4
+    public var canShowConnectedAccountManagement: Bool {
+        mode == .connected
+    }
 }

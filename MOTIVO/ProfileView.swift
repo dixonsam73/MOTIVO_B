@@ -182,6 +182,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  struct ProfileView: View {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
     @Environment(\.colorScheme) private var colorScheme
  
      // Close-first strategy
@@ -282,6 +283,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
+     @State private var showConnectedPlaceholder: Bool = false
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
  
@@ -300,11 +302,17 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                         Form {
                      Group {
                          profileSection
-                         privacySection
+                         if appModeManager.canShowConnectedAccountManagement {
+                             privacySection
+                         }
                          sessionSetupSection
                      }
                      Group {
+                         if appModeManager.canShowConnectedAccountManagement {
                              appSettingsSection
+                         } else {
+                             connectedPromoSection
+                         }
                      }
                         }
                         .background(KeyboardDismissFormTapCatcher(onDismiss: {
@@ -327,6 +335,11 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 }
                 .navigationDestination(isPresented: $showTintModeSelection) {
                     TintModeSelectionView()
+                }
+                .alert("Études Connected", isPresented: $showConnectedPlaceholder) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Explore Connected will be added later.")
                 }
                 .appBackground()
             }
@@ -510,51 +523,53 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                          quietDivider()
                      }
 
-                     HStack(spacing: 10) {
-                         if !accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                             Text("@")
-                                 .font(Theme.Text.meta)
-                                 .foregroundStyle(Theme.Colors.secondaryText)
-                         }
-
-                         TextField("Account ID : How people find you.", text: $accountIDText)
-                             .textInputAutocapitalization(.never)
-                             .autocorrectionDisabled(true)
-                             .keyboardType(.asciiCapable)
-                             .onChange(of: accountIDText) { _, newValue in
-                                 let normalized = normalizeAccountID(newValue)
-                                 if normalized != newValue { accountIDText = normalized }
-                                 // Clear any prior sync feedback as the user edits.
-                                 accountIDSyncMessage = nil
-                                 accountIDSyncIsError = false
-                                 ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
+                     if appModeManager.canShowConnectedAccountManagement {
+                         HStack(spacing: 10) {
+                             if !accountIDText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                                 Text("@")
+                                     .font(Theme.Text.meta)
+                                     .foregroundStyle(Theme.Colors.secondaryText)
                              }
-                             .focused($isAccountIDFocused)
-                             .onChange(of: isAccountIDFocused) { oldValue, newValue in
-                                 // Commit-only: on blur, sync once with the latest sanitized state.
-                                 // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
-                                 if oldValue == true && newValue == false {
-                                     if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
-                                         return
-                                     }
-                                     Task { await syncDirectoryFromCurrentState() }
+    
+                             TextField("Account ID : How people find you.", text: $accountIDText)
+                                 .textInputAutocapitalization(.never)
+                                 .autocorrectionDisabled(true)
+                                 .keyboardType(.asciiCapable)
+                                 .onChange(of: accountIDText) { _, newValue in
+                                     let normalized = normalizeAccountID(newValue)
+                                     if normalized != newValue { accountIDText = normalized }
+                                     // Clear any prior sync feedback as the user edits.
+                                     accountIDSyncMessage = nil
+                                     accountIDSyncIsError = false
+                                     ProfileStore.setAccountID(accountIDText, for: auth.backendUserID)
                                  }
-                             }
-                             .onSubmit {
-                                 // Commit-only: on Return/Done, sync once.
-                                 lastAccountIDSubmitAt = Date()
-                                 Task { await syncDirectoryFromCurrentState() }
-                                 isAccountIDFocused = false
-                             }
-                             .font(Theme.Text.meta)
-                             .foregroundStyle(Color.primary)
+                                 .focused($isAccountIDFocused)
+                                 .onChange(of: isAccountIDFocused) { oldValue, newValue in
+                                     // Commit-only: on blur, sync once with the latest sanitized state.
+                                     // Guard: Return/Done often triggers both onSubmit and a blur; avoid double-posting.
+                                     if oldValue == true && newValue == false {
+                                         if let t = lastAccountIDSubmitAt, Date().timeIntervalSince(t) < 0.35 {
+                                             return
+                                         }
+                                         Task { await syncDirectoryFromCurrentState() }
+                                     }
+                                 }
+                                 .onSubmit {
+                                     // Commit-only: on Return/Done, sync once.
+                                     lastAccountIDSubmitAt = Date()
+                                     Task { await syncDirectoryFromCurrentState() }
+                                     isAccountIDFocused = false
+                                 }
+                                 .font(Theme.Text.meta)
+                                 .foregroundStyle(Color.primary)
+                         }
+                         .padding(.vertical, Theme.Spacing.s)
+                         .frame(minHeight: 44, alignment: .center)
                      }
-                     .padding(.vertical, Theme.Spacing.s)
-                     .frame(minHeight: 44, alignment: .center)
                  }
                  .cardSurface(padding: profileInnerCardPadding)
 
-                 if let msg = accountIDSyncMessage {
+                 if appModeManager.canShowConnectedAccountManagement, let msg = accountIDSyncMessage {
                      Text(msg)
                          .font(Theme.Text.meta)
                          .foregroundStyle(accountIDSyncIsError ? Color.red : Theme.Colors.secondaryText)
@@ -736,6 +751,36 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                  }
                  .tint(Theme.Colors.accent)
                  .padding(.vertical, Theme.Spacing.s)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+             }
+             .cardSurface(padding: profileInnerCardPadding)
+             .listRowSeparator(.hidden)
+                .padding(.vertical, profileSectionSpacing / 2)
+         }
+     }
+
+     private var connectedPromoSection: some View {
+         Section(header: Text("Études Connected").sectionHeader()) {
+             VStack(spacing: 0) {
+                 Button { showConnectedPlaceholder = true } label: {
+                     navigationRow(title: "Explore Connected")
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
+                 .frame(minHeight: 44, alignment: .center)
+                 .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 Button { showAboutEtudes = true } label: {
+                     navigationRow(title: "About Études")
+                 }
+                 .buttonStyle(.plain)
+                 .contentShape(Rectangle())
+                 .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
              }
