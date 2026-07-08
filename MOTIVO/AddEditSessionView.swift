@@ -2051,37 +2051,39 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 return
             }
 
-            let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
+            if appModeManager.canShareWithFollowers {
+                let focusValue: Int? = isThoughtMode ? nil : selectedDotIndex_edit
 
-            let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
-            let instLabel =
-                (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? s.instrument?.name
+                let activityTypeString = trimmedCustom.isEmpty ? activity.label : trimmedCustom
+                let instLabel =
+                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                    ?? s.instrument?.name
 
-            let payload = SessionSyncQueue.PostPublishPayload(
-                id: sid,
-                sessionID: sid,
-                sessionTimestamp: timestamp,
-                title: isThoughtMode ? nil : s.title,
-                durationSeconds: effectiveDurationSeconds,
-                activityType: isThoughtMode ? nil : activityTypeString,
-                activityDetail: isThoughtMode ? nil : trimmedDetail,
-                instrumentLabel: isThoughtMode ? nil : instLabel,
-                mood: nil,
-                effort: focusValue,
-                isPublic: isPublic,
-                notes: notes,
-                areNotesPrivate: areNotesPrivate_edit
-            )
+                let payload = SessionSyncQueue.PostPublishPayload(
+                    id: sid,
+                    sessionID: sid,
+                    sessionTimestamp: timestamp,
+                    title: isThoughtMode ? nil : s.title,
+                    durationSeconds: effectiveDurationSeconds,
+                    activityType: isThoughtMode ? nil : activityTypeString,
+                    activityDetail: isThoughtMode ? nil : trimmedDetail,
+                    instrumentLabel: isThoughtMode ? nil : instLabel,
+                    mood: nil,
+                    effort: focusValue,
+                    isPublic: isPublic,
+                    notes: notes,
+                    areNotesPrivate: areNotesPrivate_edit
+                )
 
-            // Publish and visibility are separate concepts:
-            // - shouldPublish controls existence (publish vs unpublish/delete)
-            // - payload.isPublic controls follower visibility.
-            PublishService.shared.publish(
-                payload: payload,
-                objectID: s.objectID,
-                shouldPublish: true
-            )
+                // Publish and visibility are separate concepts:
+                // - shouldPublish controls existence (publish vs unpublish/delete)
+                // - payload.isPublic controls follower visibility.
+                PublishService.shared.publish(
+                    payload: payload,
+                    objectID: s.objectID,
+                    shouldPublish: true
+                )
+            }
 
             viewContext.processPendingChanges()
             if shouldGeneratePracticeInsight {

@@ -16,6 +16,7 @@ struct AppSetUpView: View {
     @Environment(\.managedObjectContext) private var context
     @Environment(\.colorScheme) private var scheme
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
 
     // Fetch the single local Profile row (create if missing).
     @FetchRequest(
@@ -295,7 +296,7 @@ struct AppSetUpView: View {
             return
         }
 
-        if BackendEnvironment.shared.isConnected {
+        if appModeManager.canShareWithFollowers && BackendEnvironment.shared.isConnected {
             guard auth.hasSupabaseAccessToken else {
                 statusMessage = "Couldn’t finish setup right now. Please try again."
                 return

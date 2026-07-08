@@ -1754,40 +1754,42 @@ var body: some View {
             viewContext.processPendingChanges()
             clearDraftIsPublic()
             // v7.12A — Social Pilot (local-only)
-            if let sid = s.id {
-                let resolvedTitle = s.title ?? ""
-                let instLabel =
-                    (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
-                    ?? s.instrument?.name
+            if appModeManager.canShareWithFollowers {
+                if let sid = s.id {
+                    let resolvedTitle = s.title ?? ""
+                    let instLabel =
+                        (s.userInstrumentLabel?.trimmingCharacters(in: .whitespacesAndNewlines)).flatMap { $0.isEmpty ? nil : $0 }
+                        ?? s.instrument?.name
 
-                let focusValue: Int? = {
-                    if let idx = selectedDotIndex { return idx }
-                    return nil
-                }()
+                    let focusValue: Int? = {
+                        if let idx = selectedDotIndex { return idx }
+                        return nil
+                    }()
 
-                let payload = SessionSyncQueue.PostPublishPayload(
-                    id: sid,
-                    sessionID: sid,
-                    sessionTimestamp: timestamp,
-                    title: resolvedTitle,
-                    durationSeconds: Int(durationSeconds),
-                    activityType: activityTypeString,
-                    activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
-                    instrumentLabel: instLabel,
-                    mood: nil,
-                    effort: focusValue,
-                    isPublic: visibility
-                )
+                    let payload = SessionSyncQueue.PostPublishPayload(
+                        id: sid,
+                        sessionID: sid,
+                        sessionTimestamp: timestamp,
+                        title: resolvedTitle,
+                        durationSeconds: Int(durationSeconds),
+                        activityType: activityTypeString,
+                        activityDetail: activityDetail.trimmingCharacters(in: .whitespacesAndNewlines),
+                        instrumentLabel: instLabel,
+                        mood: nil,
+                        effort: focusValue,
+                        isPublic: visibility
+                    )
 
-                PublishService.shared.publish(
-                    payload: payload,
-                    objectID: s.objectID,
-                    shouldPublish: true
-                )
-            } else {
-                print("Publish skipped: missing Session.id")
+                    PublishService.shared.publish(
+                        payload: payload,
+                        objectID: s.objectID,
+                        shouldPublish: true
+                    )
+                    FeedInteractionStore.markForPublish(sid)
+                } else {
+                    print("Publish skipped: missing Session.id")
+                }
             }
-            FeedInteractionStore.markForPublish(s.id ?? UUID())
 
             // Cleanup: remove staged items that were just committed successfully
             let consumedIDs: [UUID] = stagedAttachments.map { $0.id }

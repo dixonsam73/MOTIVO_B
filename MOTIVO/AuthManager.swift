@@ -242,6 +242,7 @@ final class AuthManager: NSObject, ObservableObject {
     private func scheduleDirectoryHydrationIfNeeded(reason: String) {
         // Delete Account v2: do not schedule hydration during/after factory reset or when backend not configured.
         guard !LocalFactoryReset.isInProgress else { return }
+        guard BackendEnvironment.shared.isConnected else { return }
         guard BackendConfig.isConfigured else { return }
         guard self.currentUserID != nil else { return }
 
@@ -617,6 +618,11 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         // Delete Account v2: never attempt identity handshake during/after a factory reset.
         guard !LocalFactoryReset.isInProgress else {
             NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (factory reset in progress)")
+            return
+        }
+        // If the app is not in a Connected backend context, do not establish backend identity.
+        guard BackendEnvironment.shared.isConnected else {
+            NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (not connected)")
             return
         }
         // If backend config is not configured (e.g., after factory reset), do not attempt backend identity.

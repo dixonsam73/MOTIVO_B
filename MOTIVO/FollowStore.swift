@@ -117,7 +117,7 @@ public final class FollowStore: ObservableObject {
     // MARK: - Backend Preview (Step 9B)
 
     private var isBackendHTTPActive: Bool {
-        BackendEnvironment.shared.isHTTPEnabled
+        BackendEnvironment.shared.isHTTPEnabled && BackendEnvironment.shared.isConnected
     }
 
     /// Refresh follow state from backend when the HTTP backend is enabled.
