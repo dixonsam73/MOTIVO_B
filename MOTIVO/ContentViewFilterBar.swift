@@ -346,7 +346,7 @@ struct FilterBar: View {
                 FilterCardDivider()
                     .padding(.horizontal, Theme.Spacing.card)
 
-                FilterCardRow(label: "Saved only") {
+                FilterCardRow(label: "Favourites") {
                     Toggle("", isOn: $savedOnly)
                         .labelsHidden()
                         .tint(Theme.Colors.accent.opacity(0.72))
