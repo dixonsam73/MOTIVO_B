@@ -26,10 +26,46 @@ public enum AppMode: String, CaseIterable, Identifiable {
 
 @MainActor
 public final class AppModeManager: ObservableObject {
-    @Published public var mode: AppMode
+    @Published public private(set) var mode: AppMode
 
     public init(mode: AppMode = .solo) {
         self.mode = mode
+        Self.applyBackendRuntimeMode(for: mode)
+    }
+
+    func applyActivation(auth: AuthManager) {
+        applyMode(Self.resolvedActivationMode(auth: auth))
+    }
+
+    func applyMode(_ mode: AppMode) {
+        Self.applyBackendRuntimeMode(for: mode)
+        guard self.mode != mode else { return }
+        self.mode = mode
+    }
+
+    private static func applyBackendRuntimeMode(for mode: AppMode) {
+        switch mode {
+        case .solo:
+            setBackendMode(.localSimulation)
+        case .connected:
+            setBackendMode(.backendConnected)
+        }
+        BackendConfig.apply()
+    }
+
+    static func resolvedActivationMode(auth: AuthManager) -> AppMode {
+        #if DEBUG
+        switch DebugAppExperienceOverride.current {
+        case .automatic:
+            return ProductionAppModeActivation.resolve(auth: auth)
+        case .forceSolo:
+            return .solo
+        case .forceConnected:
+            return .connected
+        }
+        #else
+        return ProductionAppModeActivation.resolve(auth: auth)
+        #endif
     }
 
     // MARK: - Capabilities
@@ -69,3 +105,56 @@ public final class AppModeManager: ObservableObject {
         mode == .connected
     }
 }
+
+
+// MARK: - Production Activation
+
+@MainActor
+enum ProductionAppModeActivation {
+    static func resolve(auth: AuthManager) -> AppMode {
+        guard BackendConfig.isConfigured else { return .solo }
+        guard auth.isSignedIn else { return .solo }
+        guard auth.hasSupabaseAccessToken else { return .solo }
+
+        let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !backendID.isEmpty else { return .solo }
+
+        return .connected
+    }
+}
+
+#if DEBUG
+public enum DebugAppExperienceOverride: String, CaseIterable, Identifiable {
+    case automatic
+    case forceSolo
+    case forceConnected
+
+    public var id: String { rawValue }
+
+    public var displayName: String {
+        switch self {
+        case .automatic:
+            return "Automatic"
+        case .forceSolo:
+            return "Force Études"
+        case .forceConnected:
+            return "Force Études Connected"
+        }
+    }
+
+    static let defaultsKey = "Debug.appExperienceOverride_v1"
+
+    static var current: DebugAppExperienceOverride {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
+                  let value = DebugAppExperienceOverride(rawValue: raw) else {
+                return .automatic
+            }
+            return value
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey)
+        }
+    }
+}
+#endif

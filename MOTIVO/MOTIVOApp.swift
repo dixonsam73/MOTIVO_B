@@ -68,7 +68,7 @@ struct MOTIVOApp: App {
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
     @StateObject private var appRoute = AppRouteStore()
-    @StateObject private var appModeManager = AppModeManager()
+    @StateObject private var appModeManager: AppModeManager
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -85,17 +85,21 @@ struct MOTIVOApp: App {
                 d.set(rawKey, forKey: BackendConfigKeys.token)
             }
         }
-        // Phase 14.2.1: Fresh installs default backend mode to Connected in non-DEBUG builds when config is present.
-        // Ignore-only: if a mode is already set in UserDefaults (e.g., from debug tooling), do not override it.
-        if (d.string(forKey: BackendKeys.modeKey)?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true), BackendConfig.isConfigured {
-            d.set(BackendMode.backendConnected.rawValue, forKey: BackendKeys.modeKey)
-        }
 #endif
         BackendConfig.apply()
+
+        // Milestone 6: AppMode activation is now the production owner of Connected runtime enablement.
+        // Start from the local backend runtime before AuthManager initializes so stored Apple sign-in
+        // state alone cannot establish Connected identity. The activation path below will re-enable
+        // the Connected runtime when an existing Supabase-backed Connected presence is present.
+        setBackendMode(.localSimulation)
+        BackendConfig.apply()
+
         let identityService = LocalStubIdentityService()
         self.identityService = identityService
         let authManager = AuthManager(identityService: identityService)
         _auth = StateObject(wrappedValue: authManager)
+        _appModeManager = StateObject(wrappedValue: AppModeManager(mode: AppModeManager.resolvedActivationMode(auth: authManager)))
 
         // Phase 14.3H (B3): Ensure PersistenceController mirrors the initial AuthManager.currentUserID
         // even when AuthManager initializes from Keychain before SwiftUI onReceive subscribers attach.
@@ -213,6 +217,8 @@ struct MOTIVOApp: App {
                 .environmentObject(appRoute)
                 .environmentObject(appModeManager)
                 .onAppear {
+                    appModeManager.applyActivation(auth: auth)
+
                     // Phase 14.2.2: Session liveness — refresh Supabase session only when the Connected runtime is allowed.
                     Task {
                         guard appModeManager.canViewFeed else { return }
@@ -248,6 +254,7 @@ struct MOTIVOApp: App {
                     }
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
+                    appModeManager.applyActivation(auth: auth)
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -259,6 +266,9 @@ struct MOTIVOApp: App {
                             FollowStore.shared.resetForSignOut()
                         }
                     }
+                }
+                .onReceive(auth.$backendUserID.removeDuplicates()) { _ in
+                    appModeManager.applyActivation(auth: auth)
                 }
                 .preferredColorScheme(.light)
         }

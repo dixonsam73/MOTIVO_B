@@ -73,6 +73,7 @@ public struct DebugViewerView: View {
     @StateObject private var followStore = FollowStore.shared
     @State private var deletePostIDText: String = ""
     @State private var deletePostStatusText: String? = nil
+    @AppStorage(DebugAppExperienceOverride.defaultsKey) private var appExperienceOverrideRaw: String = DebugAppExperienceOverride.automatic.rawValue
 
     // Local filesystem hygiene (DEBUG-only): one-shot orphan cleaner for persisted attachments in Documents.
     @State private var orphanCleanIsBusy: Bool = false
@@ -898,19 +899,37 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
             Text("App Experience")
                 .font(.headline)
 
-            Text("Temporary Milestone 0 selector. This updates AppModeManager only; no capability gating is active yet.")
+            Text("DEBUG override for AppMode activation. Automatic uses the same production activation path as Release builds.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Picker("App Experience", selection: $appModeManager.mode) {
-                ForEach(AppMode.allCases, id: \.self) { mode in
-                    Text(mode.displayName).tag(mode)
+            Picker("App Experience", selection: appExperienceOverrideBinding) {
+                ForEach(DebugAppExperienceOverride.allCases) { override in
+                    Text(override.displayName).tag(override)
                 }
             }
             .pickerStyle(.segmented)
             .accessibilityLabel("App Experience")
+
+            Text("Active: \(appModeManager.mode.displayName)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(.horizontal)
+    }
+
+
+    private var appExperienceOverrideBinding: Binding<DebugAppExperienceOverride> {
+        Binding(
+            get: {
+                DebugAppExperienceOverride(rawValue: appExperienceOverrideRaw) ?? .automatic
+            },
+            set: { newValue in
+                appExperienceOverrideRaw = newValue.rawValue
+                DebugAppExperienceOverride.current = newValue
+                appModeManager.applyActivation(auth: auth)
+            }
+        )
     }
 
     @ViewBuilder private var backendStep6ABlock: some View {
