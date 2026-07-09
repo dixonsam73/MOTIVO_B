@@ -53,8 +53,106 @@ final class PersistenceController {
 // MARK: - Author-Scoped Custom Directories & Normalization
 
 extension PersistenceController {
-    /// Used to scope custom directories (UserInstrument/UserActivity) to the owner.
-    var ownerIDForCustoms: String? { currentUserID }
+    /// Used to scope custom directories (UserInstrument/UserActivity) to the local profile owner.
+    ///
+    /// This must not depend on Connected sign-in state. Études mode still has a local owner,
+    /// and the instrument/activity managers must remain fully usable without authentication.
+    var ownerIDForCustoms: String? { localCustomOwnerID }
+
+    private var localCustomOwnerID: String {
+        let key = "localCustomOwnerID_v1"
+        if let existing = UserDefaults.standard.string(forKey: key),
+           !existing.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return existing
+        }
+
+        let created = "local:\(UUID().uuidString)"
+        UserDefaults.standard.set(created, forKey: key)
+        return created
+    }
+
+    func migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in ctx: NSManagedObjectContext? = nil) {
+        guard let legacyOwner = currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !legacyOwner.isEmpty else { return }
+
+        let localOwner = localCustomOwnerID
+        guard legacyOwner != localOwner else { return }
+
+        let migrationKey = "customDirectoriesMigrated_\(legacyOwner)_to_\(localOwner)"
+        if UserDefaults.standard.bool(forKey: migrationKey) { return }
+
+        let ctx = ctx ?? container.viewContext
+
+        do {
+            let localInstrumentRequest: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
+            localInstrumentRequest.predicate = NSPredicate(format: "ownerUserID == %@", localOwner)
+            let localInstruments = try ctx.fetch(localInstrumentRequest)
+            var localInstrumentByName: [String: UserInstrument] = [:]
+            for instrument in localInstruments {
+                if let name = instrument.normalizedName, !name.isEmpty, localInstrumentByName[name] == nil {
+                    localInstrumentByName[name] = instrument
+                }
+            }
+
+            let legacyInstrumentRequest: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
+            legacyInstrumentRequest.predicate = NSPredicate(format: "ownerUserID == %@", legacyOwner)
+            let legacyInstruments = try ctx.fetch(legacyInstrumentRequest)
+            for instrument in legacyInstruments {
+                let normalized = instrument.normalizedName ?? Self.normalized(instrument.displayName ?? "")
+                if let localMatch = localInstrumentByName[normalized], localMatch.objectID != instrument.objectID {
+                    if localMatch.coreInstrument == nil {
+                        localMatch.coreInstrument = instrument.coreInstrument
+                    }
+                    if localMatch.displayOrder == 0 {
+                        localMatch.displayOrder = instrument.displayOrder
+                    }
+                    localMatch.isVisibleOnProfile = localMatch.isVisibleOnProfile || instrument.isVisibleOnProfile
+                    ctx.delete(instrument)
+                } else {
+                    instrument.ownerUserID = localOwner
+                    if !normalized.isEmpty {
+                        localInstrumentByName[normalized] = instrument
+                    }
+                }
+            }
+
+            let localActivityRequest: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
+            localActivityRequest.predicate = NSPredicate(format: "ownerUserID == %@", localOwner)
+            let localActivities = try ctx.fetch(localActivityRequest)
+            var localActivityByName: [String: UserActivity] = [:]
+            for activity in localActivities {
+                if let name = activity.normalizedName, !name.isEmpty, localActivityByName[name] == nil {
+                    localActivityByName[name] = activity
+                }
+            }
+
+            let legacyActivityRequest: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
+            legacyActivityRequest.predicate = NSPredicate(format: "ownerUserID == %@", legacyOwner)
+            let legacyActivities = try ctx.fetch(legacyActivityRequest)
+            for activity in legacyActivities {
+                let normalized = activity.normalizedName ?? Self.normalized(activity.displayName ?? "")
+                if let localMatch = localActivityByName[normalized], localMatch.objectID != activity.objectID {
+                    if localMatch.value(forKey: "coreActivityCode") == nil {
+                        localMatch.setValue(activity.value(forKey: "coreActivityCode"), forKey: "coreActivityCode")
+                    }
+                    ctx.delete(activity)
+                } else {
+                    activity.ownerUserID = localOwner
+                    if !normalized.isEmpty {
+                        localActivityByName[normalized] = activity
+                    }
+                }
+            }
+
+            if ctx.hasChanges {
+                try ctx.save()
+            }
+            UserDefaults.standard.set(true, forKey: migrationKey)
+        } catch {
+            print("Custom directory owner migration failed: \(error)")
+        }
+    }
+
 
     /// Normalize names for dedupe/search (case + diacritic-insensitive; whitespace-collapsing).
     static func normalized(_ raw: String) -> String {
@@ -81,6 +179,7 @@ extension PersistenceController {
                           userInfo: [NSLocalizedDescriptionKey: "Missing ownerUserID"])
         }
         let ctx = ctx ?? container.viewContext
+        migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: ctx)
         let norm = Self.normalized(name)
 
         let fr: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
@@ -113,6 +212,7 @@ extension PersistenceController {
                               in ctx: NSManagedObjectContext? = nil) throws -> [UserInstrument] {
         guard let owner = ownerIDForCustoms else { return [] }
         let ctx = ctx ?? container.viewContext
+        migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: ctx)
         let fr: NSFetchRequest<UserInstrument> = UserInstrument.fetchRequest()
         var preds: [NSPredicate] = [NSPredicate(format: "ownerUserID == %@", owner)]
         if !includeHidden {
@@ -140,6 +240,7 @@ extension PersistenceController {
                           userInfo: [NSLocalizedDescriptionKey: "Missing ownerUserID"])
         }
         let ctx = ctx ?? container.viewContext
+        migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: ctx)
         let norm = Self.normalized(name)
 
         let fr: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
@@ -170,6 +271,7 @@ extension PersistenceController {
     func fetchUserActivities(in ctx: NSManagedObjectContext? = nil) throws -> [UserActivity] {
         guard let owner = ownerIDForCustoms else { return [] }
         let ctx = ctx ?? container.viewContext
+        migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: ctx)
         let fr: NSFetchRequest<UserActivity> = UserActivity.fetchRequest()
         fr.predicate = NSPredicate(format: "ownerUserID == %@", owner)
         fr.sortDescriptors = [NSSortDescriptor(key: "displayName", ascending: true)]

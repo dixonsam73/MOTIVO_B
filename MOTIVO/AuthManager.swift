@@ -248,7 +248,15 @@ final class AuthManager: NSObject, ObservableObject {
         guard self.currentUserID != nil else { return }
 
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
-        guard lastHydratedDirectoryUserID != bid else { return }
+
+        if lastHydratedDirectoryUserID == bid {
+            directoryHydrationTask?.cancel()
+            directoryHydrationTask = Task { [weak self] in
+                guard let self else { return }
+                await self.publishLocalProfileSnapshotToDirectoryIfPossible(userID: bid, reason: "\(reason)-alreadyHydrated")
+            }
+            return
+        }
 
         self.backendBootstrapState = .checking
         directoryHydrationTask?.cancel()
@@ -326,6 +334,7 @@ final class AuthManager: NSObject, ObservableObject {
             guard let row else {
                 self.backendBootstrapState = .newAccount
                 self.backendAvatarKey = nil
+                await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
                 return
             }
@@ -350,8 +359,86 @@ final class AuthManager: NSObject, ObservableObject {
 
             lastHydratedDirectoryUserID = userID
             self.backendBootstrapState = .existingAccount
+            await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
             NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
                   userID, reason, row.lookupEnabled ? "1" : "0", row.accountID ?? "nil")
+        }
+    }
+
+    private func publishLocalProfileSnapshotToDirectoryIfPossible(userID: String, reason: String) async {
+        // M7 local-first profile polish: entering Connected should publish the current
+        // local profile snapshot once, so instruments/profile edits made in Études mode
+        // become the Connected public account copy without requiring a dummy Profile edit.
+        guard BackendEnvironment.shared.isConnected else { return }
+        guard BackendConfig.isConfigured else { return }
+        guard hasSupabaseAccessToken else { return }
+        guard backendUserID == userID else { return }
+
+        let viewContext = PersistenceController.shared.container.viewContext
+        var localDisplayName = ""
+        var localInstruments: [String] = []
+
+        viewContext.performAndWait {
+            let profileRequest: NSFetchRequest<Profile> = Profile.fetchRequest()
+            profileRequest.fetchLimit = 1
+            if let profile = try? viewContext.fetch(profileRequest).first {
+                localDisplayName = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            let userInstruments = (try? PersistenceController.shared.fetchUserInstruments(includeHidden: true, in: viewContext)) ?? []
+            let visibleLocalInstruments = userInstruments
+                .filter { $0.isVisibleOnProfile }
+                .compactMap { $0.displayName?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            if userInstruments.isEmpty {
+                let instrumentRequest: NSFetchRequest<Instrument> = Instrument.fetchRequest()
+                instrumentRequest.sortDescriptors = [NSSortDescriptor(key: "name", ascending: true)]
+                let instruments = (try? viewContext.fetch(instrumentRequest)) ?? []
+                localInstruments = instruments
+                    .compactMap { $0.name?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            } else {
+                localInstruments = visibleLocalInstruments
+            }
+        }
+
+        let displayNameToPublish = localDisplayName.isEmpty
+            ? (displayName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            : localDisplayName
+        guard !displayNameToPublish.isEmpty else { return }
+
+        let localLocation = ProfileStore.location(for: nil).trimmingCharacters(in: .whitespacesAndNewlines)
+        let backendScopedLocation = ProfileStore.location(for: userID).trimmingCharacters(in: .whitespacesAndNewlines)
+        let locationToPublish = localLocation.isEmpty ? backendScopedLocation : localLocation
+        let locationOrNil: String? = locationToPublish.isEmpty ? nil : locationToPublish
+        if !localLocation.isEmpty, localLocation != backendScopedLocation {
+            ProfileStore.setLocation(localLocation, for: userID)
+        }
+
+        let accountID = ProfileStore.accountID(for: userID).trimmingCharacters(in: .whitespacesAndNewlines)
+        let accountIDOrNil: String? = accountID.count >= 3 ? accountID : nil
+
+        let instrumentsToPublish = localInstruments
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+
+        let result = await AccountDirectoryService.shared.upsertSelfRow(
+            userID: userID,
+            displayName: displayNameToPublish,
+            accountID: accountIDOrNil,
+            lookupEnabled: true,
+            followRequestsEnabled: true,
+            location: locationOrNil,
+            instruments: instrumentsToPublish
+        )
+
+        switch result {
+        case .success:
+            NSLog("[Auth] published local profile snapshot user=%@ reason=%@ instruments=%d", userID, reason, instrumentsToPublish.count)
+        case .failure(let error):
+            NSLog("[Auth] local profile snapshot publish failed user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
         }
     }
 

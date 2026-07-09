@@ -44,8 +44,8 @@ struct ActivityListView: View {
     // One-time notice flag to be consumed by ProfileView
     @AppStorage("primaryActivityFallbackNoticeNeeded") private var primaryActivityFallbackNoticeNeeded: Bool = false
 
-    private var isSignedIn: Bool {
-        PersistenceController.shared.currentUserID != nil
+    private var canManageCustomActivities: Bool {
+        PersistenceController.shared.ownerIDForCustoms != nil
     }
 
     private var coreActivityTypes: [SessionActivityType] {
@@ -53,7 +53,7 @@ struct ActivityListView: View {
     }
 
     private func scopedActivities() -> [UserActivity] {
-        guard let owner = PersistenceController.shared.currentUserID else { return [] }
+        guard let owner = PersistenceController.shared.ownerIDForCustoms else { return [] }
         return Array(activities).filter { ($0.ownerUserID ?? "") == owner }
     }
 
@@ -61,7 +61,7 @@ struct ActivityListView: View {
         NavigationStack {
             Form {
                 Section(header: Text("Add Activity").sectionHeader()) {
-                    if !isSignedIn {
+                    if !canManageCustomActivities {
                         Text("Sign in to add custom activities.")
                             .foregroundStyle(Theme.Colors.secondaryText)
                             .font(Theme.Text.body)
@@ -72,13 +72,13 @@ struct ActivityListView: View {
                             .textInputAutocapitalization(.words)
                             .focused($isAddActivityFocused)
 
-                        Button(action: { if isSignedIn { add() } }) {
+                        Button(action: { if canManageCustomActivities { add() } }) {
                             Text("Add")
                                 .font(Theme.Text.body)
                                 .foregroundStyle(Theme.Colors.accent)
                         }
                         .buttonStyle(.plain)
-                        .disabled(!isSignedIn || newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canManageCustomActivities || newActivity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
 
@@ -96,7 +96,7 @@ struct ActivityListView: View {
 
                     let items = scopedActivities()
                     if items.isEmpty {
-                        if isSignedIn {
+                        if canManageCustomActivities {
                             Text("No custom activities yet.")
                                 .foregroundStyle(Theme.Colors.secondaryText)
                                 .font(Theme.Text.body)
@@ -129,6 +129,9 @@ struct ActivityListView: View {
                 }
             }
             .appBackground()
+            .onAppear {
+                PersistenceController.shared.migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: moc)
+            }
         }
     }
 
@@ -157,7 +160,7 @@ struct ActivityListView: View {
     }
 
     private func add() {
-        guard PersistenceController.shared.currentUserID != nil else { return }
+        guard PersistenceController.shared.ownerIDForCustoms != nil else { return }
 
         let name = newActivity.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
@@ -173,7 +176,7 @@ struct ActivityListView: View {
     }
 
     private func delete(at offsets: IndexSet) {
-        guard isSignedIn else { return }
+        guard canManageCustomActivities else { return }
 
         let items = scopedActivities()
         for i in offsets {

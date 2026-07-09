@@ -35,8 +35,8 @@ struct InstrumentListView: View {
     @State private var newInstrument: String = ""
     @FocusState private var isAddInstrumentFocused: Bool
 
-    private var isSignedIn: Bool {
-        PersistenceController.shared.currentUserID != nil
+    private var canManageCustomInstruments: Bool {
+        PersistenceController.shared.ownerIDForCustoms != nil
     }
 
     var body: some View {
@@ -46,7 +46,7 @@ struct InstrumentListView: View {
                     HStack {
                         TextField("e.g. Bass, Piano", text: $newInstrument)
                             .font(Theme.Text.body)
-                            .disabled(!isSignedIn)
+                            .disabled(!canManageCustomInstruments)
                             .textInputAutocapitalization(.words)
                             .focused($isAddInstrumentFocused)
 
@@ -56,7 +56,7 @@ struct InstrumentListView: View {
                                 .foregroundStyle(Theme.Colors.accent)
                         }
                         .buttonStyle(.plain)
-                        .disabled(!isSignedIn || newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(!canManageCustomInstruments || newInstrument.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
 
@@ -103,13 +103,13 @@ ToolbarItem(placement: .cancellationAction) {
             }
             .appBackground()
             .onAppear {
+                PersistenceController.shared.migrateLegacyCustomDirectoriesToLocalOwnerIfNeeded(in: moc)
                 loadPrimarySelection()
             }
         }
     }
 
     private func instrumentsForProfile() -> [Instrument] {
-        guard isSignedIn else { return [] }
         guard let p = profile ?? loadProfileOnly() else { return [] }
         return instruments.filter { $0.profile == p }
     }
@@ -120,7 +120,7 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func setPrimaryInstrument(_ instrument: Instrument) {
-        guard isSignedIn else { return }
+        guard canManageCustomInstruments else { return }
         let name = (instrument.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         guard name != primaryInstrumentName else { return }
@@ -143,7 +143,7 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func add() {
-        guard isSignedIn else { return }
+        guard canManageCustomInstruments else { return }
         let name = newInstrument.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
         guard let ownerProfile = fetchOrCreateProfile() else { return }
@@ -187,7 +187,7 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func delete(at offsets: IndexSet) {
-        guard isSignedIn else { return }
+        guard canManageCustomInstruments else { return }
         let list = instrumentsForProfile()
         for index in offsets {
             let inst = list[index]
@@ -221,7 +221,6 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func loadProfileOnly() -> Profile? {
-        guard isSignedIn else { return nil }
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
         req.fetchLimit = 1
         do {
@@ -247,12 +246,6 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func loadPrimarySelection() {
-        guard isSignedIn else {
-            profile = nil
-            primaryInstrumentName = ""
-            return
-        }
-
         let loadedProfile = loadProfileOnly()
         profile = loadedProfile
         
@@ -288,7 +281,7 @@ ToolbarItem(placement: .cancellationAction) {
     }
 
     private func fetchOrCreateProfile() -> Profile? {
-        guard isSignedIn else { return nil }
+        guard canManageCustomInstruments else { return nil }
         if let existing = profile {
             return existing
         }
