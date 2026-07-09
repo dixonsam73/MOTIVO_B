@@ -24,6 +24,11 @@ import UIKit
 ///   - Avatar (derived/display): PNG file in Application Support/Profiles/{userID}-avatar.png (square, typically 256–512 px)
 struct ProfileStore {
     // MARK: - Keys
+    private static let localProfileStorageID = "__local_etudes_profile__"
+    private static func profileStorageID(for userID: String?) -> String {
+        let trimmed = userID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? localProfileStorageID : trimmed
+    }
     private static func locationKey(for userID: String) -> String { "profile.\(userID).location" }
 
     // MARK: - Phase 12C (Per-backend-user Lookup Keys)
@@ -69,11 +74,11 @@ struct ProfileStore {
 
     // MARK: - Public API (Location)
     static func location(for userID: String?) -> String {
-        guard let uid = userID, !uid.isEmpty else { return "" }
+        let uid = profileStorageID(for: userID)
         return UserDefaults.standard.string(forKey: locationKey(for: uid)) ?? ""
     }
     static func setLocation(_ value: String, for userID: String?) {
-        guard let uid = userID, !uid.isEmpty else { return }
+        let uid = profileStorageID(for: userID)
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         UserDefaults.standard.set(trimmed, forKey: locationKey(for: uid))
     }
@@ -90,12 +95,12 @@ struct ProfileStore {
     }
 
     static func avatarOriginalURL(for userID: String?) -> URL? {
-        guard let uid = userID, !uid.isEmpty else { return nil }
+        let uid = profileStorageID(for: userID)
         return baseProfilesDir()?.appendingPathComponent("\(uid)-original.jpg", conformingTo: .jpeg)
     }
 
     static func avatarDerivedURL(for userID: String?) -> URL? {
-        guard let uid = userID, !uid.isEmpty else { return nil }
+        let uid = profileStorageID(for: userID)
         return baseProfilesDir()?.appendingPathComponent("\(uid)-avatar.png", conformingTo: .png)
     }
 

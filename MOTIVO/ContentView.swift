@@ -1976,9 +1976,7 @@ fileprivate struct SessionsRootView: View {
             if let uid = effectiveUserID {
                 out = out.filter { $0.ownerUserID == uid }
             } else {
-                out = out.filter { session in
-                    (session.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }
+                break
             }
         case .all:
             if let me = effectiveUserID {

@@ -283,7 +283,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
-     @State private var showConnectedPlaceholder: Bool = false
+     @State private var showConnectedSignInSheet: Bool = false
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
  
@@ -298,7 +298,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 ZStack {
                     if shouldSuppressSignedInProfileAfterGateSignIn {
                         Color.clear
-                    } else if auth.isSignedIn {
+                    } else {
                         Form {
                      Group {
                          profileSection
@@ -318,8 +318,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                         .simultaneousGesture(DragGesture(minimumDistance: 8).onChanged { _ in
                             clearNameFieldFocus()
                         })
-                    } else {
-                        signedOutGateView
                     }
                 }
                 .font(.callout)
@@ -333,10 +331,12 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 .navigationDestination(isPresented: $showTintModeSelection) {
                     TintModeSelectionView()
                 }
-                .alert("Études Connected", isPresented: $showConnectedPlaceholder) {
-                    Button("OK", role: .cancel) { }
-                } message: {
-                    Text("Explore Connected will be added later.")
+                .sheet(isPresented: $showConnectedSignInSheet, onDismiss: {
+                    if auth.currentUserID == nil {
+                        signedOutGateWasVisible = false
+                    }
+                }) {
+                    signedOutGateView
                 }
                 .appBackground()
             }
@@ -714,7 +714,7 @@ private var sessionSetupSection: some View {
      private var connectedPromoSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button { showConnectedPlaceholder = true } label: {
+                 Button { showConnectedSignInSheet = true } label: {
                      navigationRow(title: "Explore Connected")
                  }
                  .buttonStyle(.plain)
@@ -865,12 +865,8 @@ private var sessionSetupSection: some View {
      // MARK: - Lifecycle / Data
  
      private func onAppearLoad() {
-         // Identity scoping hygiene: when signed out, Profile must render empty (no user data).
-         guard auth.currentUserID != nil else {
-             clearUserPresentedStateForSignOut()
-             return
-         }
-
+         // Milestone 7: Études Profile is local-first.
+         // Signed-out users should see the local Profile rather than an empty authentication gate.
          load()
          refreshUserActivities()
          primaryActivityChoice = normalizedPrimaryActivityRef()
@@ -1055,8 +1051,6 @@ private var sessionSetupSection: some View {
      }
 
      private func persistProfileEdits() {
-         // Do not persist user-presented state when signed out.
-         guard auth.currentUserID != nil else { return }
          save()
          ProfileStore.setLocation(locationText, for: auth.backendUserID)
      }
@@ -1553,10 +1547,12 @@ private func initials(from string: String) -> String {
                 // after a successful Sign in with Apple from the gate-presented ProfileView,
                 // dismiss the gate and reveal PracticeTimerView directly.
                 if signedOutGateWasVisible,
-                   newValue != nil,
-                   onClose != nil {
-                    onClose?()
-                    return
+                   newValue != nil {
+                    showConnectedSignInSheet = false
+                    if onClose != nil {
+                        onClose?()
+                        return
+                    }
                 }
 
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
@@ -1573,10 +1569,10 @@ private func initials(from string: String) -> String {
                         ProfileStore.setLocation(locationText, for: oldBackendID)
                     }
 
-                    // Device-level Profile: keep existing behaviour by saving pending edits
-                    // before clearing the view's presented state.
+                    // Preserve the currently presented profile as the local Études profile after sign-out.
                     save()
-                    clearUserPresentedStateForSignOut()
+                    ProfileStore.setLocation(locationText, for: nil)
+                    onAppearLoad()
                 } else {
                     onAppearLoad()
                 }
@@ -1586,6 +1582,7 @@ private func initials(from string: String) -> String {
                 if newValue == nil {
                     accountIDText = ""
                     discoveryModeRawPerUser = DiscoveryMode.search.rawValue
+                    locationText = ProfileStore.location(for: nil)
                 } else {
                     discoveryModeRawPerUser = DiscoveryMode.search.rawValue
                     ProfileStore.setDiscoveryModeRaw(DiscoveryMode.search.rawValue, for: auth.backendUserID)
@@ -1600,7 +1597,6 @@ private func initials(from string: String) -> String {
                  Task { @MainActor in scheduleDirectorySyncDebounced() }
              }
              .onReceive(NotificationCenter.default.publisher(for: .NSManagedObjectContextDidSave, object: ctx)) { _ in
-                 guard auth.currentUserID != nil else { return }
                  guard showInstrumentManager == false,
                        showActivityManager == false,
                        showTasksManager == false,
