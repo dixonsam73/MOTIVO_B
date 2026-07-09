@@ -1848,6 +1848,22 @@ fileprivate struct SessionsRootView: View {
 
 
 
+    private var localSoloSessions: [Session] {
+        Array(sessions).filter { session in
+            (session.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private var localSoloWeekSessions: [Session] {
+        let bounds = StatsHelper.dateBounds(for: .week)
+        return localSoloSessions.filter { session in
+            guard let timestamp = session.timestamp else { return false }
+            if let start = bounds.start, timestamp < start { return false }
+            if let end = bounds.end, timestamp >= end { return false }
+            return true
+        }
+    }
+
     private var displayedStats: SessionStats {
         backendOwnerStatsSnapshot?.stats ?? stats
     }
@@ -1856,6 +1872,11 @@ fileprivate struct SessionsRootView: View {
         if let backendOwnerStatsSnapshot {
             return backendOwnerStatsSnapshot.currentStreakDays
         }
+
+        if effectiveUserID == nil {
+            return Stats.currentStreakDays(sessions: localSoloSessions)
+        }
+
         guard let uid = effectiveUserID else { return 0 }
         let ownerSessions = sessions.filter {
             ($0.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines) == uid
@@ -1864,13 +1885,17 @@ fileprivate struct SessionsRootView: View {
     }
 
     private func refreshStats() {
-        // De-populate when signed out to mirror other data fields
-        guard userID != nil else {
-            stats = .init(count: 0, seconds: 0)
+        if effectiveUserID == nil {
+            let soloWeekSessions = localSoloWeekSessions
+            let totalSeconds = soloWeekSessions.reduce(0) { partial, session in
+                partial + Int(session.durationSeconds)
+            }
+            stats = .init(count: soloWeekSessions.count, seconds: totalSeconds)
             backendOwnerStatsSnapshot = nil
             backendStatsLoading = false
             return
         }
+
         do {
             guard let uid = effectiveUserID else {
                 stats = .init(count: 0, seconds: 0)
@@ -1943,8 +1968,6 @@ fileprivate struct SessionsRootView: View {
     // MARK: - Filtering (Scope • Instrument • Activity • Search)
 
     private var filteredSessions: [Session] {
-        // Ensure no data is shown when signed out
-        guard userID != nil else { return [] }
         var out = Array(sessions)
 
         // Scope
@@ -1953,7 +1976,9 @@ fileprivate struct SessionsRootView: View {
             if let uid = effectiveUserID {
                 out = out.filter { $0.ownerUserID == uid }
             } else {
-                out = []
+                out = out.filter { session in
+                    (session.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
             }
         case .all:
             if let me = effectiveUserID {
@@ -2030,9 +2055,15 @@ fileprivate struct SessionsRootView: View {
         // Thread (owner-only; local-only)
         if let selected = selectedThread {
             let target = selected.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if let me = effectiveUserID, !target.isEmpty {
+            if !target.isEmpty {
                 out = out.filter { s in
-                    guard s.ownerUserID == me else { return false }
+                    if let me = effectiveUserID {
+                        guard s.ownerUserID == me else { return false }
+                    } else {
+                        let owner = (s.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard owner.isEmpty else { return false }
+                    }
+
                     let raw = ((s.value(forKey: "threadLabel") as? String) ?? "")
                     let norm = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                     return !norm.isEmpty && norm == target
@@ -2436,15 +2467,17 @@ fileprivate struct SessionsRootView: View {
     // MARK: - Thread options (owner-only; local-only)
 
     private var existingThreadOptions: [String] {
-        // Ensure no data is shown when signed out
-        guard userID != nil else { return [] }
-        guard let me = effectiveUserID else { return [] }
-
         var out: [String] = []
         var seen: Set<String> = []
 
         for s in sessions {
-            guard s.ownerUserID == me else { continue }
+            if let me = effectiveUserID {
+                guard s.ownerUserID == me else { continue }
+            } else {
+                let owner = (s.ownerUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                guard owner.isEmpty else { continue }
+            }
+
             let raw = ((s.value(forKey: "threadLabel") as? String) ?? "")
             guard let sanitized = ThreadLabelSanitizer.sanitize(raw, maxLength: 32) else { continue }
 

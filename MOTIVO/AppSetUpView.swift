@@ -252,13 +252,17 @@ struct AppSetUpView: View {
         inst.profile = p
 
         do {
-            // Mirror into UserInstrument (owner-scoped) as per InstrumentListView behaviour.
-            try PersistenceController.shared.fetchOrCreateUserInstrument(
-                named: candidate,
-                mapTo: inst,
-                visibleOnProfile: true,
-                in: context
-            )
+            // Mirror into UserInstrument only while operating as Connected.
+            // Études setup must remain fully local and must not require an authenticated owner.
+            if appModeManager.canShareWithFollowers && BackendEnvironment.shared.isConnected {
+                try PersistenceController.shared.fetchOrCreateUserInstrument(
+                    named: candidate,
+                    mapTo: inst,
+                    visibleOnProfile: true,
+                    in: context
+                )
+            }
+
             try context.save()
             newInstrumentName = ""
         } catch {

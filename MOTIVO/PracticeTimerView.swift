@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260709_170000_M7_PTV_StandaloneLaunch
+// SCOPE: Milestone 7 Pass 1 — remove the legacy signed-out SIWA launch gate and make App Setup depend on local profile completeness rather than authentication; preserve production activation, AppMode, BackendEnvironment, AuthManager ownership, and all UI.
+// SEARCH-TOKEN: 20260709_170000_M7_PTV_StandaloneLaunch
+
 // CHANGE-ID: 20260625_174900_PTV_AdaptiveUtilityAddLayout
 // SCOPE: PracticeTimerView layout only — adapt the idle + button placement when Tasks or Scores is hidden so utility controls compose as 3-2 rather than 3-1-1; preserve existing actions, sheets, styling, opacity fade, pyramid layout when all utilities are visible, and running-state behaviour. No recorder, score, task, persistence, or backend changes.
 // SEARCH-TOKEN: 20260625_174900_PTV_AdaptiveUtilityAddLayout
@@ -1202,34 +1206,32 @@ private func loadPracticeDefaultsIfNeeded() {
     }
 
     private var appSetUpCompletenessKey: String {
-        guard auth.isSignedIn else { return "signedOut" }
-        guard BackendConfig.isConfigured else { return "backendNotConfigured" }
-        guard let uid = auth.currentUserID, !uid.isEmpty else { return "missingUserID" }
+        if auth.isSignedIn,
+           BackendConfig.isConfigured,
+           auth.backendBootstrapState == .existingAccount {
+            return "existingConnectedAccount"
+        }
 
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
         req.fetchLimit = 1
 
         guard let profile = try? viewContext.fetch(req).first else {
-            return "missingProfile|\(uid)"
+            return "missingProfile"
         }
 
         let hasName = !(profile.name?.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines).isEmpty ?? true)
         let hasInstrument = fetchInstruments().contains(where: { $0.profile == profile })
 
-        if !hasName { return "missingName|\(uid)" }
-        if !hasInstrument { return "missingInstrument|\(uid)" }
-        return "complete|\(uid)"
+        if !hasName { return "missingName" }
+        if !hasInstrument { return "missingInstrument" }
+        return "complete"
     }
 
     private func requiresAppSetUpNow() -> Bool {
-        guard auth.isSignedIn else { return false }
-        guard BackendConfig.isConfigured else { return false }
-
-        switch auth.backendBootstrapState {
-        case .existingAccount:
+        if auth.isSignedIn,
+           BackendConfig.isConfigured,
+           auth.backendBootstrapState == .existingAccount {
             return false
-        case .unknown, .checking, .newAccount:
-            break
         }
 
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
@@ -1259,30 +1261,12 @@ private func loadPracticeDefaultsIfNeeded() {
     private func evaluateAppSetUpGate() {
         guard isHomePresentation else { return }
 
-        guard auth.isSignedIn else {
-            if showAppSetUp { showAppSetUp = false }
-            return
-        }
-
-        guard BackendConfig.isConfigured else {
-            if showAppSetUp { showAppSetUp = false }
-            return
-        }
-
         if requiresAppSetUpNow() {
             if appRoute.isProfilePresented { appRoute.isProfilePresented = false }
             if showAppSetUp { showAppSetUp = false }
         } else if showAppSetUp {
             showAppSetUp = false
         }
-    }
-
-    private func evaluateSignedOutLaunchGate() {
-        guard isHomePresentation else { return }
-        guard BackendConfig.isConfigured else { return }
-        guard !auth.isSignedIn else { return }
-        guard !appRoute.isProfilePresented else { return }
-        appRoute.isProfilePresented = true
     }
 
     private var launchGateEvaluationKey: String {
@@ -1874,7 +1858,6 @@ private func loadPracticeDefaultsIfNeeded() {
             appRoute.route = .content
         }
         .task(id: launchGateEvaluationKey) {
-            evaluateSignedOutLaunchGate()
             evaluateAppSetUpGate()
 
             if isHomePresentation && !appRoute.isProfilePresented && !shouldRenderAppSetUpRoot {
