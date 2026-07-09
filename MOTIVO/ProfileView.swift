@@ -838,7 +838,8 @@ private var sessionSetupSection: some View {
              onSave: { jpegData, cropped in
                  // Local cache for immediate UI (owner view).
                  ProfileStore.saveAvatarDerived(cropped, for: auth.currentUserID)
-                 avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
+                 mirrorCurrentAvatarIntoLocalScope(cropped: cropped, currentUserID: auth.currentUserID)
+                 avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) ?? ProfileStore.avatarImage(for: nil)
                  showAvatarEditor = false
 
                  Task { _ = await persistAvatarToBackendIfPossible(jpegData: jpegData) }
@@ -846,6 +847,7 @@ private var sessionSetupSection: some View {
              onDelete: {
                  // Local clear immediately.
                  ProfileStore.deleteAvatar(for: auth.currentUserID)
+                 ProfileStore.deleteAvatar(for: nil)
                  avatarRefreshTask?.cancel()
          avatarRefreshTask = nil
          avatarImage = nil
@@ -856,6 +858,7 @@ private var sessionSetupSection: some View {
              onCancel: { showAvatarEditor = false },
              onReplaceOriginal: { image in
                  ProfileStore.saveAvatarOriginal(image, for: auth.currentUserID)
+                 ProfileStore.saveAvatarOriginal(image, for: nil)
                  // Do not auto-update derived; keep current derived until user taps Save in the editor.
              }
          )
@@ -918,9 +921,7 @@ private var sessionSetupSection: some View {
 
          if ProfileStore.hasPendingLocalAvatarSync(), BackendEnvironment.shared.isConnected {
              if ProfileStore.hasPendingLocalAvatarUpload(), let localAvatar = ProfileStore.avatarImage(for: nil) {
-                 if currentUserID != nil {
-                     ProfileStore.saveAvatarDerived(localAvatar, for: currentUserID)
-                 }
+                 copyLocalAvatarIntoConnectedScope(localAvatar, currentUserID: currentUserID)
                  avatarImage = localAvatar
              } else if ProfileStore.hasPendingLocalAvatarDeletion() {
                  if currentUserID != nil {
@@ -961,12 +962,53 @@ private var sessionSetupSection: some View {
                  if let localAvatar = ProfileStore.avatarImage(for: auth.currentUserID) {
                      avatarImage = localAvatar
                  } else {
+                     if let fetchedImage {
+                         seedLocalAvatarFromFetchedConnectedAvatar(fetchedImage, currentUserID: auth.currentUserID)
+                     }
                      avatarImage = fetchedImage
                  }
 
                  avatarRefreshTask = nil
              }
          }
+     }
+
+     private func copyLocalAvatarIntoConnectedScope(_ localAvatar: UIImage, currentUserID: String?) {
+         guard currentUserID != nil else { return }
+
+         ProfileStore.saveAvatarDerived(localAvatar, for: currentUserID)
+
+         if let localOriginal = ProfileStore.avatarOriginalImage(for: nil) {
+             ProfileStore.saveAvatarOriginal(localOriginal, for: currentUserID)
+         } else {
+             ProfileStore.saveAvatarOriginal(localAvatar, for: currentUserID)
+         }
+     }
+
+     private func mirrorCurrentAvatarIntoLocalScope(cropped: UIImage, currentUserID: String?) {
+         ProfileStore.saveAvatarDerived(cropped, for: nil)
+
+         if let currentOriginal = ProfileStore.avatarOriginalImage(for: currentUserID) {
+             ProfileStore.saveAvatarOriginal(currentOriginal, for: nil)
+         } else {
+             ProfileStore.saveAvatarOriginal(cropped, for: nil)
+         }
+     }
+
+     private func seedLocalAvatarFromFetchedConnectedAvatar(_ fetchedImage: UIImage, currentUserID: String?) {
+         guard currentUserID != nil else { return }
+
+         if ProfileStore.avatarImage(for: currentUserID) == nil {
+             ProfileStore.saveAvatarDerivedFromConnectedHydration(fetchedImage, for: currentUserID)
+         }
+         if ProfileStore.avatarOriginalImage(for: currentUserID) == nil {
+             ProfileStore.saveAvatarOriginal(fetchedImage, for: currentUserID)
+         }
+
+         // A fetched Connected avatar is already backend-authoritative, so it should also become
+         // the local Études avatar without creating a pending upload marker.
+         ProfileStore.saveAvatarDerivedFromConnectedHydration(fetchedImage, for: nil)
+         ProfileStore.saveAvatarOriginal(fetchedImage, for: nil)
      }
 
      @MainActor
@@ -989,7 +1031,7 @@ private var sessionSetupSection: some View {
                let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
 
          if auth.currentUserID != nil {
-             ProfileStore.saveAvatarDerived(localAvatar, for: auth.currentUserID)
+             copyLocalAvatarIntoConnectedScope(localAvatar, currentUserID: auth.currentUserID)
              avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) ?? localAvatar
          } else {
              avatarImage = localAvatar
@@ -1709,6 +1751,7 @@ private func initials(from string: String) -> String {
              PhotoPickerView { image in
                  if let image {
                      ProfileStore.saveAvatarOriginal(image, for: auth.currentUserID)
+                     ProfileStore.saveAvatarOriginal(image, for: nil)
                      // Do not overwrite derived automatically; user confirms via editor.
                      // If no derived exists yet, you may choose to show the editor or leave as is.
                      if ProfileStore.avatarImage(for: auth.currentUserID) == nil {

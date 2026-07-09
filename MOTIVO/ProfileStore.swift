@@ -338,6 +338,16 @@ struct ProfileStore {
 
     /// Save derived/display avatar as PNG. Downscale to max 256 px on the longer side for UI use.
     static func saveAvatarDerived(_ image: UIImage, for userID: String?) {
+        saveAvatarDerived(image, for: userID, markPendingLocalSync: true)
+    }
+
+    /// Save derived/display avatar without creating a pending Solo→Connected upload marker.
+    /// Used when hydrating local caches from an already-authoritative Connected backend avatar.
+    static func saveAvatarDerivedFromConnectedHydration(_ image: UIImage, for userID: String?) {
+        saveAvatarDerived(image, for: userID, markPendingLocalSync: false)
+    }
+
+    private static func saveAvatarDerived(_ image: UIImage, for userID: String?, markPendingLocalSync: Bool) {
         guard let url = avatarDerivedURL(for: userID) else { return }
         let fm = FileManager.default
         if let dir = url.deletingLastPathComponent() as URL?, !fm.fileExists(atPath: dir.path) {
@@ -347,7 +357,9 @@ struct ProfileStore {
         guard let data = down.pngData() else { return }
         try? data.write(to: url, options: .atomic)
         cache.setObject(down, forKey: url.path as NSString)
-        markPendingLocalAvatarUploadIfNeeded(for: userID)
+        if markPendingLocalSync {
+            markPendingLocalAvatarUploadIfNeeded(for: userID)
+        }
     }
 
     /// Backwards-compatibility: treat this as saving the derived/display avatar.
@@ -382,6 +394,7 @@ struct ProfileStore {
     static func avatarOriginalImage(for userID: String?) -> Any? { return nil }
     static func saveAvatarOriginal(_ image: Any, for userID: String?) { }
     static func saveAvatarDerived(_ image: Any, for userID: String?) { }
+    static func saveAvatarDerivedFromConnectedHydration(_ image: Any, for userID: String?) { }
     static func saveAvatarImage(_ image: Any, for userID: String?) { }
     static func deleteAvatar(for userID: String?) { }
     static func hasPendingLocalAvatarUpload() -> Bool { false }
