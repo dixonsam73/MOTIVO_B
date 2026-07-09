@@ -841,7 +841,7 @@ private var sessionSetupSection: some View {
                  avatarImage = ProfileStore.avatarImage(for: auth.currentUserID)
                  showAvatarEditor = false
 
-                 Task { await persistAvatarToBackendIfPossible(jpegData: jpegData) }
+                 Task { _ = await persistAvatarToBackendIfPossible(jpegData: jpegData) }
              },
              onDelete: {
                  // Local clear immediately.
@@ -851,7 +851,7 @@ private var sessionSetupSection: some View {
          avatarImage = nil
                  showAvatarEditor = false
 
-                 Task { await clearAvatarFromBackendIfPossible() }
+                 Task { _ = await clearAvatarFromBackendIfPossible() }
              },
              onCancel: { showAvatarEditor = false },
              onReplaceOriginal: { image in
@@ -915,6 +915,24 @@ private var sessionSetupSection: some View {
          avatarRefreshTask = nil
 
          let currentUserID = auth.currentUserID
+
+         if ProfileStore.hasPendingLocalAvatarSync(), BackendEnvironment.shared.isConnected {
+             if ProfileStore.hasPendingLocalAvatarUpload(), let localAvatar = ProfileStore.avatarImage(for: nil) {
+                 if currentUserID != nil {
+                     ProfileStore.saveAvatarDerived(localAvatar, for: currentUserID)
+                 }
+                 avatarImage = localAvatar
+             } else if ProfileStore.hasPendingLocalAvatarDeletion() {
+                 if currentUserID != nil {
+                     ProfileStore.deleteAvatar(for: currentUserID)
+                 }
+                 avatarImage = nil
+             }
+
+             Task { await syncPendingLocalAvatarToConnectedIfNeeded() }
+             return
+         }
+
          if let localAvatar = ProfileStore.avatarImage(for: currentUserID) {
              avatarImage = localAvatar
              return
@@ -948,6 +966,37 @@ private var sessionSetupSection: some View {
 
                  avatarRefreshTask = nil
              }
+         }
+     }
+
+     @MainActor
+     private func syncPendingLocalAvatarToConnectedIfNeeded() async {
+         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+         guard BackendEnvironment.shared.isConnected else { return }
+         let auth = _auth.wrappedValue
+         guard auth.hasSupabaseAccessToken else { return }
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+
+         if ProfileStore.hasPendingLocalAvatarDeletion() {
+             if await clearAvatarFromBackendIfPossible() {
+                 ProfileStore.clearPendingLocalAvatarSync()
+             }
+             return
+         }
+
+         guard ProfileStore.hasPendingLocalAvatarUpload(),
+               let localAvatar = ProfileStore.avatarImage(for: nil),
+               let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
+
+         if auth.currentUserID != nil {
+             ProfileStore.saveAvatarDerived(localAvatar, for: auth.currentUserID)
+             avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) ?? localAvatar
+         } else {
+             avatarImage = localAvatar
+         }
+
+         if await persistAvatarToBackendIfPossible(jpegData: jpegData) {
+             ProfileStore.clearPendingLocalAvatarSync()
          }
      }
 
@@ -1254,13 +1303,12 @@ case .failure(let error):
      // MARK: - Avatar (backend identity)
 
      @MainActor
-     private func persistAvatarToBackendIfPossible(jpegData: Data) async {
-         guard appModeManager.canShowConnectedAccountManagement else { return }
-         guard appModeManager.canShowConnectedAccountManagement else { return }
-         guard BackendEnvironment.shared.isConnected else { return }
+     private func persistAvatarToBackendIfPossible(jpegData: Data) async -> Bool {
+         guard appModeManager.canShowConnectedAccountManagement else { return false }
+         guard BackendEnvironment.shared.isConnected else { return false }
          let auth = _auth.wrappedValue
-         guard auth.hasSupabaseAccessToken else { return }
-         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+         guard auth.hasSupabaseAccessToken else { return false }
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return false }
 
          avatarSyncInFlight = true
          defer { avatarSyncInFlight = false }
@@ -1271,7 +1319,7 @@ case .failure(let error):
          case .failure:
              avatarSyncErrorMessage = "Couldn’t upload your avatar. Please try again."
              showAvatarSyncErrorAlert = true
-             return
+             return false
          case .success(let avatarKey):
              // Bust remote caches for this key (image + signed URL), because content may have changed.
              await invalidateRemoteAvatarCaches(avatarKey: avatarKey)
@@ -1280,21 +1328,22 @@ case .failure(let error):
              let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
              switch patch {
              case .success:
-                 return
+                 ProfileStore.clearPendingLocalAvatarSync()
+                 return true
              case .failure:
                  avatarSyncErrorMessage = "Uploaded your avatar, but couldn’t update your profile. Please try again."
                  showAvatarSyncErrorAlert = true
-                 return
+                 return false
              }
          }
      }
 
      @MainActor
-     private func clearAvatarFromBackendIfPossible() async {
-         guard BackendEnvironment.shared.isConnected else { return }
+     private func clearAvatarFromBackendIfPossible() async -> Bool {
+         guard BackendEnvironment.shared.isConnected else { return false }
          let auth = _auth.wrappedValue
-         guard auth.hasSupabaseAccessToken else { return }
-         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+         guard auth.hasSupabaseAccessToken else { return false }
+         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return false }
 
          avatarSyncInFlight = true
          defer { avatarSyncInFlight = false }
@@ -1308,11 +1357,12 @@ case .failure(let error):
          case .success:
              // Bust caches for the canonical key as well, in case any surfaces still reference it.
              await invalidateRemoteAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
-             return
+             ProfileStore.clearPendingLocalAvatarSync()
+             return true
          case .failure:
              avatarSyncErrorMessage = "Couldn’t clear your avatar right now. Please try again."
              showAvatarSyncErrorAlert = true
-             return
+             return false
          }
      }
 

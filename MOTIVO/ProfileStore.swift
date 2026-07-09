@@ -30,6 +30,36 @@ struct ProfileStore {
         return trimmed.isEmpty ? localProfileStorageID : trimmed
     }
     private static func locationKey(for userID: String) -> String { "profile.\(userID).location" }
+    private static let localAvatarSyncStateKey = "profile.__local_etudes_profile__.avatarSyncState_v1"
+
+    // MARK: - Local Avatar Sync State
+    static func hasPendingLocalAvatarUpload() -> Bool {
+        UserDefaults.standard.string(forKey: localAvatarSyncStateKey) == "upload"
+    }
+
+    static func hasPendingLocalAvatarDeletion() -> Bool {
+        UserDefaults.standard.string(forKey: localAvatarSyncStateKey) == "delete"
+    }
+
+    static func hasPendingLocalAvatarSync() -> Bool {
+        hasPendingLocalAvatarUpload() || hasPendingLocalAvatarDeletion()
+    }
+
+    static func clearPendingLocalAvatarSync() {
+        UserDefaults.standard.removeObject(forKey: localAvatarSyncStateKey)
+    }
+
+    private static func markPendingLocalAvatarUploadIfNeeded(for userID: String?) {
+        if profileStorageID(for: userID) == localProfileStorageID {
+            UserDefaults.standard.set("upload", forKey: localAvatarSyncStateKey)
+        }
+    }
+
+    private static func markPendingLocalAvatarDeletionIfNeeded(for userID: String?) {
+        if profileStorageID(for: userID) == localProfileStorageID {
+            UserDefaults.standard.set("delete", forKey: localAvatarSyncStateKey)
+        }
+    }
 
     // MARK: - Phase 12C (Per-backend-user Lookup Keys)
     private static let legacyAllowDiscoveryKey = "allowDiscovery_v1"
@@ -317,6 +347,7 @@ struct ProfileStore {
         guard let data = down.pngData() else { return }
         try? data.write(to: url, options: .atomic)
         cache.setObject(down, forKey: url.path as NSString)
+        markPendingLocalAvatarUploadIfNeeded(for: userID)
     }
 
     /// Backwards-compatibility: treat this as saving the derived/display avatar.
@@ -334,6 +365,7 @@ struct ProfileStore {
             try? fm.removeItem(at: url)
             cache.removeObject(forKey: url.path as NSString)
         }
+        markPendingLocalAvatarDeletionIfNeeded(for: userID)
     }
 
     private static func downscale(_ img: UIImage, maxSide: CGFloat) -> UIImage {
@@ -352,5 +384,9 @@ struct ProfileStore {
     static func saveAvatarDerived(_ image: Any, for userID: String?) { }
     static func saveAvatarImage(_ image: Any, for userID: String?) { }
     static func deleteAvatar(for userID: String?) { }
+    static func hasPendingLocalAvatarUpload() -> Bool { false }
+    static func hasPendingLocalAvatarDeletion() -> Bool { false }
+    static func hasPendingLocalAvatarSync() -> Bool { false }
+    static func clearPendingLocalAvatarSync() { }
     #endif
 }

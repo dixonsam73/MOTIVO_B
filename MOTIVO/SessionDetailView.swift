@@ -2046,12 +2046,18 @@ fileprivate struct SessionIdentityHeader: View {
     let session: Session
     @Environment(\.managedObjectContext) private var viewContext
     @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var appModeManager: AppModeManager
 
-    private var ownerUserID: String? { session.ownerUserID ?? auth.currentUserID }
-    private var isCurrentUser: Bool { ownerUserID == auth.currentUserID }
+    private var usesLocalIdentity: Bool { !appModeManager.canViewFeed }
+    private var ownerUserID: String? { usesLocalIdentity ? auth.currentUserID : (session.ownerUserID ?? auth.currentUserID) }
+    private var isCurrentUser: Bool { usesLocalIdentity || ownerUserID == auth.currentUserID }
 
     private var avatarImage: UIImage? { ProfileStore.avatarImage(for: ownerUserID) }
     private var location: String {
+        if usesLocalIdentity {
+            return ProfileStore.location(for: ownerUserID)
+        }
+
         if isCurrentUser {
             let canonical = (auth.backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
             if !canonical.isEmpty {

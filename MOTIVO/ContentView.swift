@@ -616,6 +616,82 @@ fileprivate struct SessionsRootView: View {
         "avatars|\(toolbarAvatarKeyNormalized)"
     }
 
+    private var toolbarFallbackInitials: String {
+        guard let uid = userID, !uid.isEmpty else { return "?" }
+
+        let req: NSFetchRequest<Profile> = Profile.fetchRequest()
+        req.fetchLimit = 1
+
+        guard let profile = (try? viewContext.fetch(req))?.first else { return "?" }
+        let trimmedName = (profile.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else { return "?" }
+
+        let words = trimmedName
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+
+        guard let firstWord = words.first else { return "?" }
+        if words.count == 1 {
+            return String(firstWord.prefix(1)).uppercased()
+        }
+
+        let first = firstWord.first.map { String($0).uppercased() } ?? ""
+        let last = words.last?.first.map { String($0).uppercased() } ?? ""
+        let initials = first + last
+        return initials.isEmpty ? "?" : initials
+    }
+
+    @ViewBuilder
+    private var toolbarProfileButtonLabel: some View {
+        #if canImport(UIKit)
+        if let uiImage = ProfileStore.avatarImage(for: userID) {
+            toolbarAvatarImage(uiImage)
+        } else if !toolbarAvatarKeyNormalized.isEmpty, let cached = RemoteAvatarImageCache.get(toolbarAvatarCacheKey) {
+            toolbarAvatarImage(cached)
+        } else if !toolbarAvatarKeyNormalized.isEmpty, let toolbarRemoteAvatar {
+            toolbarAvatarImage(toolbarRemoteAvatar)
+        } else {
+            toolbarInitialsAvatar
+        }
+        #else
+        ZStack {
+            Circle()
+                .fill(.thinMaterial)
+                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
+                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
+            Image(systemName: "person.fill")
+                .font(.system(size: 22, weight: .regular))
+                .foregroundStyle(colorScheme == .dark ? .white : .primary)
+        }
+        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+        #endif
+    }
+
+    #if canImport(UIKit)
+    private func toolbarAvatarImage(_ uiImage: UIImage) -> some View {
+        Image(uiImage: uiImage)
+            .resizable()
+            .scaledToFill()
+            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+            .clipShape(Circle())
+            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+            .padding(8)
+    }
+    #endif
+
+    private var toolbarInitialsAvatar: some View {
+        ZStack {
+            Circle().fill(.thinMaterial)
+            Text(toolbarFallbackInitials)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundStyle(Theme.Colors.secondaryText)
+        }
+        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
+        .clipShape(Circle())
+        .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+        .padding(8)
+    }
+
     private var appSetUpBootstrapStateKey: String {
         switch auth.backendBootstrapState {
         case .unknown: return "unknown"
@@ -1457,73 +1533,7 @@ fileprivate struct SessionsRootView: View {
                         practiceInsightStore.clearCurrentInsight()
                         appRoute.isProfilePresented = true
                     } label: {
-                        #if canImport(UIKit)
-                        if let uiImage = ProfileStore.avatarImage(for: userID) {
-                            Image(uiImage: uiImage)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                                .padding(8)
-                        } else if !toolbarAvatarKeyNormalized.isEmpty, let cached = RemoteAvatarImageCache.get(toolbarAvatarCacheKey) {
-                            Image(uiImage: cached)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                                .padding(8)
-                        } else if !toolbarAvatarKeyNormalized.isEmpty, let toolbarRemoteAvatar {
-                            Image(uiImage: toolbarRemoteAvatar)
-                                .resizable()
-                                .scaledToFill()
-                                .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                                .clipShape(Circle())
-                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                                .padding(8)
-                        } else {
-                            // Match initials behavior to identity row when no avatar image is available
-                            let initials: String = {
-                                // Source of truth: Core Data Profile.name for current device's user only.
-                                let req: NSFetchRequest<Profile> = Profile.fetchRequest()
-                                req.fetchLimit = 1
-                                if let uid = userID, !uid.isEmpty, let ctx = viewContext as NSManagedObjectContext?, let p = try? ctx.fetch(req).first, let n = p.name, !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    let words = n.trimmingCharacters(in: .whitespacesAndNewlines)
-                                        .components(separatedBy: .whitespacesAndNewlines)
-                                        .filter { !$0.isEmpty }
-                                    if words.count == 1 { return String(words[0].prefix(1)).uppercased() }
-                                    let first = words.first?.first.map { String($0).uppercased() } ?? ""
-                                    let last = words.last?.first.map { String($0).uppercased() } ?? ""
-                                    let combo = (first + last)
-                                    return combo.isEmpty ? "?" : combo
-                                }
-                                return "?"
-                            }()
-
-                            ZStack {
-                                Circle().fill(.thinMaterial)
-                                Text(initials)
-                                    .font(.system(size: 16, weight: .bold))
-                                    .foregroundStyle(Theme.Colors.secondaryText)
-                            }
-                            .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                            .padding(8)
-                        }
-                        #else
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? TopButtonsUI.fillOpacityDark : TopButtonsUI.fillOpacityLight)
-                                .shadow(color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15), radius: 2, y: 1)
-                            Image(systemName: "person.fill")
-                                .font(.system(size: 22, weight: .regular))
-                                .foregroundStyle(colorScheme == .dark ? .white : .primary)
-                        }
-                        .frame(width: TopButtonsUI.size, height: TopButtonsUI.size)
-                        #endif
+                        toolbarProfileButtonLabel
                     }
                     .accessibilityLabel("Open profile")
                     // People (search / follows)

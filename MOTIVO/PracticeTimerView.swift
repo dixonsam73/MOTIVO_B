@@ -1325,7 +1325,7 @@ private func loadPracticeDefaultsIfNeeded() {
                     handleProfileTap()
                 } label: {
                     #if canImport(UIKit)
-                    if let userID = auth.currentUserID, let uiImage = ProfileStore.avatarImage(for: userID) {
+                    if let uiImage = ProfileStore.avatarImage(for: auth.currentUserID) {
                         Image(uiImage: uiImage)
                             .resizable()
                             .scaledToFill()
@@ -1363,22 +1363,32 @@ private func loadPracticeDefaultsIfNeeded() {
                                 let first = words.first?.first.map { String($0).uppercased() } ?? ""
                                 let last = words.last?.first.map { String($0).uppercased() } ?? ""
                                 let combo = first + last
-                                return combo.isEmpty ? "?" : combo
+                                return combo.isEmpty ? "" : combo
                             }
-                            return "?"
+                            return ""
                         }()
 
-                        ZStack {
-                            Circle().fill(.thinMaterial)
-                            Text(initials)
-                                .font(.system(size: 16, weight: .bold))
+                        if initials.isEmpty {
+                            Image(systemName: "person.fill")
+                                .font(.system(size: 18, weight: .medium))
                                 .foregroundStyle(Theme.Colors.secondaryText)
+                                .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                                .clipShape(Circle())
+                                .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                                .padding(8)
+                        } else {
+                            ZStack {
+                                Circle().fill(.thinMaterial)
+                                Text(initials)
+                                    .font(.system(size: 16, weight: .bold))
+                                    .foregroundStyle(Theme.Colors.secondaryText)
+                            }
+                            .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
+                            .clipShape(Circle())
+                            .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
+                            .padding(8)
                         }
-                        .frame(width: PracticeTimerTopButtonsUI.size, height: PracticeTimerTopButtonsUI.size)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                        .padding(8)
-                    }
+                        }
                     #else
                     ZStack {
                         Circle()
