@@ -53,6 +53,9 @@ import AuthenticationServices
 import CryptoKit
 import Combine
 import CoreData
+#if canImport(UIKit)
+import UIKit
+#endif
 
 // CHANGE-ID: 20260112_131015_9A_backend_identity_canonicalisation
 // SCOPE: Step 9A — Canonicalise backend user identity lookup (single source for backend principal; DEBUG override key)
@@ -236,6 +239,81 @@ final class AuthManager: NSObject, ObservableObject {
     var isSignedIn: Bool { currentUserID != nil }
 
 
+    // MARK: - M7B Avatar promotion
+
+    /// Best-effort promotion of a pending Études avatar change into the active Connected scope.
+    /// The pending marker is retained on any unavailable/offline/backend failure so a later
+    /// authentication refresh or ProfileView appearance can retry safely.
+    func syncPendingLocalAvatarToConnectedIfNeeded(reason: String) async {
+        guard ProfileStore.hasPendingLocalAvatarSync() else { return }
+        guard !LocalFactoryReset.isInProgress else { return }
+        guard BackendEnvironment.shared.isConnected else { return }
+        guard BackendConfig.isConfigured else { return }
+        guard hasSupabaseAccessToken else { return }
+        guard let connectedStorageID = currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !connectedStorageID.isEmpty else { return }
+        guard let backendID = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !backendID.isEmpty else { return }
+
+        if ProfileStore.hasPendingLocalAvatarDeletion() {
+            ProfileStore.deleteAvatar(for: connectedStorageID)
+
+            _ = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
+            let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
+            guard case .success = patch else {
+                NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
+                return
+            }
+
+            await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
+            backendAvatarKey = nil
+            ProfileStore.clearPendingLocalAvatarSync()
+            NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
+            return
+        }
+
+        #if canImport(UIKit)
+        guard ProfileStore.hasPendingLocalAvatarUpload(),
+              let localAvatar = ProfileStore.avatarImage(for: nil),
+              let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
+
+        ProfileStore.saveAvatarDerivedFromConnectedHydration(localAvatar, for: connectedStorageID)
+        if let localOriginal = ProfileStore.avatarOriginalImage(for: nil) {
+            ProfileStore.saveAvatarOriginal(localOriginal, for: connectedStorageID)
+        } else {
+            ProfileStore.saveAvatarOriginal(localAvatar, for: connectedStorageID)
+        }
+
+        let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
+        guard case .success(let avatarKey) = upload else {
+            NSLog("[Auth] pending local avatar upload retry retained user=%@ reason=%@", backendID, reason)
+            return
+        }
+
+        await invalidateAvatarCaches(avatarKey: avatarKey)
+        let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
+        guard case .success = patch else {
+            NSLog("[Auth] pending local avatar directory patch retry retained user=%@ reason=%@", backendID, reason)
+            return
+        }
+
+        backendAvatarKey = avatarKey
+        ProfileStore.clearPendingLocalAvatarSync()
+        NSLog("[Auth] promoted local avatar upload user=%@ reason=%@", backendID, reason)
+        #endif
+    }
+
+    private func invalidateAvatarCaches(avatarKey: String) async {
+        let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let cacheKey = "avatars|\(trimmed)"
+        await RemoteAvatarSignedURLCache.shared.invalidate(cacheKey)
+        #if canImport(UIKit)
+        RemoteAvatarImageCache.invalidate(cacheKey)
+        #endif
+    }
+
+
     // MARK: - Directory hydration (ProfileStore defaults)
 
     /// Hydrate local ProfileStore values (discovery mode + account handle) from the backend account_directory row.
@@ -253,6 +331,7 @@ final class AuthManager: NSObject, ObservableObject {
             directoryHydrationTask?.cancel()
             directoryHydrationTask = Task { [weak self] in
                 guard let self else { return }
+                await self.syncPendingLocalAvatarToConnectedIfNeeded(reason: "\(reason)-alreadyHydrated")
                 await self.publishLocalProfileSnapshotToDirectoryIfPossible(userID: bid, reason: "\(reason)-alreadyHydrated")
             }
             return
@@ -262,6 +341,7 @@ final class AuthManager: NSObject, ObservableObject {
         directoryHydrationTask?.cancel()
         directoryHydrationTask = Task { [weak self] in
             guard let self else { return }
+            await self.syncPendingLocalAvatarToConnectedIfNeeded(reason: reason)
             await self.hydrateDirectoryStateFromBackend(userID: bid, reason: reason)
         }
     }

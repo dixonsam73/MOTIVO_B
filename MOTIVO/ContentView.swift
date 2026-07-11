@@ -617,8 +617,6 @@ fileprivate struct SessionsRootView: View {
     }
 
     private var toolbarFallbackInitials: String {
-        guard let uid = userID, !uid.isEmpty else { return "?" }
-
         let req: NSFetchRequest<Profile> = Profile.fetchRequest()
         req.fetchLimit = 1
 

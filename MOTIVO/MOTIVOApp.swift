@@ -219,6 +219,13 @@ struct MOTIVOApp: App {
                 .onAppear {
                     appModeManager.applyActivation(auth: auth)
 
+                    // M7B: AppMode activation must complete before a pending Études avatar can
+                    // be promoted into the Connected namespace/backend. AuthManager may discover
+                    // the identity before the runtime has switched to Connected, so retry here.
+                    Task {
+                        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "appOnAppearAfterActivation")
+                    }
+
                     // Phase 14.2.2: Session liveness — refresh Supabase session only when the Connected runtime is allowed.
                     Task {
                         guard appModeManager.canViewFeed else { return }
@@ -267,8 +274,16 @@ struct MOTIVOApp: App {
                         }
                     }
                 }
-                .onReceive(auth.$backendUserID.removeDuplicates()) { _ in
+                .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     appModeManager.applyActivation(auth: auth)
+
+                    // M7B: backend identity publication is the sign-in transition where the
+                    // Connected runtime becomes available. Run the pending avatar promotion only
+                    // after activation so AuthManager's Connected guard can succeed.
+                    guard backendUserID != nil else { return }
+                    Task {
+                        await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "backendUserIDAfterActivation")
+                    }
                 }
                 .preferredColorScheme(.light)
         }

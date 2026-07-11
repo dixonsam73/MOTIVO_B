@@ -853,7 +853,10 @@ private var sessionSetupSection: some View {
          avatarImage = nil
                  showAvatarEditor = false
 
-                 Task { _ = await clearAvatarFromBackendIfPossible() }
+                 Task {
+                     let auth = _auth.wrappedValue
+                     await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "ProfileView.connectedAvatarDelete")
+                 }
              },
              onCancel: { showAvatarEditor = false },
              onReplaceOriginal: { image in
@@ -1013,32 +1016,14 @@ private var sessionSetupSection: some View {
 
      @MainActor
      private func syncPendingLocalAvatarToConnectedIfNeeded() async {
-         guard ProfileStore.hasPendingLocalAvatarSync() else { return }
-         guard BackendEnvironment.shared.isConnected else { return }
          let auth = _auth.wrappedValue
-         guard auth.hasSupabaseAccessToken else { return }
-         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return }
+         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "ProfileView.refreshAvatarDisplay")
 
-         if ProfileStore.hasPendingLocalAvatarDeletion() {
-             if await clearAvatarFromBackendIfPossible() {
-                 ProfileStore.clearPendingLocalAvatarSync()
-             }
-             return
-         }
-
-         guard ProfileStore.hasPendingLocalAvatarUpload(),
-               let localAvatar = ProfileStore.avatarImage(for: nil),
-               let jpegData = localAvatar.jpegData(compressionQuality: 0.9) else { return }
-
-         if auth.currentUserID != nil {
-             copyLocalAvatarIntoConnectedScope(localAvatar, currentUserID: auth.currentUserID)
-             avatarImage = ProfileStore.avatarImage(for: auth.currentUserID) ?? localAvatar
+         if let currentUserID = auth.currentUserID,
+            let connectedAvatar = ProfileStore.avatarImage(for: currentUserID) {
+             avatarImage = connectedAvatar
          } else {
-             avatarImage = localAvatar
-         }
-
-         if await persistAvatarToBackendIfPossible(jpegData: jpegData) {
-             ProfileStore.clearPendingLocalAvatarSync()
+             avatarImage = ProfileStore.avatarImage(for: nil)
          }
      }
 
