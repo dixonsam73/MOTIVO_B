@@ -500,9 +500,15 @@ func attachmentFileURL(_ a: Attachment) -> URL? {
 
     func fallbackByFilename(_ filename: String) -> URL? {
         let fm = FileManager.default
+        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
+        let library = fm.urls(for: .libraryDirectory, in: .userDomainMask).first
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         let dirs: [URL?] = [
-            fm.urls(for: .documentDirectory, in: .userDomainMask).first,
+            documents,
+            documents?.appendingPathComponent("Scores", isDirectory: true),
             fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+            library,
+            appSupport,
             URL(fileURLWithPath: NSTemporaryDirectory())
         ]
         for d in dirs.compactMap({ $0 }) {
