@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260713_ConnectedIntroduction_v1_Polish
-// SCOPE: Introduce the locked Études Connected editorial introduction page only. Reuses existing Études visual language and routes both existing-user Sign In and Continue through callbacks supplied by ProfileView. No authentication, StoreKit, activation, invite, animation, or unrelated UI changes.
-// SEARCH-TOKEN: 20260713_ConnectedIntroduction_v1_Polish
+// CHANGE-ID: 20260713_ConnectedIntroduction_M8A1_GlyphAnimation
+// SCOPE: Add a one-shot, Reduce Motion-aware reveal to the two existing Practice Window separators in ConnectedIntroductionView only. No copy, layout, navigation, authentication, StoreKit, or unrelated UI changes.
+// SEARCH-TOKEN: 20260713_ConnectedIntroduction_M8A1_GlyphAnimation
 
 import SwiftUI
 
@@ -21,12 +21,12 @@ struct ConnectedIntroductionView: View {
                 introductionSection
                     .padding(.top, Theme.Spacing.xxl)
 
-                PracticeWindowSeparator()
+                PracticeWindowSeparator(animationDelay: 0.3)
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 sharingSection
 
-                PracticeWindowSeparator()
+                PracticeWindowSeparator(animationDelay: 0.5)
                     .padding(.vertical, Theme.Spacing.xxl)
 
                 principlesSection
@@ -178,7 +178,63 @@ struct ConnectedIntroductionView: View {
 }
 
 private struct PracticeWindowSeparator: View {
+    let animationDelay: Double
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lineRevealProgress: CGFloat = 0
+    @State private var dotRevealProgress: CGFloat = 0
+    @State private var hasAnimated = false
+
     private let glyphColor = Color(red: 0.28, green: 0.56, blue: 0.56)
+
+    var body: some View {
+        PracticeWindowSeparatorCanvas(
+            lineProgress: lineRevealProgress,
+            dotProgress: dotRevealProgress,
+            glyphColor: glyphColor
+        )
+        .frame(width: 92, height: 30)
+        .frame(maxWidth: .infinity)
+        .accessibilityHidden(true)
+        .onAppear {
+            revealIfNeeded()
+        }
+    }
+
+    private func revealIfNeeded() {
+        guard !hasAnimated else { return }
+        hasAnimated = true
+
+        guard !reduceMotion else {
+            lineRevealProgress = 1
+            dotRevealProgress = 1
+            return
+        }
+
+        let lineDuration: Double = 5.0
+
+        withAnimation(.easeOut(duration: lineDuration).delay(animationDelay)) {
+            lineRevealProgress = 1
+        }
+
+        withAnimation(.easeIn(duration: 1.6).delay(animationDelay + lineDuration)) {
+            dotRevealProgress = 1
+        }
+    }
+}
+
+private struct PracticeWindowSeparatorCanvas: View, Animatable {
+    var lineProgress: CGFloat
+    var dotProgress: CGFloat
+    let glyphColor: Color
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(lineProgress, dotProgress) }
+        set {
+            lineProgress = newValue.first
+            dotProgress = newValue.second
+        }
+    }
 
     var body: some View {
         Canvas { context, size in
@@ -188,10 +244,15 @@ private struct PracticeWindowSeparator: View {
             let opticalExtension: CGFloat = 2.5
             let startX = insetX - opticalExtension
             let endX = insetX + availableWidth + opticalExtension
+            let fullLineWidth = max(endX - startX, 1)
+            let lineCenterX = startX + (fullLineWidth / 2)
+            let clampedLineProgress = min(max(lineProgress, 0), 1)
+            let clampedDotProgress = min(max(dotProgress, 0), 1)
+            let halfLineWidth = (fullLineWidth / 2) * clampedLineProgress
 
             var line = Path()
-            line.move(to: CGPoint(x: startX, y: centerY))
-            line.addLine(to: CGPoint(x: endX, y: centerY))
+            line.move(to: CGPoint(x: lineCenterX - halfLineWidth, y: centerY))
+            line.addLine(to: CGPoint(x: lineCenterX + halfLineWidth, y: centerY))
             context.stroke(
                 line,
                 with: .color(glyphColor.opacity(0.31)),
@@ -211,18 +272,15 @@ private struct PracticeWindowSeparator: View {
 
                 context.fill(
                     dotPath,
-                    with: .color(glyphColor.opacity(0.32))
+                    with: .color(glyphColor.opacity(0.32 * Double(clampedDotProgress)))
                 )
                 context.stroke(
                     dotPath,
-                    with: .color(glyphColor.opacity(0.46)),
+                    with: .color(glyphColor.opacity(0.46 * Double(clampedDotProgress))),
                     lineWidth: 1.25
                 )
             }
         }
-        .frame(width: 92, height: 30)
-        .frame(maxWidth: .infinity)
-        .accessibilityHidden(true)
     }
 }
 
