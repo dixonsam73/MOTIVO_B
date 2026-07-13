@@ -608,7 +608,7 @@ return AttachmentViewerView(
                     }
                 },
                 isReadOnly: true,
-                canShare: (session.ownerUserID == auth.currentUserID)
+                canShare: !appModeManager.canViewFeed || viewerIsOwner
             )
             .onDisappear { _refreshTick &+= 1 }
     }
@@ -625,8 +625,7 @@ return AttachmentViewerView(
             ToolbarItem(placement: .topBarTrailing) {
                 HStack(spacing: 12) {
                     // Show Edit only when the current user owns the session
-                    let isOwner = (session.ownerUserID ?? "") == (auth.currentUserID ?? "")
-                    if isOwner {
+                    if viewerIsOwner || !appModeManager.canViewFeed {
                         Button("Edit") {
                             showEdit = true
                         }
