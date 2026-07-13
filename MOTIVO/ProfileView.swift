@@ -283,6 +283,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      // New state for avatar editor sheet
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
+     @State private var showConnectedIntroduction: Bool = false
      @State private var showConnectedSignInSheet: Bool = false
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
@@ -327,6 +328,12 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 }
                 .navigationDestination(isPresented: $showAboutEtudes) {
                     AboutEtudesView()
+                }
+                .navigationDestination(isPresented: $showConnectedIntroduction) {
+                    ConnectedIntroductionView(
+                        onSignIn: { showConnectedSignInSheet = true },
+                        onContinue: { showConnectedSignInSheet = true }
+                    )
                 }
                 .navigationDestination(isPresented: $showTintModeSelection) {
                     TintModeSelectionView()
@@ -714,7 +721,7 @@ private var sessionSetupSection: some View {
      private var connectedPromoSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button { showConnectedSignInSheet = true } label: {
+                 Button { showConnectedIntroduction = true } label: {
                      navigationRow(title: "Explore Connected")
                  }
                  .buttonStyle(.plain)
