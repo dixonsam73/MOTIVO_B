@@ -1,6 +1,6 @@
-// CHANGE-ID: 20260614_171200_ScoresPhase3A_PageMemory_Store
-// SCOPE: Scores V1 Phase 3A — persist last viewed page per library score for active score page restoration. No Core Data, backend, session attachment, zoom, or viewport changes.
-// SEARCH-TOKEN: 20260614_171200_SCORES_PHASE3A_PAGE_MEMORY
+// CHANGE-ID: 20260714_ScoresLocalLibraryIdentityMigration
+// SCOPE: Make the Scores library permanently device-local and independent of Études Connected identity. Migrate legacy identity-scoped score metadata non-destructively. No UI, PDF file, Core Data, backend, attachment, viewer, or unrelated behaviour changes.
+// SEARCH-TOKEN: 20260714_SCORES_LOCAL_LIBRARY_IDENTITY_MIGRATION
 
 import Foundation
 import Combine
@@ -150,6 +150,8 @@ final class ScoreLibraryStore: ObservableObject {
 
     private func load() {
         let defaults = UserDefaults.standard
+        migrateLegacyIdentityScopedLibraryIfNeeded(in: defaults)
+
         if let data = defaults.data(forKey: storageKey),
            let decoded = try? decoder.decode([ScoreLibraryItem].self, from: data) {
             items = decoded
@@ -166,6 +168,56 @@ final class ScoreLibraryStore: ObservableObject {
         }
     }
 
+    private func migrateLegacyIdentityScopedLibraryIfNeeded(in defaults: UserDefaults) {
+        guard defaults.object(forKey: storageKey) == nil else { return }
+
+        let legacyStoragePrefix = "scoreLibrary_v1::"
+        let legacyActivePrefix = "scoreLibrary_activeScore_v1::"
+
+        let legacyStorageKeys = defaults.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(legacyStoragePrefix) }
+            .sorted { lhs, rhs in
+                let localKey = legacyStoragePrefix + "local"
+                if lhs == localKey { return true }
+                if rhs == localKey { return false }
+                return lhs.localizedStandardCompare(rhs) == .orderedAscending
+            }
+
+        var migratedItems: [ScoreLibraryItem] = []
+        var migratedIDs = Set<UUID>()
+        var migratedActiveScoreID: UUID?
+
+        for legacyKey in legacyStorageKeys {
+            guard let data = defaults.data(forKey: legacyKey),
+                  let decoded = try? decoder.decode([ScoreLibraryItem].self, from: data) else {
+                continue
+            }
+
+            for item in decoded where migratedIDs.insert(item.id).inserted {
+                migratedItems.append(item)
+            }
+
+            if migratedActiveScoreID == nil {
+                let scope = String(legacyKey.dropFirst(legacyStoragePrefix.count))
+                let legacyActiveKey = legacyActivePrefix + scope
+                if let rawActive = defaults.string(forKey: legacyActiveKey),
+                   let id = UUID(uuidString: rawActive),
+                   decoded.contains(where: { $0.id == id }) {
+                    migratedActiveScoreID = id
+                }
+            }
+        }
+
+        if let data = try? encoder.encode(migratedItems) {
+            defaults.set(data, forKey: storageKey)
+        }
+
+        if let migratedActiveScoreID,
+           migratedItems.contains(where: { $0.id == migratedActiveScoreID }) {
+            defaults.set(migratedActiveScoreID.uuidString, forKey: activeScoreKey)
+        }
+    }
+
     private func persist() {
         let defaults = UserDefaults.standard
         if let data = try? encoder.encode(items) {
@@ -179,19 +231,12 @@ final class ScoreLibraryStore: ObservableObject {
         }
     }
 
-    private var ownerScope: String {
-        if let id = PersistenceController.shared.currentUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !id.isEmpty {
-            return id
-        }
-        return "local"
-    }
-
     private var storageKey: String {
-        "scoreLibrary_v1::\(ownerScope)"
+        "scoreLibrary_v2"
     }
 
     private var activeScoreKey: String {
-        "scoreLibrary_activeScore_v1::\(ownerScope)"
+        "scoreLibrary_activeScore_v2"
     }
 
     private func scoresDirectory() -> URL {
