@@ -69,7 +69,9 @@ struct PeopleView: View {
 
     // Owner-Only Share — unread share pointers (recipient-side)
     @StateObject private var sharedWithYouStore = SharedWithYouStore.shared
+    @StateObject private var receivedAttachmentStore = ReceivedConnectedAttachmentStore.shared
     @State private var shareOwnerDirectory: [String: DirectoryAccount] = [:]
+    @State private var attachmentSenderDirectory: [String: DirectoryAccount] = [:]
     @State private var responseAuthorDirectory: [String: DirectoryAccount] = [:]
 
     @ObservedObject private var backendFeedStore: BackendFeedStore = BackendFeedStore.shared
@@ -94,7 +96,7 @@ struct PeopleView: View {
                     .padding(.horizontal, Theme.Spacing.l)
                 
                 // Shared with you (quiet, conditional)
-                if !sharedWithYouStore.unreadShares.isEmpty {
+                if !sharedWithYouStore.unreadShares.isEmpty || !receivedAttachmentStore.items.isEmpty {
                     sharedWithYouSection
                 }
 
@@ -141,6 +143,20 @@ struct PeopleView: View {
         .task {
             await sharedWithYouStore.refreshUnreadShares()
         }
+        .task {
+            await receivedAttachmentStore.refresh()
+        }
+        .task(id: attachmentSenderIDs) {
+            let ids = attachmentSenderIDs
+            guard !ids.isEmpty else {
+                attachmentSenderDirectory = [:]
+                return
+            }
+            let result = await AccountDirectoryService.shared.resolveAccounts(userIDs: ids)
+            if case .success(let map) = result {
+                attachmentSenderDirectory = map
+            }
+        }
         .task(id: shareOwnerIDs) {
             let ids = shareOwnerIDs
             guard !ids.isEmpty else {
@@ -186,6 +202,12 @@ struct PeopleView: View {
             .sorted()
     }
 
+    private var attachmentSenderIDs: [String] {
+        Array(Set(receivedAttachmentStore.items.map { $0.senderUserID.lowercased() }))
+            .filter { !$0.isEmpty }
+            .sorted()
+    }
+
     private var responseAuthorIDs: [String] {
         // IMPORTANT: normalize to lowercase so String keys match account_directory.user_id casing.
         // UUID().uuidString is uppercase by default; backend IDs are typically lowercase.
@@ -218,6 +240,39 @@ struct PeopleView: View {
     private var sharedWithYouSection: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
             Text("Shared with you").sectionHeader()
+
+            ForEach(receivedAttachmentStore.items.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { attachment in
+                let acct = attachmentSenderDirectory[attachment.senderUserID.lowercased()]
+
+                NavigationLink {
+                    ReceivedConnectedAttachmentDetailView(attachment: attachment)
+                } label: {
+                    HStack(spacing: Theme.Spacing.m) {
+                        Image(systemName: "doc.richtext")
+                            .font(.system(size: 20, weight: .regular))
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                            .frame(width: 40, height: 40)
+                            .background(.thinMaterial, in: Circle())
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(attachment.filename)
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Color.primary)
+                                .lineLimit(1)
+                            Text("From \(acct?.displayName ?? "Connected musician")")
+                                .font(Theme.Text.meta)
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                    }
+                    .padding(.vertical, Theme.Spacing.s)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
 
             ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
                 let acct = shareOwnerDirectory[share.ownerUserID]

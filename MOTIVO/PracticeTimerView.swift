@@ -328,6 +328,10 @@ struct PracticeTimerView: View {
     @State private var showThoughtEditorSheet: Bool = false
     @State private var showScoresLibrary: Bool = false
     @State private var scoreViewerRequest: TimerScoreViewerRequest? = nil
+    @State private var connectedScoreShareRequest: ConnectedScoreShareRequest? = nil
+    @State private var pendingNativeScoreShareURL: URL? = nil
+    @State private var nativeScoreShareURL: URL? = nil
+    @State private var showNativeScoreShare = false
     @State var usedScoreIDsThisSession: [UUID] = []
     @State var meaningfulScorePagesThisSession: [UUID: [Int]] = [:]
     @State var lastMeaningfulScorePageThisSession: [UUID: Int] = [:]
@@ -1512,6 +1516,24 @@ private func loadPracticeDefaultsIfNeeded() {
             Spacer()
 
             Button {
+                connectedScoreShareRequest = ConnectedScoreShareRequest(
+                    scoreID: request.id,
+                    title: request.title,
+                    url: request.url,
+                    currentPage: currentScorePageByID[request.id] ?? request.initialPage ?? 1
+                )
+            } label: {
+                scoreViewerDestinationControl(
+                    systemName: "square.and.arrow.up",
+                    tint: Theme.Colors.secondaryText
+                )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Share score")
+
+            Spacer()
+
+            Button {
                 flushMeaningfulScorePageTracking(for: request.id)
                 scoreViewerRequest = nil
                 showScoresLibrary = true
@@ -2036,6 +2058,34 @@ private func loadPracticeDefaultsIfNeeded() {
                     }
                 }
             )
+        }
+        .sheet(item: $connectedScoreShareRequest, onDismiss: {
+            guard let pendingURL = pendingNativeScoreShareURL else { return }
+            pendingNativeScoreShareURL = nil
+
+            DispatchQueue.main.async {
+                nativeScoreShareURL = pendingURL
+                showNativeScoreShare = true
+            }
+        }) { request in
+            ScoreAttachmentShareFlow(
+                request: request,
+                connectedEnabled: appModeManager.canShareAttachmentsWithConnected,
+                onIOSShare: { url in
+                    pendingNativeScoreShareURL = url
+                    connectedScoreShareRequest = nil
+                }
+            )
+        }
+        .sheet(
+            isPresented: $showNativeScoreShare,
+            onDismiss: {
+                nativeScoreShareURL = nil
+            }
+        ) {
+            if let nativeScoreShareURL {
+                NativeActivityView(activityItems: [nativeScoreShareURL])
+            }
         }
         .fullScreenCover(item: $scoreViewerRequest) { request in
             NavigationStack {

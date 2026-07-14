@@ -90,6 +90,11 @@ public final class AppModeManager: ObservableObject {
         mode == .connected
     }
 
+    /// Connected Attachment Sharing — native iOS sharing remains available in both modes.
+    public var canShareAttachmentsWithConnected: Bool {
+        mode == .connected
+    }
+
     /// Milestone 3
     public var canUseAttachmentPrivacy: Bool {
         mode == .connected
