@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260714_M7_LocalSessionConnectedAdoption
+// SCOPE: Adopt ownerless device-local Études sessions and their attachments into the first authenticated Connected identity. No session content, UI, publishing, backend, or unrelated persistence changes.
+// SEARCH-TOKEN: 20260714_M7_LOCAL_SESSION_CONNECTED_ADOPTION
+
 //
 //  Persistence.swift
 //  MOTIVO
@@ -147,7 +151,6 @@ extension PersistenceController {
             if ctx.hasChanges {
                 try ctx.save()
             }
-            UserDefaults.standard.set(true, forKey: migrationKey)
         } catch {
             print("Custom directory owner migration failed: \(error)")
         }
@@ -336,6 +339,51 @@ extension PersistenceController {
 }
 
 //  [ROLLBACK ANCHOR] v7.8 Maintenance — post-context-niceties (viewContext named; undo disabled)
+
+// MARK: - Études → Connected local journal adoption
+
+extension PersistenceController {
+    /// Adopts any ownerless device-local Études sessions into the authenticated
+    /// Connected identity whenever sign-in completes. Sessions already owned by
+    /// any concrete identity are deliberately left untouched.
+    func adoptOwnerlessLocalSessionsIfNeeded(for userID: String,
+                                             in ctx: NSManagedObjectContext? = nil) {
+        let owner = userID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !owner.isEmpty else { return }
+
+        let context = ctx ?? container.viewContext
+
+        do {
+            let request: NSFetchRequest<Session> = Session.fetchRequest()
+            request.predicate = NSCompoundPredicate(orPredicateWithSubpredicates: [
+                NSPredicate(format: "ownerUserID == nil"),
+                NSPredicate(format: "ownerUserID == ''")
+            ])
+
+            let sessions = try context.fetch(request)
+
+            for session in sessions {
+                session.ownerUserID = owner
+
+                let attachments = session.attachments as? Set<Attachment> ?? []
+                for attachment in attachments {
+                    let attachmentOwner = attachment.ownerUserID?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if attachmentOwner.isEmpty {
+                        attachment.ownerUserID = owner
+                    }
+                }
+            }
+
+            if context.hasChanges {
+                try context.save()
+            }
+
+        } catch {
+            print("Ownerless local session adoption failed: \(error)")
+        }
+    }
+}
 
 // MARK: - Delete Account v2 (Local Factory Reset)
 

@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260714_M7_LocalSessionConnectedAdoption
+// SCOPE: Adopt ownerless device-local Études sessions and their attachments into the first authenticated Connected identity. No session content, UI, publishing, backend, or unrelated persistence changes.
+// SEARCH-TOKEN: 20260714_M7_LOCAL_SESSION_CONNECTED_ADOPTION
+
 ////
 //  AuthManager.swift
 //  MOTIVO
@@ -753,6 +757,11 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         let userID = credential.user
         Keychain.set(userID, for: "appleUserID")
         self.currentUserID = userID
+
+        // First Connected activation: retain the existing device-local Études journal
+        // by adopting only ownerless local sessions into this authenticated identity.
+        PersistenceController.shared.currentUserID = userID
+        PersistenceController.shared.adoptOwnerlessLocalSessionsIfNeeded(for: userID)
 
         // Apple only provides fullName on the very first authorization.
         // On subsequent sign-ins it's usually nil — handle safely without force unwraps.
