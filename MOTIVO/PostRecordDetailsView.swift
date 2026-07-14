@@ -191,6 +191,11 @@ private struct PRDVScorePageSelection: Equatable {
     var hasSelection: Bool
 }
 
+private enum PRDVScoreAttachmentIntent {
+    case attach
+    case dontAttach
+}
+
 struct PostRecordDetailsView: View {
     @Environment(\.managedObjectContext) var viewContext
     @Environment(\.colorScheme) private var colorScheme
@@ -276,6 +281,7 @@ struct PostRecordDetailsView: View {
     @State var pdfPageSelectionRequest: PDFPageSelectionRequest? = nil
     @State private var scorePageSelectionRequest: PDFPageSelectionRequest? = nil
     @State private var scorePageSelections: [UUID: PRDVScorePageSelection] = [:]
+    @State private var scoreAttachmentIntents: [UUID: PRDVScoreAttachmentIntent] = [:]
     @State private var showScoreAttachLibrary: Bool = false
     @State private var manuallyAttachedScoreIDs: [UUID] = []
 
@@ -666,11 +672,20 @@ struct PostRecordDetailsView: View {
         )
     }
 
+    private func attachmentIntentForUsedScore(_ id: UUID) -> PRDVScoreAttachmentIntent {
+        scoreAttachmentIntents[id] ?? .attach
+    }
+
+    private func setAttachmentIntentForUsedScore(_ intent: PRDVScoreAttachmentIntent, id: UUID) {
+        scoreAttachmentIntents[id] = intent
+    }
+
     private func commitUsedScoreAttachments(to session: Session, ctx: NSManagedObjectContext) {
         let fileManager = FileManager.default
         var committedScoreIDs = Set<UUID>()
 
         for score in usedScoreItems {
+            guard attachmentIntentForUsedScore(score.id) == .attach else { continue }
             guard committedScoreIDs.insert(score.id).inserted else { continue }
 
             let url = ScoreLibraryStore.shared.url(for: score)
@@ -718,6 +733,7 @@ struct PostRecordDetailsView: View {
     }
 
     private func isScoreSelection(_ id: UUID, matching pages: [Int]?) -> Bool {
+        guard attachmentIntentForUsedScore(id) == .attach else { return false }
         guard let selection = scorePageSelections[id], selection.hasSelection else {
             return PDFSelectedPagesStore.sanitized(pages) == nil
         }
@@ -725,8 +741,38 @@ struct PostRecordDetailsView: View {
     }
 
     @ViewBuilder
+    private func scoreAttachmentOmissionOption(id: UUID) -> some View {
+        let isSelected = attachmentIntentForUsedScore(id) == .dontAttach
+
+        Button {
+            setAttachmentIntentForUsedScore(.dontAttach, id: id)
+        } label: {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(
+                        isSelected
+                        ? AnyShapeStyle(Theme.Colors.accent)
+                        : AnyShapeStyle(Theme.Colors.secondaryText.opacity(0.65))
+                    )
+                    .frame(width: 22, height: 22)
+
+                Text("Don’t attach")
+                    .font(.footnote)
+                    .foregroundStyle(Theme.Colors.secondaryText)
+
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
     private func scoreSelectionOption(title: String, pages: [Int]?, id: UUID) -> some View {
         Button {
+            setAttachmentIntentForUsedScore(.attach, id: id)
             setSelectedPagesForUsedScore(pages, id: id)
         } label: {
             HStack(spacing: Theme.Spacing.m) {
@@ -799,6 +845,7 @@ struct PostRecordDetailsView: View {
             }
 
             VStack(alignment: .leading, spacing: 2) {
+                scoreAttachmentOmissionOption(id: score.id)
                 scoreSelectionOption(title: "Entire document", pages: nil, id: score.id)
 
                 if meaningfulPages.count == 1, let page = meaningfulPages.first {
@@ -1241,7 +1288,10 @@ var body: some View {
                     pageCount: request.pageCount,
                     selectedPages: Binding(
                         get: { selectedPagesForUsedScore(request.id) },
-                        set: { setSelectedPagesForUsedScore($0, id: request.id) }
+                        set: {
+                            setAttachmentIntentForUsedScore(.attach, id: request.id)
+                            setSelectedPagesForUsedScore($0, id: request.id)
+                        }
                     )
                 )
             }
