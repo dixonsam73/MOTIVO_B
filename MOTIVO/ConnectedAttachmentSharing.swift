@@ -1,3 +1,8 @@
+// CHANGE-ID: 20260715_ConnectedAttachmentNotifications_Phase1
+// SCOPE: Add recipient viewed state, unread derivation, and idempotent mark-viewed support
+// for the existing relational notification pipeline. No transport, storage, save, delete,
+// page export, sharing ownership, or presentation changes.
+//
 // CHANGE-ID: 20260714_ConnectedAttachmentSharing_Phase1
 // SCOPE: Connected-only immutable PDF attachment delivery, persistent local recipient copies,
 // one-upload/many-recipient rows, and recipient-only lifecycle metadata. No post/feed/messaging integration.
@@ -19,6 +24,7 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
     public let createdAt: Date
     public let savedToScoresAt: Date?
     public let deletedAt: Date?
+    public let viewedAt: Date?
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -34,6 +40,7 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
         case createdAt = "created_at"
         case savedToScoresAt = "saved_to_scores_at"
         case deletedAt = "deleted_at"
+        case viewedAt = "viewed_at"
     }
 }
 
@@ -63,6 +70,7 @@ public protocol BackendConnectedAttachmentService {
     func uploadPDF(localURL: URL, filename: String, pageCount: Int) async -> Result<ConnectedAttachmentUploadReference, Error>
     func deliver(_ reference: ConnectedAttachmentUploadReference, to recipientUserIDs: [String]) async -> Result<Void, Error>
     func fetchReceived() async -> Result<[ConnectedAttachment], Error>
+    func markViewed(id: UUID) async -> Result<Void, Error>
     func markSavedToScores(id: UUID) async -> Result<Void, Error>
     func softDelete(id: UUID) async -> Result<Void, Error>
     func download(_ attachment: ConnectedAttachment) async -> Result<Data, Error>
@@ -77,6 +85,7 @@ public struct SimulatedConnectedAttachmentService: BackendConnectedAttachmentSer
     }
     public func deliver(_ reference: ConnectedAttachmentUploadReference, to recipientUserIDs: [String]) async -> Result<Void, Error> { .success(()) }
     public func fetchReceived() async -> Result<[ConnectedAttachment], Error> { .success([]) }
+    public func markViewed(id: UUID) async -> Result<Void, Error> { .success(()) }
     public func markSavedToScores(id: UUID) async -> Result<Void, Error> { .success(()) }
     public func softDelete(id: UUID) async -> Result<Void, Error> { .success(()) }
     public func download(_ attachment: ConnectedAttachment) async -> Result<Data, Error> { .failure(ConnectedAttachmentError.downloadUnavailable) }
@@ -222,6 +231,16 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
         }
     }
 
+    public func markViewed(id: UUID) async -> Result<Void, Error> {
+        await patch(
+            id: id,
+            values: ["viewed_at": ISO8601DateFormatter().string(from: Date())],
+            additionalQueryItems: [
+                URLQueryItem(name: "viewed_at", value: "is.null")
+            ]
+        )
+    }
+
     public func markSavedToScores(id: UUID) async -> Result<Void, Error> {
         await patch(id: id, values: ["saved_to_scores_at": ISO8601DateFormatter().string(from: Date())])
     }
@@ -230,13 +249,19 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
         await patch(id: id, values: ["deleted_at": ISO8601DateFormatter().string(from: Date())])
     }
 
-    private func patch(id: UUID, values: [String: Any]) async -> Result<Void, Error> {
+    private func patch(
+        id: UUID,
+        values: [String: Any],
+        additionalQueryItems: [URLQueryItem] = []
+    ) async -> Result<Void, Error> {
         do {
             let data = try JSONSerialization.data(withJSONObject: values)
             let result = await NetworkManager.shared.request(
                 path: "/rest/v1/connected_attachments",
                 method: "PATCH",
-                query: [URLQueryItem(name: "id", value: "eq.\(id.uuidString.lowercased())")],
+                query: [
+                    URLQueryItem(name: "id", value: "eq.\(id.uuidString.lowercased())")
+                ] + additionalQueryItems,
                 jsonBody: data,
                 headers: ["Prefer": "return=minimal"]
             )
@@ -276,6 +301,14 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
     private let fileManager = FileManager.default
     private init() {}
 
+    public var unreadItems: [ConnectedAttachment] {
+        items.filter { $0.viewedAt == nil }
+    }
+
+    public var unreadCount: Int {
+        unreadItems.count
+    }
+
     public func refresh() async {
         guard !isRefreshing else { return }
         isRefreshing = true
@@ -303,6 +336,14 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
             try? mutable.setResourceValues(values)
             return destination
         case .failure(let error): throw error
+        }
+    }
+
+    public func markViewed(_ item: ConnectedAttachment) async {
+        guard item.viewedAt == nil else { return }
+
+        if case .success = await BackendEnvironment.shared.connectedAttachments.markViewed(id: item.id) {
+            await refresh()
         }
     }
 

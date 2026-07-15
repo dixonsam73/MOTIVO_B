@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260715_ConnectedAttachmentNotifications_Aggregation
+// SCOPE: Include unread received Connected attachments in the existing canonical relational
+// unseen count. No badge UI, routing, follow, share, comment, or attachment lifecycle changes.
+//
 // CHANGE-ID: 20260518_223800_RelationalUnseenCountStore
 // SCOPE: Centralize canonical relational unseen count derivation and shared unread-share ownership. No UI, routing, lifecycle, or semantics changes.
 
@@ -15,6 +19,7 @@ final class RelationalUnseenCountStore: ObservableObject {
 
     private let followStore = FollowStore.shared
     private let unreadCommentsStore = UnreadCommentsStore.shared
+    private let receivedAttachmentStore = ReceivedConnectedAttachmentStore.shared
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -26,6 +31,7 @@ final class RelationalUnseenCountStore: ObservableObject {
         incomingFollowRequestCount
         + sharedWithYouStore.unreadShares.count
         + unreadCommentsStore.unreadGroups.count
+        + receivedAttachmentStore.unreadCount
     }
 
     private init() {
@@ -44,6 +50,12 @@ final class RelationalUnseenCountStore: ObservableObject {
             .store(in: &cancellables)
 
         sharedWithYouStore.objectWillChange
+            .sink { [weak self] _ in
+                self?.refreshTick += 1
+            }
+            .store(in: &cancellables)
+
+        receivedAttachmentStore.objectWillChange
             .sink { [weak self] _ in
                 self?.refreshTick += 1
             }

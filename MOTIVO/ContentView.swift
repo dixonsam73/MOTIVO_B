@@ -1757,6 +1757,7 @@ fileprivate struct SessionsRootView: View {
                     await followStore.refreshFromBackendIfPossible()
                     await sharedWithYouStore.refreshUnreadShares()
                     await unreadCommentsStore.refresh(force: true)
+                    await ReceivedConnectedAttachmentStore.shared.refresh()
                 }
             }
             .onAppear {
@@ -1814,6 +1815,7 @@ fileprivate struct SessionsRootView: View {
             await followStore.refreshFromBackendIfPossible()
             await sharedWithYouStore.refreshUnreadShares()
             await unreadCommentsStore.refresh(force: true)
+            await ReceivedConnectedAttachmentStore.shared.refresh()
         }
         await MainActor.run {
             refreshStats()
@@ -1828,6 +1830,7 @@ fileprivate struct SessionsRootView: View {
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
         await unreadCommentsStore.refresh(force: true)
+        await ReceivedConnectedAttachmentStore.shared.refresh()
     }
 
     private func performAutoReturnRefreshBundle(scopeKey: String) async {
@@ -1852,6 +1855,7 @@ fileprivate struct SessionsRootView: View {
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
         await unreadCommentsStore.refresh(force: true)
+        await ReceivedConnectedAttachmentStore.shared.refresh() 
     }
 
 

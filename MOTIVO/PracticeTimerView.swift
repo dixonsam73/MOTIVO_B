@@ -1479,6 +1479,7 @@ private func loadPracticeDefaultsIfNeeded() {
         await followStore.refreshFromBackendIfPossible()
         await sharedWithYouStore.refreshUnreadShares()
         await unreadCommentsStore.refresh(force: true)
+        await ReceivedConnectedAttachmentStore.shared.refresh()
     }
 
     private var thoughtEditorSheet: some View {

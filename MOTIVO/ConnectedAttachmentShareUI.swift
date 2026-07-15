@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260715_ConnectedAttachmentNotifications_OpenToClear
+// SCOPE: Mark an unread received Connected attachment viewed when its existing detail view opens.
+// No UI, navigation, rendering, save, delete, transport, or sharing changes.
+//
 // CHANGE-ID: 20260714_ConnectedAttachmentSharing_Phase1_UI
 // SCOPE: Reusable PDF attachment destination/page/recipient flow and recipient PDF detail UI.
 // No post, feed, messaging, or AttachmentViewerView integration.
@@ -442,6 +446,10 @@ struct ReceivedConnectedAttachmentDetailView: View {
             }
         }
         .task {
+            if attachment.viewedAt == nil {
+                await store.markViewed(attachment)
+            }
+
             do {
                 localURL = try await store.localURL(
                     for: attachment
