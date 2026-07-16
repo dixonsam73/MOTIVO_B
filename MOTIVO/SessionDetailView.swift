@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260716_M8C_ConnectedSessionAttachmentSharing_SDV
+// SCOPE: Enable Connected destinations for owner-opened saved-session attachments without changing attachment resolution, session persistence, privacy, playback or viewer behaviour.
+// SEARCH-TOKEN: 20260716_M8C_ConnectedSessionAttachmentSharing_SDV
+//
 // CHANGE-ID: 20260610_1430_PDFPhase2A
 // SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
 // SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
@@ -608,7 +612,8 @@ return AttachmentViewerView(
                     }
                 },
                 isReadOnly: true,
-                canShare: !appModeManager.canViewFeed || viewerIsOwner
+                canShare: !appModeManager.canViewFeed || viewerIsOwner,
+                connectedShareEnabled: appModeManager.canViewFeed && viewerIsOwner
             )
             .onDisappear { _refreshTick &+= 1 }
     }

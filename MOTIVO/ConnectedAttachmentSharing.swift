@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260716_M8C_ConnectedSessionAttachmentSharing
+// SCOPE: Generalise the existing Connected attachment upload boundary and recipient local-file persistence for PDF, photo, audio and video payloads. Preserve schema, delivery, upload-once/reference-many, notifications and recipient lifecycle.
+// SEARCH-TOKEN: 20260716_M8C_ConnectedSessionAttachmentSharing
+//
 // CHANGE-ID: 20260715_ConnectedAttachmentNotifications_Phase1
 // SCOPE: Add recipient viewed state, unread derivation, and idempotent mark-viewed support
 // for the existing relational notification pipeline. No transport, storage, save, delete,
@@ -44,6 +48,21 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
     }
 }
 
+
+public struct ConnectedAttachmentUploadPayload: Hashable {
+    public let localURL: URL
+    public let filename: String
+    public let mimeType: String
+    public let pageCount: Int
+
+    public init(localURL: URL, filename: String, mimeType: String, pageCount: Int = 0) {
+        self.localURL = localURL
+        self.filename = filename
+        self.mimeType = mimeType
+        self.pageCount = pageCount
+    }
+}
+
 public struct ConnectedAttachmentUploadReference: Hashable {
     public let assetID: UUID
     public let storageBucket: String
@@ -67,7 +86,7 @@ public enum AttachmentSharePageScope: Hashable {
 }
 
 public protocol BackendConnectedAttachmentService {
-    func uploadPDF(localURL: URL, filename: String, pageCount: Int) async -> Result<ConnectedAttachmentUploadReference, Error>
+    func upload(_ payload: ConnectedAttachmentUploadPayload) async -> Result<ConnectedAttachmentUploadReference, Error>
     func deliver(_ reference: ConnectedAttachmentUploadReference, to recipientUserIDs: [String]) async -> Result<Void, Error>
     func fetchReceived() async -> Result<[ConnectedAttachment], Error>
     func markViewed(id: UUID) async -> Result<Void, Error>
@@ -76,12 +95,38 @@ public protocol BackendConnectedAttachmentService {
     func download(_ attachment: ConnectedAttachment) async -> Result<Data, Error>
 }
 
+public extension BackendConnectedAttachmentService {
+    func uploadPDF(
+        localURL: URL,
+        filename: String,
+        pageCount: Int
+    ) async -> Result<ConnectedAttachmentUploadReference, Error> {
+        await upload(
+            ConnectedAttachmentUploadPayload(
+                localURL: localURL,
+                filename: filename,
+                mimeType: "application/pdf",
+                pageCount: pageCount
+            )
+        )
+    }
+}
+
 public struct SimulatedConnectedAttachmentService: BackendConnectedAttachmentService {
     public init() {}
-    public func uploadPDF(localURL: URL, filename: String, pageCount: Int) async -> Result<ConnectedAttachmentUploadReference, Error> {
-        let size = ((try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
+    public func upload(_ payload: ConnectedAttachmentUploadPayload) async -> Result<ConnectedAttachmentUploadReference, Error> {
+        let size = ((try? FileManager.default.attributesOfItem(atPath: payload.localURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
         let assetID = UUID()
-        return .success(.init(assetID: assetID, storageBucket: "attachments", storagePath: "shared/simulated/\(assetID.uuidString.lowercased()).pdf", filename: filename, mimeType: "application/pdf", byteCount: size, pageCount: pageCount))
+        let ext = HTTPBackendConnectedAttachmentService.safePathExtension(for: payload)
+        return .success(.init(
+            assetID: assetID,
+            storageBucket: "attachments",
+            storagePath: "shared/simulated/\(assetID.uuidString.lowercased()).\(ext)",
+            filename: HTTPBackendConnectedAttachmentService.safeFilename(payload.filename, pathExtension: ext),
+            mimeType: payload.mimeType,
+            byteCount: size,
+            pageCount: payload.pageCount
+        ))
     }
     public func deliver(_ reference: ConnectedAttachmentUploadReference, to recipientUserIDs: [String]) async -> Result<Void, Error> { .success(()) }
     public func fetchReceived() async -> Result<[ConnectedAttachment], Error> { .success([]) }
@@ -94,7 +139,7 @@ public struct SimulatedConnectedAttachmentService: BackendConnectedAttachmentSer
 public enum ConnectedAttachmentError: LocalizedError {
     case missingUserID
     case emptyRecipients
-    case invalidPDF
+    case invalidAttachment
     case fileTooLarge
     case downloadUnavailable
 
@@ -102,8 +147,8 @@ public enum ConnectedAttachmentError: LocalizedError {
         switch self {
         case .missingUserID: return "Missing Connected user identity."
         case .emptyRecipients: return "There are no valid recipients."
-        case .invalidPDF: return "The PDF could not be prepared."
-        case .fileTooLarge: return "This PDF is too large to share."
+        case .invalidAttachment: return "The attachment could not be prepared."
+        case .fileTooLarge: return "This attachment is too large to share."
         case .downloadUnavailable: return "The attachment could not be downloaded."
         }
     }
@@ -137,26 +182,29 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
         return decoder
     }
 
-    public func uploadPDF(localURL: URL, filename: String, pageCount: Int) async -> Result<ConnectedAttachmentUploadReference, Error> {
+    public func upload(_ payload: ConnectedAttachmentUploadPayload) async -> Result<ConnectedAttachmentUploadReference, Error> {
         guard let senderID = currentBackendUserID() else { return .failure(ConnectedAttachmentError.missingUserID) }
-        guard localURL.pathExtension.lowercased() == "pdf" else { return .failure(ConnectedAttachmentError.invalidPDF) }
+        guard payload.localURL.isFileURL, FileManager.default.fileExists(atPath: payload.localURL.path) else {
+            return .failure(ConnectedAttachmentError.invalidAttachment)
+        }
 
-        let values = try? localURL.resourceValues(forKeys: [.fileSizeKey])
+        let values = try? payload.localURL.resourceValues(forKeys: [.fileSizeKey])
         let byteCount = Int64(values?.fileSize ?? 0)
         guard byteCount <= maxUploadBytes else { return .failure(ConnectedAttachmentError.fileTooLarge) }
 
         let data: Data
-        do { data = try Data(contentsOf: localURL) }
+        do { data = try Data(contentsOf: payload.localURL) }
         catch { return .failure(error) }
 
         let assetID = UUID()
-        let path = "users/\(senderID.lowercased())/connected/\(assetID.uuidString.lowercased()).pdf"
+        let ext = Self.safePathExtension(for: payload)
+        let path = "users/\(senderID.lowercased())/connected/\(assetID.uuidString.lowercased()).\(ext)"
         let result = await NetworkManager.shared.request(
             path: "storage/v1/object/attachments/\(path)",
             method: "POST",
             query: nil,
             jsonBody: data,
-            headers: ["Content-Type": "application/pdf", "x-upsert": "false"]
+            headers: ["Content-Type": payload.mimeType, "x-upsert": "false"]
         )
 
         switch result {
@@ -165,10 +213,10 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
                 assetID: assetID,
                 storageBucket: "attachments",
                 storagePath: path,
-                filename: Self.safeFilename(filename),
-                mimeType: "application/pdf",
+                filename: Self.safeFilename(payload.filename, pathExtension: ext),
+                mimeType: payload.mimeType,
                 byteCount: byteCount,
-                pageCount: max(pageCount, 1)
+                pageCount: payload.pageCount
             ))
         case .failure(let error):
             return .failure(error)
@@ -273,12 +321,31 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
         await NetworkManager.shared.downloadAuthenticatedStorageObject(bucket: attachment.storageBucket, path: attachment.storagePath)
     }
 
-    private static func safeFilename(_ raw: String) -> String {
+    static func safePathExtension(for payload: ConnectedAttachmentUploadPayload) -> String {
+        let source = payload.localURL.pathExtension.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if !source.isEmpty { return source }
+
+        switch payload.mimeType.lowercased() {
+        case "application/pdf": return "pdf"
+        case "image/jpeg": return "jpg"
+        case "image/png": return "png"
+        case "image/heic", "image/heif": return "heic"
+        case "audio/mpeg": return "mp3"
+        case "audio/mp4", "audio/x-m4a": return "m4a"
+        case "audio/wav", "audio/x-wav": return "wav"
+        case "video/quicktime": return "mov"
+        case "video/mp4": return "mp4"
+        default: return "bin"
+        }
+    }
+
+    static func safeFilename(_ raw: String, pathExtension: String) -> String {
         let base = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let fallback = base.isEmpty ? "Shared Score.pdf" : base
-        let withExtension = fallback.lowercased().hasSuffix(".pdf") ? fallback : fallback + ".pdf"
+        let fallback = base.isEmpty ? "Shared Attachment" : base
         let invalid = CharacterSet(charactersIn: "/\\:\0")
-        return withExtension.components(separatedBy: invalid).joined(separator: "-")
+        let sanitized = fallback.components(separatedBy: invalid).joined(separator: "-")
+        if sanitized.lowercased().hasSuffix(".\(pathExtension.lowercased())") { return sanitized }
+        return sanitized + "." + pathExtension
     }
 }
 
@@ -323,8 +390,7 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
     }
 
     public func localURL(for item: ConnectedAttachment) async throws -> URL {
-        let directory = try receivedDirectory()
-        let destination = directory.appendingPathComponent(item.id.uuidString.lowercased()).appendingPathExtension("pdf")
+        let destination = try localDestination(for: item)
         if fileManager.fileExists(atPath: destination.path) { return destination }
 
         switch await BackendEnvironment.shared.connectedAttachments.download(item) {
@@ -361,8 +427,17 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
     }
 
     private func localURLIfPresent(for item: ConnectedAttachment) async throws -> URL? {
-        let destination = try receivedDirectory().appendingPathComponent(item.id.uuidString.lowercased()).appendingPathExtension("pdf")
+        let destination = try localDestination(for: item)
         return fileManager.fileExists(atPath: destination.path) ? destination : nil
+    }
+
+    private func localDestination(for item: ConnectedAttachment) throws -> URL {
+        let filenameExtension = URL(fileURLWithPath: item.filename).pathExtension
+        let storageExtension = URL(fileURLWithPath: item.storagePath).pathExtension
+        let ext = !filenameExtension.isEmpty ? filenameExtension : (!storageExtension.isEmpty ? storageExtension : "bin")
+        return try receivedDirectory()
+            .appendingPathComponent(item.id.uuidString.lowercased())
+            .appendingPathExtension(ext)
     }
 
     private func receivedDirectory() throws -> URL {

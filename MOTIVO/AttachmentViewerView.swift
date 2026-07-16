@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260716_M8C_ConnectedSessionAttachmentSharing_AVV
+// SCOPE: Make AttachmentViewerView a producer of existing Connected attachment sharing for saved-session PDFs, photos, audio and video while preserving its native iOS Share payload and all viewer behaviour.
+// SEARCH-TOKEN: 20260716_M8C_ConnectedSessionAttachmentSharing_AVV
+//
 // CHANGE-ID: 20260610_1430_PDFPhase2A
 // SCOPE: PDF Scores Phase 2A — metadata-only PDF page selection; staged-to-persisted UUID migration; selected-page viewer routing and display labels.
 // SEARCH-TOKEN: 20260610_1430-PDF-PAGE-SELECTION
@@ -68,6 +72,7 @@ import SwiftUI
 import AVKit
 import AVFoundation
 import PDFKit
+import UniformTypeIdentifiers
 #if canImport(UIKit)
 import UIKit
 #endif
@@ -95,6 +100,7 @@ struct AttachmentViewerView: View {
     let pdfSelectedPagesForURL: ((URL) -> [Int]?)?
     let isReadOnly: Bool
     let canShare: Bool
+    let connectedShareEnabled: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private let topButtonSize: CGFloat = 40
@@ -128,6 +134,8 @@ struct AttachmentViewerView: View {
     // Storage Safety: Track any temp surrogate files created by the viewer (e.g., posters, exported shares)
     @State private var tempFilesToCleanup: Set<URL> = []
     @State private var sharePayload: SharePayload? = nil
+    @State private var pendingIOSSharePayload: IOSSharePayload? = nil
+    @State private var activeShareTemporaryURL: URL? = nil
     @State private var isPreparingShare: Bool = false
     @State private var isRenaming: Bool = false
     @State private var renameTargetURL: URL? = nil
@@ -253,6 +261,7 @@ struct AttachmentViewerView: View {
         pdfSelectedPagesForURL: ((URL) -> [Int]?)? = nil,
         isReadOnly: Bool,
         canShare: Bool,
+        connectedShareEnabled: Bool = false,
         themeBackground: Color = Color.clear,
         onDelete: ((URL) -> Void)? = nil,
         titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
@@ -277,6 +286,7 @@ struct AttachmentViewerView: View {
         self.pdfSelectedPagesForURL = pdfSelectedPagesForURL
         self.isReadOnly = isReadOnly
         self.canShare = canShare
+        self.connectedShareEnabled = connectedShareEnabled
         self.themeBackground = themeBackground
 
         self.onDelete = onDelete
@@ -385,32 +395,85 @@ private func currentURL() -> URL? {
         isPreparingShare = true
         stopAllPlayersToggle.toggle()
 
+        let title = resolvedShareTitle(for: url, kind: kind)
+        let mimeType = resolvedMIMEType(for: url, kind: kind)
+
         do {
             if kind == .pdf, let selectedPages = PDFSelectedPagesStore.sanitized(pdfSelectedPagesForURL?(url)) {
                 let exportURL = try PDFSubsetExporter.export(from: url, selectedPages: selectedPages)
                 registerTemp(exportURL)
-                sharePayload = SharePayload(url: exportURL, temporaryURL: exportURL)
+                activeShareTemporaryURL = exportURL
+                sharePayload = SharePayload(
+                    url: exportURL,
+                    temporaryURL: exportURL,
+                    title: title,
+                    mimeType: mimeType,
+                    pageCount: selectedPages.count
+                )
             } else {
-                sharePayload = SharePayload(url: url, temporaryURL: nil)
+                activeShareTemporaryURL = nil
+                let pageCount = kind == .pdf ? max(PDFDocument(url: url)?.pageCount ?? 1, 1) : 0
+                sharePayload = SharePayload(
+                    url: url,
+                    temporaryURL: nil,
+                    title: title,
+                    mimeType: mimeType,
+                    pageCount: pageCount
+                )
             }
         } catch {
             #if DEBUG
             print("[AttachmentViewer] PDF subset export failed; sharing original PDF: \(error)")
             #endif
-            sharePayload = SharePayload(url: url, temporaryURL: nil)
+            activeShareTemporaryURL = nil
+            sharePayload = SharePayload(
+                url: url,
+                temporaryURL: nil,
+                title: title,
+                mimeType: mimeType,
+                pageCount: kind == .pdf ? max(PDFDocument(url: url)?.pageCount ?? 1, 1) : 0
+            )
         }
 
         isPreparingShare = false
     }
 
+    private func resolvedShareTitle(for url: URL, kind: AttachmentKind) -> String {
+        let resolved = resolvedTitle(for: url, kind: kind)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !resolved.isEmpty { return resolved }
+        let filename = url.lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !filename.isEmpty { return filename }
+        switch kind {
+        case .pdf: return "Shared Score.pdf"
+        case .image: return "Shared Photo"
+        case .audio: return "Shared Audio"
+        case .video: return "Shared Video"
+        case .file: return "Shared Attachment"
+        }
+    }
+
+    private func resolvedMIMEType(for url: URL, kind: AttachmentKind) -> String {
+        if let type = UTType(filenameExtension: url.pathExtension), let mimeType = type.preferredMIMEType {
+            return mimeType
+        }
+        switch kind {
+        case .pdf: return "application/pdf"
+        case .image: return "image/jpeg"
+        case .audio: return "audio/mp4"
+        case .video: return "video/quicktime"
+        case .file: return "application/octet-stream"
+        }
+    }
+
     private func cleanupSharePayload() {
-        if let temporaryURL = sharePayload?.temporaryURL {
+        if let temporaryURL = activeShareTemporaryURL {
             let fm = FileManager.default
             if fm.fileExists(atPath: temporaryURL.path) {
                 do { try fm.removeItem(at: temporaryURL) } catch { /* best-effort cleanup */ }
             }
             tempFilesToCleanup.remove(temporaryURL)
         }
+        activeShareTemporaryURL = nil
         sharePayload = nil
     }
 
@@ -472,6 +535,7 @@ private func currentURL() -> URL? {
         onSaveAsNewAttachmentFromSource: ((URL, URL, AttachmentKind) -> Void)? = nil,
         isReadOnly: Bool = false,
         canShare: Bool = true,
+        connectedShareEnabled: Bool = false,
         replaceStrategy: ReplaceStrategy = .immediate
     ) {
        
@@ -501,6 +565,7 @@ private func currentURL() -> URL? {
         self.onSaveAsNewAttachmentFromSource = onSaveAsNewAttachmentFromSource
         self.isReadOnly = isReadOnly
         self.canShare = canShare
+        self.connectedShareEnabled = connectedShareEnabled
         self.replaceStrategy = replaceStrategy
     }
 
@@ -556,6 +621,7 @@ private func currentURL() -> URL? {
             onSaveAsNewAttachmentFromSource: onSaveAsNewAttachmentFromSource,
             isReadOnly: false,
             canShare: true,
+            connectedShareEnabled: false,
             replaceStrategy: replaceStrategy
         )
     }
@@ -567,6 +633,15 @@ private func currentURL() -> URL? {
     }
 
     private struct SharePayload: Identifiable {
+        let id = UUID()
+        let url: URL
+        let temporaryURL: URL?
+        let title: String
+        let mimeType: String
+        let pageCount: Int
+    }
+
+    private struct IOSSharePayload: Identifiable {
         let id = UUID()
         let url: URL
         let temporaryURL: URL?
@@ -1068,6 +1143,27 @@ private func currentURL() -> URL? {
             cleanupTempFiles()
         }
         .sheet(item: $sharePayload, onDismiss: {
+            if pendingIOSSharePayload == nil {
+                cleanupSharePayload()
+            }
+        }) { payload in
+            SessionAttachmentShareFlow(
+                request: ConnectedSessionAttachmentShareRequest(
+                    title: payload.title,
+                    url: payload.url,
+                    mimeType: payload.mimeType,
+                    pageCount: payload.pageCount
+                ),
+                connectedEnabled: connectedShareEnabled,
+                onIOSShare: { url in
+                    pendingIOSSharePayload = IOSSharePayload(
+                        url: url,
+                        temporaryURL: payload.temporaryURL
+                    )
+                }
+            )
+        }
+        .sheet(item: $pendingIOSSharePayload, onDismiss: {
             cleanupSharePayload()
         }) { payload in
             ActivityView(activityItems: [payload.url])
