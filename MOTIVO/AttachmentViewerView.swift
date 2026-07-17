@@ -827,29 +827,6 @@ private func currentURL() -> URL? {
             VStack {
                 ZStack {
                     HStack {
-                        Button {
-                        stopAllPlayersToggle.toggle()
-                        dismiss()
-                    } label: {
-                        ZStack {
-                            Circle()
-                                .fill(.thinMaterial)
-                                .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
-                                .shadow(
-                                    color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
-                                    radius: 2,
-                                    y: 1
-                                )
-                            Image(systemName: "xmark")
-                                .font(.system(size: 17, weight: .semibold))
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        .frame(width: topButtonSize, height: topButtonSize)
-                        .contentShape(Circle())
-                    }
-                        .buttonStyle(.plain)
-                        .contentShape(Rectangle())
-
                         Spacer()
 
                         if media.indices.contains(currentIndex) {
