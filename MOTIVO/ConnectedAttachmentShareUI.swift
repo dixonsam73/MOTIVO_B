@@ -496,7 +496,7 @@ private struct ConnectedAttachmentShareFlow: View {
             return ConnectedAttachmentUploadPayload(
                 localURL: item.url,
                 filename: item.title,
-                attachmentName: item.title,
+                attachmentName: sessionAttachmentName(for: item),
                 mimeType: item.mimeType,
                 pageCount: item.pageCount
             )
@@ -534,6 +534,33 @@ private struct ConnectedAttachmentShareFlow: View {
         }
 
         return "\(safeTitle) — \(pages.count) selected pages.pdf"
+    }
+
+
+
+    private func sessionAttachmentName(for item: ConnectedSessionAttachmentShareRequest) -> String {
+        let trimmed = item.title.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
+        let mime = item.mimeType.lowercased()
+
+        func isMeaningfulTitle(_ title: String) -> Bool {
+            guard !title.isEmpty else { return false }
+            let stem = (title as NSString).deletingPathExtension
+            return UUID(uuidString: stem) == nil
+        }
+
+        if mime.hasPrefix("image/") {
+            return "Photo"
+        }
+
+        if mime.hasPrefix("video/") {
+            return isMeaningfulTitle(trimmed) ? trimmed : "Video"
+        }
+
+        if mime.hasPrefix("audio/") {
+            return isMeaningfulTitle(trimmed) ? trimmed : "Recording"
+        }
+
+        return trimmed
     }
 
     private func send(to recipients: [String]) async {
