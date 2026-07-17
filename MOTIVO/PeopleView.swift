@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260717_ConnectedAttachmentUserFacingName_People
+// SCOPE: Prefer optional Connected attachment_name in Shared with you rows, with filename fallback for historical records. No layout or behaviour changes.
+// SEARCH-TOKEN: 20260717_ConnectedAttachmentUserFacingName_People
+//
 // CHANGE-ID: 20260717_ConnectedAttachmentSharing_VisualPolish
 // SCOPE: Visual-only refinement of Shared with you attachment rows so sender identity is primary and attachment type is a supporting glyph. No recipient lifecycle, navigation, persistence, notification, save or delete behaviour changes.
 // SEARCH-TOKEN: 20260717_ConnectedAttachmentSharing_VisualPolish
@@ -252,7 +256,7 @@ struct PeopleView: View {
                 PeopleUserRow(
                     userID: senderID,
                     overrideDisplayName: acct?.displayName ?? "Connected musician",
-                    overrideSubtitle: attachment.filename,
+                    overrideSubtitle: attachment.attachmentName ?? attachment.filename,
                     overrideAvatarKey: acct?.avatarKey
                 ) {
                     ReceivedConnectedAttachmentDetailView(attachment: attachment)

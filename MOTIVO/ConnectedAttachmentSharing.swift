@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260717_ConnectedAttachmentUserFacingName
+// SCOPE: Preserve storage filename identity while carrying optional user-facing attachment_name metadata through Connected upload, delivery and receipt. Backwards-compatible fallback remains filename.
+// SEARCH-TOKEN: 20260717_ConnectedAttachmentUserFacingName
+//
 // CHANGE-ID: 20260716_M8C_ConnectedSessionAttachmentSharing
 // SCOPE: Generalise the existing Connected attachment upload boundary and recipient local-file persistence for PDF, photo, audio and video payloads. Preserve schema, delivery, upload-once/reference-many, notifications and recipient lifecycle.
 // SEARCH-TOKEN: 20260716_M8C_ConnectedSessionAttachmentSharing
@@ -22,6 +26,7 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
     public let storageBucket: String
     public let storagePath: String
     public let filename: String
+    public let attachmentName: String?
     public let mimeType: String
     public let byteCount: Int64
     public let pageCount: Int
@@ -38,6 +43,7 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
         case storageBucket = "storage_bucket"
         case storagePath = "storage_path"
         case filename
+        case attachmentName = "attachment_name"
         case mimeType = "mime_type"
         case byteCount = "byte_count"
         case pageCount = "page_count"
@@ -52,12 +58,14 @@ public struct ConnectedAttachment: Codable, Hashable, Identifiable {
 public struct ConnectedAttachmentUploadPayload: Hashable {
     public let localURL: URL
     public let filename: String
+    public let attachmentName: String?
     public let mimeType: String
     public let pageCount: Int
 
-    public init(localURL: URL, filename: String, mimeType: String, pageCount: Int = 0) {
+    public init(localURL: URL, filename: String, attachmentName: String? = nil, mimeType: String, pageCount: Int = 0) {
         self.localURL = localURL
         self.filename = filename
+        self.attachmentName = attachmentName
         self.mimeType = mimeType
         self.pageCount = pageCount
     }
@@ -68,6 +76,7 @@ public struct ConnectedAttachmentUploadReference: Hashable {
     public let storageBucket: String
     public let storagePath: String
     public let filename: String
+    public let attachmentName: String?
     public let mimeType: String
     public let byteCount: Int64
     public let pageCount: Int
@@ -99,12 +108,14 @@ public extension BackendConnectedAttachmentService {
     func uploadPDF(
         localURL: URL,
         filename: String,
+        attachmentName: String? = nil,
         pageCount: Int
     ) async -> Result<ConnectedAttachmentUploadReference, Error> {
         await upload(
             ConnectedAttachmentUploadPayload(
                 localURL: localURL,
                 filename: filename,
+                attachmentName: attachmentName,
                 mimeType: "application/pdf",
                 pageCount: pageCount
             )
@@ -123,6 +134,7 @@ public struct SimulatedConnectedAttachmentService: BackendConnectedAttachmentSer
             storageBucket: "attachments",
             storagePath: "shared/simulated/\(assetID.uuidString.lowercased()).\(ext)",
             filename: HTTPBackendConnectedAttachmentService.safeFilename(payload.filename, pathExtension: ext),
+            attachmentName: payload.attachmentName,
             mimeType: payload.mimeType,
             byteCount: size,
             pageCount: payload.pageCount
@@ -214,6 +226,7 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
                 storageBucket: "attachments",
                 storagePath: path,
                 filename: Self.safeFilename(payload.filename, pathExtension: ext),
+                attachmentName: payload.attachmentName,
                 mimeType: payload.mimeType,
                 byteCount: byteCount,
                 pageCount: payload.pageCount
@@ -230,7 +243,7 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
         guard !recipients.isEmpty else { return .failure(ConnectedAttachmentError.emptyRecipients) }
 
         let rows: [[String: Any]] = recipients.map { recipientID in
-            [
+            var row: [String: Any] = [
                 "asset_id": reference.assetID.uuidString.lowercased(),
                 "sender_user_id": senderID,
                 "recipient_user_id": recipientID,
@@ -241,6 +254,11 @@ public final class HTTPBackendConnectedAttachmentService: BackendConnectedAttach
                 "byte_count": reference.byteCount,
                 "page_count": reference.pageCount
             ]
+            if let attachmentName = reference.attachmentName?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !attachmentName.isEmpty {
+                row["attachment_name"] = attachmentName
+            }
+            return row
         }
 
         do {

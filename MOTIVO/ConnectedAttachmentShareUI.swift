@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260717_ConnectedAttachmentUserFacingName_UI
+// SCOPE: Generate meaningful PDF attachment names from the score title and selected pages, pass them through Connected sharing, and prefer them in recipient presentation. No storage, export, routing or lifecycle changes.
+// SEARCH-TOKEN: 20260717_ConnectedAttachmentUserFacingName_UI
+//
 // CHANGE-ID: 20260717_ConnectedAttachmentSharing_VisualPolish
 // SCOPE: Visual-only refinement of Connected attachment destination, page scope, person and Ensemble selection using established Études cards, typography and PeopleUserRow presentation. No sharing, transport, persistence, recipient, navigation or backend behaviour changes.
 // SEARCH-TOKEN: 20260717_ConnectedAttachmentSharing_VisualPolish
@@ -483,6 +487,7 @@ private struct ConnectedAttachmentShareFlow: View {
             return ConnectedAttachmentUploadPayload(
                 localURL: preparedURL,
                 filename: filename,
+                attachmentName: scoreAttachmentName(title: score.title, selectedPages: selectedPages),
                 mimeType: "application/pdf",
                 pageCount: preparedPageCount
             )
@@ -491,10 +496,44 @@ private struct ConnectedAttachmentShareFlow: View {
             return ConnectedAttachmentUploadPayload(
                 localURL: item.url,
                 filename: item.title,
+                attachmentName: item.title,
                 mimeType: item.mimeType,
                 pageCount: item.pageCount
             )
         }
+    }
+
+    private func scoreAttachmentName(title: String, selectedPages: [Int]?) -> String {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseTitle: String
+        if trimmedTitle.lowercased().hasSuffix(".pdf") {
+            baseTitle = String(trimmedTitle.dropLast(4))
+        } else {
+            baseTitle = trimmedTitle
+        }
+        let safeTitle = baseTitle.isEmpty ? "Score" : baseTitle
+
+        guard let selectedPages, !selectedPages.isEmpty else {
+            return "\(safeTitle).pdf"
+        }
+
+        let pages = Array(Set(selectedPages.filter { $0 > 0 })).sorted()
+        guard let firstPage = pages.first else {
+            return "\(safeTitle).pdf"
+        }
+
+        if pages.count == 1 {
+            return "\(safeTitle) — Page \(firstPage).pdf"
+        }
+
+        let consecutive = zip(pages, pages.dropFirst()).allSatisfy { next, following in
+            following == next + 1
+        }
+        if consecutive, let lastPage = pages.last {
+            return "\(safeTitle) — Pages \(firstPage)–\(lastPage).pdf"
+        }
+
+        return "\(safeTitle) — \(pages.count) selected pages.pdf"
     }
 
     private func send(to recipients: [String]) async {
@@ -562,7 +601,7 @@ struct ReceivedConnectedAttachmentDetailView: View {
                 ProgressView("Downloading…")
             }
         }
-        .navigationTitle(attachment.filename)
+        .navigationTitle(attachment.attachmentName ?? attachment.filename)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
