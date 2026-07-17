@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260717_ConnectedAttachmentSharing_VisualPolish
+// SCOPE: Visual-only refinement of Shared with you attachment rows so sender identity is primary and attachment type is a supporting glyph. No recipient lifecycle, navigation, persistence, notification, save or delete behaviour changes.
+// SEARCH-TOKEN: 20260717_ConnectedAttachmentSharing_VisualPolish
+//
 // CHANGE-ID: 20260518_223800_RelationalUnseenCountCentralization
 // SCOPE: Use shared SharedWithYouStore instance for centralized relational unseen count derivation. No UI or semantics changes. the same circular material chevron treatment used in ProfileView. No other UI, layout, or logic changes.
 // SEARCH-TOKEN: 20260518_223800_RelationalUnseenCountCentralization
@@ -242,36 +246,28 @@ struct PeopleView: View {
             Text("Shared with you").sectionHeader()
 
             ForEach(receivedAttachmentStore.items.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { attachment in
-                let acct = attachmentSenderDirectory[attachment.senderUserID.lowercased()]
+                let senderID = attachment.senderUserID.lowercased()
+                let acct = attachmentSenderDirectory[senderID]
 
-                NavigationLink {
+                PeopleUserRow(
+                    userID: senderID,
+                    overrideDisplayName: acct?.displayName ?? "Connected musician",
+                    overrideSubtitle: attachment.filename,
+                    overrideAvatarKey: acct?.avatarKey
+                ) {
                     ReceivedConnectedAttachmentDetailView(attachment: attachment)
-                } label: {
-                    HStack(spacing: Theme.Spacing.m) {
-                        Image(systemName: "doc.richtext")
-                            .font(.system(size: 20, weight: .regular))
+                } trailing: {
+                    HStack(spacing: Theme.Spacing.s) {
+                        Image(systemName: attachmentTypeGlyph(for: attachment))
+                            .font(.system(size: 14, weight: .regular))
                             .foregroundStyle(Theme.Colors.secondaryText)
-                            .frame(width: 40, height: 40)
-                            .background(.thinMaterial, in: Circle())
+                            .frame(width: 20, height: 20)
 
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(attachment.filename)
-                                .font(Theme.Text.body)
-                                .foregroundStyle(Color.primary)
-                                .lineLimit(1)
-                            Text("From \(acct?.displayName ?? "Connected musician")")
-                                .font(Theme.Text.meta)
-                                .foregroundStyle(Theme.Colors.secondaryText)
-                        }
-                        Spacer()
                         Image(systemName: "chevron.right")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
                     }
-                    .padding(.vertical, Theme.Spacing.s)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
             }
 
             ForEach(sharedWithYouStore.unreadShares.sorted(by: { $0.createdAt > $1.createdAt }), id: \.id) { share in
@@ -304,6 +300,28 @@ struct PeopleView: View {
             }
         }
         .cardSurface()
+    }
+
+    private func attachmentTypeGlyph(for attachment: ConnectedAttachment) -> String {
+        let mimeType = attachment.mimeType.lowercased()
+
+        if mimeType == "application/pdf" { return "doc.richtext" }
+        if mimeType.hasPrefix("image/") { return "photo" }
+        if mimeType.hasPrefix("audio/") { return "waveform" }
+        if mimeType.hasPrefix("video/") { return "video" }
+
+        switch URL(fileURLWithPath: attachment.filename).pathExtension.lowercased() {
+        case "pdf":
+            return "doc.richtext"
+        case "jpg", "jpeg", "png", "heic", "heif", "gif":
+            return "photo"
+        case "m4a", "mp3", "wav", "aiff", "caf":
+            return "waveform"
+        case "mov", "mp4", "m4v":
+            return "video"
+        default:
+            return "doc"
+        }
     }
 
     private var responsesSection: some View {

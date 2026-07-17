@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260717_ConnectedAttachmentSharing_VisualPolish
+// SCOPE: Visual-only refinement of Connected attachment destination, page scope, person and Ensemble selection using established Études cards, typography and PeopleUserRow presentation. No sharing, transport, persistence, recipient, navigation or backend behaviour changes.
+// SEARCH-TOKEN: 20260717_ConnectedAttachmentSharing_VisualPolish
+//
 // CHANGE-ID: 20260716_M8C_ConnectedSessionAttachmentSharing_UI
 // SCOPE: Reuse the existing Connected destination/recipient flow for saved-session PDF, photo, audio and video attachments while preserving score page selection and native iOS Share.
 // SEARCH-TOKEN: 20260716_M8C_ConnectedSessionAttachmentSharing_UI
@@ -165,29 +169,83 @@ private struct ConnectedAttachmentShareFlow: View {
 
     private var navigationTitle: String {
         switch route {
-        case .destination: return "Share with"
-        case .pageScope: return "What would you like to share?"
+        case .destination: return "Choose destination"
+        case .pageScope: return "Choose content"
         case .person: return "Person"
         case .ensemble: return "Ensemble"
         }
     }
 
     private var destinationView: some View {
-        List {
-            if connectedEnabled {
-                Button { choose(.person) } label: { Label("Person…", systemImage: "person") }
-                Button { choose(.ensemble) } label: { Label("Ensemble…", systemImage: "person.3") }
-            }
+        ScrollView {
+            VStack(spacing: Theme.Spacing.l) {
+                if connectedEnabled {
+                    VStack(spacing: 0) {
+                        destinationRow(
+                            title: "Person",
+                            systemImage: "person"
+                        ) {
+                            choose(.person)
+                        }
 
-            Section {
-                Button {
-                    onIOSShare(request.url)
-                    dismiss()
-                } label: {
-                    Label("Share via iOS…", systemImage: "square.and.arrow.up")
+                        Divider()
+                            .padding(.leading, 56)
+
+                        destinationRow(
+                            title: "Ensemble",
+                            systemImage: "person.3"
+                        ) {
+                            choose(.ensemble)
+                        }
+                    }
+                    .connectedShareCard()
                 }
+
+                VStack(spacing: 0) {
+                    destinationRow(
+                        title: "Outside Études",
+                        systemImage: "square.and.arrow.up"
+                    ) {
+                        onIOSShare(request.url)
+                        dismiss()
+                    }
+                }
+                .connectedShareCard()
             }
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, Theme.Spacing.xxl)
         }
+        .appBackground()
+    }
+
+    private func destinationRow(
+        title: String,
+        systemImage: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: Theme.Spacing.m) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 16, weight: .regular))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 28, height: 28)
+
+                Text(title)
+                    .font(Theme.Text.body)
+                    .foregroundStyle(Color.primary)
+
+                Spacer()
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+            }
+            .padding(.horizontal, Theme.Spacing.m)
+            .padding(.vertical, Theme.Spacing.s)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func choose(_ destination: AttachmentShareDestination) {
@@ -200,18 +258,61 @@ private struct ConnectedAttachmentShareFlow: View {
     }
 
     private var pageScopeView: some View {
-        List {
-            Button { selectedPages = nil; continueAfterScope() } label: { scopeRow("Entire document") }
-            Button {
-                if case .score(let score) = request { selectedPages = [max(score.currentPage, 1)] }
-                continueAfterScope()
-            } label: { scopeRow("Current page") }
-            Button { selectedPages = nil; showPageSelection = true } label: { scopeRow("Selected pages…") }
+        ScrollView {
+            VStack(spacing: 0) {
+                Button {
+                    selectedPages = nil
+                    continueAfterScope()
+                } label: {
+                    scopeRow("Entire document")
+                }
+
+                Divider()
+                    .padding(.leading, 56)
+
+                Button {
+                    if case .score(let score) = request {
+                        selectedPages = [max(score.currentPage, 1)]
+                    }
+                    continueAfterScope()
+                } label: {
+                    scopeRow("Current page")
+                }
+
+                Divider()
+                    .padding(.leading, 56)
+
+                Button {
+                    selectedPages = nil
+                    showPageSelection = true
+                } label: {
+                    scopeRow("Selected pages…")
+                }
+            }
+            .connectedShareCard()
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, Theme.Spacing.xxl)
         }
+        .appBackground()
     }
 
     private func scopeRow(_ title: String) -> some View {
-        HStack { Image(systemName: "circle"); Text(title); Spacer() }
+        HStack(spacing: Theme.Spacing.s) {
+            Image(systemName: "circle")
+                .font(.system(size: 17, weight: .regular))
+                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.75))
+                .frame(width: 28, height: 28)
+
+            Text(title)
+                .font(Theme.Text.body)
+                .foregroundStyle(Color.primary)
+
+            Spacer()
+        }
+        .padding(.horizontal, Theme.Spacing.m)
+        .padding(.vertical, Theme.Spacing.m)
+        .contentShape(Rectangle())
     }
 
     private func continueAfterScope() {
@@ -222,42 +323,129 @@ private struct ConnectedAttachmentShareFlow: View {
     private var validFollowerIDs: [String] { followStore.followers.sorted() }
 
     private var personView: some View {
-        List {
-            if isLoadingRecipients { ProgressView().frame(maxWidth: .infinity) }
-            ForEach(validFollowerIDs, id: \.self) { id in
-                let account = directory[id]
-                Button { Task { await send(to: [id]) } } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(account?.displayName ?? "Connected musician")
-                        if let accountID = account?.accountID {
-                            Text("@\(accountID)").font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 0) {
+                if isLoadingRecipients {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding(Theme.Spacing.xl)
+                } else if validFollowerIDs.isEmpty {
+                    Text("No Connected people are available.")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Spacing.l)
+                } else {
+                    ForEach(Array(validFollowerIDs.enumerated()), id: \.element) { index, id in
+                        let account = directory[id]
+
+                        selectionPersonRow(userID: id, account: account)
+                            .disabled(isSending || account == nil)
+
+                        if index < validFollowerIDs.count - 1 {
+                            Divider()
+                                .padding(.leading, 68)
                         }
                     }
                 }
-                .disabled(isSending || account == nil)
             }
-            if !isLoadingRecipients && validFollowerIDs.isEmpty {
-                Text("No Connected people are available.").foregroundStyle(.secondary)
+            .connectedShareCard()
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, Theme.Spacing.xxl)
+        }
+        .appBackground()
+    }
+
+    private func selectionPersonRow(
+        userID: String,
+        account: DirectoryAccount?
+    ) -> some View {
+        ZStack {
+            PeopleUserRow(
+                userID: userID,
+                overrideDisplayName: account?.displayName ?? "Connected musician",
+                overrideSubtitle: account?.accountID.map { "@\($0)" },
+                overrideAvatarKey: account?.avatarKey
+            ) {
+                EmptyView()
+            } trailing: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
             }
+            .allowsHitTesting(false)
+
+            Button {
+                Task { await send(to: [userID]) }
+            } label: {
+                Color.clear
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
     private var ensembleView: some View {
-        List {
-            ForEach(ensembleStore.ensembles) { ensemble in
-                let recipients = validRecipients(for: ensemble)
-                Button { Task { await send(to: recipients) } } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(ensemble.name)
-                        Text("\(recipients.count) " + (recipients.count == 1 ? "person" : "people"))
-                            .font(.caption).foregroundStyle(.secondary)
+        ScrollView {
+            VStack(spacing: 0) {
+                if ensembleStore.ensembles.isEmpty {
+                    Text("No Ensembles are available.")
+                        .font(Theme.Text.meta)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(Theme.Spacing.l)
+                } else {
+                    ForEach(Array(ensembleStore.ensembles.enumerated()), id: \.element.id) { index, ensemble in
+                        let recipients = validRecipients(for: ensemble)
+
+                        selectionEnsembleRow(
+                            ensemble: ensemble,
+                            recipients: recipients
+                        )
+                        .disabled(isSending || recipients.isEmpty)
+
+                        if index < ensembleStore.ensembles.count - 1 {
+                            Divider()
+                                .padding(.leading, 68)
+                        }
                     }
                 }
-                .disabled(isSending || recipients.isEmpty)
             }
-            if ensembleStore.ensembles.isEmpty {
-                Text("No Ensembles are available.").foregroundStyle(.secondary)
+            .connectedShareCard()
+            .padding(.horizontal, Theme.Spacing.l)
+            .padding(.top, Theme.Spacing.m)
+            .padding(.bottom, Theme.Spacing.xxl)
+        }
+        .appBackground()
+    }
+
+    private func selectionEnsembleRow(
+        ensemble: Ensemble,
+        recipients: [String]
+    ) -> some View {
+        ZStack {
+            PeopleUserRow(
+                userID: "ensemble:\(ensemble.id)",
+                overrideDisplayName: ensemble.name,
+                overrideSubtitle: "\(recipients.count) " + (recipients.count == 1 ? "person" : "people"),
+                overrideAvatarKey: nil
+            ) {
+                EmptyView()
+            } trailing: {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
             }
+            .allowsHitTesting(false)
+
+            Button {
+                Task { await send(to: recipients) }
+            } label: {
+                Color.clear
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
         }
     }
 
@@ -329,6 +517,21 @@ private struct ConnectedAttachmentShareFlow: View {
         } catch {
             errorMessage = error.localizedDescription
         }
+    }
+}
+
+
+private extension View {
+    func connectedShareCard() -> some View {
+        self
+            .background(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .fill(Color.white.opacity(0.6))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+            )
     }
 }
 
