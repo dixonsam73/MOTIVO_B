@@ -110,7 +110,14 @@ private struct ConnectedAttachmentShareFlow: View {
     @ObservedObject private var followStore = FollowStore.shared
     @ObservedObject private var ensembleStore = EnsembleStore.shared
 
-    @State private var route: Route = .destination
+    @State private var route: Route
+
+    init(request: Request, connectedEnabled: Bool, onIOSShare: @escaping (URL) -> Void) {
+        self.request = request
+        self.connectedEnabled = connectedEnabled
+        self.onIOSShare = onIOSShare
+        _route = State(initialValue: request.requiresPageScope ? .pageScope : .destination)
+    }
     @State private var chosenDestination: AttachmentShareDestination?
     @State private var selectedPages: [Int]? = nil
     @State private var directory: [String: DirectoryAccount] = [:]
@@ -254,11 +261,7 @@ private struct ConnectedAttachmentShareFlow: View {
 
     private func choose(_ destination: AttachmentShareDestination) {
         chosenDestination = destination
-        if request.requiresPageScope {
-            route = .pageScope
-        } else {
-            continueAfterScope()
-        }
+        continueAfterScope()
     }
 
     private var pageScopeView: some View {
@@ -320,7 +323,11 @@ private struct ConnectedAttachmentShareFlow: View {
     }
 
     private func continueAfterScope() {
-        route = chosenDestination == .ensemble ? .ensemble : .person
+        guard let destination = chosenDestination else {
+            route = .destination
+            return
+        }
+        route = destination == .ensemble ? .ensemble : .person
         Task { await loadRecipients() }
     }
 
