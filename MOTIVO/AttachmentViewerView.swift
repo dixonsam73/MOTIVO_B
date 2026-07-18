@@ -101,6 +101,7 @@ struct AttachmentViewerView: View {
     let isReadOnly: Bool
     let canShare: Bool
     let connectedShareEnabled: Bool
+    let showsDismissButton: Bool
     @Environment(\.colorScheme) private var colorScheme
 
     private let topButtonSize: CGFloat = 40
@@ -262,6 +263,7 @@ struct AttachmentViewerView: View {
         isReadOnly: Bool,
         canShare: Bool,
         connectedShareEnabled: Bool = false,
+        showsDismissButton: Bool = true,
         themeBackground: Color = Color.clear,
         onDelete: ((URL) -> Void)? = nil,
         titleForURL: ((URL, AttachmentKind) -> String?)? = nil,
@@ -287,6 +289,7 @@ struct AttachmentViewerView: View {
         self.isReadOnly = isReadOnly
         self.canShare = canShare
         self.connectedShareEnabled = connectedShareEnabled
+        self.showsDismissButton = showsDismissButton
         self.themeBackground = themeBackground
 
         self.onDelete = onDelete
@@ -536,6 +539,7 @@ private func currentURL() -> URL? {
         isReadOnly: Bool = false,
         canShare: Bool = true,
         connectedShareEnabled: Bool = false,
+        showsDismissButton: Bool = true,
         replaceStrategy: ReplaceStrategy = .immediate
     ) {
        
@@ -566,6 +570,7 @@ private func currentURL() -> URL? {
         self.isReadOnly = isReadOnly
         self.canShare = canShare
         self.connectedShareEnabled = connectedShareEnabled
+        self.showsDismissButton = showsDismissButton
         self.replaceStrategy = replaceStrategy
     }
 
@@ -827,6 +832,31 @@ private func currentURL() -> URL? {
             VStack {
                 ZStack {
                     HStack {
+                        if showsDismissButton {
+                            Button {
+                                stopAllPlayersToggle.toggle()
+                                dismiss()
+                            } label: {
+                                ZStack {
+                                    Circle()
+                                        .fill(.thinMaterial)
+                                        .opacity(colorScheme == .dark ? fillOpacityDark : fillOpacityLight)
+                                        .shadow(
+                                            color: .black.opacity(colorScheme == .dark ? 0.35 : 0.15),
+                                            radius: 2,
+                                            y: 1
+                                        )
+                                    Image(systemName: "chevron.left")
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(Theme.Colors.secondaryText)
+                                }
+                                .frame(width: topButtonSize, height: topButtonSize)
+                                .contentShape(Circle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Close attachment")
+                        }
+
                         Spacer()
 
                         if media.indices.contains(currentIndex) {

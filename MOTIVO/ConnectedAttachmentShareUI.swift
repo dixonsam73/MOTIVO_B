@@ -629,7 +629,8 @@ struct ReceivedConnectedAttachmentDetailView: View {
                     audioURLs: attachmentKind == .audio ? [localURL] : [],
                     pdfURLs: attachmentKind == .pdf ? [localURL] : [],
                     isReadOnly: true,
-                    canShare: false
+                    canShare: false,
+                    showsDismissButton: false
                 )
             } else {
                 ProgressView("Downloading…")
