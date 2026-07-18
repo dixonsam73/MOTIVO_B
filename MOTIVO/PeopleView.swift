@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260718_ConnectedAttachmentSwipeDelete
+// SCOPE: Add a compact custom swipe-to-delete reveal to received attachment rows in Shared with you, using the existing recipient delete path. No resting-layout, navigation, lifecycle, persistence, notification, or other PeopleView changes.
+// SEARCH-TOKEN: 20260718_ConnectedAttachmentSwipeDelete
+//
 // CHANGE-ID: 20260717_ConnectedAttachmentUserFacingName_People
 // SCOPE: Prefer optional Connected attachment_name in Shared with you rows, with filename fallback for historical records. No layout or behaviour changes.
 // SEARCH-TOKEN: 20260717_ConnectedAttachmentUserFacingName_People
@@ -253,24 +257,28 @@ struct PeopleView: View {
                 let senderID = attachment.senderUserID.lowercased()
                 let acct = attachmentSenderDirectory[senderID]
 
-                PeopleUserRow(
-                    userID: senderID,
-                    overrideDisplayName: acct?.displayName ?? "Connected musician",
-                    overrideSubtitle: attachment.attachmentName ?? attachment.filename,
-                    overrideAvatarKey: acct?.avatarKey
-                ) {
-                    ReceivedConnectedAttachmentDetailView(attachment: attachment)
-                } trailing: {
-                    HStack(spacing: Theme.Spacing.s) {
-                        Image(systemName: attachmentTypeGlyph(for: attachment))
-                            .font(.system(size: 14, weight: .regular))
-                            .foregroundStyle(Theme.Colors.secondaryText)
-                            .frame(width: 20, height: 20)
+                SwipeRevealRow {
+                    PeopleUserRow(
+                        userID: senderID,
+                        overrideDisplayName: acct?.displayName ?? "Connected musician",
+                        overrideSubtitle: attachment.attachmentName ?? attachment.filename,
+                        overrideAvatarKey: acct?.avatarKey
+                    ) {
+                        ReceivedConnectedAttachmentDetailView(attachment: attachment)
+                    } trailing: {
+                        HStack(spacing: Theme.Spacing.s) {
+                            Image(systemName: attachmentTypeGlyph(for: attachment))
+                                .font(.system(size: 14, weight: .regular))
+                                .foregroundStyle(Theme.Colors.secondaryText)
+                                .frame(width: 20, height: 20)
 
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundStyle(Theme.Colors.secondaryText.opacity(0.7))
+                        }
                     }
+                } onDelete: {
+                    await receivedAttachmentStore.delete(attachment)
                 }
             }
 
@@ -625,6 +633,88 @@ struct PeopleView: View {
 
 
 // MARK: - Shared Post Detail Host (PeopleView navigation)
+
+
+private struct SwipeRevealRow<Content: View>: View {
+    private let revealWidth: CGFloat = 80
+    private let content: Content
+    private let onDelete: () async -> Void
+
+    @State private var settledOffset: CGFloat = 0
+    @GestureState private var dragOffset: CGFloat = 0
+    @State private var isDeleting: Bool = false
+
+    init(
+        @ViewBuilder content: () -> Content,
+        onDelete: @escaping () async -> Void
+    ) {
+        self.content = content()
+        self.onDelete = onDelete
+    }
+
+    private var effectiveOffset: CGFloat {
+        min(0, max(-revealWidth, settledOffset + dragOffset))
+    }
+
+    var body: some View {
+        content
+            .offset(x: effectiveOffset)
+            .overlay(alignment: .trailing) {
+                Button(role: .destructive) {
+                    guard isDeleting == false else { return }
+                    isDeleting = true
+
+                    Task {
+                        await onDelete()
+                        isDeleting = false
+                    }
+                } label: {
+                    Group {
+                        if isDeleting {
+                            ProgressView()
+                                .progressViewStyle(.circular)
+                                .tint(.white)
+                        } else {
+                            Text("Delete")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.red)
+                    .contentShape(Rectangle())
+                }
+                .frame(width: revealWidth)
+                .buttonStyle(.plain)
+                .disabled(isDeleting)
+                .offset(x: revealWidth + effectiveOffset)
+                .accessibilityLabel("Delete attachment")
+            }
+            .contentShape(Rectangle())
+            .clipped()
+            .simultaneousGesture(
+                DragGesture(minimumDistance: 10, coordinateSpace: .local)
+                    .updating($dragOffset) { value, state, _ in
+                        guard abs(value.translation.width) > abs(value.translation.height) else {
+                            return
+                        }
+                        state = value.translation.width
+                    }
+                    .onEnded { value in
+                        guard abs(value.translation.width) > abs(value.translation.height) else {
+                            return
+                        }
+
+                        let projectedOffset = settledOffset + value.predictedEndTranslation.width
+                        let shouldOpen = projectedOffset < -(revealWidth * 0.4)
+
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            settledOffset = shouldOpen ? -revealWidth : 0
+                        }
+                    }
+            )
+    }
+}
 
 private struct SharedPostDetailHost: View {
     let share: BackendPostSharePointer
