@@ -315,17 +315,55 @@ private struct EnsembleEditorView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Spacing.l) {
+                Text(title)
+                    .sectionHeader()
+
                 editorCard
 
                 membersCard
+
+                if case .edit = mode {
+                    Spacer(minLength: Theme.Spacing.xl)
+
+                    Button {
+                        pendingDelete = true
+                    } label: {
+                        HStack {
+                            Spacer()
+                            Text("Delete Ensemble")
+                                .font(Theme.Text.body)
+                                .foregroundStyle(Color.primary)
+                            Spacer()
+                        }
+                        .padding(.vertical, Theme.Spacing.l)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, Theme.Spacing.l)
             .padding(.top, Theme.Spacing.m)
             .padding(.bottom, Theme.Spacing.xxl)
         }
         .appBackground()
-        .navigationTitle("")
-        .navigationBarTitleDisplayMode(.inline)
+        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .cancellationAction) {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .font(.body.weight(.medium))
+                .foregroundStyle(Theme.Colors.secondaryText)
+            }
+
+            ToolbarItem(placement: .confirmationAction) {
+                Button("Save") {
+                    save()
+                }
+                .font(.body.weight(.semibold))
+                .foregroundStyle(canSave ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
+                .disabled(!canSave)
+            }
+        }
         .task(id: userIDs) {
             loadDraftIfNeeded()
 
@@ -353,30 +391,6 @@ private struct EnsembleEditorView: View {
 
     private var editorCard: some View {
         VStack(alignment: .leading, spacing: Theme.Spacing.s) {
-            ZStack {
-                Text(title)
-                    .font(Theme.Text.meta.weight(.semibold))
-                    .foregroundStyle(Color.primary)
-
-                HStack(alignment: .center, spacing: Theme.Spacing.s) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .font(Theme.Text.meta)
-                    .foregroundStyle(Theme.Colors.secondaryText)
-                    .buttonStyle(.plain)
-
-                    Spacer(minLength: 0)
-
-                    Button("Save") {
-                        save()
-                    }
-                    .font(Theme.Text.meta.weight(.semibold))
-                    .foregroundStyle(canSave ? Theme.Colors.primaryAction : Theme.Colors.secondaryText)
-                    .disabled(!canSave)
-                }
-            }
-
             TextField("Ensemble name", text: $draftName)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
@@ -388,16 +402,7 @@ private struct EnsembleEditorView: View {
                         .fill(Color.primary.opacity(0.03))
                 )
 
-            if case .edit = mode {
-                HStack(spacing: Theme.Spacing.s) {
-                    Button("Delete", role: .destructive) {
-                        pendingDelete = true
-                    }
-                    .font(Theme.Text.meta)
 
-                    Spacer(minLength: 0)
-                }
-            }
         }
         .padding(20)
         .background(
@@ -412,6 +417,7 @@ private struct EnsembleEditorView: View {
 
     private var membersCard: some View {
         VStack(spacing: 0) {
+
             ForEach(Array(userIDs.enumerated()), id: \.element) { index, userID in
                 memberRow(for: userID)
 
