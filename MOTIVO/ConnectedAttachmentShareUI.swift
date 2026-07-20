@@ -22,6 +22,7 @@ import SwiftUI
 import PDFKit
 import UIKit
 import UniformTypeIdentifiers
+import Photos
 
 struct ConnectedScoreShareRequest: Identifiable {
     let id = UUID()
@@ -608,6 +609,20 @@ private extension View {
     }
 }
 
+
+private struct ConnectedAttachmentFileExporter: UIViewControllerRepresentable {
+    let url: URL
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        UIDocumentPickerViewController(forExporting: [url], asCopy: true)
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIDocumentPickerViewController,
+        context: Context
+    ) {}
+}
+
 struct ReceivedConnectedAttachmentDetailView: View {
     let attachment: ConnectedAttachment
 
@@ -617,7 +632,10 @@ struct ReceivedConnectedAttachmentDetailView: View {
 
     @State private var localURL: URL?
     @State private var errorMessage: String?
+    @State private var successMessage: String?
     @State private var showDeleteConfirmation = false
+    @State private var fileExportURL: URL?
+    @State private var showFileExporter = false
 
     var body: some View {
         Group {
@@ -640,10 +658,10 @@ struct ReceivedConnectedAttachmentDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if attachmentKind == .pdf {
-                    Button("Save to Scores") {
+                if let adoptionAction {
+                    Button(adoptionAction.title) {
                         Task {
-                            await saveToScores()
+                            await performAdoptionAction(adoptionAction)
                         }
                     }
                 }
@@ -666,6 +684,11 @@ struct ReceivedConnectedAttachmentDetailView: View {
                 )
             } catch {
                 errorMessage = error.localizedDescription
+            }
+        }
+        .sheet(isPresented: $showFileExporter) {
+            if let fileExportURL {
+                ConnectedAttachmentFileExporter(url: fileExportURL)
             }
         }
         .confirmationDialog(
@@ -695,6 +718,44 @@ struct ReceivedConnectedAttachmentDetailView: View {
         } message: {
             Text(errorMessage ?? "Please try again.")
         }
+        .alert(
+            "Saved",
+            isPresented: Binding(
+                get: { successMessage != nil },
+                set: {
+                    if !$0 {
+                        successMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(successMessage ?? "")
+        }
+    }
+
+    private enum AdoptionAction {
+        case scores
+        case photos
+        case files
+
+        var title: String {
+            switch self {
+            case .scores: return "Add to Scores"
+            case .photos: return "Save to Photos"
+            case .files: return "Save to Files"
+            }
+        }
+    }
+
+    private var adoptionAction: AdoptionAction? {
+        switch attachmentKind {
+        case .pdf: return .scores
+        case .image, .video: return .photos
+        case .audio: return .files
+        case .file: return nil
+        }
     }
 
     private var attachmentKind: AttachmentKind {
@@ -713,17 +774,28 @@ struct ReceivedConnectedAttachmentDetailView: View {
         }
     }
 
+    private func performAdoptionAction(_ action: AdoptionAction) async {
+        switch action {
+        case .scores:
+            await saveToScores()
+        case .photos:
+            await saveToPhotos()
+        case .files:
+            await saveToFiles()
+        }
+    }
+
+    private func resolvedLocalURL() async throws -> URL {
+        if let localURL {
+            return localURL
+        }
+
+        return try await store.localURL(for: attachment)
+    }
+
     private func saveToScores() async {
         do {
-            let url: URL
-
-            if let localURL {
-                url = localURL
-            } else {
-                url = try await store.localURL(
-                    for: attachment
-                )
-            }
+            let url = try await resolvedLocalURL()
 
             _ = try ScoreLibraryStore.shared.importPDF(
                 from: url
@@ -732,6 +804,73 @@ struct ReceivedConnectedAttachmentDetailView: View {
             await store.markSavedToScores(attachment)
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveToPhotos() async {
+        do {
+            let url = try await resolvedLocalURL()
+            let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+
+            guard status == .authorized || status == .limited else {
+                throw ConnectedAttachmentAdoptionError.photoLibraryAccessDenied
+            }
+
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                PHPhotoLibrary.shared().performChanges {
+                    switch attachmentKind {
+                    case .image:
+                        PHAssetChangeRequest.creationRequestForAssetFromImage(
+                            atFileURL: url
+                        )
+                    case .video:
+                        PHAssetChangeRequest.creationRequestForAssetFromVideo(
+                            atFileURL: url
+                        )
+                    default:
+                        break
+                    }
+                } completionHandler: { success, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if success {
+                        continuation.resume(returning: ())
+                    } else {
+                        continuation.resume(
+                            throwing: ConnectedAttachmentAdoptionError.photoSaveFailed
+                        )
+                    }
+                }
+            }
+
+            successMessage = attachmentKind == .video
+                ? "Video saved to Photos."
+                : "Photo saved to Photos."
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func saveToFiles() async {
+        do {
+            fileExportURL = try await resolvedLocalURL()
+            showFileExporter = true
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+}
+
+private enum ConnectedAttachmentAdoptionError: LocalizedError {
+    case photoLibraryAccessDenied
+    case photoSaveFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .photoLibraryAccessDenied:
+            return "Études doesn’t have permission to add items to your Photos library."
+        case .photoSaveFailed:
+            return "The attachment couldn’t be saved to Photos."
         }
     }
 }
