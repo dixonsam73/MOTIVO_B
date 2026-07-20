@@ -646,6 +646,9 @@ struct ReceivedConnectedAttachmentDetailView: View {
                     videoURLs: attachmentKind == .video ? [localURL] : [],
                     audioURLs: attachmentKind == .audio ? [localURL] : [],
                     pdfURLs: attachmentKind == .pdf ? [localURL] : [],
+                    titleForURL: { _, _ in
+                        attachment.attachmentName ?? attachment.filename
+                    },
                     isReadOnly: true,
                     canShare: false,
                     showsDismissButton: false
