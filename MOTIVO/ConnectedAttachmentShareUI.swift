@@ -798,10 +798,12 @@ struct ReceivedConnectedAttachmentDetailView: View {
             let url = try await resolvedLocalURL()
 
             _ = try ScoreLibraryStore.shared.importPDF(
-                from: url
+                from: url,
+                displayName: attachment.attachmentName ?? attachment.filename
             )
 
             await store.markSavedToScores(attachment)
+            dismiss()
         } catch {
             errorMessage = error.localizedDescription
         }

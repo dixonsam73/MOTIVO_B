@@ -43,7 +43,10 @@ final class ScoreLibraryStore: ObservableObject {
     }
 
     @discardableResult
-    func importPDF(from sourceURL: URL) throws -> ScoreLibraryItem {
+    func importPDF(
+        from sourceURL: URL,
+        displayName: String? = nil
+    ) throws -> ScoreLibraryItem {
         let didStartSecurityScope = sourceURL.startAccessingSecurityScopedResource()
         defer {
             if didStartSecurityScope {
@@ -51,7 +54,10 @@ final class ScoreLibraryStore: ObservableObject {
             }
         }
 
-        let title = cleanedTitle(sourceURL.deletingPathExtension().lastPathComponent, fallback: "Untitled Score")
+        let title = cleanedTitle(
+            displayName ?? sourceURL.deletingPathExtension().lastPathComponent,
+            fallback: "Untitled Score"
+        )
         let destination = try uniqueScoreFileURL()
 
         if fileManager.fileExists(atPath: destination.path) {
