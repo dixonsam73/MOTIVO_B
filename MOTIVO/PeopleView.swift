@@ -659,6 +659,7 @@ private struct SwipeRevealRow<Content: View>: View {
     var body: some View {
         content
             .offset(x: effectiveOffset)
+            .allowsHitTesting(effectiveOffset == 0)
             .overlay(alignment: .trailing) {
                 Button(role: .destructive) {
                     guard isDeleting == false else { return }
@@ -692,7 +693,7 @@ private struct SwipeRevealRow<Content: View>: View {
             }
             .contentShape(Rectangle())
             .clipped()
-            .simultaneousGesture(
+            .highPriorityGesture(
                 DragGesture(minimumDistance: 10, coordinateSpace: .local)
                     .updating($dragOffset) { value, state, _ in
                         guard abs(value.translation.width) > abs(value.translation.height) else {
