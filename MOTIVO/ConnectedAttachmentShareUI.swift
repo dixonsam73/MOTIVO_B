@@ -858,7 +858,24 @@ struct ReceivedConnectedAttachmentDetailView: View {
 
     private func saveToFiles() async {
         do {
-            fileExportURL = try await resolvedLocalURL()
+            let sourceURL = try await resolvedLocalURL()
+
+            let rawName = attachment.attachmentName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let displayName = (rawName?.isEmpty == false)
+                ? rawName!
+                : sourceURL.deletingPathExtension().lastPathComponent
+
+            let exportURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(displayName)
+                .appendingPathExtension(sourceURL.pathExtension)
+
+            if FileManager.default.fileExists(atPath: exportURL.path) {
+                try? FileManager.default.removeItem(at: exportURL)
+            }
+
+            try FileManager.default.copyItem(at: sourceURL, to: exportURL)
+
+            fileExportURL = exportURL
             showFileExporter = true
         } catch {
             errorMessage = error.localizedDescription
