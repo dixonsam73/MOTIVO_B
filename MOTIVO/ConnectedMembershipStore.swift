@@ -2,7 +2,7 @@
 //  ConnectedMembershipStore.swift
 //  MOTIVO
 //
-//  M9A.4: StoreKit membership foundation with purchase and restore APIs.
+//  M9A.5: StoreKit membership foundation startup-order polish.
 //
 
 import Foundation
@@ -88,8 +88,8 @@ final class ConnectedMembershipStore: ObservableObject {
         startTransactionObservation()
 
         Task {
-            await loadProducts()
             await refreshEntitlement()
+            await loadProducts()
         }
     }
 
