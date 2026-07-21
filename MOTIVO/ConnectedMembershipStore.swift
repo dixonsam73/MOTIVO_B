@@ -2,7 +2,7 @@
 //  ConnectedMembershipStore.swift
 //  MOTIVO
 //
-//  M9A.3: StoreKit product loading, entitlement derivation and transaction observation.
+//  M9A.4: StoreKit membership foundation with purchase and restore APIs.
 //
 
 import Foundation
@@ -17,6 +17,31 @@ final class ConnectedMembershipStore: ObservableObject {
         case loading
         case notEntitled
         case entitled
+    }
+
+    enum PurchaseOutcome {
+        case verified
+        case unverified
+        case pending
+        case userCancelled
+        case failed(Error)
+    }
+
+    private enum MembershipStoreError: LocalizedError {
+        case unsupportedProduct(String)
+        case purchaseAlreadyInProgress
+        case unknownPurchaseResult
+
+        var errorDescription: String? {
+            switch self {
+            case .unsupportedProduct(let productID):
+                return "Unsupported StoreKit product: \(productID)"
+            case .purchaseAlreadyInProgress:
+                return "A StoreKit purchase is already in progress."
+            case .unknownPurchaseResult:
+                return "StoreKit returned an unknown purchase result."
+            }
+        }
     }
 
     private enum ProductID {
@@ -34,6 +59,12 @@ final class ConnectedMembershipStore: ObservableObject {
     @Published private(set) var products: [Product] = []
     @Published private(set) var isLoadingProducts = false
     @Published private(set) var productLoadError: Error?
+
+    @Published private(set) var isPurchasing = false
+    @Published private(set) var purchaseOutcome: PurchaseOutcome?
+
+    @Published private(set) var isRestoringPurchases = false
+    @Published private(set) var restoreError: Error?
 
     var isEntitled: Bool {
         membershipState == .entitled
@@ -59,6 +90,127 @@ final class ConnectedMembershipStore: ObservableObject {
         Task {
             await loadProducts()
             await refreshEntitlement()
+        }
+    }
+
+    func purchase(_ product: Product) async -> PurchaseOutcome {
+        guard ProductID.all.contains(product.id) else {
+            let error = MembershipStoreError.unsupportedProduct(product.id)
+            let outcome = PurchaseOutcome.failed(error)
+            purchaseOutcome = outcome
+            return outcome
+        }
+
+        guard !isPurchasing else {
+            let error = MembershipStoreError.purchaseAlreadyInProgress
+            let outcome = PurchaseOutcome.failed(error)
+            purchaseOutcome = outcome
+            return outcome
+        }
+
+        isPurchasing = true
+        purchaseOutcome = nil
+
+        defer {
+            isPurchasing = false
+        }
+
+        do {
+            let result = try await product.purchase()
+
+            switch result {
+            case .success(let verificationResult):
+                switch verificationResult {
+                case .verified(let transaction):
+                    await transaction.finish()
+                    await refreshEntitlement()
+
+                    let outcome = PurchaseOutcome.verified
+                    purchaseOutcome = outcome
+
+#if DEBUG
+                    print("[Membership] Purchase verified (\(transaction.productID))")
+#endif
+
+                    return outcome
+
+                case .unverified:
+                    let outcome = PurchaseOutcome.unverified
+                    purchaseOutcome = outcome
+
+#if DEBUG
+                    print("[Membership] Purchase succeeded but transaction was unverified")
+#endif
+
+                    return outcome
+                }
+
+            case .pending:
+                let outcome = PurchaseOutcome.pending
+                purchaseOutcome = outcome
+
+#if DEBUG
+                print("[Membership] Purchase pending")
+#endif
+
+                return outcome
+
+            case .userCancelled:
+                let outcome = PurchaseOutcome.userCancelled
+                purchaseOutcome = outcome
+
+#if DEBUG
+                print("[Membership] Purchase cancelled by user")
+#endif
+
+                return outcome
+
+            @unknown default:
+                let error = MembershipStoreError.unknownPurchaseResult
+                let outcome = PurchaseOutcome.failed(error)
+                purchaseOutcome = outcome
+
+#if DEBUG
+                print("[Membership] Purchase failed: \(error.localizedDescription)")
+#endif
+
+                return outcome
+            }
+        } catch {
+            let outcome = PurchaseOutcome.failed(error)
+            purchaseOutcome = outcome
+
+#if DEBUG
+            print("[Membership] Purchase failed: \(error)")
+#endif
+
+            return outcome
+        }
+    }
+
+    func restorePurchases() async {
+        guard !isRestoringPurchases else { return }
+
+        isRestoringPurchases = true
+        restoreError = nil
+
+        defer {
+            isRestoringPurchases = false
+        }
+
+        do {
+            try await AppStore.sync()
+            await refreshEntitlement()
+
+#if DEBUG
+            print("[Membership] Restore purchases completed")
+#endif
+        } catch {
+            restoreError = error
+
+#if DEBUG
+            print("[Membership] Restore purchases failed: \(error)")
+#endif
         }
     }
 
