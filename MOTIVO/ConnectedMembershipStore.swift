@@ -2,7 +2,7 @@
 //  ConnectedMembershipStore.swift
 //  MOTIVO
 //
-//  M9A.2: StoreKit product loading and verified entitlement derivation.
+//  M9A.3: StoreKit product loading, entitlement derivation and transaction observation.
 //
 
 import Foundation
@@ -48,14 +48,45 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     private var hasStarted = false
+    private var transactionUpdatesTask: Task<Void, Never>?
 
     func start() {
         guard !hasStarted else { return }
         hasStarted = true
 
+        startTransactionObservation()
+
         Task {
             await loadProducts()
             await refreshEntitlement()
+        }
+    }
+
+    private func startTransactionObservation() {
+        guard transactionUpdatesTask == nil else { return }
+
+        transactionUpdatesTask = Task {
+#if DEBUG
+            print("[Membership] Transaction listener started")
+#endif
+
+            for await verificationResult in Transaction.updates {
+                guard !Task.isCancelled else { return }
+
+                guard case .verified(let transaction) = verificationResult else {
+#if DEBUG
+                    print("[Membership] Ignored unverified transaction update")
+#endif
+                    continue
+                }
+
+#if DEBUG
+                print("[Membership] Verified transaction update received (\(transaction.productID))")
+#endif
+
+                await transaction.finish()
+                await refreshEntitlement()
+            }
         }
     }
 
