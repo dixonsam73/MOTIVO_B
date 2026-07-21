@@ -2,7 +2,7 @@
 //  ConnectedMembershipStore.swift
 //  MOTIVO
 //
-//  M9A.1: StoreKit product loading foundation.
+//  M9A.2: StoreKit product loading and verified entitlement derivation.
 //
 
 import Foundation
@@ -48,7 +48,6 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     private var hasStarted = false
-  
 
     func start() {
         guard !hasStarted else { return }
@@ -56,7 +55,38 @@ final class ConnectedMembershipStore: ObservableObject {
 
         Task {
             await loadProducts()
+            await refreshEntitlement()
         }
+    }
+
+    func refreshEntitlement() async {
+        membershipState = .loading
+
+        for await verificationResult in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = verificationResult else {
+#if DEBUG
+                print("[Membership] Ignored unverified current entitlement")
+#endif
+                continue
+            }
+
+            guard ProductID.all.contains(transaction.productID) else {
+                continue
+            }
+
+            membershipState = .entitled
+
+#if DEBUG
+            print("[Membership] Entitlement: entitled (\(transaction.productID))")
+#endif
+            return
+        }
+
+        membershipState = .notEntitled
+
+#if DEBUG
+        print("[Membership] Entitlement: not entitled")
+#endif
     }
 
     private func loadProducts() async {
