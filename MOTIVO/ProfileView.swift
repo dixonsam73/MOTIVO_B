@@ -284,6 +284,7 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @State private var showAvatarEditor: Bool = false
      @State private var showAboutEtudes: Bool = false
      @State private var showConnectedIntroduction: Bool = false
+     @State private var showMembershipSelection: Bool = false
      @State private var showConnectedSignInSheet: Bool = false
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
@@ -332,8 +333,11 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 .navigationDestination(isPresented: $showConnectedIntroduction) {
                     ConnectedIntroductionView(
                         onSignIn: { showConnectedSignInSheet = true },
-                        onContinue: { showConnectedSignInSheet = true }
+                        onContinue: { showMembershipSelection = true }
                     )
+                }
+                .navigationDestination(isPresented: $showMembershipSelection) {
+                    MembershipSelectionView()
                 }
                 .navigationDestination(isPresented: $showTintModeSelection) {
                     TintModeSelectionView()
