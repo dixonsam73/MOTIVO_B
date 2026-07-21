@@ -337,7 +337,12 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                     )
                 }
                 .navigationDestination(isPresented: $showMembershipSelection) {
-                    MembershipSelectionView()
+                    MembershipSelectionView(
+                        onAuthenticationRequired: {
+                            showMembershipSelection = false
+                            showConnectedSignInSheet = true
+                        }
+                    )
                 }
                 .navigationDestination(isPresented: $showTintModeSelection) {
                     TintModeSelectionView()

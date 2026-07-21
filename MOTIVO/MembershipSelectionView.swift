@@ -12,6 +12,8 @@ struct MembershipSelectionView: View {
     @EnvironmentObject private var membershipStore: ConnectedMembershipStore
     @Environment(\.colorScheme) private var colorScheme
 
+    let onAuthenticationRequired: () -> Void
+
     @State private var selectedProductID: String?
     @State private var notice: MembershipNotice?
 
@@ -38,6 +40,12 @@ struct MembershipSelectionView: View {
         }
         .onAppear {
             selectDefaultProductIfNeeded()
+
+            if membershipStore.isEntitled {
+                DispatchQueue.main.async {
+                    onAuthenticationRequired()
+                }
+            }
         }
         .onChange(of: membershipStore.products.map(\.id)) { _, _ in
             selectDefaultProductIfNeeded()
@@ -257,10 +265,9 @@ struct MembershipSelectionView: View {
 
             switch outcome {
             case .verified:
-                notice = MembershipNotice(
-                    title: "Membership activated",
-                    message: "Your Études Connected membership is active."
-                )
+                await MainActor.run {
+                    onAuthenticationRequired()
+                }
 
             case .unverified:
                 notice = MembershipNotice(
@@ -296,10 +303,9 @@ struct MembershipSelectionView: View {
                     message: error.localizedDescription
                 )
             } else if membershipStore.isEntitled {
-                notice = MembershipNotice(
-                    title: "Purchases restored",
-                    message: "Your Études Connected membership is active."
-                )
+                await MainActor.run {
+                    onAuthenticationRequired()
+                }
             } else {
                 notice = MembershipNotice(
                     title: "No membership found",
