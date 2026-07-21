@@ -94,11 +94,7 @@ public final class NetworkManager {
         if bearerToken != nil {
             print("[NetworkManager] bearer token set")
         }
-#if DEBUG
-        if let jwt = bearerToken {
-            print("[Auth][DEBUG] access_token=\(jwt)")
-        }
-#endif
+
     }
 
     /// Compatibility shim: AuthManager expects this.

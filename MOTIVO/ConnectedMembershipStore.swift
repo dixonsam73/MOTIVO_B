@@ -128,19 +128,11 @@ final class ConnectedMembershipStore: ObservableObject {
                     let outcome = PurchaseOutcome.verified
                     purchaseOutcome = outcome
 
-#if DEBUG
-                    print("[Membership] Purchase verified (\(transaction.productID))")
-#endif
-
                     return outcome
 
                 case .unverified:
                     let outcome = PurchaseOutcome.unverified
                     purchaseOutcome = outcome
-
-#if DEBUG
-                    print("[Membership] Purchase succeeded but transaction was unverified")
-#endif
 
                     return outcome
                 }
@@ -149,19 +141,11 @@ final class ConnectedMembershipStore: ObservableObject {
                 let outcome = PurchaseOutcome.pending
                 purchaseOutcome = outcome
 
-#if DEBUG
-                print("[Membership] Purchase pending")
-#endif
-
                 return outcome
 
             case .userCancelled:
                 let outcome = PurchaseOutcome.userCancelled
                 purchaseOutcome = outcome
-
-#if DEBUG
-                print("[Membership] Purchase cancelled by user")
-#endif
 
                 return outcome
 
@@ -202,9 +186,6 @@ final class ConnectedMembershipStore: ObservableObject {
             try await AppStore.sync()
             await refreshEntitlement()
 
-#if DEBUG
-            print("[Membership] Restore purchases completed")
-#endif
         } catch {
             restoreError = error
 
@@ -218,10 +199,6 @@ final class ConnectedMembershipStore: ObservableObject {
         guard transactionUpdatesTask == nil else { return }
 
         transactionUpdatesTask = Task { @MainActor in
-#if DEBUG
-            print("[Membership] Transaction listener started")
-#endif
-
             for await verificationResult in Transaction.updates {
                 guard !Task.isCancelled else { return }
 
@@ -231,10 +208,6 @@ final class ConnectedMembershipStore: ObservableObject {
 #endif
                     continue
                 }
-
-#if DEBUG
-                print("[Membership] Verified transaction update received (\(transaction.productID))")
-#endif
 
                 await transaction.finish()
                 await refreshEntitlement()
@@ -259,17 +232,12 @@ final class ConnectedMembershipStore: ObservableObject {
 
             membershipState = .entitled
 
-#if DEBUG
-            print("[Membership] Entitlement: entitled (\(transaction.productID))")
-#endif
             return
         }
 
         membershipState = .notEntitled
 
-#if DEBUG
-        print("[Membership] Entitlement: not entitled")
-#endif
+
     }
 
     private func loadProducts() async {
@@ -295,19 +263,6 @@ final class ConnectedMembershipStore: ObservableObject {
                     return lhs.id < rhs.id
                 }
             }
-
-#if DEBUG
-            print("[Membership] Loaded \(products.count) StoreKit products")
-
-            for product in products {
-                print("[Membership] \(product.id) • \(product.displayPrice)")
-            }
-
-            let missing = Set(ProductID.all).subtracting(products.map(\.id))
-            if !missing.isEmpty {
-                print("[Membership] Missing StoreKit products: \(missing)")
-            }
-#endif
 
         } catch {
             productLoadError = error
