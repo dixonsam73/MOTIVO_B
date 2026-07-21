@@ -69,6 +69,7 @@ struct MOTIVOApp: App {
     @StateObject private var auth: AuthManager
     @StateObject private var appRoute = AppRouteStore()
     @StateObject private var appModeManager: AppModeManager
+    @StateObject private var connectedMembershipStore: ConnectedMembershipStore
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -100,6 +101,7 @@ struct MOTIVOApp: App {
         let authManager = AuthManager(identityService: identityService)
         _auth = StateObject(wrappedValue: authManager)
         _appModeManager = StateObject(wrappedValue: AppModeManager(mode: AppModeManager.resolvedActivationMode(auth: authManager)))
+        _connectedMembershipStore = StateObject(wrappedValue: ConnectedMembershipStore())
 
         // Phase 14.3H (B3): Ensure PersistenceController mirrors the initial AuthManager.currentUserID
         // even when AuthManager initializes from Keychain before SwiftUI onReceive subscribers attach.
@@ -216,7 +218,9 @@ struct MOTIVOApp: App {
                 .environmentObject(auth)
                 .environmentObject(appRoute)
                 .environmentObject(appModeManager)
+                .environmentObject(connectedMembershipStore)
                 .onAppear {
+                    connectedMembershipStore.start()
                     appModeManager.applyActivation(auth: auth)
 
                     // M7B: AppMode activation must complete before a pending Études avatar can
