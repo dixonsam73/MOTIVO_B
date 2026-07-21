@@ -64,6 +64,7 @@ extension DebugDump {
 public struct DebugViewerView: View {
     @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appModeManager: AppModeManager
+    @EnvironmentObject private var connectedMembershipStore: ConnectedMembershipStore
     @Environment(\.managedObjectContext) private var viewContext
     private let title: String
     @Binding private var jsonString: String
@@ -927,7 +928,10 @@ private func parsePostAttachmentsArray(from data: Data) -> [[String: Any]]? {
             set: { newValue in
                 appExperienceOverrideRaw = newValue.rawValue
                 DebugAppExperienceOverride.current = newValue
-                appModeManager.applyActivation(auth: auth)
+                appModeManager.applyActivation(
+                    auth: auth,
+                    isEntitled: connectedMembershipStore.isEntitled
+                )
             }
         )
     }

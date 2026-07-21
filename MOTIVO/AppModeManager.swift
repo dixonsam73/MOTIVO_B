@@ -33,8 +33,8 @@ public final class AppModeManager: ObservableObject {
         Self.applyBackendRuntimeMode(for: mode)
     }
 
-    func applyActivation(auth: AuthManager) {
-        applyMode(Self.resolvedActivationMode(auth: auth))
+    func applyActivation(auth: AuthManager, isEntitled: Bool) {
+        applyMode(Self.resolvedActivationMode(auth: auth, isEntitled: isEntitled))
     }
 
     func applyMode(_ mode: AppMode) {
@@ -53,18 +53,18 @@ public final class AppModeManager: ObservableObject {
         BackendConfig.apply()
     }
 
-    static func resolvedActivationMode(auth: AuthManager) -> AppMode {
+    static func resolvedActivationMode(auth: AuthManager, isEntitled: Bool) -> AppMode {
         #if DEBUG
         switch DebugAppExperienceOverride.current {
         case .automatic:
-            return ProductionAppModeActivation.resolve(auth: auth)
+            return ProductionAppModeActivation.resolve(auth: auth, isEntitled: isEntitled)
         case .forceSolo:
             return .solo
         case .forceConnected:
             return .connected
         }
         #else
-        return ProductionAppModeActivation.resolve(auth: auth)
+        return ProductionAppModeActivation.resolve(auth: auth, isEntitled: isEntitled)
         #endif
     }
 
@@ -116,8 +116,9 @@ public final class AppModeManager: ObservableObject {
 
 @MainActor
 enum ProductionAppModeActivation {
-    static func resolve(auth: AuthManager) -> AppMode {
+    static func resolve(auth: AuthManager, isEntitled: Bool) -> AppMode {
         guard BackendConfig.isConfigured else { return .solo }
+        guard isEntitled else { return .solo }
         guard auth.isSignedIn else { return .solo }
         guard auth.hasSupabaseAccessToken else { return .solo }
 

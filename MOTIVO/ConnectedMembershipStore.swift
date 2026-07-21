@@ -217,7 +217,7 @@ final class ConnectedMembershipStore: ObservableObject {
     private func startTransactionObservation() {
         guard transactionUpdatesTask == nil else { return }
 
-        transactionUpdatesTask = Task {
+        transactionUpdatesTask = Task { @MainActor in
 #if DEBUG
             print("[Membership] Transaction listener started")
 #endif

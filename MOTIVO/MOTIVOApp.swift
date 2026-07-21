@@ -99,9 +99,17 @@ struct MOTIVOApp: App {
         let identityService = LocalStubIdentityService()
         self.identityService = identityService
         let authManager = AuthManager(identityService: identityService)
+        let membershipStore = ConnectedMembershipStore()
         _auth = StateObject(wrappedValue: authManager)
-        _appModeManager = StateObject(wrappedValue: AppModeManager(mode: AppModeManager.resolvedActivationMode(auth: authManager)))
-        _connectedMembershipStore = StateObject(wrappedValue: ConnectedMembershipStore())
+        _connectedMembershipStore = StateObject(wrappedValue: membershipStore)
+        _appModeManager = StateObject(
+            wrappedValue: AppModeManager(
+                mode: AppModeManager.resolvedActivationMode(
+                    auth: authManager,
+                    isEntitled: membershipStore.isEntitled
+                )
+            )
+        )
 
         // Phase 14.3H (B3): Ensure PersistenceController mirrors the initial AuthManager.currentUserID
         // even when AuthManager initializes from Keychain before SwiftUI onReceive subscribers attach.
@@ -221,7 +229,7 @@ struct MOTIVOApp: App {
                 .environmentObject(connectedMembershipStore)
                 .onAppear {
                     connectedMembershipStore.start()
-                    appModeManager.applyActivation(auth: auth)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
 
                     // M7B: AppMode activation must complete before a pending Études avatar can
                     // be promoted into the Connected namespace/backend. AuthManager may discover
@@ -264,8 +272,14 @@ struct MOTIVOApp: App {
                         await SessionSyncQueue.shared.flushNow()
                     }
                 }
+                .onReceive(connectedMembershipStore.$membershipState.removeDuplicates()) { _ in
+                    appModeManager.applyActivation(
+                        auth: auth,
+                        isEntitled: connectedMembershipStore.isEntitled
+                    )
+                }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
-                    appModeManager.applyActivation(auth: auth)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -279,7 +293,7 @@ struct MOTIVOApp: App {
                     }
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
-                    appModeManager.applyActivation(auth: auth)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
 
                     // M7B: backend identity publication is the sign-in transition where the
                     // Connected runtime becomes available. Run the pending avatar promotion only
