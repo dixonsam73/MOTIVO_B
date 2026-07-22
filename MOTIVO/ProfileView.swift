@@ -1578,89 +1578,18 @@ case .failure(let error):
              return
          }
 
-         // Preflight: ensure we have a fresh, valid Supabase session/token before invoking the function.
-let sessionOK = await auth.ensureValidSession(reason: "delete-account")
-guard sessionOK else {
-    deleteAccountErrorMessage = "Session is not valid. Please sign out, sign in, then try again."
-    showDeleteAccountErrorAlert = true
-    return
-}
-
-let tokenKey = "supabaseAccessToken_v1"
-         guard let accessTokenRaw = Keychain.get(tokenKey), accessTokenRaw.isEmpty == false else {
-             deleteAccountErrorMessage = "Missing Supabase session token. Please sign out and sign back in, then try again."
-             showDeleteAccountErrorAlert = true
-             return
-         }
-
-         // Defensive: Keychain values can carry stray whitespace; JWT must be header.payload.signature (2 dots).
-         let accessToken = accessTokenRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-         let dotCount = accessToken.filter { $0 == "." }.count
-         guard dotCount == 2 else {
-             deleteAccountErrorMessage = "Invalid Supabase session token format (dotCount=\(dotCount)). Please sign out and sign back in, then try again."
-             showDeleteAccountErrorAlert = true
-             return
-         }
-
-         guard let baseURL = BackendConfig.apiBaseURL, let anonKey = BackendConfig.apiToken else {
-             deleteAccountErrorMessage = "Backend is not configured."
-             showDeleteAccountErrorAlert = true
-             return
-         }
-
          deleteAccountInFlight = true
          defer { deleteAccountInFlight = false }
 
-         // Prefer the dedicated functions domain to avoid gateway/header quirks:
-// https://<project-ref>.functions.supabase.co/<function>
-let functionURL: URL = {
-    if let host = baseURL.host,
-       host.hasSuffix(".supabase.co") {
-        let projectRef = host.replacingOccurrences(of: ".supabase.co", with: "")
-        if let url = URL(string: "https://\(projectRef).functions.supabase.co/delete_account_v1") {
-            return url
-        }
-    }
-    // Fallback to the REST-style endpoint if we cannot derive the project ref.
-    return baseURL
-        .appendingPathComponent("functions")
-        .appendingPathComponent("v1")
-        .appendingPathComponent("delete_account_v1")
-}()
-
-         var request = URLRequest(url: functionURL)
-         request.httpMethod = "POST"
-         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-         request.setValue(anonKey, forHTTPHeaderField: "apikey")
-         request.setValue(anonKey, forHTTPHeaderField: "x-api-key")
-         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-
          do {
-             let (data, response) = try await URLSession.shared.data(for: request)
-             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-
-             if status != 200 {
-                 let body = String(data: data, encoding: .utf8) ?? ""
-                 deleteAccountErrorMessage = "Server returned \(status). \(body)"
-                 showDeleteAccountErrorAlert = true
-                 return
-             }
-
-             // Expect: { "success": true }
-             if let obj = try? JSONSerialization.jsonObject(with: data, options: []),
-                let dict = obj as? [String: Any],
-                let ok = dict["success"] as? Bool,
-                ok == true {
-                 showDeleteAccountSheet = false
-                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
-                 return
-             }
-
-             let body = String(data: data, encoding: .utf8) ?? ""
-             deleteAccountErrorMessage = "Unexpected response: \(body)"
-             showDeleteAccountErrorAlert = true
+             try await ConnectedAccountDeletionService.deleteCurrentConnectedAccount(
+                 auth: auth,
+                 reason: "delete-account"
+             )
+             showDeleteAccountSheet = false
+             await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
          } catch {
-             deleteAccountErrorMessage = String(describing: error)
+             deleteAccountErrorMessage = error.localizedDescription
              showDeleteAccountErrorAlert = true
          }
      }

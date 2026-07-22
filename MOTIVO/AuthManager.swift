@@ -687,6 +687,69 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     }
 
 
+    /// Ensures the authenticated Supabase session is valid for a Connected account lifecycle operation,
+    /// even after the visible app experience has already returned to local Études.
+    func ensureValidSessionForConnectedAccountCleanup(reason: String) async -> Bool {
+        guard !LocalFactoryReset.isInProgress else {
+            NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
+            return false
+        }
+
+        guard self.currentUserID != nil else {
+            return false
+        }
+
+        guard !self.isSigningIn else {
+            NSLog("[Auth] connected cleanup refresh skipped: sign-in in flight. reason=%@", reason)
+            return false
+        }
+
+        guard BackendConfig.isConfigured else {
+            NSLog("[Auth] connected cleanup refresh skipped: BackendConfig not configured. reason=%@", reason)
+            return false
+        }
+
+        if let existing = sessionRefreshInFlight {
+            return await existing.value
+        }
+
+        let task = Task<Bool, Never> { [weak self] in
+            guard let self else { return false }
+            return await self.refreshSupabaseSession(reason: reason)
+        }
+        sessionRefreshInFlight = task
+        let ok = await task.value
+        sessionRefreshInFlight = nil
+        return ok
+    }
+
+    /// Clears only Connected authentication and backend identity after membership expiry.
+    /// Device-local Études content, profile fields and attachment metadata remain untouched.
+    func clearConnectedIdentityAfterMembershipExpiry() {
+        directoryHydrationTask?.cancel()
+        directoryHydrationTask = nil
+        lastHydratedDirectoryUserID = nil
+        accountIDBackfillTask?.cancel()
+        accountIDBackfillTask = nil
+        accountIDBackfillAttemptedUserIDs.removeAll()
+        accountIDBackfillInFlightUserIDs.removeAll()
+
+        Keychain.delete("appleUserID")
+        Keychain.delete("displayName")
+        Keychain.delete(Self.supabaseAccessTokenKeychainKey)
+        Keychain.delete(Self.supabaseRefreshTokenKeychainKey)
+        UserDefaults.standard.removeObject(forKey: Self.supabaseUserIDDefaultsKey)
+        UserDefaults.standard.removeObject(forKey: Self.backendUserDefaultsKey)
+        NetworkManager.shared.clearBearerToken()
+
+        self.currentUserID = nil
+        self.displayName = nil
+        self.backendUserID = nil
+        self.backendAvatarKey = nil
+        self.isSigningIn = false
+        self.backendBootstrapState = .unknown
+    }
+
     // Configure SwiftUI Sign in with Apple button
     func configure(_ request: ASAuthorizationAppleIDRequest) {
         let nonce = Self.randomNonceString()

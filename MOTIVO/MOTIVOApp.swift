@@ -70,6 +70,9 @@ struct MOTIVOApp: App {
     @StateObject private var appRoute = AppRouteStore()
     @StateObject private var appModeManager: AppModeManager
     @StateObject private var connectedMembershipStore: ConnectedMembershipStore
+    @State private var membershipExpiryCleanupInFlight = false
+    @State private var showMembershipExpiredAlert = false
+    @State private var membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -246,16 +249,25 @@ struct MOTIVOApp: App {
                     guard phase == .active else { return }
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
-                    // Phase 14.2: Connected-mode liveness trigger (idempotent apply + lightweight refresh/flush)
-                    guard appModeManager.canViewFeed else { return }
-                    BackendConfig.apply()
-                    guard BackendEnvironment.shared.isConnected, BackendConfig.isConfigured, NetworkManager.shared.baseURL != nil else { return }
+
                     Task {
+                        // StoreKit remains the entitlement authority. Refresh whenever the app becomes active
+                        // so a genuine expiry does not depend solely on a transaction update.
+                        await connectedMembershipStore.refreshEntitlement()
+
+                        // Phase 14.2: Connected-mode liveness trigger (idempotent apply + lightweight refresh/flush)
+                        guard appModeManager.canViewFeed else { return }
+                        BackendConfig.apply()
+                        guard BackendEnvironment.shared.isConnected,
+                              BackendConfig.isConfigured,
+                              NetworkManager.shared.baseURL != nil else { return }
+
                         // Phase 14.3H (B5): Avoid racing foreground liveness refresh against an in-flight sign-in.
                         guard !auth.isSigningIn else {
                             NSLog("[App] foreground: sign-in in flight; skipping ensureValidSession")
                             return
                         }
+
                         // Phase 14.2.2: Session liveness — refresh before issuing connected requests.
                         let ok = await auth.ensureValidSession(reason: "foreground")
                         guard ok else { return }
@@ -263,11 +275,8 @@ struct MOTIVOApp: App {
                         await SessionSyncQueue.shared.flushNow()
                     }
                 }
-                .onReceive(connectedMembershipStore.$membershipState.removeDuplicates()) { _ in
-                    appModeManager.applyActivation(
-                        auth: auth,
-                        isEntitled: connectedMembershipStore.isEntitled
-                    )
+                .onReceive(connectedMembershipStore.$membershipState.removeDuplicates()) { state in
+                    handleMembershipState(state)
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
@@ -294,7 +303,71 @@ struct MOTIVOApp: App {
                         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "backendUserIDAfterActivation")
                     }
                 }
+                .alert("Études Connected Membership Ended", isPresented: $showMembershipExpiredAlert) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(membershipExpiredMessage)
+                }
                 .preferredColorScheme(.light)
         }
+    }
+
+    @MainActor
+    private func handleMembershipState(_ state: ConnectedMembershipStore.MembershipState) {
+        switch state {
+        case .unknown, .loading:
+            return
+
+        case .entitled:
+            appModeManager.applyActivation(auth: auth, isEntitled: true)
+
+        case .notEntitled:
+            // Expiry and sign-out share the same visible destination: local Études.
+            // The backend deletion path below is only entered while a stored Connected identity still exists.
+            appModeManager.applyActivation(auth: auth, isEntitled: false)
+
+            guard auth.isSignedIn,
+                  auth.hasSupabaseAccessToken,
+                  let backendUserID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !backendUserID.isEmpty else {
+                return
+            }
+
+            Task {
+                await performMembershipExpiryCleanup()
+            }
+        }
+    }
+
+    @MainActor
+    private func performMembershipExpiryCleanup() async {
+        guard !membershipExpiryCleanupInFlight else { return }
+        membershipExpiryCleanupInFlight = true
+        defer { membershipExpiryCleanupInFlight = false }
+
+        // Connected UI is no longer available once StoreKit has definitively reported no entitlement.
+        appRoute.isProfilePresented = false
+        appModeManager.applyMode(.solo)
+
+        do {
+            try await ConnectedAccountDeletionService.deleteCurrentConnectedAccount(
+                auth: auth,
+                reason: "membership-expiry"
+            )
+
+            BackendFeedStore.shared.resetForSignOut()
+            FollowStore.shared.resetForSignOut()
+            auth.clearConnectedIdentityAfterMembershipExpiry()
+            appModeManager.applyMode(.solo)
+
+            membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."
+        } catch {
+            // Keep the Connected credentials available for M10D retry hardening, but never restore
+            // the Connected product experience without an active StoreKit entitlement.
+            appModeManager.applyMode(.solo)
+            membershipExpiredMessage = "Your Études Connected membership has ended and you have returned to Études. Your local content remains on this device. Connected account cleanup could not be completed: \(error.localizedDescription)"
+        }
+
+        showMembershipExpiredAlert = true
     }
 }

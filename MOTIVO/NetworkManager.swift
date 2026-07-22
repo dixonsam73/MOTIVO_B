@@ -708,3 +708,101 @@ enum RemoteAvatarPipeline {
         #endif
     }
 }
+
+
+// MARK: - Connected account deletion
+
+@MainActor
+enum ConnectedAccountDeletionService {
+    enum DeletionError: LocalizedError {
+        case sessionInvalid
+        case missingAccessToken
+        case invalidAccessToken(dotCount: Int)
+        case backendNotConfigured
+        case server(status: Int, body: String)
+        case unexpectedResponse(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .sessionInvalid:
+                return "Session is not valid. Please sign out, sign in, then try again."
+            case .missingAccessToken:
+                return "Missing Supabase session token. Please sign out and sign back in, then try again."
+            case .invalidAccessToken(let dotCount):
+                return "Invalid Supabase session token format (dotCount=\(dotCount)). Please sign out and sign back in, then try again."
+            case .backendNotConfigured:
+                return "Backend is not configured."
+            case .server(let status, let body):
+                return "Server returned \(status). \(body)"
+            case .unexpectedResponse(let body):
+                return "Unexpected response: \(body)"
+            }
+        }
+    }
+
+    static func deleteCurrentConnectedAccount(
+        auth: AuthManager,
+        reason: String
+    ) async throws {
+        let sessionOK = await auth.ensureValidSessionForConnectedAccountCleanup(reason: reason)
+        guard sessionOK else {
+            throw DeletionError.sessionInvalid
+        }
+
+        let tokenKey = "supabaseAccessToken_v1"
+        guard let accessTokenRaw = Keychain.get(tokenKey), !accessTokenRaw.isEmpty else {
+            throw DeletionError.missingAccessToken
+        }
+
+        let accessToken = accessTokenRaw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dotCount = accessToken.filter { $0 == "." }.count
+        guard dotCount == 2 else {
+            throw DeletionError.invalidAccessToken(dotCount: dotCount)
+        }
+
+        guard let baseURL = BackendConfig.apiBaseURL,
+              let anonKey = BackendConfig.apiToken else {
+            throw DeletionError.backendNotConfigured
+        }
+
+        let functionURL: URL = {
+            if let host = baseURL.host,
+               host.hasSuffix(".supabase.co") {
+                let projectRef = host.replacingOccurrences(of: ".supabase.co", with: "")
+                if let url = URL(string: "https://\(projectRef).functions.supabase.co/delete_account_v1") {
+                    return url
+                }
+            }
+
+            return baseURL
+                .appendingPathComponent("functions")
+                .appendingPathComponent("v1")
+                .appendingPathComponent("delete_account_v1")
+        }()
+
+        var request = URLRequest(url: functionURL)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(anonKey, forHTTPHeaderField: "apikey")
+        request.setValue(anonKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+        guard status == 200 else {
+            let body = String(data: data, encoding: .utf8) ?? ""
+            throw DeletionError.server(status: status, body: body)
+        }
+
+        if let object = try? JSONSerialization.jsonObject(with: data, options: []),
+           let dictionary = object as? [String: Any],
+           let success = dictionary["success"] as? Bool,
+           success {
+            return
+        }
+
+        let body = String(data: data, encoding: .utf8) ?? ""
+        throw DeletionError.unexpectedResponse(body)
+    }
+}

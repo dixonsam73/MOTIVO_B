@@ -55,6 +55,7 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     @Published private(set) var membershipState: MembershipState = .unknown
+    @Published private(set) var isRefreshingEntitlement = false
 
     @Published private(set) var products: [Product] = []
     @Published private(set) var isLoadingProducts = false
@@ -216,7 +217,18 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     func refreshEntitlement() async {
-        membershipState = .loading
+        guard !isRefreshingEntitlement else { return }
+
+        isRefreshingEntitlement = true
+        if membershipState == .unknown {
+            membershipState = .loading
+        }
+
+        defer {
+            isRefreshingEntitlement = false
+        }
+
+        var resolvedState: MembershipState = .notEntitled
 
         for await verificationResult in Transaction.currentEntitlements {
             guard case .verified(let transaction) = verificationResult else {
@@ -230,14 +242,11 @@ final class ConnectedMembershipStore: ObservableObject {
                 continue
             }
 
-            membershipState = .entitled
-
-            return
+            resolvedState = .entitled
+            break
         }
 
-        membershipState = .notEntitled
-
-
+        membershipState = resolvedState
     }
 
     private func loadProducts() async {
