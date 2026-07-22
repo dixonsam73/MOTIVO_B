@@ -1,3 +1,7 @@
+// CHANGE-ID: 20260722_M10A_ProfileAccountSettingsFoundation
+// SCOPE: M10A only — differentiate Études and Études Connected account rows; add Manage Membership placeholder in Connected; expose Erase All Études Data in both modes; preserve existing backend-delete + local factory-reset behavior for Connected and add direct local factory reset for Études mode; no other changes.
+// SEARCH-TOKEN: 20260722_M10A_PROFILE_ACCOUNT_SETTINGS
+
 // CHANGE-ID: 20260625_173400_Profile_ShowScoresToggle
 // SCOPE: ProfileView settings only — add persisted Show Scores toggle using existing appSettings_showScores preference; no other UI, navigation, persistence, or timer logic changes.
 // SEARCH-TOKEN: 20260625_173400_Profile_ShowScoresToggle
@@ -750,6 +754,11 @@ private var sessionSetupSection: some View {
                  .accessibilityAddTraits(.isButton)
                  .frame(minHeight: 44, alignment: .center)
                  .font(Theme.Text.body)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 eraseAllEtudesDataButton
              }
              .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
@@ -761,8 +770,8 @@ private var sessionSetupSection: some View {
      private var appSettingsSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button { showAboutEtudes = true } label: {
-                     navigationRow(title: "About Études")
+                 Button(action: {}) {
+                     navigationRow(title: "Manage Membership")
                  }
                  .buttonStyle(.plain)
                  .contentShape(Rectangle())
@@ -788,23 +797,27 @@ private var sessionSetupSection: some View {
                      quietDivider()
                  }
 
-                 Button {
-                     deleteAccountConfirmText = ""
-                     showDeleteAccountSheet = true
-                 } label: {
-                     Text("Delete account")
-                         .foregroundStyle(.red)
-                         .frame(maxWidth: .infinity, alignment: .leading)
-                         .frame(minHeight: 44, alignment: .center)
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .font(Theme.Text.body)
+                 eraseAllEtudesDataButton
              }
              .cardSurface(padding: profileInnerCardPadding)
              .listRowSeparator(.hidden)
                 .padding(.vertical, profileSectionSpacing / 2)
          }
+     }
+
+     private var eraseAllEtudesDataButton: some View {
+         Button {
+             deleteAccountConfirmText = ""
+             showDeleteAccountSheet = true
+         } label: {
+             Text("Erase All Études Data")
+                 .foregroundStyle(.red)
+                 .frame(maxWidth: .infinity, alignment: .leading)
+                 .frame(minHeight: 44, alignment: .center)
+         }
+         .buttonStyle(.plain)
+         .contentShape(Rectangle())
+         .font(Theme.Text.body)
      }
 
      // MARK: - Toolbar
@@ -1443,21 +1456,28 @@ case .failure(let error):
      // New helper method to compute initials from a string
      
 
+     private var eraseAllEtudesDataExplanation: String {
+         if appModeManager.canShowConnectedAccountManagement {
+             return "This permanently erases everything stored in Études on this device and deletes your Études Connected account, including its profile, posts, attachments, follows, comments, and avatar. Études will return to its first-launch state. This can’t be undone."
+         }
+         return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This can’t be undone."
+     }
+
      private var deleteAccountSheet: some View {
          NavigationStack {
              ScrollView {
                  VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                      VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                         Text("This permanently deletes your account and all backend data (posts, attachments, follows, comments, and your avatar). This can’t be undone.")
+                         Text(eraseAllEtudesDataExplanation)
                              .font(Theme.Text.body)
                              .foregroundStyle(Theme.Colors.secondaryText)
                      }
                      .cardSurface()
 
                      VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                         Text("Type DELETE to confirm").sectionHeader()
+                         Text("Type ERASE to confirm").sectionHeader()
 
-                         TextField("DELETE", text: $deleteAccountConfirmText)
+                         TextField("ERASE", text: $deleteAccountConfirmText)
                              .textInputAutocapitalization(.characters)
                              .autocorrectionDisabled()
                              .font(Theme.Text.body)
@@ -1481,7 +1501,7 @@ case .failure(let error):
                                  ProgressView()
                                      .padding(.trailing, 6)
                              }
-                             Text(deleteAccountInFlight ? "Deleting…" : "Delete account")
+                             Text(deleteAccountInFlight ? "Erasing…" : "Erase All Études Data")
                                  .font(Theme.Text.body.weight(.semibold))
                              Spacer()
                          }
@@ -1494,15 +1514,15 @@ case .failure(let error):
                          )
                      }
                      .buttonStyle(.plain)
-                     .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "DELETE")
-                     .opacity(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "DELETE" ? 0.5 : 1.0)
+                     .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "ERASE")
+                     .opacity(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "ERASE" ? 0.5 : 1.0)
                  }
                  .padding(.horizontal, Theme.Spacing.l)
                  .padding(.vertical, Theme.Spacing.section)
              }
              .appBackground()
              .tint(Theme.Colors.accent)
-             .navigationTitle("Delete account")
+             .navigationTitle("Erase All Études Data")
              .navigationBarTitleDisplayMode(.inline)
              .toolbar {
                  ToolbarItem(placement: .cancellationAction) {
@@ -1516,9 +1536,18 @@ case .failure(let error):
 
 
      private func performDeleteAccount() async {
-         // Guard: must be connected and have a stored Supabase access token.
+         // In Études mode there is no backend account to delete. Perform the local factory reset directly.
+         guard appModeManager.canShowConnectedAccountManagement else {
+             deleteAccountInFlight = true
+             showDeleteAccountSheet = false
+             await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
+             deleteAccountInFlight = false
+             return
+         }
+
+         // Connected mode: delete the backend account first, then perform the same local factory reset.
          guard BackendEnvironment.shared.isConnected else {
-             deleteAccountErrorMessage = "Delete Account is only available in Connected mode."
+             deleteAccountErrorMessage = "Études Connected is not currently available. Please try again."
              showDeleteAccountErrorAlert = true
              return
          }
@@ -1597,7 +1626,7 @@ let functionURL: URL = {
                 let ok = dict["success"] as? Bool,
                 ok == true {
                  showDeleteAccountSheet = false
-                 await LocalFactoryReset.perform(reason: "delete-account-success", auth: auth)
+                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
                  return
              }
 
@@ -1712,10 +1741,10 @@ private func initials(from string: String) -> String {
                  Text(avatarSyncErrorMessage ?? "Couldn’t update your avatar. Please try again.")
              }
 
-             .alert("Delete account failed", isPresented: $showDeleteAccountErrorAlert) {
+             .alert("Erase failed", isPresented: $showDeleteAccountErrorAlert) {
                  Button("OK", role: .cancel) {}
              } message: {
-                 Text(deleteAccountErrorMessage ?? "Couldn’t delete your account. Please try again.")
+                 Text(deleteAccountErrorMessage ?? "Couldn’t erase your Études data. Please try again.")
              }
              .sheet(isPresented: $showDeleteAccountSheet) {
                  deleteAccountSheet

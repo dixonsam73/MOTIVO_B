@@ -76,18 +76,9 @@ struct MOTIVOApp: App {
     init() {
         // Step 7: ensure live HTTP configuration is applied before any backend services initialize
         // Phase 14.2: Non-DEBUG bootstrap of backend config for fresh installs (Info.plist / xcconfig injected)
-#if !DEBUG
-        let d = UserDefaults.standard
-        if BackendConfig.isConfigured == false {
-            let rawURL = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_URL") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            let rawKey = (Bundle.main.object(forInfoDictionaryKey: "SUPABASE_ANON_KEY") as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !rawURL.isEmpty, !rawKey.isEmpty {
-                d.set(rawURL, forKey: BackendConfigKeys.baseURL)
-                d.set(rawKey, forKey: BackendConfigKeys.token)
-            }
-        }
-#endif
-        BackendConfig.apply()
+        // Bootstrap bundled backend configuration for every build configuration.
+        // Debug must also recover correctly on a clean install or after factory reset.
+        BackendConfig.bootstrapFromBundleIfNeededForFactoryReset()
 
         // Milestone 6: AppMode activation is now the production owner of Connected runtime enablement.
         // Start from the local backend runtime before AuthManager initializes so stored Apple sign-in
