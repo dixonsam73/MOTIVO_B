@@ -114,6 +114,9 @@
 // SCOPE: Follow infra hardening — immediate backend sync for follow request mode + request rejection UX wiring (no redesign).
 // SEARCH-TOKEN: 20260221_150200_FollowInfraHardening_TOKEN_b5a1
 
+
+import StoreKit
+import UIKit
  import SwiftUI
  import CoreData
 import Foundation
@@ -770,7 +773,11 @@ private var sessionSetupSection: some View {
      private var appSettingsSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button(action: {}) {
+                 Button {
+                     Task {
+                         await openManageMembership()
+                     }
+                 } label: {
                      navigationRow(title: "Manage Membership")
                  }
                  .buttonStyle(.plain)
@@ -818,6 +825,25 @@ private var sessionSetupSection: some View {
          .buttonStyle(.plain)
          .contentShape(Rectangle())
          .font(Theme.Text.body)
+     }
+     
+     @MainActor
+     private func openManageMembership() async {
+         guard
+             let scene = UIApplication.shared.connectedScenes
+                 .compactMap({ $0 as? UIWindowScene })
+                 .first
+         else {
+             return
+         }
+
+         do {
+             try await AppStore.showManageSubscriptions(in: scene)
+         } catch {
+             #if DEBUG
+             print("[Profile] Failed to present Manage Membership: \(error)")
+             #endif
+         }
      }
 
      // MARK: - Toolbar
