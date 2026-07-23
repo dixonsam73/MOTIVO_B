@@ -150,7 +150,9 @@ struct MOTIVOApp: App {
         let d = UserDefaults.standard.dictionaryRepresentation()
         for (key, value) in d {
             if let data = try? PropertyListSerialization.data(fromPropertyList: value, format: .binary, options: 0), data.count >= threshold {
+                #if DEBUG
                 print("[App] Large UserDefaults key: \(key) size: \(data.count) bytes")
+                #endif
             }
         }
     }
@@ -239,7 +241,9 @@ struct MOTIVOApp: App {
                     Task {
                         guard appModeManager.canViewFeed else { return }
                         if auth.isSigningIn {
+                            #if DEBUG
                             NSLog("[App] launch: sign-in in flight; skipping ensureValidSession")
+                            #endif
                         } else {
                             _ = await auth.ensureValidSession(reason: "launch")
                         }
@@ -267,7 +271,9 @@ struct MOTIVOApp: App {
 
                         // Phase 14.3H (B5): Avoid racing foreground liveness refresh against an in-flight sign-in.
                         guard !auth.isSigningIn else {
+                            #if DEBUG
                             NSLog("[App] foreground: sign-in in flight; skipping ensureValidSession")
+                            #endif
                             return
                         }
 

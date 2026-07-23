@@ -80,7 +80,8 @@ public final class NetworkManager {
     public func configure(baseURL: URL?, authToken: String?) {
         self.baseURL = baseURL
         self.authToken = authToken
-        print("[NetworkManager] configured baseURL=\(String(describing: baseURL)) apiKey=•••")
+        #if DEBUG
+        #endif
     }
 
     /// Step 7: set bearer token (Supabase access token).
@@ -92,7 +93,8 @@ public final class NetworkManager {
         }
         bearerToken = (t?.isEmpty == true) ? nil : t
         if bearerToken != nil {
-            print("[NetworkManager] bearer token set")
+            #if DEBUG
+            #endif
         }
 
     }
@@ -103,7 +105,8 @@ public final class NetworkManager {
     }
 
     public func clearBearerToken(reason: String) {
-        print("[NetworkManager] bearer token cleared reason=\(reason)")
+        #if DEBUG
+        #endif
         setBearerToken(nil)
     }
 
@@ -250,13 +253,9 @@ public final class NetworkManager {
             }
             #endif
 
-            // Logging (no tokens printed)
-            print("[NetworkManager] ▶︎ \(method) \(finalURL.absoluteString)")
-
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-                print("[NetworkManager] ◀︎ status=\(status) for \(finalURL.lastPathComponent)")
 
                 if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                     let bodyString = String(data: data, encoding: .utf8)
@@ -499,12 +498,10 @@ public final class NetworkManager {
         request.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
         request.setValue("true", forHTTPHeaderField: "x-upsert")
 
-        print("[NetworkManager] ▶︎ POST \(url.absoluteString)")
 
         do {
             let (respData, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            print("[NetworkManager] ◀︎ status=\(status) for avatar upload")
 
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 let bodyString = String(data: respData, encoding: .utf8)
@@ -552,12 +549,10 @@ public final class NetworkManager {
             request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
         }
 
-        print("[NetworkManager] ▶︎ DELETE \(url.absoluteString)")
 
         do {
             let (respData, response) = try await URLSession.shared.data(for: request)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-            print("[NetworkManager] ◀︎ status=\(status) for avatar delete")
 
             if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
                 let bodyString = String(data: respData, encoding: .utf8)

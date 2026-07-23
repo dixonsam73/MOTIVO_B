@@ -265,14 +265,18 @@ final class AuthManager: NSObject, ObservableObject {
             _ = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
             let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
             guard case .success = patch else {
+                #if DEBUG
                 NSLog("[Auth] pending local avatar deletion retry retained user=%@ reason=%@", backendID, reason)
+                #endif
                 return
             }
 
             await invalidateAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
             backendAvatarKey = nil
             ProfileStore.clearPendingLocalAvatarSync()
+            #if DEBUG
             NSLog("[Auth] promoted local avatar deletion user=%@ reason=%@", backendID, reason)
+            #endif
             return
         }
 
@@ -290,20 +294,26 @@ final class AuthManager: NSObject, ObservableObject {
 
         let upload = await NetworkManager.shared.uploadAvatarJPEG(data: jpegData, backendUserID: backendID)
         guard case .success(let avatarKey) = upload else {
+            #if DEBUG
             NSLog("[Auth] pending local avatar upload retry retained user=%@ reason=%@", backendID, reason)
+            #endif
             return
         }
 
         await invalidateAvatarCaches(avatarKey: avatarKey)
         let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: avatarKey)
         guard case .success = patch else {
+            #if DEBUG
             NSLog("[Auth] pending local avatar directory patch retry retained user=%@ reason=%@", backendID, reason)
+            #endif
             return
         }
 
         backendAvatarKey = avatarKey
         ProfileStore.clearPendingLocalAvatarSync()
+        #if DEBUG
         NSLog("[Auth] promoted local avatar upload user=%@ reason=%@", backendID, reason)
+        #endif
         #endif
     }
 
@@ -388,20 +398,26 @@ final class AuthManager: NSObject, ObservableObject {
             ) else { return }
 
             ProfileStore.setAccountID(generated, for: bid)
+            #if DEBUG
             NSLog("[Auth] account_id backfill generated user=%@ reason=%@ account_id=%@", bid, reason, generated)
+            #endif
         }
     }
 
     private func hydrateDirectoryStateFromBackend(userID: String, reason: String) async {
         // If backend config is not available (e.g., after factory reset), do not attempt hydration.
         guard BackendConfig.isConfigured else {
+            #if DEBUG
             NSLog("[Auth] directory hydration skipped user=%@ reason=%@ (BackendConfig not configured)", userID, reason)
+            #endif
             return
         }
 
         // Skip during factory reset or when signed out; avoids mutating ProfileStore/Core Data after wipe.
         guard !LocalFactoryReset.isInProgress else {
+            #if DEBUG
             NSLog("[Auth] directory hydration skipped user=%@ reason=%@ (factory reset in progress)", userID, reason)
+            #endif
             return
         }
         guard self.backendUserID == userID else { return }
@@ -413,13 +429,17 @@ final class AuthManager: NSObject, ObservableObject {
         switch result {
         case .failure(let error):
             // Offline/not-configured is not fatal — leave local defaults as-is.
+            #if DEBUG
             NSLog("[Auth] directory hydration skipped user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
+            #endif
         case .success(let row):
             guard let row else {
                 self.backendBootstrapState = .newAccount
                 self.backendAvatarKey = nil
                 await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
+                #if DEBUG
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
+                #endif
                 return
             }
 
@@ -444,8 +464,10 @@ final class AuthManager: NSObject, ObservableObject {
             lastHydratedDirectoryUserID = userID
             self.backendBootstrapState = .existingAccount
             await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
+            #if DEBUG
             NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
                   userID, reason, row.lookupEnabled ? "1" : "0", row.accountID ?? "nil")
+            #endif
         }
     }
 
@@ -520,9 +542,13 @@ final class AuthManager: NSObject, ObservableObject {
 
         switch result {
         case .success:
+            #if DEBUG
             NSLog("[Auth] published local profile snapshot user=%@ reason=%@ instruments=%d", userID, reason, instrumentsToPublish.count)
+            #endif
         case .failure(let error):
+            #if DEBUG
             NSLog("[Auth] local profile snapshot publish failed user=%@ reason=%@ err=%@", userID, reason, String(describing: error))
+            #endif
         }
     }
 
@@ -536,7 +562,9 @@ final class AuthManager: NSObject, ObservableObject {
     func ensureValidSession(reason: String) async -> Bool {
         // Delete Account v2: suppress auth/identity work during a local factory reset.
         guard !LocalFactoryReset.isInProgress else {
+            #if DEBUG
             NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
+            #endif
             return false
         }
 
@@ -553,13 +581,17 @@ final class AuthManager: NSObject, ObservableObject {
         // If a sign-in is currently in-flight, do not attempt a refresh.
         // This avoids racing foreground/launch liveness refresh against the initial Supabase sign-in.
         guard !self.isSigningIn else {
+            #if DEBUG
             NSLog("[Auth] ensureValidSession: sign-in in flight; skipping refresh. reason=%@", reason)
+            #endif
             return false
         }
 
         // If backend isn't configured, collapse state (prevents zombie UI in Connected builds).
         guard BackendConfig.isConfigured else {
+            #if DEBUG
             NSLog("[Auth] ensureValidSession: BackendConfig not configured; signing out. reason=%@", reason)
+            #endif
             await MainActor.run { self.signOut() }
             return false
         }
@@ -625,22 +657,30 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     private func refreshSupabaseSession(reason: String) async -> Bool {
         // Delete Account v2: suppress refresh during a local factory reset.
         guard !LocalFactoryReset.isInProgress else {
+            #if DEBUG
             NSLog("[Auth] refreshSupabaseSession skipped (factory reset in progress) reason=%@", reason)
+            #endif
             return false
         }
 
         #if canImport(Supabase)
         guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
             if self.isSigningIn {
+                #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: missing refresh token while sign-in in flight; not signing out. reason=%@", reason)
+                #endif
                 return false
             }
+            #if DEBUG
             NSLog("[Auth] refreshSupabaseSession: missing refresh token; signing out. reason=%@", reason)
+            #endif
             await MainActor.run { self.signOut() }
             return false
         }
         guard let url = BackendConfig.apiBaseURL, let key = BackendConfig.apiToken else {
+            #if DEBUG
             NSLog("[Auth] refreshSupabaseSession: BackendConfig missing URL/key; signing out. reason=%@", reason)
+            #endif
             await MainActor.run { self.signOut() }
             return false
         }
@@ -667,12 +707,18 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
                 self.scheduleAccountIDBackfillIfNeeded(reason: "refreshSupabaseSession")
             }
 
+            #if DEBUG
             NSLog("[Auth] refreshSupabaseSession OK user=%@ reason=%@", supaUserID, reason)
+            #endif
             return true
         } catch {
+            #if DEBUG
             NSLog("[Auth] refreshSupabaseSession FAILED: %@ reason=%@", String(describing: error), reason)
+            #endif
             if isOfflineOrTransientNetworkError(error) {
+                #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: offline/transient failure; not signing out. reason=%@", reason)
+                #endif
                 return false
             }
             await MainActor.run { self.signOut() }
@@ -680,7 +726,9 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         }
         #else
         // If Supabase is not linked, we cannot refresh; sign out to avoid zombie UI.
+        #if DEBUG
         NSLog("[Auth] refreshSupabaseSession: Supabase module missing; signing out. reason=%@", reason)
+        #endif
         await MainActor.run { self.signOut() }
         return false
         #endif
@@ -691,7 +739,9 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     /// even after the visible app experience has already returned to local Études.
     func ensureValidSessionForConnectedAccountCleanup(reason: String) async -> Bool {
         guard !LocalFactoryReset.isInProgress else {
+            #if DEBUG
             NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
+            #endif
             return false
         }
 
@@ -700,12 +750,16 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         }
 
         guard !self.isSigningIn else {
+            #if DEBUG
             NSLog("[Auth] connected cleanup refresh skipped: sign-in in flight. reason=%@", reason)
+            #endif
             return false
         }
 
         guard BackendConfig.isConfigured else {
+            #if DEBUG
             NSLog("[Auth] connected cleanup refresh skipped: BackendConfig not configured. reason=%@", reason)
+            #endif
             return false
         }
 
@@ -857,17 +911,23 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     private func ensureBackendIdentityIfNeeded(for appleID: String) {
         // Delete Account v2: never attempt identity handshake during/after a factory reset.
         guard !LocalFactoryReset.isInProgress else {
+            #if DEBUG
             NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (factory reset in progress)")
+            #endif
             return
         }
         // If the app is not in a Connected backend context, do not establish backend identity.
         guard BackendEnvironment.shared.isConnected else {
+            #if DEBUG
             NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (not connected)")
+            #endif
             return
         }
         // If backend config is not configured (e.g., after factory reset), do not attempt backend identity.
         guard BackendConfig.isConfigured else {
+            #if DEBUG
             NSLog("[Auth] ensureBackendIdentityIfNeeded skipped (BackendConfig not configured)")
+            #endif
             return
         }
 
@@ -891,17 +951,23 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     private func signInToSupabaseIfPossible(credential: ASAuthorizationAppleIDCredential) async {
         defer { self.isSigningIn = false }
         guard let nonce = currentNonce, !nonce.isEmpty else {
+            #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: missing nonce")
+            #endif
             return
         }
         guard let tokenData = credential.identityToken,
               let idToken = String(data: tokenData, encoding: .utf8),
               !idToken.isEmpty else {
+            #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: missing identityToken")
+            #endif
             return
         }
         guard let url = BackendConfig.apiBaseURL, let key = BackendConfig.apiToken else {
+            #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: BackendConfig not configured")
+            #endif
             return
         }
 
@@ -934,15 +1000,21 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
                 self.scheduleAccountIDBackfillIfNeeded(reason: "supabaseSignIn")
             }
 
+            #if DEBUG
             NSLog("[Auth] Supabase sign-in success user=%@", supaUserID)
+            #endif
         } catch {
+            #if DEBUG
             NSLog("[Auth] Supabase sign-in failed: %@", String(describing: error))
+            #endif
         }
         #else
         // You have supabase-swift installed, but the MOTIVO target is missing the *Supabase* product/library.
         // In Xcode: Package Dependencies → supabase-swift → add the "Supabase" product to the MOTIVO target
         // (often below the visible list—scroll).
+        #if DEBUG
         NSLog("[Auth] Supabase module not present. Add supabase-swift product 'Supabase' to the MOTIVO app target (not just 'Auth'), then rebuild.")
+        #endif
         #endif
     }
 
