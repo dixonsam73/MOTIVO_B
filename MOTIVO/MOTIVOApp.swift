@@ -71,6 +71,9 @@ struct MOTIVOApp: App {
     @StateObject private var appModeManager: AppModeManager
     @StateObject private var connectedMembershipStore: ConnectedMembershipStore
     @State private var membershipExpiryCleanupInFlight = false
+    @State private var lastStableMembershipState: ConnectedMembershipStore.MembershipState?
+    @AppStorage("connectedMembershipHadEntitlement_v1") private var connectedMembershipHadEntitlement = false
+    @AppStorage("connectedMembershipExpiryCleanupPending_v1") private var connectedMembershipExpiryCleanupPending = false
     @State private var showMembershipExpiredAlert = false
     @State private var membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."
     @Environment(\.scenePhase) private var scenePhase
@@ -280,6 +283,7 @@ struct MOTIVOApp: App {
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    attemptPendingMembershipExpiryCleanupIfPossible()
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -294,6 +298,7 @@ struct MOTIVOApp: App {
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    attemptPendingMembershipExpiryCleanupIfPossible()
 
                     // M7B: backend identity publication is the sign-in transition where the
                     // Connected runtime becomes available. Run the pending avatar promotion only
@@ -319,23 +324,41 @@ struct MOTIVOApp: App {
             return
 
         case .entitled:
+            lastStableMembershipState = .entitled
+            connectedMembershipHadEntitlement = true
+            connectedMembershipExpiryCleanupPending = false
             appModeManager.applyActivation(auth: auth, isEntitled: true)
 
         case .notEntitled:
-            // Expiry and sign-out share the same visible destination: local Études.
-            // The backend deletion path below is only entered while a stored Connected identity still exists.
+            let observedLiveExpiry = lastStableMembershipState == .entitled
+            let observedColdLaunchExpiry = lastStableMembershipState == nil
+                && connectedMembershipHadEntitlement
+
+            lastStableMembershipState = .notEntitled
             appModeManager.applyActivation(auth: auth, isEntitled: false)
 
-            guard auth.isSignedIn,
-                  auth.hasSupabaseAccessToken,
-                  let backendUserID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !backendUserID.isEmpty else {
+            guard observedLiveExpiry || observedColdLaunchExpiry || connectedMembershipExpiryCleanupPending else {
                 return
             }
 
-            Task {
-                await performMembershipExpiryCleanup()
-            }
+            connectedMembershipExpiryCleanupPending = true
+            attemptPendingMembershipExpiryCleanupIfPossible()
+        }
+    }
+
+    @MainActor
+    private func attemptPendingMembershipExpiryCleanupIfPossible() {
+        guard connectedMembershipExpiryCleanupPending,
+              connectedMembershipStore.membershipState == .notEntitled,
+              auth.isSignedIn,
+              auth.hasSupabaseAccessToken,
+              let backendUserID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !backendUserID.isEmpty else {
+            return
+        }
+
+        Task {
+            await performMembershipExpiryCleanup()
         }
     }
 
@@ -358,6 +381,8 @@ struct MOTIVOApp: App {
             BackendFeedStore.shared.resetForSignOut()
             FollowStore.shared.resetForSignOut()
             auth.clearConnectedIdentityAfterMembershipExpiry()
+            connectedMembershipExpiryCleanupPending = false
+            connectedMembershipHadEntitlement = false
             appModeManager.applyMode(.solo)
 
             membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."

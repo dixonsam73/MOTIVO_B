@@ -1632,6 +1632,17 @@ private func initials(from string: String) -> String {
                     }
                 }
 
+                // Purchase/onboarding flow:
+                // Successful authentication after Membership Selection should unwind
+                // the onboarding navigation stack as well as dismiss the SIWA sheet.
+                if !signedOutGateWasVisible,
+                   newValue != nil,
+                   showConnectedSignInSheet || showMembershipSelection || showConnectedIntroduction {
+                    showConnectedSignInSheet = false
+                    showMembershipSelection = false
+                    showConnectedIntroduction = false
+                }
+
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
                 // before we clear UI state (location is stored per-user in ProfileStore).

@@ -30,6 +30,7 @@ final class ConnectedMembershipStore: ObservableObject {
     private enum MembershipStoreError: LocalizedError {
         case unsupportedProduct(String)
         case purchaseAlreadyInProgress
+        case entitlementMissingAfterVerifiedPurchase
         case unknownPurchaseResult
 
         var errorDescription: String? {
@@ -38,6 +39,8 @@ final class ConnectedMembershipStore: ObservableObject {
                 return "Unsupported StoreKit product: \(productID)"
             case .purchaseAlreadyInProgress:
                 return "A StoreKit purchase is already in progress."
+            case .entitlementMissingAfterVerifiedPurchase:
+                return "The purchase was verified, but no active Études Connected entitlement was found."
             case .unknownPurchaseResult:
                 return "StoreKit returned an unknown purchase result."
             }
@@ -81,6 +84,7 @@ final class ConnectedMembershipStore: ObservableObject {
 
     private var hasStarted = false
     private var transactionUpdatesTask: Task<Void, Never>?
+    private var entitlementRefreshTask: Task<MembershipState, Never>?
 
     func start() {
         guard !hasStarted else { return }
@@ -124,7 +128,14 @@ final class ConnectedMembershipStore: ObservableObject {
                 switch verificationResult {
                 case .verified(let transaction):
                     await transaction.finish()
-                    await refreshEntitlement()
+                    await refreshEntitlement(forceAfterCurrent: true)
+
+                    guard isEntitled else {
+                        let error = MembershipStoreError.entitlementMissingAfterVerifiedPurchase
+                        let outcome = PurchaseOutcome.failed(error)
+                        purchaseOutcome = outcome
+                        return outcome
+                    }
 
                     let outcome = PurchaseOutcome.verified
                     purchaseOutcome = outcome
@@ -185,7 +196,7 @@ final class ConnectedMembershipStore: ObservableObject {
 
         do {
             try await AppStore.sync()
-            await refreshEntitlement()
+            await refreshEntitlement(forceAfterCurrent: true)
 
         } catch {
             restoreError = error
@@ -211,41 +222,56 @@ final class ConnectedMembershipStore: ObservableObject {
                 }
 
                 await transaction.finish()
-                await refreshEntitlement()
+                await refreshEntitlement(forceAfterCurrent: true)
             }
         }
     }
 
-    func refreshEntitlement() async {
-        guard !isRefreshingEntitlement else { return }
+    func refreshEntitlement(forceAfterCurrent: Bool = false) async {
+        if let entitlementRefreshTask {
+            let resolvedState = await entitlementRefreshTask.value
+            membershipState = resolvedState
+
+            if forceAfterCurrent {
+                while entitlementRefreshTask != nil {
+                    await Task.yield()
+                }
+                await refreshEntitlement()
+            }
+            return
+        }
 
         isRefreshingEntitlement = true
         if membershipState == .unknown {
             membershipState = .loading
         }
 
-        defer {
-            isRefreshingEntitlement = false
-        }
+        let refreshTask = Task { @MainActor in
+            var resolvedState: MembershipState = .notEntitled
 
-        var resolvedState: MembershipState = .notEntitled
-
-        for await verificationResult in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = verificationResult else {
+            for await verificationResult in Transaction.currentEntitlements {
+                guard case .verified(let transaction) = verificationResult else {
 #if DEBUG
-                print("[Membership] Ignored unverified current entitlement")
+                    print("[Membership] Ignored unverified current entitlement")
 #endif
-                continue
+                    continue
+                }
+
+                guard ProductID.all.contains(transaction.productID) else {
+                    continue
+                }
+
+                resolvedState = .entitled
+                break
             }
 
-            guard ProductID.all.contains(transaction.productID) else {
-                continue
-            }
-
-            resolvedState = .entitled
-            break
+            return resolvedState
         }
 
+        entitlementRefreshTask = refreshTask
+        let resolvedState = await refreshTask.value
+        entitlementRefreshTask = nil
+        isRefreshingEntitlement = false
         membershipState = resolvedState
     }
 
