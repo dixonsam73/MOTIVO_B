@@ -19,7 +19,9 @@ work lands:
 
 The distinction between the last two is the point of this register. An item
 moves to **Resolved** only when code has changed and been checked — never
-because a design was agreed. Nothing in this document is Resolved yet.
+because a design was agreed. The only Resolved item is C-23, which was
+introduced and closed inside a single commit and never existed in a build; no
+finding from the audit itself is Resolved yet.
 
 ---
 
@@ -27,7 +29,8 @@ because a design was agreed. Nothing in this document is Resolved yet.
 
 | ID | Finding | Sev | State | Phase |
 |---|---|---|---|---|
-| C-13 | **Unterminating loop in the purchase path.** `ConnectedMembershipStore:236` — `if let entitlementRefreshTask` shadows with the unwrapped non-optional, so `while entitlementRefreshTask != nil` is always true. Entered only when a refresh is already in flight; reachable after purchase (`:131`), restore (`:199`) and transaction updates (`:225`). A foreground refresh triggered by the StoreKit sheet dismissing is a plausible and possibly common trigger. Consequence: `purchase()` never returns, `isPurchasing` never resets, the user pays and never reaches sign-in. | **P1** (possibly P0 depending on trigger rate) | **Confirmed defect** *(build)*. Originally filed P3 "busy-wait, terminates in practice" — that was a misread | **1, first** |
+| C-13 | **Unterminating loop in the purchase path.** `ConnectedMembershipStore:236` — `if let entitlementRefreshTask` shadows with the unwrapped non-optional, so `while entitlementRefreshTask != nil` is always true. Entered only when a refresh is already in flight; reachable after purchase (`:131`), restore (`:199`) and transaction updates (`:225`). A foreground refresh triggered by the StoreKit sheet dismissing is a plausible and possibly common trigger. Consequence: `purchase()` never returns, `isPurchasing` never resets, the user pays and never reaches sign-in. | **P1** (possibly P0 depending on trigger rate) | **Confirmed defect** *(build)*. Originally filed P3 "busy-wait, terminates in practice" — that was a misread. Fix landed on `feature/solo-connected` (`fix: remove the unterminating poll in refreshEntitlement`), awaiting B2 | **1, first** |
+| C-23 | **Ownership race in `refreshEntitlement`'s owner tail.** `ConnectedMembershipStore:271-275` cleared `entitlementRefreshTask` unconditionally after awaiting its own task. Once C-13's fix made the forced re-entry reachable, a waiter that resumed before the owner could install a newer task and have the owner then nil it — leaving a live refresh unregistered (so a later caller starts a duplicate), `isRefreshingEntitlement` false while one is in flight, and a stale `membershipState` published over a newer one. **Not present in any build:** unreachable before the C-13 fix, because the poll meant the forced re-entry never ran. Closed by an identity guard in the same commit | P2 | **Resolved** — introduced and closed within the C-13 fix; build-verified, and covered incidentally by B2 | 1 |
 | C-1 | Entitlement resolution cannot express "indeterminate"; one negative read triggers irreversible backend deletion. `ConnectedMembershipStore:230-267` → `MOTIVOApp:339/377` | P0 | **Confirmed defect** | 1 |
 | C-2 | "Erase All Études Data" does not clear the Scores library, and the singleton resurrects it on next mutation. `LocalFactoryReset:24`, `AttachmentStore:412`, `ScoreLibraryStore:159` | P1 | **Confirmed defect** | 1 |
 | C-3 | Staged video held wholly in memory; re-read plus full temp copy on every foreground, synchronously on main actor. `PracticeTimerView:4572/3988/1816` | P1? | **Confirmed defect** (mechanism); severity **unverified** — needs device measurement | 1 (measure) / 5 (fix) |

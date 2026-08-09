@@ -32,7 +32,7 @@ is tested by using the app — not by reading the diff.
 | # | Steps | Expected |
 |---|---|---|
 | B1 | Profile → Explore Connected → Continue → Monthly → purchase | Sandbox purchase, then SIWA, then Connected active |
-| B2 | **C-13 probe:** repeat B1 several times on a slow or throttled connection | Purchase must always complete through to sign-in. A permanently spinning Continue button confirms the unterminating loop |
+| B2 | **C-13 probe:** repeat B1 several times on a slow or throttled connection | Purchase must always complete through to sign-in. A permanently spinning Continue button confirms the unterminating loop. **First-run coverage, not a re-test:** the loop made `refreshEntitlement`'s forced re-entry unreachable, so the second, fresh entitlement refresh has never executed in any build. Watch for a wrong entitlement state after a verified purchase — "Purchase verified but no active membership" — as well as for a hang |
 | B3 | Check pre-existing Group A sessions | Still present, still private. Confirm none appear in another account's feed |
 | B4 | Create a session, tap Save without touching Visibility | Observe whether it shares — D-1 behaviour check |
 | B5 | Delete and reinstall; Restore Purchases | Entitlement restored, Connected reactivated |

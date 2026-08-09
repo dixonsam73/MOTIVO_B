@@ -228,16 +228,14 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     func refreshEntitlement(forceAfterCurrent: Bool = false) async {
-        if let entitlementRefreshTask {
-            let resolvedState = await entitlementRefreshTask.value
+        if let inFlightTask = entitlementRefreshTask {
+            let resolvedState = await inFlightTask.value
             membershipState = resolvedState
 
-            if forceAfterCurrent {
-                while entitlementRefreshTask != nil {
-                    await Task.yield()
-                }
-                await refreshEntitlement()
-            }
+            guard forceAfterCurrent else { return }
+
+            entitlementRefreshTask = nil
+            await refreshEntitlement()
             return
         }
 
@@ -270,6 +268,11 @@ final class ConnectedMembershipStore: ObservableObject {
 
         entitlementRefreshTask = refreshTask
         let resolvedState = await refreshTask.value
+
+        // A forced refresh may have taken ownership of the slot while this one
+        // was finishing. It will publish its own, newer result.
+        guard entitlementRefreshTask == refreshTask else { return }
+
         entitlementRefreshTask = nil
         isRefreshingEntitlement = false
         membershipState = resolvedState
