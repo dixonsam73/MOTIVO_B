@@ -52,6 +52,7 @@ yet.
 | C-16 | `try!` on directory creation. `SessionSyncQueue:279` | P3 | **Confirmed defect** | 5 |
 | C-17 | Unit test suite is an empty template | P3 | **Confirmed gap** | — |
 | C-18 | `stageAudioURL` reads file attributes after deleting the file | P3 | **Confirmed defect** | 6 |
+| C-25 | **Expiry-specific naming on a policy-neutral primitive.** `AuthManager:802` `clearConnectedIdentityAfterMembershipExpiry()` names a caller's motive rather than the operation. What it does is mechanical — clear the local Connected identity and session — and has several legitimate triggers beyond expiry: server-confirmed cleanup, Sign in with Apple credential revocation, a server-forced sign-out. Since C-1 removed the client's expiry responsibility, the suffix asserts a context the function has no way to know. Target: a policy-neutral primitive taking the motive as a parameter, `clearConnectedIdentity(reason:)`, mirroring `deleteCurrentConnectedAccount(reason:)` which already models this. Phase 3's server-confirmed expiry orchestration may carry the policy-specific name and *call* the primitive — the policy must not be folded back into it | P3 | **Confirmed gap** — naming and layering, no behavioural defect. Deferred deliberately: renaming now would pre-empt a Phase 3 design that does not exist yet | 6 |
 | C-22 | 53 deprecated AVFoundation and SwiftUI APIs (`videoOrientation`, sync `duration`/`tracks`/`naturalSize`, `copyCGImage`, `exportAsynchronously`, `onChange(of:perform:)`) | P3 | **Confirmed gap** *(build)* | 6 |
 
 ## Copy alignment (not code defects)
