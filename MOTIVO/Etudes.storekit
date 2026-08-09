@@ -22,7 +22,7 @@
     "_billingGracePeriodEnabled" : false,
     "_billingIssuesEnabled" : false,
     "_compatibilityTimeRate" : {
-      "3" : 4
+      "3" : 6
     },
     "_developerTeamID" : "K352DG4UJA",
     "_disableDialogs" : false,
@@ -34,7 +34,7 @@
     "_storeKitErrors" : [
 
     ],
-    "_timeRate" : 11
+    "_timeRate" : 15
   },
   "subscriptionGroups" : [
     {
