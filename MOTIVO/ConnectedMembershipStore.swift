@@ -222,19 +222,32 @@ final class ConnectedMembershipStore: ObservableObject {
                 }
 
                 await transaction.finish()
+                MembershipTrace.log("transactionUpdate.verified")
                 await refreshEntitlement(forceAfterCurrent: true)
             }
         }
     }
 
     func refreshEntitlement(forceAfterCurrent: Bool = false) async {
+        MembershipTrace.log("refresh.enter", [
+            "force": "\(forceAfterCurrent)",
+            "inFlight": "\(entitlementRefreshTask != nil)",
+            "state": membershipState.traceName
+        ])
+
         if let inFlightTask = entitlementRefreshTask {
             let resolvedState = await inFlightTask.value
             membershipState = resolvedState
 
+            MembershipTrace.log("refresh.waiter.published", [
+                "state": resolvedState.traceName,
+                "force": "\(forceAfterCurrent)"
+            ])
+
             guard forceAfterCurrent else { return }
 
             entitlementRefreshTask = nil
+            MembershipTrace.log("refresh.waiter.reenter")
             await refreshEntitlement()
             return
         }
@@ -271,11 +284,16 @@ final class ConnectedMembershipStore: ObservableObject {
 
         // A forced refresh may have taken ownership of the slot while this one
         // was finishing. It will publish its own, newer result.
-        guard entitlementRefreshTask == refreshTask else { return }
+        guard entitlementRefreshTask == refreshTask else {
+            MembershipTrace.log("refresh.owner.superseded", ["state": resolvedState.traceName])
+            return
+        }
 
         entitlementRefreshTask = nil
         isRefreshingEntitlement = false
         membershipState = resolvedState
+
+        MembershipTrace.log("refresh.owner.published", ["state": resolvedState.traceName])
     }
 
     private func loadProducts() async {

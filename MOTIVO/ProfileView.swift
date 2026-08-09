@@ -484,6 +484,11 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             .padding(.horizontal, Theme.Spacing.l)
             .onAppear {
                 signedOutGateWasVisible = true
+
+                MembershipTrace.log("profile.gate.appear", [
+                    "alreadySignedIn": "\(auth.currentUserID != nil)",
+                    "hasOnClose": "\(onClose != nil)"
+                ])
             }
         }
     }
@@ -1619,6 +1624,15 @@ private func initials(from string: String) -> String {
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
             .onChange(of: auth.currentUserID) { oldValue, newValue in
+
+                // Reconnect investigation: absence of this line after a successful
+                // SIWA is the finding — the dismissal path is never entered.
+                MembershipTrace.log("profile.currentUserID.changed", [
+                    "wasNil": "\(oldValue == nil)",
+                    "isNil": "\(newValue == nil)",
+                    "gateVisible": "\(signedOutGateWasVisible)",
+                    "hasOnClose": "\(onClose != nil)"
+                ])
 
                 // Signed-out gate flow:
                 // after a successful Sign in with Apple from the gate-presented ProfileView,

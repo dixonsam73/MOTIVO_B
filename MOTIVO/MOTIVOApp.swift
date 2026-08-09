@@ -325,6 +325,13 @@ struct MOTIVOApp: App {
 
     @MainActor
     private func handleMembershipState(_ state: ConnectedMembershipStore.MembershipState) {
+        MembershipTrace.log("membershipState", [
+            "state": state.traceName,
+            "lastStable": lastStableMembershipState?.traceName ?? "nil",
+            "hadEntitlement": "\(connectedMembershipHadEntitlement)",
+            "cleanupPending": "\(connectedMembershipExpiryCleanupPending)"
+        ])
+
         switch state {
         case .unknown, .loading:
             return
@@ -343,6 +350,12 @@ struct MOTIVOApp: App {
             lastStableMembershipState = .notEntitled
             appModeManager.applyActivation(auth: auth, isEntitled: false)
 
+            MembershipTrace.log("expiryArming", [
+                "liveExpiry": "\(observedLiveExpiry)",
+                "coldLaunchExpiry": "\(observedColdLaunchExpiry)",
+                "alreadyPending": "\(connectedMembershipExpiryCleanupPending)"
+            ])
+
             guard observedLiveExpiry || observedColdLaunchExpiry || connectedMembershipExpiryCleanupPending else {
                 return
             }
@@ -354,6 +367,15 @@ struct MOTIVOApp: App {
 
     @MainActor
     private func attemptPendingMembershipExpiryCleanupIfPossible() {
+        let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        MembershipTrace.log("cleanupGate", [
+            "pending": "\(connectedMembershipExpiryCleanupPending)",
+            "state": connectedMembershipStore.membershipState.traceName,
+            "signedIn": "\(auth.isSignedIn)",
+            "token": "\(auth.hasSupabaseAccessToken)",
+            "backendID": "\(!backendID.isEmpty)"
+        ])
+
         guard connectedMembershipExpiryCleanupPending,
               connectedMembershipStore.membershipState == .notEntitled,
               auth.isSignedIn,
@@ -371,6 +393,7 @@ struct MOTIVOApp: App {
     @MainActor
     private func performMembershipExpiryCleanup() async {
         guard !membershipExpiryCleanupInFlight else { return }
+        MembershipTrace.log("cleanup.begin")
         membershipExpiryCleanupInFlight = true
         defer { membershipExpiryCleanupInFlight = false }
 

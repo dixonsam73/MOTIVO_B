@@ -238,6 +238,14 @@ final class AuthManager: NSObject, ObservableObject {
         if let appleID = currentUserID, backendUserID == nil {
             ensureBackendIdentityIfNeeded(for: appleID)
         }
+
+        // Reconnect investigation: on a reinstall the Keychain survives, so this
+        // reports whether the app believes it is already signed in at first launch.
+        MembershipTrace.log("auth.init", [
+            "appleID": "\(currentUserID != nil)",
+            "backendID": "\(!((backendUserID ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))",
+            "token": "\(hasSupabaseAccessToken)"
+        ])
     }
 
     var isSignedIn: Bool { currentUserID != nil }
@@ -873,6 +881,11 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         // Persist stable Apple user ID (always present)
         let userID = credential.user
         Keychain.set(userID, for: "appleUserID")
+
+        // Reconnect investigation: `changed` false means every observer keyed on
+        // a currentUserID transition will not fire for this sign-in.
+        MembershipTrace.log("auth.siwa.applied", ["changed": "\(self.currentUserID != userID)"])
+
         self.currentUserID = userID
 
         // First Connected activation: retain the existing device-local Études journal
