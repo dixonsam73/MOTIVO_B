@@ -130,6 +130,13 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
+    /// Incremented whenever a Sign in with Apple flow completes successfully.
+    /// Observers must key off this rather than a change of `currentUserID`: the
+    /// Keychain survives app deletion, so on a reinstall the Apple user ID is
+    /// already restored and re-authenticating with the same identity changes no
+    /// published value at all (C-24).
+    @Published private(set) var signInCompletionCount: Int = 0
+
     // Profile privacy hydration (fresh install consistency)
     private var directoryHydrationTask: Task<Void, Never>?
     private var lastHydratedDirectoryUserID: String?
@@ -919,6 +926,18 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
         // Step 5 fallback: Backend identity handshake (local stub): performed only if we don't already have a backendUserID.
         ensureBackendIdentityIfNeeded(for: userID)
+
+        // C-24: signal completion here — the same point at which `currentUserID`
+        // is assigned above — so observers no longer depend on that value having
+        // changed. Deliberately not deferred to the Supabase exchange: a failed
+        // exchange already unwinds the sign-in navigation today, and narrowing
+        // that is a separate decision.
+        noteSignInCompleted()
+    }
+
+    private func noteSignInCompleted() {
+        signInCompletionCount &+= 1
+        MembershipTrace.log("auth.signIn.completed", ["count": "\(signInCompletionCount)"])
     }
 
     private func ensureBackendIdentityIfNeeded(for appleID: String) {

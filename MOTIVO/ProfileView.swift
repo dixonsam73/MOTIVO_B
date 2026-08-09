@@ -1623,13 +1623,13 @@ private func initials(from string: String) -> String {
          view = AnyView(view
             .onAppear(perform: onAppearLoad)
             .onDisappear(perform: persistProfileEdits)
-            .onChange(of: auth.currentUserID) { oldValue, newValue in
+            // C-24: sign-in completion is an event, not a change of identity. On a
+            // reinstall the Keychain still holds the Apple user ID, so `currentUserID`
+            // never changes and none of this would run if it were keyed on that.
+            .onChange(of: auth.signInCompletionCount) { _, _ in
+                guard auth.currentUserID != nil else { return }
 
-                // Reconnect investigation: absence of this line after a successful
-                // SIWA is the finding — the dismissal path is never entered.
-                MembershipTrace.log("profile.currentUserID.changed", [
-                    "wasNil": "\(oldValue == nil)",
-                    "isNil": "\(newValue == nil)",
+                MembershipTrace.log("profile.signInCompleted", [
                     "gateVisible": "\(signedOutGateWasVisible)",
                     "hasOnClose": "\(onClose != nil)"
                 ])
@@ -1637,25 +1637,30 @@ private func initials(from string: String) -> String {
                 // Signed-out gate flow:
                 // after a successful Sign in with Apple from the gate-presented ProfileView,
                 // dismiss the gate and reveal PracticeTimerView directly.
-                if signedOutGateWasVisible,
-                   newValue != nil {
+                if signedOutGateWasVisible {
                     showConnectedSignInSheet = false
-                    if onClose != nil {
-                        onClose?()
-                        return
+
+                    if let onClose {
+                        onClose()
+                    } else {
+                        // Nothing else will dismiss this ProfileView, and the
+                        // suppression view clears only on sign-out, so it would
+                        // otherwise be left on screen as a blank page.
+                        signedOutGateWasVisible = false
                     }
+                    return
                 }
 
                 // Purchase/onboarding flow:
                 // Successful authentication after Membership Selection should unwind
                 // the onboarding navigation stack as well as dismiss the SIWA sheet.
-                if !signedOutGateWasVisible,
-                   newValue != nil,
-                   showConnectedSignInSheet || showMembershipSelection || showConnectedIntroduction {
+                if showConnectedSignInSheet || showMembershipSelection || showConnectedIntroduction {
                     showConnectedSignInSheet = false
                     showMembershipSelection = false
                     showConnectedIntroduction = false
                 }
+            }
+            .onChange(of: auth.currentUserID) { oldValue, newValue in
 
                 // Identity scoping: clear on sign-out; repopulate on sign-in.
                 // Hygiene: persist any in-memory edits for the *previous* signed-in identity
