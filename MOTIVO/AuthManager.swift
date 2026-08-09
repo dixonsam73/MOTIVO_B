@@ -794,6 +794,11 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
     /// Clears only Connected authentication and backend identity after membership expiry.
     /// Device-local Études content, profile fields and attachment metadata remain untouched.
+    ///
+    /// C-1: deliberately uncalled. No client-side entitlement path may reach this —
+    /// the client governs access only, and a negative StoreKit read is not authority
+    /// to destroy a session. Retained for Phase 3's server-authoritative expiry flow,
+    /// driven by App Store Server Notifications. Not dead code; unwired on purpose.
     func clearConnectedIdentityAfterMembershipExpiry() {
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil

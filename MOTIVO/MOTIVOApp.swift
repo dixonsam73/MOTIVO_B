@@ -70,12 +70,6 @@ struct MOTIVOApp: App {
     @StateObject private var appRoute = AppRouteStore()
     @StateObject private var appModeManager: AppModeManager
     @StateObject private var connectedMembershipStore: ConnectedMembershipStore
-    @State private var membershipExpiryCleanupInFlight = false
-    @State private var lastStableMembershipState: ConnectedMembershipStore.MembershipState?
-    @AppStorage("connectedMembershipHadEntitlement_v1") private var connectedMembershipHadEntitlement = false
-    @AppStorage("connectedMembershipExpiryCleanupPending_v1") private var connectedMembershipExpiryCleanupPending = false
-    @State private var showMembershipExpiredAlert = false
-    @State private var membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -289,7 +283,6 @@ struct MOTIVOApp: App {
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
-                    attemptPendingMembershipExpiryCleanupIfPossible()
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -304,7 +297,6 @@ struct MOTIVOApp: App {
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
-                    attemptPendingMembershipExpiryCleanupIfPossible()
 
                     // M7B: backend identity publication is the sign-in transition where the
                     // Connected runtime becomes available. Run the pending avatar promotion only
@@ -314,114 +306,29 @@ struct MOTIVOApp: App {
                         await auth.syncPendingLocalAvatarToConnectedIfNeeded(reason: "backendUserIDAfterActivation")
                     }
                 }
-                .alert("Études Connected Membership Ended", isPresented: $showMembershipExpiredAlert) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text(membershipExpiredMessage)
-                }
                 .preferredColorScheme(.light)
         }
     }
 
     @MainActor
     private func handleMembershipState(_ state: ConnectedMembershipStore.MembershipState) {
-        MembershipTrace.log("membershipState", [
-            "state": state.traceName,
-            "lastStable": lastStableMembershipState?.traceName ?? "nil",
-            "hadEntitlement": "\(connectedMembershipHadEntitlement)",
-            "cleanupPending": "\(connectedMembershipExpiryCleanupPending)"
-        ])
+        MembershipTrace.log("membershipState", ["state": state.traceName])
 
+        // C-1: the client governs access, and only access. A negative entitlement
+        // read withdraws the Connected experience and does nothing else — a
+        // reversible decision, which the next read restores if the read was wrong.
+        // Irreversible membership-expiry cleanup is the server's responsibility,
+        // via App Store Server Notifications (Phase 3). The client no longer has
+        // the authority to delete a Connected account on its own evidence.
         switch state {
         case .unknown, .loading:
             return
 
         case .entitled:
-            lastStableMembershipState = .entitled
-            connectedMembershipHadEntitlement = true
-            connectedMembershipExpiryCleanupPending = false
             appModeManager.applyActivation(auth: auth, isEntitled: true)
 
         case .notEntitled:
-            let observedLiveExpiry = lastStableMembershipState == .entitled
-            let observedColdLaunchExpiry = lastStableMembershipState == nil
-                && connectedMembershipHadEntitlement
-
-            lastStableMembershipState = .notEntitled
             appModeManager.applyActivation(auth: auth, isEntitled: false)
-
-            MembershipTrace.log("expiryArming", [
-                "liveExpiry": "\(observedLiveExpiry)",
-                "coldLaunchExpiry": "\(observedColdLaunchExpiry)",
-                "alreadyPending": "\(connectedMembershipExpiryCleanupPending)"
-            ])
-
-            guard observedLiveExpiry || observedColdLaunchExpiry || connectedMembershipExpiryCleanupPending else {
-                return
-            }
-
-            connectedMembershipExpiryCleanupPending = true
-            attemptPendingMembershipExpiryCleanupIfPossible()
         }
-    }
-
-    @MainActor
-    private func attemptPendingMembershipExpiryCleanupIfPossible() {
-        let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        MembershipTrace.log("cleanupGate", [
-            "pending": "\(connectedMembershipExpiryCleanupPending)",
-            "state": connectedMembershipStore.membershipState.traceName,
-            "signedIn": "\(auth.isSignedIn)",
-            "token": "\(auth.hasSupabaseAccessToken)",
-            "backendID": "\(!backendID.isEmpty)"
-        ])
-
-        guard connectedMembershipExpiryCleanupPending,
-              connectedMembershipStore.membershipState == .notEntitled,
-              auth.isSignedIn,
-              auth.hasSupabaseAccessToken,
-              let backendUserID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !backendUserID.isEmpty else {
-            return
-        }
-
-        Task {
-            await performMembershipExpiryCleanup()
-        }
-    }
-
-    @MainActor
-    private func performMembershipExpiryCleanup() async {
-        guard !membershipExpiryCleanupInFlight else { return }
-        MembershipTrace.log("cleanup.begin")
-        membershipExpiryCleanupInFlight = true
-        defer { membershipExpiryCleanupInFlight = false }
-
-        // Connected UI is no longer available once StoreKit has definitively reported no entitlement.
-        appRoute.isProfilePresented = false
-        appModeManager.applyMode(.solo)
-
-        do {
-            try await ConnectedAccountDeletionService.deleteCurrentConnectedAccount(
-                auth: auth,
-                reason: "membership-expiry"
-            )
-
-            BackendFeedStore.shared.resetForSignOut()
-            FollowStore.shared.resetForSignOut()
-            auth.clearConnectedIdentityAfterMembershipExpiry()
-            connectedMembershipExpiryCleanupPending = false
-            connectedMembershipHadEntitlement = false
-            appModeManager.applyMode(.solo)
-
-            membershipExpiredMessage = "Your Études Connected membership has ended. You have returned to Études, and your local content remains on this device."
-        } catch {
-            // Keep the Connected credentials available for M10D retry hardening, but never restore
-            // the Connected product experience without an active StoreKit entitlement.
-            appModeManager.applyMode(.solo)
-            membershipExpiredMessage = "Your Études Connected membership has ended and you have returned to Études. Your local content remains on this device. Connected account cleanup could not be completed: \(error.localizedDescription)"
-        }
-
-        showMembershipExpiredAlert = true
     }
 }
