@@ -4502,14 +4502,17 @@ if let sel = self.selectedThumbnailID, images.contains(where: { $0.id == sel }) 
             try? FileManager.default.removeItem(at: url)
             let id = UUID()
 
-            // Auto-generate title from recording date/time (using file's creation date if available, else now)
-            let title: String
-            if let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-               let cdate = attrs[.creationDate] as? Date {
-                title = formattedAutoTitle(from: cdate)
-            } else {
-                title = formattedAutoTitle(from: Date())
-            }
+            // Auto-generate the title from the staging time.
+            //
+            // C-18: this previously preferred the file's creation date, but the read
+            // happened *after* the file was deleted just above, so it always failed
+            // and the fallback below is what has always run. Removing the dead branch
+            // changes no behaviour.
+            //
+            // C-8: it was also the app's only use of a file-timestamp required-reason
+            // API, so removing it keeps that category out of the privacy manifest
+            // rather than obliging us to justify a read that never worked.
+            let title = formattedAutoTitle(from: Date())
             audioAutoTitles[id] = title
             audioTitles[id] = title
             #if DEBUG

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<!--
+	  C-8. Required-reason API declarations.
+
+	  UserDefaults is the app's only required-reason API. Reason CA92.1: the app
+	  accesses user defaults to read and write information accessible only to
+	  itself. There is no app group and no shared suite — every access is
+	  UserDefaults.standard against the app's own domain.
+
+	  Deliberately absent:
+	  - File timestamps. The single `attrs[.creationDate]` read in
+	    PracticeTimerView.stageAudioURL was removed rather than declared; it ran
+	    after the file had been deleted, so it never succeeded (C-18).
+	  - Disk space, system boot time, active keyboards. Not used anywhere.
+
+	  NSPrivacyCollectedDataTypes is intentionally omitted rather than declared
+	  empty, which would be false — Études Connected does upload shared content.
+	  It is authored in Phase 4, alongside the shared-only upload work and the
+	  App Store Connect disclosures, so the two cannot describe different systems.
+	-->
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

@@ -43,9 +43,9 @@
 		1C1228FD2E73FC940081CFDE /* Exceptions for "MOTIVO" folder in "MOTIVO" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				Info.plist,
 				debug_upload_test.m4a,
 				debug_upload_test.mp4,
+				Info.plist,
 			);
 			target = 1CA2DFBA2E704AF800F23C97 /* MOTIVO */;
 		};
