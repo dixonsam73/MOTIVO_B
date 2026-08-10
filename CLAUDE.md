@@ -14,10 +14,11 @@ Baseline verified at migration: Debug and Release both compile clean
 
 **Current position: Phase 1 in progress.** Landed and device-verified: C-13
 (purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
-expiry-deletion authority removed). Verification batch cleared: C-7, C-8, C-19.
-Next: C-2, then safe `delete_account_v1`, directory and follow-policy hardening,
-zero-dependency cleanup, C-3 measurement, B-6 two-account test. Update this line
-as work lands.
+expiry-deletion authority removed), C-2 (Scores survived Erase All).
+Verification batch cleared: C-7, C-8, C-19. Filed along the way: C-23, C-25,
+C-26, C-27, C-28. Next: C-28 (needs a product decision first), safe
+`delete_account_v1`, directory and follow-policy hardening, zero-dependency
+cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
 
 ---
 
