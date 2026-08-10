@@ -12,8 +12,12 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**Current position: Phase 1 not started.** No implementation work has begun;
-the codebase is at the audited baseline. Update this line as phases complete.
+**Current position: Phase 1 in progress.** Landed and device-verified: C-13
+(purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
+expiry-deletion authority removed). Verification batch cleared: C-7, C-8, C-19.
+Next: C-2, then safe `delete_account_v1`, directory and follow-policy hardening,
+zero-dependency cleanup, C-3 measurement, B-6 two-account test. Update this line
+as work lands.
 
 ---
 
@@ -121,9 +125,13 @@ Verification gate after each phase. RC QA confirms an already-tested system.
 - iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), deployment target iOS 18.5.
 - Flat source layout via `fileSystemSynchronizedGroups` — everything in
   `MOTIVO/` is auto-included in the app target.
-- Debug and Release use different bundle IDs. The shared scheme's Run action
-  is Debug with a local `Etudes.storekit` config, so **real StoreKit behaviour
-  only occurs in Release/TestFlight builds**.
+- Debug and Release use different bundle IDs. The shared scheme's Run action is
+  Release and pins a `StoreKitConfigurationFileReference` to `Etudes.storekit`.
+  A pinned StoreKit configuration applies **regardless of build configuration**,
+  so running from Xcode always gets synthetic StoreKit — Release included.
+  **Real StoreKit behaviour requires TestFlight**, or clearing the StoreKit
+  configuration in Run → Options. This bit us mid-audit: a Release QA pass was
+  mistaken for real-StoreKit evidence. See C-9.
 - 193 `#if DEBUG` blocks. Always verify Release as well as Debug.
 - Unit test suite is an empty template. "Green build" means compile-clean, not
   test-verified.
