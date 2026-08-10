@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+#
+# Refresh the structural snapshot in supabase/schema/ from the linked project.
+#
+# Run this immediately after any applied SQL change, and commit the resulting
+# diff. The diff is the record of what changed in production — until Phase 3
+# introduces migrations, it is the only such record.
+#
+# Structure only. Every query below reads the system catalogs or
+# information_schema. None of them read a user table, and none may be changed
+# to do so. See README.md.
+#
+# Requires: supabase CLI, logged in and linked. No Docker.
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+OUT="supabase/schema"
+mkdir -p "$OUT"
+
+q() {
+  # $1 = output basename, $2 = SQL
+  #
+  # Keep only .rows, with sorted keys. The CLI wraps results in a per-invocation
+  # random `boundary` token plus a warning string; leaving those in would make
+  # every refresh produce a diff on every file, which would render the snapshot
+  # diff worthless as a record of what actually changed.
+  supabase db query --linked "$2" | jq -S '.rows' > "$OUT/$1.json"
+  printf "  %-18s %8s bytes\n" "$1" "$(wc -c < "$OUT/$1.json" | tr -d ' ')"
+}
+
+echo "Refreshing structural snapshot..."
+
+q functions "select p.proname, pg_get_functiondef(p.oid) as definition, p.prosecdef as security_definer from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' order by 1;"
+
+q policies "select schemaname, tablename, policyname, permissive, roles, cmd, qual, with_check from pg_policies where schemaname in ('public','storage') order by schemaname, tablename, policyname;"
+
+q rls_enabled "select c.relname as table_name, c.relrowsecurity as rls_enabled, c.relforcerowsecurity as rls_forced from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' order by 1;"
+
+q triggers "select t.tgname, c.relname as on_table, pg_get_triggerdef(t.oid) as definition, t.tgenabled from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal order by 2,1;"
+
+q constraints "select conrelid::regclass::text as table_name, conname, pg_get_constraintdef(oid) as definition, contype from pg_constraint where connamespace='public'::regnamespace order by 1,2;"
+
+q columns "select table_name, column_name, ordinal_position, data_type, is_nullable, column_default from information_schema.columns where table_schema='public' order by table_name, ordinal_position;"
+
+q function_grants "select p.proname, r.rolname as grantee, has_function_privilege(r.rolname, p.oid, 'EXECUTE') as can_execute from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' order by 1,2;"
+
+q storage_buckets "select id, name, public, file_size_limit, allowed_mime_types from storage.buckets order by 1;"
+
+echo
+echo "Done. Review the diff before committing:"
+echo "  git diff --stat supabase/schema"
