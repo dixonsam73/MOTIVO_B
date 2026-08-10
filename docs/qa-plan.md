@@ -71,6 +71,21 @@ group. Verify that explicitly each time, not just once.
 
 ## Group D — Destructive (disposable device state)
 
+**Prerequisite: two real Apple IDs, held at the same time.** D5–D8 each need a
+sender and a recipient, and E2 and E8 need the same. This cannot be met with
+sandbox tester accounts: those authorise *purchases* only, and Sign in with
+Apple requires a real Apple ID, so a tester can never become a second Connected
+identity. Two devices, or one device and a willing second person.
+
+Reassuring counterpart: **an Apple ID is not consumed by these tests.** Erase
+All deletes the Connected account, not the Apple ID — signing in again with the
+same Apple ID mints a fresh Connected identity. So two Apple IDs can cycle
+through every destructive row rather than being spent one per test.
+
+D5–D11 test the rewritten `delete_account_v1` and are meaningless until it is
+deployed. Run against the old function they would simply re-demonstrate B-1,
+B-3, B-4, B-9, B-12, B-13 and B-19 while destroying accounts to do it.
+
 | # | Steps | Expected |
 |---|---|---|
 | D1 | Import 3 scores. Erase All Études Data → type ERASE. **Without relaunching**, reopen Scores | **C-2 probe.** Library must be empty. If scores appear, tap one — the resurrection path |
@@ -97,9 +112,24 @@ group. Verify that explicitly each time, not just once.
 | E6 | Publish with attachments left private | Followers see none |
 | E7 | Attach a `.txt` or `.zip` to a session, mark included, share | **C-10 probe.** Watch for a permanently stuck sync queue |
 | E8 | **B-6 probe, part 1 — revocation:** A (approved follower) records the path of B's public post attachment; B unshares; A attempts access | Determines whether the revocation bypass is real |
-| E8b | **B-6 probe, part 2 — the decisive test.** A takes the path recorded in E8 and creates a **private** post of their own whose attachment references that exact bucket and path. A then attempts to read the object. A must never have needed legitimate access for this to work | This is the mechanism read from the deployed policy: `attachments_select_via_visible_post` asks only whether *some* post references the path, with no predicate tying that post to the object's owner, and `posts_insert_owner` leaves the `attachments` jsonb unvalidated. **If A can read the object, B-6 is confirmed and is a privilege escalation rather than only a revocation bypass** — any member can read any attachment whose path they know. If A cannot, the schema reading is wrong and B-6 should be closed |
+| E8b | **B-6 probe, part 2 — the decisive test. NOT RUNNABLE AS WRITTEN — see note below Group E.** A takes the path recorded in E8 and creates a **private** post of their own whose attachment references that exact bucket and path. A then attempts to read the object. A must never have needed legitimate access for this to work | This is the mechanism read from the deployed policy: `attachments_select_via_visible_post` asks only whether *some* post references the path, with no predicate tying that post to the object's owner, and `posts_insert_owner` leaves the `attachments` jsonb unvalidated. **If A can read the object, B-6 is confirmed and is a privilege escalation rather than only a revocation bypass** — any member can read any attachment whose path they know. If A cannot, the schema reading is wrong and B-6 should be closed |
 | E9 | **B-2 probe:** account A disables directory lookup; account B searches for A's handle and display name | A must not be returned. Repeat via both directory RPCs |
 | E10 | **B-11 probe:** obtain a Supabase session for an account with no active entitlement and attempt each Connected operation | After Phase 3: every write and every read of Domain 3 is refused server-side |
+
+**E8b needs a method, not just a tester.** It is written as though it were a UI
+test and it is not: the app offers no way to type a storage path, so "create a
+post whose attachment references that path" cannot be done by using the app. It
+requires a crafted PostgREST insert with A's access token, setting the
+`attachments` jsonb by hand — a developer action, and a deliberate write of
+fabricated data to production.
+
+That is the same category of action we declined for B-6 earlier, and declining
+it is why B-6 still reads "mechanism established from schema; runtime
+confirmation pending". Resolve the method before attempting the row. The
+options, none yet chosen: run it against a local Supabase instance once Phase 3
+brings one; run it against a disposable project; or accept a single crafted
+insert on production under a disposable account, with the row deleted
+afterwards. Do not improvise this mid-session.
 
 ## Group F — Backup and restore
 
