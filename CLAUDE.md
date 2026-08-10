@@ -20,15 +20,15 @@ C-26, C-27, C-28. Next: C-28 (needs a product decision first), safe
 `delete_account_v1`, directory and follow-policy hardening, zero-dependency
 cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
 
-**Temporary instrumentation — `MembershipTrace.swift` and its call sites.**
-Release-capable by design (not `#if DEBUG`), identifier-free. It stays only
-while it earns its keep: the remaining membership/auth/session work, including
-`delete_account_v1`, and QA B2 on real StoreKit. **Remove it immediately after
-whichever comes first — a successful B2, or completion of the auth-adjacent
-work — in its own explicit commit.** It must not survive Phase 1. If a
-TestFlight build is cut for anyone other than the owner before then, strip it
-first. Removal is a deliberate commit, not `git revert bce0e1d`: the C-24 fix
-carries two of the call sites.
+**Temporary instrumentation: removed.** `MembershipTrace.swift` and its
+thirteen call sites were deleted once QA B2 passed on real StoreKit, as the
+standing condition here required. It earned its keep — it diagnosed C-24,
+produced C-1's only device evidence, and framed C-13's verification. One
+lesson worth keeping: it was labelled "Release-capable by design" but only ever
+read through Xcode, and on TestFlight every line arrived as `<private>`,
+because `NSLog` with `%@` arguments is redacted when read from a device. If
+release-readable logging is ever needed again, use `os.Logger` with
+`privacy: .public`.
 
 ---
 

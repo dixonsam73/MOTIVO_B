@@ -484,11 +484,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
             .padding(.horizontal, Theme.Spacing.l)
             .onAppear {
                 signedOutGateWasVisible = true
-
-                MembershipTrace.log("profile.gate.appear", [
-                    "alreadySignedIn": "\(auth.currentUserID != nil)",
-                    "hasOnClose": "\(onClose != nil)"
-                ])
             }
         }
     }
@@ -1628,11 +1623,6 @@ private func initials(from string: String) -> String {
             // never changes and none of this would run if it were keyed on that.
             .onChange(of: auth.signInCompletionCount) { _, _ in
                 guard auth.currentUserID != nil else { return }
-
-                MembershipTrace.log("profile.signInCompleted", [
-                    "gateVisible": "\(signedOutGateWasVisible)",
-                    "hasOnClose": "\(onClose != nil)"
-                ])
 
                 // Signed-out gate flow:
                 // after a successful Sign in with Apple from the gate-presented ProfileView,

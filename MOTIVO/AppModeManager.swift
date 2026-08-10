@@ -34,20 +34,7 @@ public final class AppModeManager: ObservableObject {
     }
 
     func applyActivation(auth: AuthManager, isEntitled: Bool) {
-        let resolved = Self.resolvedActivationMode(auth: auth, isEntitled: isEntitled)
-
-        let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        MembershipTrace.log("activation", [
-            "entitled": "\(isEntitled)",
-            "signedIn": "\(auth.isSignedIn)",
-            "token": "\(auth.hasSupabaseAccessToken)",
-            "backendID": "\(!backendID.isEmpty)",
-            "configured": "\(BackendConfig.isConfigured)",
-            "from": mode.rawValue,
-            "to": resolved.rawValue
-        ])
-
-        applyMode(resolved)
+        applyMode(Self.resolvedActivationMode(auth: auth, isEntitled: isEntitled))
     }
 
     func applyMode(_ mode: AppMode) {

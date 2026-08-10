@@ -312,8 +312,6 @@ struct MOTIVOApp: App {
 
     @MainActor
     private func handleMembershipState(_ state: ConnectedMembershipStore.MembershipState) {
-        MembershipTrace.log("membershipState", ["state": state.traceName])
-
         // C-1: the client governs access, and only access. A negative entitlement
         // read withdraws the Connected experience and does nothing else — a
         // reversible decision, which the next read restores if the read was wrong.
