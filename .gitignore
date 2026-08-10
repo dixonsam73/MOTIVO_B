@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+*.DS_Store
+
+# Xcode — user-specific state, not project configuration.
+# Note: xcshareddata IS tracked deliberately; the shared scheme is project
+# configuration and its Run action affects what everyone gets (see CLAUDE.md).
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+
+# Build products
+DerivedData/
+build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Supabase CLI — local scratch and anything that could carry credentials.
+# The tracked contents of supabase/ are structural only: functions,
+# migrations, policies, triggers, RPCs. Never data. See supabase/README.md.
+supabase/.temp/
+supabase/.branches/
+supabase/.env
+supabase/**/.env
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.p8
+*.p12
