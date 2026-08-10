@@ -85,6 +85,9 @@ enum LocalFactoryReset {
 
         // Wipe local files (Documents + Application Support stores + tmp).
         AttachmentStore.wipeDocumentsAttachmentsForFactoryReset()
+        // C-2: Documents/Scores is a directory, so the extension-filtered sweep above
+        // never reaches the PDFs inside it. The Scores store owns its own wipe.
+        ScoreLibraryStore.shared.wipeOnDiskAndCacheForFactoryReset()
         StagingStore.wipeOnDiskForFactoryReset()
         PracticeTimerStore.wipeOnDiskForFactoryReset()
         SessionSyncQueue.shared.wipeOnDiskForFactoryReset()

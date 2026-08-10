@@ -154,6 +154,33 @@ final class ScoreLibraryStore: ObservableObject {
         persist()
     }
 
+    // MARK: - Delete Account v2 (Local Factory Reset)
+
+    /// Clears the Scores library completely: the on-disk PDFs, the persisted
+    /// index, and the in-memory state.
+    ///
+    /// C-2: all three are required. The PDFs live in `Documents/Scores/`, which
+    /// no other wipe reaches — `AttachmentStore` deliberately protects that tree
+    /// (`isProtectedScoreLibraryURL`), so this store owns clearing it. The
+    /// singleton outlives the reset, so leaving `items` populated lets the next
+    /// mutation `persist()` the whole library straight back. And the legacy
+    /// `scoreLibrary_v1::` keys must go too, because `load()` migrates them
+    /// forward whenever `scoreLibrary_v2` is absent — the post-reset state
+    /// exactly.
+    func wipeOnDiskAndCacheForFactoryReset() {
+        try? fileManager.removeItem(at: scoresDirectory())
+
+        let defaults = UserDefaults.standard
+        defaults.removeObject(forKey: storageKey)
+        defaults.removeObject(forKey: activeScoreKey)
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("scoreLibrary_") {
+            defaults.removeObject(forKey: key)
+        }
+
+        items = []
+        activeScoreID = nil
+    }
+
     private func load() {
         let defaults = UserDefaults.standard
         migrateLegacyIdentityScopedLibraryIfNeeded(in: defaults)
