@@ -20,6 +20,16 @@ C-26, C-27, C-28. Next: C-28 (needs a product decision first), safe
 `delete_account_v1`, directory and follow-policy hardening, zero-dependency
 cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
 
+**Temporary instrumentation — `MembershipTrace.swift` and its call sites.**
+Release-capable by design (not `#if DEBUG`), identifier-free. It stays only
+while it earns its keep: the remaining membership/auth/session work, including
+`delete_account_v1`, and QA B2 on real StoreKit. **Remove it immediately after
+whichever comes first — a successful B2, or completion of the auth-adjacent
+work — in its own explicit commit.** It must not survive Phase 1. If a
+TestFlight build is cut for anyone other than the owner before then, strip it
+first. Removal is a deliberate commit, not `git revert bce0e1d`: the C-24 fix
+carries two of the call sites.
+
 ---
 
 ## Architectural invariants — FIXED. Do not revisit.
