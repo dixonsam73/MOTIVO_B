@@ -90,7 +90,8 @@ group. Verify that explicitly each time, not just once.
 | E5 | Save received photo to Photos, audio to Files | Both succeed with correct permissions |
 | E6 | Publish with attachments left private | Followers see none |
 | E7 | Attach a `.txt` or `.zip` to a session, mark included, share | **C-10 probe.** Watch for a permanently stuck sync queue |
-| E8 | **B-6 probe:** A (approved follower) records the path of B's public post attachment; B unshares; A attempts access | Determines whether the revocation bypass is real |
+| E8 | **B-6 probe, part 1 — revocation:** A (approved follower) records the path of B's public post attachment; B unshares; A attempts access | Determines whether the revocation bypass is real |
+| E8b | **B-6 probe, part 2 — the decisive test.** A takes the path recorded in E8 and creates a **private** post of their own whose attachment references that exact bucket and path. A then attempts to read the object. A must never have needed legitimate access for this to work | This is the mechanism read from the deployed policy: `attachments_select_via_visible_post` asks only whether *some* post references the path, with no predicate tying that post to the object's owner, and `posts_insert_owner` leaves the `attachments` jsonb unvalidated. **If A can read the object, B-6 is confirmed and is a privilege escalation rather than only a revocation bypass** — any member can read any attachment whose path they know. If A cannot, the schema reading is wrong and B-6 should be closed |
 | E9 | **B-2 probe:** account A disables directory lookup; account B searches for A's handle and display name | A must not be returned. Repeat via both directory RPCs |
 | E10 | **B-11 probe:** obtain a Supabase session for an account with no active entitlement and attempt each Connected operation | After Phase 3: every write and every read of Domain 3 is refused server-side |
 
