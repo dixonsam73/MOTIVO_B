@@ -187,7 +187,7 @@ public struct DebugViewerView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Backend • Step 8G Storage (DEBUG seed)").font(.headline)
 
-            Text("Uploads a bundled debug media seed into Storage bucket “attachments” under folder “debug/”, then downloads it back using the authenticated Storage endpoint. Image uses Assets.xcassets name “debug_upload_test”. Video/audio require bundle files named “debug_upload_test.mp4” and “debug_upload_test.m4a”.")
+            Text("Uploads a debug media seed into Storage bucket “attachments” under folder “debug/”, then downloads it back using the authenticated Storage endpoint. Image uses Assets.xcassets name “debug_upload_test”. Video/audio need “debug_upload_test.mp4” and “debug_upload_test.m4a”, which live in MOTIVO/ but are excluded from the app target (C-7: 11.6 MB of fixtures were shipping in Release). Remove them from the synchronized group’s membership exceptions in the project file to run those two seeds.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -349,7 +349,7 @@ using (
 
         case .video, .audio:
             guard let url = Bundle.main.url(forResource: "debug_upload_test", withExtension: ext) else {
-                storageHelloStatus = "❌ Bundle file not found: debug_upload_test.\(ext). Add it to the app target’s Copy Bundle Resources."
+                storageHelloStatus = "❌ Not bundled: debug_upload_test.\(ext). Excluded from the app target by design (C-7). Drop it from the synchronized group’s membership exceptions to re-enable."
                 return
             }
             do {
