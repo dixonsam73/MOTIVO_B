@@ -180,9 +180,25 @@ Deno.serve(async (req) => {
 
     // 5. Relational rows.
     //
-    // No post_comments statement, deliberately. The cascade from posts removes
-    // every comment on this member's own posts, and anything it does not reach
-    // is content we have decided to retain (B-3, B-19).
+    // THERE IS NO post_comments STATEMENT HERE, AND THAT IS THE FIX — do not
+    // add one back. Deleting a statement to repair two findings looks like an
+    // omission, so the reasoning is spelled out.
+    //
+    // `post_comments_post_id_fkey` is ON DELETE CASCADE (verified in
+    // supabase/schema/constraints.json), so removing this member's posts
+    // already removes every comment on them. What a delete here would reach in
+    // addition is exactly the content we decided to keep:
+    //
+    //   author_user_id = uid     their comments on OTHER members' posts (B-3)
+    //   recipient_user_id = uid  replies written BY another member, on that
+    //                            member's own post, merely addressed to this
+    //                            one (B-19) — someone else's words entirely
+    //   owner_user_id = uid      redundant; the cascade above covers it
+    //
+    // Retained comments will hold author/recipient IDs pointing at a deleted
+    // account, and account_directory cascades from auth.users, so those names
+    // will not resolve. That is a client rendering concern, not a reason to
+    // delete conversation history.
     {
       const { error } = await admin
         .from("post_comment_views")
