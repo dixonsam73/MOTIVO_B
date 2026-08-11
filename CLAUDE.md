@@ -33,8 +33,10 @@ test that proves today's fix, and it is the next thing to run.**
 defaults to `true` and a deploy would silently change the deletion path's
 authorisation configuration.
 
-Next: C-28 and C-35 (both need a product decision first), directory and
-follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
+Next: **C-38** (P1, filed 2026-08-11 — a successful purchase reports failure
+because `forceAfterCurrent` is a no-op when no refresh is in flight; disproves
+C-1's corollary), C-28 and C-35 (both need a product decision first), directory
+and follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
 two-account test. Update this line as work lands.
 
 **Temporary instrumentation: removed.** `MembershipTrace.swift` and its
