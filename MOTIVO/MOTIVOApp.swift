@@ -222,7 +222,7 @@ struct MOTIVOApp: App {
                 .environmentObject(connectedMembershipStore)
                 .onAppear {
                     connectedMembershipStore.start()
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled, reason: "appOnAppear")
 
                     // M7B: AppMode activation must complete before a pending Études avatar can
                     // be promoted into the Connected namespace/backend. AuthManager may discover
@@ -282,7 +282,7 @@ struct MOTIVOApp: App {
                     handleMembershipState(state)
                 }
                 .onReceive(auth.$currentUserID.removeDuplicates()) { uid in
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled, reason: "currentUserIDChanged")
                     persistenceController.currentUserID = uid
                     if let id = uid {
                         Task { await persistenceController.runOneTimeBackfillIfNeeded(for: id) }
@@ -296,7 +296,7 @@ struct MOTIVOApp: App {
                     }
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled, reason: "backendUserIDChanged")
 
                     // M7B: backend identity publication is the sign-in transition where the
                     // Connected runtime becomes available. Run the pending avatar promotion only
@@ -323,10 +323,10 @@ struct MOTIVOApp: App {
             return
 
         case .entitled:
-            appModeManager.applyActivation(auth: auth, isEntitled: true)
+            appModeManager.applyActivation(auth: auth, isEntitled: true, reason: "membershipEntitled")
 
         case .notEntitled:
-            appModeManager.applyActivation(auth: auth, isEntitled: false)
+            appModeManager.applyActivation(auth: auth, isEntitled: false, reason: "membershipNotEntitled")
         }
     }
 }

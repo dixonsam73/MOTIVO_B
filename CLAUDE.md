@@ -57,7 +57,25 @@ C-1's corollary), C-28 and C-35 (both need a product decision first), directory
 and follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
 two-account test. Update this line as work lands.
 
-**Temporary instrumentation: removed.** `MembershipTrace.swift` and its
+**Temporary instrumentation: ACTIVE — `ActivationTrace.swift`, 15 call sites.**
+Added 2026-08-11 for C-38, after two wrong attempts at that finding: the first
+misread the mechanism, the second compiled clean in both configurations and left
+the app permanently in Solo with a live entitlement. The observable evidence was
+only "stayed Solo", and activation turns on five gates re-evaluated exclusively
+on `removeDuplicates` transitions, so one boolean separates a correct fix from a
+third guess. It logs the five gates at every `applyActivation` (tagged with which
+trigger fired), every `membershipState` write including same-value ones, each
+entitlement read, the purchase guard, and SIWA completion — whose failure
+branches are all `#if DEBUG` today and therefore invisible on TestFlight.
+Booleans and enum names only; no identifiers, tokens or handles.
+
+**Standing condition: this is removed once C-38 is diagnosed, fixed and
+verified. It must not ship.** Written with the earlier lesson applied — every
+line goes through one `emit` that sets `privacy: .public`, because `NSLog` with
+`%@` is redacted to `<private>` when read from a device, which is why the last
+instrumentation produced nothing on TestFlight.
+
+**Previous temporary instrumentation: removed.** `MembershipTrace.swift` and its
 thirteen call sites were deleted once QA B2 passed on real StoreKit, as the
 standing condition here required. It earned its keep — it diagnosed C-24,
 produced C-1's only device evidence, and framed C-13's verification. One

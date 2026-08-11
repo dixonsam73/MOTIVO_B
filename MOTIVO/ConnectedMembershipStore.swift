@@ -57,7 +57,18 @@ final class ConnectedMembershipStore: ObservableObject {
         ]
     }
 
-    @Published private(set) var membershipState: MembershipState = .unknown
+    // TEMPORARY — C-38 diagnosis. Remove the didSet with ActivationTrace.swift.
+    // Logs every write including same-value ones: `changed=false` marks exactly
+    // the publications that $membershipState.removeDuplicates() swallows.
+    @Published private(set) var membershipState: MembershipState = .unknown {
+        didSet {
+            ActivationTrace.membershipState(
+                from: String(describing: oldValue),
+                to: String(describing: membershipState),
+                changed: oldValue != membershipState
+            )
+        }
+    }
     @Published private(set) var isRefreshingEntitlement = false
 
     @Published private(set) var products: [Product] = []
@@ -129,6 +140,9 @@ final class ConnectedMembershipStore: ObservableObject {
                 case .verified(let transaction):
                     await transaction.finish()
                     await refreshEntitlement(forceAfterCurrent: true)
+
+                    // TEMPORARY — C-38 diagnosis. Remove with ActivationTrace.swift.
+                    ActivationTrace.purchaseGuard(isEntitled: isEntitled)
 
                     guard isEntitled else {
                         let error = MembershipStoreError.entitlementMissingAfterVerifiedPurchase
@@ -228,6 +242,9 @@ final class ConnectedMembershipStore: ObservableObject {
     }
 
     func refreshEntitlement(forceAfterCurrent: Bool = false) async {
+        // TEMPORARY — C-38 diagnosis. Remove with ActivationTrace.swift.
+        let traceWasInFlight = entitlementRefreshTask != nil
+
         if let inFlightTask = entitlementRefreshTask {
             let resolvedState = await inFlightTask.value
             membershipState = resolvedState
@@ -268,6 +285,13 @@ final class ConnectedMembershipStore: ObservableObject {
 
         entitlementRefreshTask = refreshTask
         let resolvedState = await refreshTask.value
+
+        // TEMPORARY — C-38 diagnosis. Remove with ActivationTrace.swift.
+        ActivationTrace.entitlementRead(
+            resolved: String(describing: resolvedState),
+            forced: forceAfterCurrent,
+            wasInFlight: traceWasInFlight
+        )
 
         // A forced refresh may have taken ownership of the slot while this one
         // was finishing. It will publish its own, newer result.

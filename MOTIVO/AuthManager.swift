@@ -977,6 +977,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: missing nonce")
             #endif
+            ActivationTrace.signInFailed(stage: "missingNonce")
             return
         }
         guard let tokenData = credential.identityToken,
@@ -985,12 +986,14 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: missing identityToken")
             #endif
+            ActivationTrace.signInFailed(stage: "missingIdentityToken")
             return
         }
         guard let url = BackendConfig.apiBaseURL, let key = BackendConfig.apiToken else {
             #if DEBUG
             NSLog("[Auth] Supabase sign-in skipped: BackendConfig not configured")
             #endif
+            ActivationTrace.signInFailed(stage: "backendNotConfigured")
             return
         }
 
@@ -1021,6 +1024,14 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
                 self.backendAvatarKey = nil
                 self.scheduleDirectoryHydrationIfNeeded(reason: "supabaseSignIn")
                 self.scheduleAccountIDBackfillIfNeeded(reason: "supabaseSignIn")
+
+                // TEMPORARY — C-38 diagnosis. Remove with ActivationTrace.swift.
+                ActivationTrace.signIn(
+                    stage: "supabaseSessionStored",
+                    signedIn: self.isSignedIn,
+                    hasToken: self.hasSupabaseAccessToken,
+                    hasBackendUserID: !(self.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                )
             }
 
             #if DEBUG
@@ -1030,6 +1041,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             #if DEBUG
             NSLog("[Auth] Supabase sign-in failed: %@", String(describing: error))
             #endif
+            ActivationTrace.signInFailed(stage: "supabaseSignInThrew")
         }
         #else
         // You have supabase-swift installed, but the MOTIVO target is missing the *Supabase* product/library.
