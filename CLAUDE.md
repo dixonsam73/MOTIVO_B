@@ -20,15 +20,22 @@ C-26, C-27, C-28, from the avatar audit C-33, C-34, C-35 and B-20 (avatar
 lifecycle — deletion on erase, and replacement propagation), and C-36 from the
 location audit (Solo location published on join, then clobbered).
 
-**`delete_account_v1` is deployed, and QA run 1 has passed.** The rewrite
-(`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings. D5–D9,
-D11 and D12 ran combined on 2026-08-11 against one disposable account and came
-back clean, which **Resolves B-1, B-3 and B-19**. The other five stay open for
-five different reasons — B-4 only ever saw the positive direction, B-9 and B-12
-were never executed, B-13's D10 is deferred for want of a safe fault-injection
-path, and **D12 cannot discriminate the B-20 fix from the bug it replaces**
-because `avatar_key` was populated. **D13 is therefore the only outstanding
-test that proves today's fix, and it is the next thing to run.**
+**`delete_account_v1` is deployed, and QA runs 1 and 2 have both passed.** The
+rewrite (`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings.
+D5–D9, D11 and D12 ran combined on 2026-08-11, and D13 ran separately the same
+day; together they **Resolve B-1, B-3, B-19 and B-20**. D13 is the only run that
+proves the avatar fix, because D12's populated `avatar_key` cannot tell the two
+implementations apart. Four stay open — B-4 only ever saw the positive
+direction, B-9 and B-12 were never executed, and B-13's D10 is deferred for want
+of a safe fault-injection path.
+
+**Filed from D13's blast-radius check: B-21, P1.** Two avatars of accounts
+deleted in July are permanently orphaned in the bucket — no `auth.users` row, no
+directory row, no pointer, and no policy path that could ever reach them. B-20
+observed in production rather than argued from source. The fix stops new orphans
+and has no reach over these; clearing them is a one-off service-role deletion
+and **must happen before release**.
+
 `verify_jwt` is now pinned in `supabase/config.toml` — without it the CLI
 defaults to `true` and a deploy would silently change the deletion path's
 authorisation configuration.
