@@ -18,6 +18,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   - The departing member's own received-attachment references are removed.
 //   - Attachments they SENT survive while any live recipient reference remains
 //     (B-1). "Live" means connected_attachments.deleted_at IS NULL.
+//   - The avatar is removed by prefix as well as by pointer (B-20), because
+//     the directory column is not a reliable pointer to it.
 //   - Every operation checks its result and fails immediately and honestly
 //     (B-4). Storage listing paginates (B-12).
 //   - Cleanup steps are idempotent, so a retry after a failure safely
@@ -78,6 +80,33 @@ Deno.serve(async (req) => {
   const uid = userData.user.id;
   const admin = createClient(SUPABASE_URL, SERVICE_ROLE);
 
+  /**
+   * Every entry in one storage folder, paginated (B-12). Not recursive — the
+   * one caller that needs recursion does it itself, because what counts as a
+   * folder is only meaningful to that caller.
+   */
+  async function listFolder(
+    bucket: string,
+    folder: string,
+    step: string,
+  ): Promise<{ name: string; metadata?: unknown }[]> {
+    const all: { name: string; metadata?: unknown }[] = [];
+    let offset = 0;
+    for (;;) {
+      const { data: items, error } = await admin.storage
+        .from(bucket)
+        .list(folder, { limit: LIST_PAGE, offset });
+      must(step, error);
+
+      const page = (items ?? []) as { name: string; metadata?: unknown }[];
+      all.push(...page);
+
+      if (page.length < LIST_PAGE) break;
+      offset += page.length;
+    }
+    return all;
+  }
+
   try {
     // 1. Remove the departing member's own received-attachment references.
     //
@@ -130,26 +159,19 @@ Deno.serve(async (req) => {
     const doomed: string[] = [];
 
     async function collect(folder: string): Promise<void> {
-      let offset = 0;
-      for (;;) {
-        const { data: items, error } = await admin.storage
-          .from(ATTACHMENTS_BUCKET)
-          .list(folder, { limit: LIST_PAGE, offset });
-        must(`storage.list:${folder}`, error);
-
-        const page = items ?? [];
-        for (const item of page) {
-          const fullPath = `${folder}/${item.name}`;
-          // supabase-js reports folders as entries with null metadata.
-          if ((item as { metadata?: unknown }).metadata == null) {
-            await collect(fullPath);
-          } else if (!livePaths.has(fullPath)) {
-            doomed.push(fullPath);
-          }
+      const entries = await listFolder(
+        ATTACHMENTS_BUCKET,
+        folder,
+        `storage.list:${folder}`,
+      );
+      for (const item of entries) {
+        const fullPath = `${folder}/${item.name}`;
+        // supabase-js reports folders as entries with null metadata.
+        if (item.metadata == null) {
+          await collect(fullPath);
+        } else if (!livePaths.has(fullPath)) {
+          doomed.push(fullPath);
         }
-
-        if (page.length < LIST_PAGE) break;
-        offset += page.length;
       }
     }
 
@@ -161,7 +183,30 @@ Deno.serve(async (req) => {
       must(`storage.remove:${i}`, error);
     }
 
-    // 4. Avatar, read before the directory row that names it is removed.
+    // 4. Avatar — BY PREFIX AND BY POINTER, not by pointer alone (B-20).
+    //
+    // account_directory.avatar_key is not a reliable pointer to the object.
+    // Three routes lead to a null or stale key with the photo still present:
+    // both of C-33's (a failed object delete followed by a successful patch to
+    // null; an upload followed by a failed directory patch) and a missing
+    // directory row, where maybeSingle() returns null and a pointer-driven step
+    // silently skips. Anything left behind is unreachable forever after step 6:
+    // avatars_delete_owner_only requires auth.uid() to equal a user that no
+    // longer exists, so there is no owner, no client path and no policy path.
+    // Permanently orphaned personal data, and precisely the data the erase
+    // promises to remove.
+    //
+    // The union is deliberate in both directions. The prefix catches an object
+    // the column does not name; the keyed object catches a stale key pointing
+    // outside the prefix.
+    //
+    // Bounded and safe: avatars_insert_owner_only pins every client write to
+    // exactly users/<uid>/avatar.jpg, so the sweep can reach one object and
+    // cannot touch anyone else's. The listing is flat for the same reason — a
+    // nested name is not writable through any client path, so recursing here
+    // would guard against nothing.
+    //
+    // Read before step 5 deletes the directory row that names it.
     {
       const { data: acct, error } = await admin
         .from("account_directory")
@@ -170,10 +215,25 @@ Deno.serve(async (req) => {
         .maybeSingle();
       must("account_directory.read", error);
 
-      if (acct?.avatar_key) {
+      const avatarPaths = new Set<string>();
+
+      const folder = `users/${uid}`;
+      for (
+        const item of await listFolder(
+          AVATARS_BUCKET,
+          folder,
+          "storage.list.avatars",
+        )
+      ) {
+        if (item.metadata != null) avatarPaths.add(`${folder}/${item.name}`);
+      }
+
+      if (acct?.avatar_key) avatarPaths.add(acct.avatar_key as string);
+
+      if (avatarPaths.size > 0) {
         const { error: rmErr } = await admin.storage
           .from(AVATARS_BUCKET)
-          .remove([acct.avatar_key as string]);
+          .remove([...avatarPaths]);
         must("storage.remove.avatar", rmErr);
       }
     }
