@@ -1,0 +1,23 @@
+# Supabase CLI configuration.
+#
+# This file exists for one reason: `supabase functions deploy` defaults
+# verify_jwt to TRUE when no config entry exists, and delete_account_v1 is
+# deployed with it FALSE. Without this file, the next deploy from a clean
+# checkout would silently change the deployed authorisation configuration of
+# the most irreversible path in the system — exactly the class of drift that
+# B-17 and supabase/README.md exist to prevent.
+#
+# Deliberately minimal. The CLI merges defaults for everything it does not
+# find here, and nothing in this project runs a local instance: there is no
+# `supabase start`, no `db reset`, and no migrations until Phase 3. Sections
+# for db, auth, storage and studio would be configuration nobody applies.
+
+project_id = "rlwtqxumfobakvdueugm"
+
+[functions.delete_account_v1]
+# verify_jwt = false is NOT a relaxation. The function performs its own check
+# and it is stricter than the gateway's: it calls auth.getUser(token) and
+# derives the subject from the verified token, never from the request body,
+# so the account being deleted is always the caller's own. Confirmed as the
+# deployed state (`supabase functions list` reports verify_jwt: false).
+verify_jwt = false
