@@ -98,10 +98,49 @@ B-3, B-4, B-9, B-12, B-13 and B-19 while destroying accounts to do it.
 | D7 | **B-3 retention.** A comments on B's post. A performs Erase All. B views their own post | A's comment is **still there**. It is A's words on B's post, and the settled decision retains it. The author is now unresolvable — confirm the client renders that gracefully rather than crashing or showing a blank row |
 | D8 | **B-19 retention.** A comments on B's post; B replies to A using the owner reply. A performs Erase All. B views their own post | B's reply is **still there**. It is B's words on B's own post; A was merely the addressee. Previously deleted by the `recipient_user_id` clause. Check the recipient renders gracefully — `account_directory` is cascade-deleted, so the name will not resolve |
 | D9 | **Post attachments removed.** A creates a post with an attachment, then performs Erase All. Inspect storage under `users/<A>/<postID>/` | Objects removed. These live under the same prefix as Connected shares but are never referenced by `connected_attachments`, so the preservation rule must not accidentally spare them |
-| D10 | **Idempotent retry.** Induce a mid-sequence failure (for example, revoke storage permissions or take the bucket offline), call Erase All, and confirm the response is `{ success: false, step: … }`. Restore the condition and retry | The first call names the step it stopped at and does **not** report success. The retry safely continues — steps already completed are no-ops — and either completes with `success: true` or fails honestly at the next unresolved step. The account must still be signed in and usable between the two attempts, because `auth.users` deletion is strictly last |
-| D11 | **No silent success.** Across D5–D10, confirm `success: true` is returned only when every step completed | The old function reported success unconditionally, so the client's existing `success` check was meaningless. This is what makes it meaningful |
+| D10 | **Idempotent retry. DEFERRED — no safe inducement exists yet. See the note below Group D.** As written: induce a mid-sequence failure, call Erase All, confirm `{ success: false, step: … }`, restore the condition and retry | The first call names the step it stopped at and does **not** report success. The retry safely continues — steps already completed are no-ops — and either completes with `success: true` or fails honestly at the next unresolved step. The account must still be signed in and usable between the two attempts, because `auth.users` deletion is strictly last — **with one exception, recorded below** |
+| D11 | **No silent success.** Across D5–D9, D12 and D13, confirm `success: true` is returned only when every step completed | The old function reported success unconditionally, so the client's existing `success` check was meaningless. This is what makes it meaningful. **Scope, while D10 is deferred: this confirms the positive direction only.** Every runnable row is a success case, so nothing here exercises a `success: false`. The negative direction is exactly what D10 was for, and it is untested until D10 runs |
 | D12 | **B-20 probe — the avatar is removed on Erase All.** A sets an avatar while Connected and confirms it renders for follower B. A performs Erase All. Inspect the `avatars` bucket under `users/<A>/` | The object is gone. This is the ordinary path, where `avatar_key` is correctly set, and it must pass before D13 means anything |
 | D13 | **B-20 orphan probe — the null-pointer case.** Reach the state deliberately: with an avatar uploaded, fail **only** the storage DELETE (a proxy blocking `storage/v1/object/avatars/*` is the honest way; the network being off fails the directory patch too and the pending marker then repairs it) while letting the `avatar_key` patch succeed. Confirm the column is null and the object still present. Now perform Erase All and inspect `avatars/users/<A>/` | The object is removed anyway. Pointer-driven deletion leaves it — that is the defect. If the proxy proves impractical, null the column directly in the dashboard and record in the result that the state was simulated rather than provoked |
+
+**D10 needs a fault-injection path, not just a tester.** Its own suggested
+inducement does not work. "Revoke storage permissions or take the bucket
+offline" cannot be done from outside the function: it runs as **service role**,
+so there is no permission to revoke and nothing a client or a proxy can reach.
+Every step is server-side, so the device is not in the path at all — turning the
+network off aborts the *call*, not a step within it.
+
+What remains, and why each was set aside:
+
+- **Temporarily deploy a variant that throws at a chosen step.** Technically the
+  cleanest demonstration, and never committed. **Declined:** it puts a
+  deliberately broken account-deletion path into production for the duration,
+  and "briefly" is not a property anyone can guarantee once a session goes
+  wrong. The same objection as writing to production, applied to code.
+- **Add QA-only failure injection behind an env var.** Rejected outright.
+  Permanent fault-injection scaffolding inside a P0 irreversible path is a
+  worse defect than the one it verifies.
+- **DDL to make one step fail** — a constraint or trigger that raises on the
+  delete. A schema write to production, which is the thing the backend rule
+  forbids.
+
+**Deferred until a disposable or local backend exists**, where any of the above
+is free. Phase 3 brings a local instance for migration tooling; that is the
+natural home for this row. Until then B-13's idempotency is **established by
+inspection and not by execution** — every delete is `.eq()`-scoped, the storage
+sweep re-lists before removing, `maybeSingle()` returns null on a second pass —
+and the register should say so rather than implying the retry has been observed.
+
+**One caveat that survives whenever D10 is eventually run.** The row asserts the
+account is still signed in and usable between the two attempts. That holds for
+every step except the last. If `auth.users` deletion **succeeds but its response
+is lost**, the account is genuinely gone while the client sees a failure, and
+the retry will return **401 `Invalid session`** — the token no longer resolves
+to a user. That 401 is the correct answer, not a defect: it means the deletion
+completed. Do not "fix" it by treating 401 as success. The function derives its
+subject from the verified token, so accepting an unverifiable one would hand
+away the only authorisation gate the function has — and `verify_jwt` is `false`
+for exactly that reason (`supabase/config.toml`).
 
 ## Group E — Connected social and attachments
 

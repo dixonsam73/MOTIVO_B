@@ -94,13 +94,42 @@ word.
 | B-9 | `connected_attachments` rows never deleted on account deletion; no FK, no explicit delete, no DELETE policy | P2 | **Confirmed defect** | 1 |
 | B-10 | Dormant `cleanup_post_attachments_on_*`: `SECURITY DEFINER`, path-based deletion, no ownership predicate. Attached to nothing, so latent rather than live. Repair with an ownership predicate and attach in Phase 4, or drop | P2 | **Confirmed defect** (latent) | 1 (defuse) / 4 (repair) |
 | B-12 | `delete_account_v1` storage listing stops silently at 1000 entries | P2 | **Confirmed defect** | 1 |
-| B-13 | `delete_account_v1` not idempotent | P2 | **Confirmed defect** | 1 |
+| B-13 | `delete_account_v1` not idempotent | P2 | **Confirmed defect** — fix deployed, **verification blocked**. Idempotency is established **by inspection, not by execution**: every delete is `.eq()`-scoped, the storage sweep re-lists before removing, and `maybeSingle()` returns null on a second pass. QA D10 was written to execute it and **cannot be run** — the function is service-role and entirely server-side, so the row's own suggested inducement ("revoke storage permissions") reaches nothing, and the three remaining fault-injection routes all require either a deliberately broken production deploy, permanent injection scaffolding in a P0 path, or DDL against production. Deferred to a disposable or local backend; Phase 3's local instance is the natural home. See the note below Group D | 1 (fix) / 3 (verify) |
 | B-20 | **`delete_account_v1` deletes the avatar by pointer, not by prefix.** Step 4 (`index.ts:164-179`) reads `account_directory.avatar_key` and removes exactly that object, while every other storage sweep in the same function lists `users/<uid>` and removes what it finds (`:132-156`). If the object exists and the column is null or stale, the photo survives the account. Three routes there: both of C-33's, plus a missing directory row, where `maybeSingle()` returns null and the step silently skips. After `auth.users` is deleted nothing can ever reach it — `avatars_delete_owner_only` requires `auth.uid()` to equal a user that no longer exists, so there is no owner, no client path and no policy path. Permanently orphaned personal data, and precisely the data the erase promises to remove. Same class as B-8, in a bucket B-8 does not mention. Fix: list `users/<uid>/` in the `avatars` bucket and remove the union of that and the keyed object. Bounded and safe — `avatars_insert_owner_only` pins the client to one name per user, so the sweep can reach exactly one object and cannot touch anyone else's | P2 | **Confirmed defect** — read from the committed function and the deployed policies | 1 |
 | B-14 | `follows_update_approve_by_followed` contains a tautological no-op guard; the approver can rewrite `follower_user_id` | P3 | **Confirmed defect** — verified against the deployed policy. `WITH CHECK` reads `(followed_user_id = auth.uid()) AND (follower_user_id = follower_user_id) AND (followed_user_id = followed_user_id) AND (status = 'approved')`. Both middle clauses compare a column to itself and are therefore always true; `WITH CHECK` sees only the new row, so there was never an old value to compare against. Concrete consequence: the approver can take a genuine `status='requested'` row from A and, in the same `UPDATE`, rewrite `follower_user_id` to B while approving it — fabricating an approved follow edge for someone who never requested one. Since an approved follow is what grants feed visibility (`posts_select_public_or_owner`), this pushes the approver's public posts into an arbitrary user's feed | 1 |
 | B-18 | **`follow_requests_open` is SECURITY DEFINER, anon-executable, and performs no `auth.uid()` check.** Low-priority sibling of B-5, same class and same one-line fix. Exposure is genuinely small: it takes a `uuid` the caller must already possess and returns a single boolean, and it `coalesce`s to `true` when no directory row exists, so it cannot be used to test account existence. A `false` return reveals only that a known UUID has follow requests disabled. Worth noting the general point it shares with B-5: **anon-executable means world-executable**, because the anon key ships inside the app binary | P3 | **Confirmed defect** — read from the deployed definition | 1 |
 | B-15 | Weak anti-browse in `search_account_directory` (2-char substrings) | P3 | **Confirmed defect** | 4 |
 | B-16 | `post_comment_views` accumulates orphans | P3 | **Confirmed defect** | 6 |
 | B-17 | **The backend has no source of truth under version control.** Edge Functions and schema exist only in the hosted Supabase project. This repository contains no `supabase/` directory, no `.ts`, no `.sql`; `~/supabase` holds only a CLI `.temp` scratch directory and is not a git repository. Consequences: the current `delete_account_v1` cannot be read before being rewritten, so B-1/B-3/B-4/B-12/B-13 would have to be fixed from finding descriptions alone; policy and RPC changes for B-2/B-5/B-14 have no diff, no review and no rollback; and nothing pins what is deployed to what was agreed. This directly blocks the Phase 1 backend block, and it matters most precisely where the risk is highest — irreversible account deletion. The register's own lesson applies: several findings were wrong because behaviour was inferred rather than read, and rewriting a P0 deletion path blind repeats exactly that mistake. Fix: pull the functions and schema into version control before any backend change | **P1** | **Resolved (source of truth).** `supabase/` now holds the `delete_account_v1` source and a structural catalog snapshot — functions with definitions, RLS policies, triggers, constraints, columns, grants, buckets. Pulled via `supabase db query --linked`, which goes through the Management API: no Docker, no `pg_dump`, and no credential handling. Verified data-free before commit. **Scope:** this is an audit-grade snapshot, not a replayable migration source — there is no DDL dump and no migration history. Migration tooling (`supabase db diff`, a local instance, hence Docker) is deliberately deferred to Phase 3, where server-side entitlement state will need it. Backend changes before then are reviewed against this snapshot | 1 |
+
+### `delete_account_v1` — deployed, not yet verified
+
+**Eight rows above depend on one function: B-1, B-3, B-4, B-9, B-12, B-13,
+B-19 and B-20.** The rewrite carrying all eight is **deployed to production** —
+version 4, `verify_jwt: false`, committed at `ca00189` (rewrite) and `5714c53`
+(B-20, avatar by prefix as well as by pointer). Production was confirmed
+drift-free against the captured baseline before the deploy, and the deployed
+source was confirmed byte-identical to the committed source after it.
+
+**None of the eight moves to Resolved on the strength of that.** They move when
+QA D5–D13 has been run, per the rule at the top of this register: an item
+becomes Resolved only when code has changed *and been checked*. Deployment is
+not a check. The mapping, so no row is credited to the wrong evidence:
+
+| Row | Verifies |
+|---|---|
+| D5 / D6 | B-1, both directions — a sent asset survives while a live recipient reference remains, and is removed when none does |
+| D7 | B-3 — the departing member's comments on others' posts are retained |
+| D8 | B-19 — third-party replies merely addressed to them are retained |
+| D9 | post attachments are removed, and the B-1 preservation rule does not accidentally spare them |
+| D12 / D13 | B-20 — the ordinary keyed path, then the null-pointer case the prefix sweep exists for |
+| D11 | B-4, positive direction only while D10 is deferred |
+| — | **B-9 and B-12 have no row of their own.** B-9 is observed incidentally (received references gone, sent references surviving) rather than tested; B-12's pagination needs >1000 objects under one prefix, which no row sets up. Both are inspection-only for now |
+
+`verify_jwt` is pinned in `supabase/config.toml` (`43be489`). Without it the CLI
+defaults to `true` and any deploy from a clean checkout would silently change
+the authorisation configuration of the deletion path as a side effect of
+shipping unrelated code — caught before the B-20 deploy, not after.
 
 **Retracted:** an earlier P0 asserted cross-user storage destruction via the
 cleanup triggers. `pg_trigger` shows they are attached to nothing, so the attack
