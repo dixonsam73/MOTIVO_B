@@ -130,36 +130,6 @@ final class ConnectedMembershipStore: ObservableObject {
                     await transaction.finish()
                     await refreshEntitlement(forceAfterCurrent: true)
 
-                    // C-38. Transaction.currentEntitlements is an async aggregation
-                    // with no guarantee of reflecting a transaction we have only
-                    // just finished, so the refresh above can legitimately come
-                    // back .notEntitled for a purchase that succeeded. Reporting
-                    // failure on that read tells a paying user their purchase did
-                    // not work; the observed recovery was a foreground refresh,
-                    // which no user would guess at.
-                    //
-                    // We are holding the evidence the aggregation is still catching
-                    // up to. The three conditions below are what make this
-                    // transaction an entitlement rather than merely a historical
-                    // record — a product we sell, not revoked, and not past its
-                    // expiry if it has one. That is what currentEntitlements would
-                    // itself report once it settles.
-                    //
-                    // Access only, and reversible, which invariant 3 permits on
-                    // client evidence. Later refreshes reconcile normally, and the
-                    // guard below still fails for anything not meeting the three.
-                    //
-                    // NOT applied to the transactionUpdate path (:startTransaction-
-                    // Observation): the same lag exists there, but its consequence
-                    // is a reversible drop to Solo that C-1 already accepts, and no
-                    // alert claims a failure.
-                    if !isEntitled,
-                       ProductID.all.contains(transaction.productID),
-                       transaction.revocationDate == nil,
-                       transaction.expirationDate.map({ $0 > Date() }) ?? true {
-                        membershipState = .entitled
-                    }
-
                     guard isEntitled else {
                         let error = MembershipStoreError.entitlementMissingAfterVerifiedPurchase
                         let outcome = PurchaseOutcome.failed(error)
