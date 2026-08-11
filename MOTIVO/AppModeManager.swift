@@ -33,23 +33,8 @@ public final class AppModeManager: ObservableObject {
         Self.applyBackendRuntimeMode(for: mode)
     }
 
-    func applyActivation(auth: AuthManager, isEntitled: Bool, reason: String = "-") {
-        let resolved = Self.resolvedActivationMode(auth: auth, isEntitled: isEntitled)
-
-        // TEMPORARY — C-38 diagnosis. Remove with ActivationTrace.swift.
-        // Reads only; the resolve above is untouched.
-        ActivationTrace.gates(
-            reason: reason,
-            backendConfigured: BackendConfig.isConfigured,
-            isEntitled: isEntitled,
-            isSignedIn: auth.isSignedIn,
-            hasToken: auth.hasSupabaseAccessToken,
-            hasBackendUserID: !(auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true),
-            resolved: String(describing: resolved),
-            previous: String(describing: self.mode)
-        )
-
-        applyMode(resolved)
+    func applyActivation(auth: AuthManager, isEntitled: Bool) {
+        applyMode(Self.resolvedActivationMode(auth: auth, isEntitled: isEntitled))
     }
 
     func applyMode(_ mode: AppMode) {

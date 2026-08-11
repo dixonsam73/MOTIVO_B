@@ -51,43 +51,56 @@ liveness from `connected_attachments.deleted_at`, never from the path.
 defaults to `true` and a deploy would silently change the deletion path's
 authorisation configuration.
 
-**C-38 is PARKED as Unverified — suspected synthetic-config artefact.** It has
-only ever been seen under `Etudes.storekit`; QA B2 on build 129 and two
-instrumented TestFlight runs on 2026-08-11 all resolved entitlement immediately
-and activated normally. Two causal explanations were offered and both withdrawn,
-and the one fix attempted was reverted for causing a worse activation
-regression. **One deliberate attempt remains:** device A's sandbox subscription
-lapses 2026-08-12, giving a clean first-purchase device at no cost. Run one
-instrumented purchase then. If it reproduces, investigate. If not, it stays
-unverified and no further hypotheses are manufactured. Device B is deliberately
-not used for this.
+**C-38 is CLOSED as Unverified — a synthetic-only artefact.** The one deliberate
+attempt was run on 2026-08-11 and **did not reproduce it.** A fresh Sandbox Apple
+Account on device A gave the clean first-purchase state the attempt needed
+(`entitlementRead resolved=notEntitled`, confirmed from the trace rather than
+from the screen). The purchase went through Apple's sandbox — verified on Apple's
+own payment sheet, headed "Sandbox", not the synthetic `[Environment: Xcode]`
+sheet — and **the first entitlement read after the verified transaction already
+resolved `entitled`**, with `purchaseGuard isEntitled=true`. There was no stale
+read at any point. The single synthetic observation stands and is not retracted;
+it simply has never occurred on Apple's pipeline in four runs now. Per the agreed
+stopping rule, no further hypotheses are manufactured. It reopens only on a real
+observation, and QA B2 is where that would surface.
 
-Next: C-28 and C-35 (both need a product decision first), B-9's soft-deleted
-sender-row tightening, directory and follow-policy hardening, zero-dependency
-cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
+**Note the run method, because it is more useful than TestFlight for this class
+of work:** the shared scheme's Run action is already Release, so clearing the
+StoreKit configuration in Run → Options gives a development build on real sandbox
+StoreKit with the debugger and live console attached. That is a genuine
+real-StoreKit environment and it iterates in minutes rather than in TestFlight
+processing time. **The Run action must stay on Release** — Debug carries
+`com.samueldixon.motivo.dev`, which App Store Connect does not know, so products
+return an empty array and you get C-29's signature instead of a purchase.
 
-**Temporary instrumentation: ACTIVE — `ActivationTrace.swift`, 15 call sites.**
-Added 2026-08-11 for C-38, after two wrong attempts at that finding: the first
-misread the mechanism, the second compiled clean in both configurations and left
-the app permanently in Solo with a live entitlement. The observable evidence was
-only "stayed Solo", and activation turns on five gates re-evaluated exclusively
-on `removeDuplicates` transitions, so one boolean separates a correct fix from a
-third guess. It logs the five gates at every `applyActivation` (tagged with which
-trigger fired), every `membershipState` write including same-value ones, each
-entitlement read, the purchase guard, and SIWA completion — whose failure
-branches are all `#if DEBUG` today and therefore invisible on TestFlight.
-Booleans and enum names only; no identifiers, tokens or handles.
+Next: C-28 and C-35 (both need a product decision first), B-9's QA run and deploy
+(the code is committed and undeployed), directory and follow-policy hardening,
+zero-dependency cleanup, C-3 measurement, B-6 two-account test. Update this line
+as work lands.
 
-It has already earned its keep: it produced the healthy activation sequence
+**Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
+sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
+condition required. Nothing of it ships. Removal was done by restoring the four
+touched files to their pre-instrumentation state rather than by hand-editing the
+call sites — no client code had landed in between, so the result is provably
+identical to the tree before `402418c`, and Debug and Release both compile clean.
+
+It earned its keep three times over: it produced the healthy activation sequence
 (`docs/audit-findings.md`, "Activation path — observed behaviour"), killed two
-C-38 hypotheses, and re-verified C-24 on real StoreKit.
+C-38 hypotheses, re-verified C-24 on real StoreKit, and finally closed C-38
+itself — the last of which no screen could have done, since the app sits in Solo
+with a live entitlement whenever identity is absent, and "stayed Solo" is the
+single observation both the healthy and the broken path produce.
 
-**Standing condition: this is removed once C-38 is resolved either way — fixed
-and verified, or closed as a synthetic-only artefact after the 2026-08-12
-attempt. It must not ship.** Written with the earlier lesson applied — every
-line goes through one `emit` that sets `privacy: .public`, because `NSLog` with
-`%@` is redacted to `<private>` when read from a device, which is why the last
-instrumentation produced nothing on TestFlight.
+**The `privacy: .public` lesson held.** Every line funnelled through one `emit`,
+and every line was readable on device — unlike the previous effort. Reuse the
+pattern if release-readable logging is ever needed again.
+
+**One tooling correction for next time:** `log stream --device` no longer exists
+on this macOS. The working retrospective route is
+`sudo log collect --device-name "<device>"` followed by `log show` on the
+archive. Running from Xcode is better still — `Logger` output with
+`privacy: .public` appears live in the Xcode console, with no root required.
 
 **Previous temporary instrumentation: removed.** `MembershipTrace.swift` and its
 thirteen call sites were deleted once QA B2 passed on real StoreKit, as the
