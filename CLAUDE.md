@@ -51,11 +51,20 @@ liveness from `connected_attachments.deleted_at`, never from the path.
 defaults to `true` and a deploy would silently change the deletion path's
 authorisation configuration.
 
-Next: **C-38** (P1, filed 2026-08-11 — a successful purchase reports failure
-because `forceAfterCurrent` is a no-op when no refresh is in flight; disproves
-C-1's corollary), C-28 and C-35 (both need a product decision first), directory
-and follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
-two-account test. Update this line as work lands.
+**C-38 is PARKED as Unverified — suspected synthetic-config artefact.** It has
+only ever been seen under `Etudes.storekit`; QA B2 on build 129 and two
+instrumented TestFlight runs on 2026-08-11 all resolved entitlement immediately
+and activated normally. Two causal explanations were offered and both withdrawn,
+and the one fix attempted was reverted for causing a worse activation
+regression. **One deliberate attempt remains:** device A's sandbox subscription
+lapses 2026-08-12, giving a clean first-purchase device at no cost. Run one
+instrumented purchase then. If it reproduces, investigate. If not, it stays
+unverified and no further hypotheses are manufactured. Device B is deliberately
+not used for this.
+
+Next: C-28 and C-35 (both need a product decision first), B-9's soft-deleted
+sender-row tightening, directory and follow-policy hardening, zero-dependency
+cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
 
 **Temporary instrumentation: ACTIVE — `ActivationTrace.swift`, 15 call sites.**
 Added 2026-08-11 for C-38, after two wrong attempts at that finding: the first
@@ -69,8 +78,13 @@ entitlement read, the purchase guard, and SIWA completion — whose failure
 branches are all `#if DEBUG` today and therefore invisible on TestFlight.
 Booleans and enum names only; no identifiers, tokens or handles.
 
-**Standing condition: this is removed once C-38 is diagnosed, fixed and
-verified. It must not ship.** Written with the earlier lesson applied — every
+It has already earned its keep: it produced the healthy activation sequence
+(`docs/audit-findings.md`, "Activation path — observed behaviour"), killed two
+C-38 hypotheses, and re-verified C-24 on real StoreKit.
+
+**Standing condition: this is removed once C-38 is resolved either way — fixed
+and verified, or closed as a synthetic-only artefact after the 2026-08-12
+attempt. It must not ship.** Written with the earlier lesson applied — every
 line goes through one `emit` that sets `privacy: .public`, because `NSLog` with
 `%@` is redacted to `<private>` when read from a device, which is why the last
 instrumentation produced nothing on TestFlight.
