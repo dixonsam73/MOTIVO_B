@@ -25,9 +25,25 @@ rewrite (`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings.
 D5–D9, D11 and D12 ran combined on 2026-08-11, and D13 ran separately the same
 day; together they **Resolve B-1, B-3, B-19 and B-20**. D13 is the only run that
 proves the avatar fix, because D12's populated `avatar_key` cannot tell the two
-implementations apart. Four stay open — B-4 only ever saw the positive
-direction, B-9 and B-12 were never executed, and B-13's D10 is deferred for want
-of a safe fault-injection path.
+implementations apart.
+
+**B-9 joined them on 2026-08-11 via D14**, the third run and the first against
+the `step 3b` deploy — the sent-tombstone cleanup, committed and reviewed before
+it was deployed. Its received-row path had never executed in any prior run. Three
+legs, one erase, and all eight blast-radius counts matched a prediction written
+down *beforehand*, which is what made the check binary rather than a reading of
+the aftermath. **Three stay open** — B-4 only ever saw the positive direction,
+B-12 was never executed, and B-13's D10 is deferred for want of a safe
+fault-injection path.
+
+**One lesson from D14 is worth more than the fix.** B-9's cell had justified the
+tombstone cleanup as deleting "precisely the rows whose objects were just swept",
+and that reasoning was wrong — rows are per-recipient and share one storage path.
+The predicate it implied was right; the reason was not. Implemented from the
+stated reason, the natural code would have deleted *every* soft-deleted row, and
+account B happened to hold one from a third-party sender that the run would then
+have destroyed. **Correct a finding's reasoning even when its proposed fix is
+right**, because the reasoning is what the next person implements from.
 
 **Filed from D13's blast-radius check: B-21, P3.** Two avatars of accounts
 deleted in July were permanently orphaned in the bucket — no `auth.users` row, no
@@ -73,9 +89,12 @@ processing time. **The Run action must stay on Release** — Debug carries
 `com.samueldixon.motivo.dev`, which App Store Connect does not know, so products
 return an empty array and you get C-29's signature instead of a purchase.
 
-Next: C-28 and C-35 (both need a product decision first), B-9's QA run and deploy
-(the code is committed and undeployed), directory and follow-policy hardening,
-zero-dependency cleanup, C-3 measurement, B-6 two-account test. **Plus a standing
+Next: C-28 and C-35 (both need a product decision first), directory and
+follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
+two-account test. **A two-device, two-Apple-ID rig now exists** — Device A on a
+dedicated sandbox tester, Device B running Release *alongside* its long-serving
+Debug install under a second iCloud account — which unblocks D5–D8, E2 and E8
+as well. **Plus a standing
 release-hardening checkpoint: cut a fresh TestFlight build at the next clean
 point and run QA Group B against it.** Sandbox proves the purchase path, not the
 artifact beta testers install; C-9 does not close until that runs. Update this
