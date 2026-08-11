@@ -4,8 +4,9 @@ Derived from the implementation as audited, and revised against the settled
 architecture. Used as the per-phase verification gate and, in full, for the
 Release Candidate.
 
-**Prerequisites:** a TestFlight (Release) build — Debug cannot exercise real
-StoreKit; a sandbox Apple ID; a second Connected account for social flows; a
+**Prerequisites:** a Release build — Debug cannot exercise real StoreKit at all,
+and a TestFlight build is required only where the *distribution artifact* is
+under test; a sandbox Apple Account; a second Connected account for social flows; a
 device with ≥2 GB free. **Use a disposable Apple ID and a device you can erase
 for Groups C and D.**
 
@@ -65,6 +66,56 @@ testers install — different signing, different distribution path, no debugger.
 **Group B must be re-run on a fresh TestFlight build before StoreKit work is
 considered settled**, regardless of how many sandbox runs have passed.
 
+## The standing two-device rig
+
+Established 2026-08-11 during D14 and kept deliberately. Most of Group D and
+parts of Group E need two live Connected identities, and this is what supplies
+them.
+
+| | **Device A** — "SD beta burner" | **Device B** — "SD iPhone" |
+|---|---|---|
+| Role | **Disposable.** The departing account in destructive rows | **Surviving / control.** Never the account being erased |
+| Installs | Release only | Release **and** Debug, side by side |
+| iCloud account | its own | a second, different one |
+| Sandbox tester | dedicated tester #1 | dedicated tester #2 |
+| After a destructive run | clear tester #1's purchase history to restore a first-purchase state | left intact |
+
+### Why the constraints are what they are
+
+**Distinct Connected identities require distinct devices.** Native Sign in with
+Apple offers no account picker — it uses whichever Apple Account is signed into
+iCloud on that device. A Sandbox Apple Account cannot supply a second identity;
+it only pays. So "two real Apple IDs" in Group D's prerequisite is really *two
+devices signed into two different iCloud accounts*, and there is no way to fake
+it on one handset.
+
+**One sandbox tester per device.** Clearing purchase history is per tester, and
+that is how Device A is returned to a clean first-purchase state. A shared
+tester would drop Device B's entitlement at the same moment — and Device B is
+the control whose inbox the destructive rows are checked against.
+
+### Études Dev, and one trap it creates
+
+Device B also carries **Études Dev** (`com.samueldixon.motivo.dev`), a
+long-running local dataset kept for ordinary use. It is a genuinely separate app:
+different container, different keychain access group, no App Groups. Nothing it
+does can reach the Release install's data, or vice versa.
+
+It **cannot transact.** The `.dev` bundle ID is unknown to App Store Connect, so
+with StoreKit Configuration `None` it gets an empty product array — C-29's
+signature. Connected testing there is therefore synthetic only, by deliberately
+attaching `Etudes.storekit` for that run. **Real-sandbox Connected testing lives
+on the Release installation.** Do not put a sandbox subscription through Debug.
+
+**The trap:** Sign in with Apple identifiers are scoped to the development team,
+not the bundle ID — observed 2026-08-11, when the fresh Release install landed in
+the *same* backend account as Études Dev, avatar and location included. So both
+apps on Device B are two clients on **one** Connected account. **Keep Études Dev
+closed during any run that reads or writes account B's backend state**, or a
+second client will muddy the snapshot.
+
+---
+
 ---
 
 ## Group A — Solo / local-first (no account)
@@ -122,7 +173,7 @@ group. Verify that explicitly each time, not just once.
 
 ## Group D — Destructive (disposable device state)
 
-**Prerequisite: two real Apple IDs, held at the same time.** D5–D8 each need a
+**Prerequisite: two real Apple IDs, held at the same time — see "The standing two-device rig" above, which now supplies this.** D5–D8 each need a
 sender and a recipient, and E2 and E8 need the same. This cannot be met with
 sandbox tester accounts: those authorise *purchases* only, and Sign in with
 Apple requires a real Apple ID, so a tester can never become a second Connected
