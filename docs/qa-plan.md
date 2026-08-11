@@ -17,6 +17,56 @@ is tested by using the app — not by reading the diff.
 
 ---
 
+## StoreKit environments — choose deliberately
+
+Three environments, not interchangeable. Four findings in the register — C-9,
+C-29, C-30 and C-38 — exist because the differences between them were invisible
+at the time.
+
+| Environment | How to get it | What it proves | What it hides |
+|---|---|---|---|
+| **Synthetic** (`Etudes.storekit`) | Attach in Run → Options. **Opt-in only since 2026-08-11** | Client logic against locally-defined products | Everything server-side — App Store Connect configuration, product vending, real entitlement timing. Apple's sheet reads `[Environment: Xcode]` |
+| **Sandbox** — the preferred loop | Xcode, Run action **Release**, StoreKit Configuration **None**, dedicated Sandbox Apple Account | Real StoreKit against Apple's servers, with debugger and live console attached | The distribution artifact itself |
+| **TestFlight** | Upload a build | The artifact beta testers install, transacting on sandbox IAP | Nothing StoreKit-specific — but it is slow to iterate |
+
+### The preferred development loop, and it repeats
+
+1. **Run action = Release.** Debug's bundle ID vends nothing; you get C-29's
+   signature rather than a purchase.
+2. **StoreKit Configuration = None** in Run → Options.
+3. A **dedicated Sandbox Apple Account**, signed in under Settings → Developer
+   on the test device. Not a personal Apple ID.
+4. **Between clean-purchase tests, clear that tester's purchase history in App
+   Store Connect** (Users and Access → Sandbox → the tester). This restores a
+   genuine first-purchase state without creating a new account and without
+   waiting for a subscription to lapse — the C-38 attempt had to wait for one,
+   and it cost a day.
+
+### Two ways this test lies to you
+
+**Verify the environment on Apple's sheet, never on ours.** The app's own
+selection screen cannot discriminate: `Etudes.storekit` mirrors App Store
+Connect exactly — same display names, same prices. Apple's payment sheet is the
+only reliable tell: **"Sandbox"**, with "For testing purposes only" and an
+Account line, versus `[Environment: Xcode]` for synthetic.
+
+**Establish entitlement state from evidence, not from the screen.** Solo mode
+does **not** mean non-entitled — the app resolves to Solo whenever identity is
+absent, whatever the subscription is doing, and on 2026-08-11 a device sat in
+Solo with a live entitlement for an hour before that was noticed. With the
+diagnostic instrumentation now removed, **the sandbox tester's purchase history
+in App Store Connect is the authoritative check**, and clearing it is what
+guarantees the state rather than assuming it.
+
+### TestFlight remains a required checkpoint
+
+The sandbox loop proves the purchase path. It does not prove the build that beta
+testers install — different signing, different distribution path, no debugger.
+**Group B must be re-run on a fresh TestFlight build before StoreKit work is
+considered settled**, regardless of how many sandbox runs have passed.
+
+---
+
 ## Group A — Solo / local-first (no account)
 
 | # | Steps | Expected |

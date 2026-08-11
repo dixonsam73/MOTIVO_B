@@ -75,8 +75,11 @@ return an empty array and you get C-29's signature instead of a purchase.
 
 Next: C-28 and C-35 (both need a product decision first), B-9's QA run and deploy
 (the code is committed and undeployed), directory and follow-policy hardening,
-zero-dependency cleanup, C-3 measurement, B-6 two-account test. Update this line
-as work lands.
+zero-dependency cleanup, C-3 measurement, B-6 two-account test. **Plus a standing
+release-hardening checkpoint: cut a fresh TestFlight build at the next clean
+point and run QA Group B against it.** Sandbox proves the purchase path, not the
+artifact beta testers install; C-9 does not close until that runs. Update this
+line as work lands.
 
 **Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
 sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
@@ -218,13 +221,29 @@ Verification gate after each phase. RC QA confirms an already-tested system.
 - iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), deployment target iOS 18.5.
 - Flat source layout via `fileSystemSynchronizedGroups` — everything in
   `MOTIVO/` is auto-included in the app target.
-- Debug and Release use different bundle IDs. The shared scheme's Run action is
-  Release and pins a `StoreKitConfigurationFileReference` to `Etudes.storekit`.
-  A pinned StoreKit configuration applies **regardless of build configuration**,
-  so running from Xcode always gets synthetic StoreKit — Release included.
-  **Real StoreKit behaviour requires TestFlight**, or clearing the StoreKit
-  configuration in Run → Options. This bit us mid-audit: a Release QA pass was
-  mistaken for real-StoreKit evidence. See C-9.
+- Debug and Release use different bundle IDs, and **only Release can transact.**
+  Debug is `com.samueldixon.motivo.dev`, which App Store Connect does not know,
+  so `Product.products(for:)` returns an empty array and you get C-29's
+  signature — "Membership options are unavailable", no error beneath it —
+  instead of a purchase. The shared scheme's Run action is Release. Keep it
+  there.
+- **The shared scheme no longer pins a StoreKit configuration** (changed
+  2026-08-11). Running from Xcode now gets **real StoreKit against Apple's
+  sandbox by default**, which is the inverse of the setting that masked C-9,
+  C-29, C-30 and C-38. `Etudes.storekit` is retained but **opt-in only**: attach
+  it in Run → Options when synthetic behaviour is deliberately wanted, and
+  detach it afterwards. A pinned configuration applies **regardless of build
+  configuration**, so it silences real StoreKit in Release too — which is
+  exactly how a Release QA pass was once mistaken for real-StoreKit evidence.
+- **Preferred StoreKit testing loop**, documented in full in `docs/qa-plan.md`:
+  Xcode + Release + StoreKit Configuration **None** + a dedicated Sandbox Apple
+  Account, clearing that tester's purchase history in App Store Connect between
+  clean-purchase tests. Repeatable, and needs neither new accounts nor a
+  subscription lapse — the C-38 attempt waited a day for one.
+- **TestFlight is still a required checkpoint before StoreKit work is settled.**
+  The sandbox loop proves the purchase path; it does not prove the artifact beta
+  testers actually install. Cut a build at the next clean checkpoint and run QA
+  Group B against it.
 - 193 `#if DEBUG` blocks. Always verify Release as well as Debug.
 - Unit test suite is an empty template. "Green build" means compile-clean, not
   test-verified.
