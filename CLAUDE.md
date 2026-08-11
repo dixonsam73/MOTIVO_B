@@ -20,12 +20,15 @@ C-26, C-27, C-28, from the avatar audit C-33, C-34, C-35 and B-20 (avatar
 lifecycle — deletion on erase, and replacement propagation), and C-36 from the
 location audit (Solo location published on join, then clobbered).
 
-**`delete_account_v1` is deployed and awaiting verification.** The rewrite
-(`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings — B-1,
-B-3, B-4, B-9, B-12, B-13, B-19, B-20 — and none of them is Resolved until QA
-D5–D13 has run. D10 is deferred: it cannot be induced safely against a
-service-role, server-side function, and every remaining route needs a
-disposable or local backend. See the note below Group D in `docs/qa-plan.md`.
+**`delete_account_v1` is deployed, and QA run 1 has passed.** The rewrite
+(`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings. D5–D9,
+D11 and D12 ran combined on 2026-08-11 against one disposable account and came
+back clean, which **Resolves B-1, B-3 and B-19**. The other five stay open for
+five different reasons — B-4 only ever saw the positive direction, B-9 and B-12
+were never executed, B-13's D10 is deferred for want of a safe fault-injection
+path, and **D12 cannot discriminate the B-20 fix from the bug it replaces**
+because `avatar_key` was populated. **D13 is therefore the only outstanding
+test that proves today's fix, and it is the next thing to run.**
 `verify_jwt` is now pinned in `supabase/config.toml` — without it the CLI
 defaults to `true` and a deploy would silently change the deletion path's
 authorisation configuration.
