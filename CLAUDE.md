@@ -16,8 +16,11 @@ Baseline verified at migration: Debug and Release both compile clean
 (purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
 expiry-deletion authority removed), C-2 (Scores survived Erase All).
 Verification batch cleared: C-7, C-8, C-19. Filed along the way: C-23, C-25,
-C-26, C-27, C-28. Next: C-28 (needs a product decision first), safe
-`delete_account_v1`, directory and follow-policy hardening, zero-dependency
+C-26, C-27, C-28, from the avatar audit C-33, C-34, C-35 and B-20 (avatar
+lifecycle — deletion on erase, and replacement propagation), and C-36 from the
+location audit (Solo location published on join, then clobbered). Next: C-28 and
+C-35 (both need a product decision first), safe `delete_account_v1` (now
+carrying B-20 as well), directory and follow-policy hardening, zero-dependency
 cleanup, C-3 measurement, B-6 two-account test. Update this line as work lands.
 
 **Temporary instrumentation: removed.** `MembershipTrace.swift` and its
