@@ -18,6 +18,9 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //   - The departing member's own received-attachment references are removed.
 //   - Attachments they SENT survive while any live recipient reference remains
 //     (B-1). "Live" means connected_attachments.deleted_at IS NULL.
+//   - Their sent rows that no recipient still holds — the soft-deleted ones —
+//     are removed with them (B-9), so no connected_attachments row outlives
+//     the account without a live reference behind it.
 //   - The avatar is removed by prefix as well as by pointer (B-20), because
 //     the directory column is not a reliable pointer to it.
 //   - Every operation checks its result and fails immediately and honestly
@@ -110,17 +113,24 @@ Deno.serve(async (req) => {
   try {
     // 1. Remove the departing member's own received-attachment references.
     //
-    // ORDER IS LOAD-BEARING — do not move this below step 2, and do not merge
-    // the two connected_attachments queries into one pass. Liveness in step 2
-    // is computed from rows that survive this delete. If a member sent an
-    // attachment to themselves (sender and recipient both this uid), their
-    // received row is the only reference to that asset; deleting it first is
-    // what allows step 2 to see the asset as unreferenced and step 3 to remove
-    // it. Computing liveness first would see that row as live and strand the
-    // object permanently, with no owner left to clean it up.
+    // Rows where they are the SENDER are deliberately left alone here: those
+    // are the recipients' references and must survive while any recipient
+    // still holds one (B-1). Step 3b below removes only the dead ones.
     //
-    // Rows where they are the SENDER are deliberately left alone: those are
-    // the recipients' references and must survive (B-1).
+    // ORDERING IS NOT LOAD-BEARING. This comment claimed the opposite until
+    // 2026-08-11, on the grounds that a member could send an attachment to
+    // themselves — making their received row the only reference to that asset,
+    // so that computing liveness before deleting it would strand the object.
+    // That state cannot exist. `connected_attachments_not_self` is
+    // CHECK (sender_user_id <> recipient_user_id), and the RLS insert policy
+    // `connected_attachments_insert_sender` independently requires
+    // recipient_user_id <> auth.uid(). The sender-scoped and recipient-scoped
+    // row sets are therefore disjoint, and this delete cannot change step 2's
+    // result set. Both are verified in supabase/schema/.
+    //
+    // What IS still load-bearing: do not merge the two connected_attachments
+    // queries into one pass, and never widen this delete to sender rows with a
+    // live recipient reference — that is the B-1 guarantee itself.
     {
       const { error } = await admin
         .from("connected_attachments")
@@ -181,6 +191,49 @@ Deno.serve(async (req) => {
       const chunk = doomed.slice(i, i + REMOVE_CHUNK);
       const { error } = await admin.storage.from(ATTACHMENTS_BUCKET).remove(chunk);
       must(`storage.remove:${i}`, error);
+    }
+
+    // 3b. Drop the departing member's SENT rows that no recipient still holds
+    //     (B-9). Step 1 removed the rows where they were the recipient; these
+    //     are the other half, and without this they outlive the account with
+    //     no live reference and — usually — no object either.
+    //
+    //     THE JUSTIFICATION IS ABOUT REFERENCES, NOT STORAGE. B-9's own cell
+    //     described these as "precisely the ones whose objects were just
+    //     swept", and that is wrong.
+    //     `connected_attachments_asset_recipient_unique` is
+    //     UNIQUE (asset_id, recipient_user_id), and
+    //     `connected_attachments_sender_storage_path` pins storage_path to
+    //     users/<sender_user_id>/connected/<asset_id>.<ext> — derived from
+    //     sender and asset alone. So one asset sent to two recipients is TWO
+    //     rows sharing ONE storage_path. With one recipient live and the other
+    //     soft-deleted, step 3 correctly preserves the object (B-1) while the
+    //     soft-deleted row still matches this delete. That is intended: the
+    //     row is a dead reference either way, and this step reasons about
+    //     references, never about what step 3 did or did not remove.
+    //
+    //     The rule that survives inspection: a soft-deleted row is nobody's
+    //     live inbox reference. B-1 requires only that LIVE recipient
+    //     references survive, and this cannot touch one — `deleted_at IS NULL`
+    //     is exactly the set step 2 preserved.
+    //
+    //     Ordering is free for the same reason: livePaths was computed on
+    //     deleted_at IS NULL, so these rows were never in it. Placed after the
+    //     sweep so that a row outlives its object on failure rather than the
+    //     reverse.
+    //
+    //     Nothing observable changes for anyone.
+    //     `connected_attachments_select_recipient` is
+    //     USING (recipient_user_id = auth.uid()), so the sender has no read
+    //     access to these rows at all, and the recipient already soft-deleted
+    //     theirs. Idempotent: a second pass matches nothing.
+    {
+      const { error } = await admin
+        .from("connected_attachments")
+        .delete()
+        .eq("sender_user_id", uid)
+        .not("deleted_at", "is", null);
+      must("connected_attachments.sent_tombstones", error);
     }
 
     // 4. Avatar — BY PREFIX AND BY POINTER, not by pointer alone (B-20).
