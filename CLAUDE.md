@@ -29,12 +29,23 @@ implementations apart. Four stay open — B-4 only ever saw the positive
 direction, B-9 and B-12 were never executed, and B-13's D10 is deferred for want
 of a safe fault-injection path.
 
-**Filed from D13's blast-radius check: B-21, P1.** Two avatars of accounts
-deleted in July are permanently orphaned in the bucket — no `auth.users` row, no
+**Filed from D13's blast-radius check: B-21, P3.** Two avatars of accounts
+deleted in July were permanently orphaned in the bucket — no `auth.users` row, no
 directory row, no pointer, and no policy path that could ever reach them. B-20
-observed in production rather than argued from source. The fix stops new orphans
-and has no reach over these; clearing them is a one-off service-role deletion
-and **must happen before release**.
+observed in production rather than argued from source. Both were the developer's
+own earlier beta accounts, so no real user's data was involved; cleared manually
+2026-08-11. The row is kept as the observed instance behind B-20.
+
+A whole-backend read-only orphan sweep followed, on the reasoning that the old
+function ran for months. **Nothing else was left exposed** — zero orphaned
+`posts` (B-4's worst case never materialised), zero orphaned shares, follows,
+comment views or `attachments` objects; 30 dead `connected_attachments` rows with
+no surviving storage. The avatars bucket was the only place with residue, which
+is exactly where the audit had no coverage. **One false positive is recorded on
+B-8 as a warning:** an orphan heuristic keyed on the `users/<uid>/` path prefix
+flags D5's survivor, because the prefix carries the *sender's* uid and a dead
+sender is the correct state for a preserved asset. Any future cleanup must read
+liveness from `connected_attachments.deleted_at`, never from the path.
 
 `verify_jwt` is now pinned in `supabase/config.toml` — without it the CLI
 defaults to `true` and a deploy would silently change the deletion path's
