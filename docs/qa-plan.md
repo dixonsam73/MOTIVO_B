@@ -62,9 +62,32 @@ at the time.
 
    - **Clear Purchase History does not withdraw a live entitlement**, and
      nothing about waiting, relaunching, re-signing-in or rebooting changes
-     that.
-   - **Cancelling does not either** — access continues to the period end by
-     design, which is correct StoreKit behaviour and not a defect.
+     that. **Mechanism corrected later the same day, and it is not a no-op:**
+     Settings → Developer → Sandbox Apple Account → Subscriptions read **"You
+     do not have any subscriptions"** while the in-app Manage Membership sheet
+     simultaneously showed the plan **active, £4.99/month, renewing 13 August**.
+     Both are Apple's UI. So the clear *did* apply to the sandbox account
+     server-side; what it does not do is revoke what the device already holds,
+     which is what `currentEntitlements` reports and what the app renders.
+   - **Cancelling does not give an immediate reset either** — access continues
+     to the period end by design. **But do not read that as "cancelling is
+     useless", which an earlier version of this step implied.** Cancelling
+     stops the renewal chain, so it converts an open-ended run of daily
+     TestFlight renewals into a **lapse on a known date** — which is exactly the
+     tool to reach for when the *goal is to observe an expiry* rather than to
+     re-purchase. Use it deliberately for C-1 / C-26 lapse testing.
+
+   **Device-side sandbox controls worth knowing about** (Settings → Developer →
+   Sandbox Apple Account → Account Settings), found 2026-08-12 and previously
+   undocumented here:
+
+   | Control | Use |
+   |---|---|
+   | **Allow Purchases & Renewals** | Toggle off to block renewals — a second route to a scheduled lapse |
+   | **Test Interrupted Purchases** | **Apple's own way to produce a delayed/contended purchase.** Closer to C-13's actual hazard — a forced entitlement refresh racing one already in flight — than Network Link Conditioner, which only approximates it. Prefer this for B2 |
+   | **Renewal Rate** | The accelerated cadence, e.g. Every 5 minutes. Applies in the development sandbox; **ignored on TestFlight** |
+   | **Clear Purchase History** | Same effect as the App Store Connect action; see above for what it does and does not reach |
+   | **Initiate Transaction** | Server-initiated purchase testing |
 
    **What actually yields a clean first-purchase state:** a **new sandbox
    tester**, or waiting out the current period. Budget for that when planning,

@@ -263,11 +263,20 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   is false.** Observed on Device B: history cleared, >10 minutes waited, app
   force-quit and relaunched, tester signed out and in, device restarted — and
   the subscription stayed live, with Apple's own Manage Membership sheet showing
-  it active and renewing. Cancelling does not help either; access runs to the
-  period end by design. **A clean first-purchase state needs a new sandbox
+  it active and renewing. **The clear is not a no-op, though:** Settings →
+  Sandbox Apple Account → Subscriptions simultaneously read "You do not have any
+  subscriptions", so it applies server-side and simply does not revoke what the
+  device already holds. **A clean first-purchase state needs a new sandbox
   tester or a waited-out period**, so design runs to need one purchase rather
   than several. Note the one clean run on record, C-38's, used a *fresh* tester
   — clearing has never been observed to work.
+- **To *observe* a lapse rather than re-purchase, cancel the subscription.**
+  Access runs to the period end, so cancelling converts an open-ended run of
+  daily TestFlight renewals into an expiry on a known date. That is the tool for
+  C-1 / C-26 lapse testing. Device-side sandbox controls also include **Test
+  Interrupted Purchases**, which is Apple's own way to produce the contended
+  purchase state C-13's hazard needs — better than throttling. See
+  `docs/qa-plan.md` step 4.
 - **The two sandboxes keep different time.** Development sandbox (run from
   Xcode) honours the tester's accelerated renewal rate, so a Monthly cycle
   completes in about 30 minutes. **TestFlight ignores that rate entirely** —
