@@ -249,6 +249,18 @@ sheet (headed `[Sandbox]`, £4.99/month, renewing 13 August, offering only Cance
 Subscription), which is Apple's UI and has no Restore button by nature. A
 failure state was deliberately **not** manufactured to expose ours.
 
+**C-36 probe on this path — did NOT reproduce, and that is informative.** The
+empty container after reinstall is exactly the condition C-36 needs, so Profile
+was opened deliberately and left on screen for over a minute. Location rendered
+**"London" immediately, with no blank state at any point**, and
+`account_directory.location` was still populated afterwards. The reason is
+structural: a reinstall has an existing `account_directory` row, so hydration
+seeds the user-scoped local value from the backend before Profile mounts, and
+`ProfileView:1687` reads a populated field — no change, no debounce, no `NULL`
+write. A **first join** has no backend row to hydrate from, which is precisely
+the absence C-36 turns on. **B7 still owns the finding; this run does not
+weaken or close it.**
+
 **Two observations, neither a defect.** The brief onboarding flash is the empty
 container being detected and then superseded once Keychain identity restored.
 And the feed correctly shows posts originally authored through the **Debug**
