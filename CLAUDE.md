@@ -268,6 +268,14 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   tester or a waited-out period**, so design runs to need one purchase rather
   than several. Note the one clean run on record, C-38's, used a *fresh* tester
   — clearing has never been observed to work.
+- **The two sandboxes keep different time.** Development sandbox (run from
+  Xcode) honours the tester's accelerated renewal rate, so a Monthly cycle
+  completes in about 30 minutes. **TestFlight ignores that rate entirely** —
+  Apple documents daily renewal, up to six times in one week, so a TestFlight
+  entitlement lasts roughly six days and cannot be reset on demand. That is why
+  Device B read "Renews 13 August" on a tester configured for five minutes;
+  nothing was misconfigured. Runs needing repeated first purchases belong in the
+  development sandbox.
 - **TestFlight is still a required checkpoint before StoreKit work is settled.**
   The sandbox loop proves the purchase path; it does not prove the artifact beta
   testers actually install. Cut a build at the next clean checkpoint and run QA

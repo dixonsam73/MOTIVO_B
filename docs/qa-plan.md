@@ -27,8 +27,8 @@ at the time.
 | Environment | How to get it | What it proves | What it hides |
 |---|---|---|---|
 | **Synthetic** (`Etudes.storekit`) | Attach in Run → Options. **Opt-in only since 2026-08-11** | Client logic against locally-defined products | Everything server-side — App Store Connect configuration, product vending, real entitlement timing. Apple's sheet reads `[Environment: Xcode]` |
-| **Sandbox** — the preferred loop | Xcode, Run action **Release**, StoreKit Configuration **None**, dedicated Sandbox Apple Account | Real StoreKit against Apple's servers, with debugger and live console attached | The distribution artifact itself |
-| **TestFlight** | Upload a build | The artifact beta testers install, transacting on sandbox IAP | Nothing StoreKit-specific — but it is slow to iterate |
+| **Sandbox** — the preferred loop | Xcode, Run action **Release**, StoreKit Configuration **None**, dedicated Sandbox Apple Account | Real StoreKit against Apple's servers, with debugger and live console attached. **Honours the tester's accelerated renewal rate**, so a full subscription cycle completes in ~30 min | The distribution artifact itself |
+| **TestFlight** | Upload a build | The artifact beta testers install, transacting on sandbox IAP | Nothing StoreKit-specific — but it is slow to iterate, and **subscriptions renew daily for up to a week regardless of the tester's rate**, so an entitlement cannot be reset on demand. See step 4 |
 
 ### The preferred development loop, and it repeats
 
@@ -68,11 +68,38 @@ at the time.
 
    **What actually yields a clean first-purchase state:** a **new sandbox
    tester**, or waiting out the current period. Budget for that when planning,
-   or design the run to need one purchase rather than several. Two levers are
-   plausible but unverified and should not be relied on until someone observes
-   them working: the per-tester *Subscription Renewal Rate* setting in App
-   Store Connect, and letting the accelerated sandbox renewal cycle run to its
-   end (sandbox subscriptions renew a limited number of times, then stop).
+   or design the run to need one purchase rather than several.
+
+   **The two sandboxes keep different time, and conflating them is what made
+   the observation above confusing.** Apple documents that **TestFlight**
+   auto-renewable subscriptions renew **daily, up to six times within a
+   one-week period, regardless of the tester's configured accelerated renewal
+   rate**. Development sandbox — Xcode, Run action Release, StoreKit
+   Configuration None — *does* honour that per-tester rate.
+
+   | | Renewal cadence | Practical lifetime of one purchase |
+   |---|---|---|
+   | **Development sandbox** (run from Xcode) | the tester's configured accelerated rate, e.g. Monthly ≈ 5 min | ~30 min (6 renewals) |
+   | **TestFlight** | **daily, max 6 renewals in one week — tester rate ignored** | **~6 days** |
+
+   This is exactly why Device B showed **"Renews 13 August"** while Tester #2
+   is configured for a five-minute Monthly cadence: the setting was not being
+   applied, because the purchase was made on TestFlight. Nothing was
+   misconfigured. *(Source: Apple's current TestFlight documentation, reported
+   2026-08-12 — external, not observed here. The 13 August renewal date on
+   Device B is consistent with it.)*
+
+   **An earlier version of this step listed the per-tester Subscription Renewal
+   Rate as a plausible lever for resetting a TestFlight entitlement. It is
+   not** — TestFlight ignores it. Do not reach for it there.
+
+   **Planning consequence.** A TestFlight entitlement lasts roughly six days
+   and then lapses on its own. So a clean first-purchase state on the
+   distribution artifact arrives **free, about a week later**, or immediately
+   with a new tester — but it cannot be manufactured on demand within a
+   session. Design TestFlight runs around one purchase. Runs that genuinely
+   need repeated first purchases belong in the development sandbox, where the
+   accelerated rate applies and a cycle completes in half an hour.
 
 ### Two ways this test lies to you
 
@@ -189,6 +216,11 @@ history. That does not work on an already-active subscription — the full
 observation is in step 4 of the development loop above. Restoring the state
 would have meant either creating several more sandbox testers or waiting out
 subscription periods, neither of which is worth it to manufacture repetitions.
+**On TestFlight specifically, "waiting out the period" means about six days** —
+subscriptions there renew daily up to six times regardless of the tester's
+accelerated rate, so the repetitions were never going to be runnable in one
+session on this artifact. If they are wanted, run them in the development
+sandbox, where a full cycle takes half an hour.
 
 **What this does and does not establish.** It establishes the acquisition path
 on the artifact beta testers install, which is what C-9 required and which no
