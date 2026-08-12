@@ -201,6 +201,39 @@ second client will muddy the snapshot.
 | B6 | **PASS — 2026-08-12, TestFlight build 131, Device B.** Signed out normally; local journal, Scores and local attachments all intact; no backend or account deletion; signed back in with SIWA and Connected restored, with existing local data, backend posts and follow relationships unchanged. **Confirmed backend-side rather than from the screen:** `auth.users` for Device B still shows `created_at = 2026-07-23`, so sign-in restored the *same* row rather than minting a new one — the failure this row exists to catch. Note what was **not** covered: nobody checked the Location field across the sign-out, so C-27 is untouched by this run | Sign out, sign back in | Connected restored; no data loss; no account deletion |
 | B7 | **C-36 probe — does the Solo location survive joining?** Set a Location (and a Name) in Solo. Join Connected as in B1. Watch the Location field at the instant sign-in completes, then query `account_directory.location` for the new user **and** check what a second account sees on your profile | The field must not blank out, and the column must hold the location, not `NULL`. Blank field is the read at `ProfileView:1687`; `NULL` in the column is the debounced write ~650 ms later. Both can occur while Profile *later* shows the location again, because `AuthManager:529` repairs the local copy — so **the column is the verdict, not the screen**. Repeat once with the Name field left empty: that path skips the publish entirely and should fail the same way without any race |
 
+### Pre-lapse baseline — 2026-08-12 12:5x, taken while Device B was still entitled
+
+Device B's TestFlight subscription will expire on its own. **C-26's claim is that
+a lapse deletes nothing** — no server-side authority exists to act on expiry, and
+since C-1 the client has none either — so this is the prediction to check
+afterwards. Recorded now because it cannot be taken after the fact.
+
+| | Pre-lapse |
+|---|---|
+| `auth.users` | 16 |
+| `account_directory` | 16 |
+| `posts` (Device B's own) | 98 (3) |
+| `follows` (edges touching Device B) | 8 (6) |
+| `post_comments` | 4 |
+| `connected_attachments` rows | 35 |
+| `attachments` storage objects | 10 |
+| `avatars` storage objects | 4 |
+
+Device B's directory row, all present: display name, account ID, **location**,
+avatar key, 6 instruments, `lookup_enabled` and `follow_requests_enabled` both
+true. `auth.users.created_at = 2026-07-23 13:42:16Z` — the value that proves
+identity was not re-minted.
+
+**Every one of these must be unchanged after the lapse.** Any movement
+contradicts C-26 and is a finding. On the device, expect: Connected withdrawn,
+app drops to Solo, and local journal, Scores, media, profile name, avatar,
+location, instruments and settings all survive untouched — C-1's verified
+behaviour, which has never been observed on the distribution artifact.
+
+**Do not run "Erase All Études Data" on Device B when it lapses.** That is
+C-35's condition and it would destroy the account and the two-device control
+fixture with it. C-35 belongs on a disposable account.
+
 ### Pre-B5 backend baseline — 2026-08-12, recorded *before* the run
 
 B5 deletes the app at the iOS level and reinstalls. **App deletion is not
