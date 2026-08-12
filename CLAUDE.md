@@ -263,10 +263,11 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   is false.** Observed on Device B: history cleared, >10 minutes waited, app
   force-quit and relaunched, tester signed out and in, device restarted — and
   the subscription stayed live, with Apple's own Manage Membership sheet showing
-  it active and renewing. **The clear is not a no-op, though:** Settings →
-  Sandbox Apple Account → Subscriptions simultaneously read "You do not have any
-  subscriptions", so it applies server-side and simply does not revoke what the
-  device already holds. **A clean first-purchase state needs a new sandbox
+  it active and renewing. **Two Apple surfaces disagreed** — Settings → Sandbox
+  Apple Account → Subscriptions simultaneously read "You do not have any
+  subscriptions". That disagreement is the observation; **where the retained
+  entitlement state lives is unknown and is not needed for any current work.**
+  **A clean first-purchase state needs a new sandbox
   tester or a waited-out period**, so design runs to need one purchase rather
   than several. Note the one clean run on record, C-38's, used a *fresh* tester
   — clearing has never been observed to work.

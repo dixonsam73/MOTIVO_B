@@ -62,13 +62,21 @@ at the time.
 
    - **Clear Purchase History does not withdraw a live entitlement**, and
      nothing about waiting, relaunching, re-signing-in or rebooting changes
-     that. **Mechanism corrected later the same day, and it is not a no-op:**
-     Settings → Developer → Sandbox Apple Account → Subscriptions read **"You
-     do not have any subscriptions"** while the in-app Manage Membership sheet
+     that. **What was actually observed, stated as observation:** Settings →
+     Developer → Sandbox Apple Account → Subscriptions read **"You do not have
+     any subscriptions"** while the in-app Manage Membership sheet
      simultaneously showed the plan **active, £4.99/month, renewing 13 August**.
-     Both are Apple's UI. So the clear *did* apply to the sandbox account
-     server-side; what it does not do is revoke what the device already holds,
-     which is what `currentEntitlements` reports and what the app renders.
+     Both are Apple's UI. **So two Apple surfaces disagreed, and the app kept a
+     live entitlement throughout. That is the whole finding.**
+     **Everything beyond it is hypothesis and is labelled as such:** it is
+     *plausible* that the clear applies to the sandbox account while the device
+     retains its own entitlement state, but nothing here establishes **where the
+     retained state actually lives**, nor whether the two surfaces query the
+     same source at different scopes. An earlier version of this step asserted
+     that mechanism as fact on the strength of the disagreement alone. It does
+     not follow, and settling it is not needed for any current work — the
+     operational rule is simply that clearing does not withdraw a live
+     entitlement.
    - **Cancelling does not give an immediate reset either** — access continues
      to the period end by design. **But do not read that as "cancelling is
      useless", which an earlier version of this step implied.** Cancelling
@@ -246,6 +254,20 @@ Device B's directory row, all present: display name, account ID, **location**,
 avatar key, 6 instruments, `lookup_enabled` and `follow_requests_enabled` both
 true. `auth.users.created_at = 2026-07-23 13:42:16Z` — the value that proves
 identity was not re-minted.
+
+**Pre-lapse device state, 2026-08-12 12:57.** The subscription was **cancelled
+deliberately**, to convert an open-ended run of daily TestFlight renewals into an
+expiry on a known date — cancelling is the tool for *observing* a lapse, as
+distinct from resetting to a first-purchase state, which it does not do. Apple's
+sandbox sheet then read **"You have cancelled your subscription. Your
+subscription ends on 13 August"**, offering *Renew £4.99/month*. **Études
+remained Connected immediately afterwards**, which is correct: cancellation stops
+renewal and does not withdraw a still-active entitlement.
+
+Device B is being left untouched from that point. When the lapse occurs, the app
+state is to be **observed before anything is manipulated** — no relaunch, no
+sign-out, no Profile edits — so that what is recorded is the app's own response
+to expiry rather than a response to being prodded.
 
 **Every one of these must be unchanged after the lapse.** Any movement
 contradicts C-26 and is a finding. On the device, expect: Connected withdrawn,
