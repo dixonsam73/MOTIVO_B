@@ -37,11 +37,42 @@ at the time.
 2. **StoreKit Configuration = None** in Run → Options.
 3. A **dedicated Sandbox Apple Account**, signed in under Settings → Developer
    on the test device. Not a personal Apple ID.
-4. **Between clean-purchase tests, clear that tester's purchase history in App
-   Store Connect** (Users and Access → Sandbox → the tester). This restores a
-   genuine first-purchase state without creating a new account and without
-   waiting for a subscription to lapse — the C-38 attempt had to wait for one,
-   and it cost a day.
+4. **Getting back to a clean first-purchase state is the hard part, and there
+   is no quick lever. CORRECTED 2026-08-12 — read this before planning any
+   run that needs repeated purchases.**
+
+   This step previously read: *"Between clean-purchase tests, clear that
+   tester's purchase history in App Store Connect. This restores a genuine
+   first-purchase state without creating a new account and without waiting for
+   a subscription to lapse."* **That is false, and it was never observed — it
+   was written from expectation.** Note what the one successful clean run
+   actually used: the C-38 attempt on 2026-08-11 ran on a **fresh Sandbox Apple
+   Account**, not a cleared one, so clearing has no supporting evidence behind
+   it anywhere in this repository.
+
+   **Observed 2026-08-12, Device B, TestFlight build 131.** Purchase history
+   was cleared in App Store Connect; then >10 minutes elapsed, the app was
+   force-quit and relaunched repeatedly, the sandbox tester was signed out and
+   back in, and the device was restarted. **Études remained Connected
+   throughout.** Apple's own Manage Membership sheet on the device showed the
+   subscription **active at £4.99/month, renewing 13 August**, and stated that
+   cancelling would still leave access until that date.
+
+   So, for an already-active subscription:
+
+   - **Clear Purchase History does not withdraw a live entitlement**, and
+     nothing about waiting, relaunching, re-signing-in or rebooting changes
+     that.
+   - **Cancelling does not either** — access continues to the period end by
+     design, which is correct StoreKit behaviour and not a defect.
+
+   **What actually yields a clean first-purchase state:** a **new sandbox
+   tester**, or waiting out the current period. Budget for that when planning,
+   or design the run to need one purchase rather than several. Two levers are
+   plausible but unverified and should not be relied on until someone observes
+   them working: the per-tester *Subscription Renewal Rate* setting in App
+   Store Connect, and letting the accelerated sandbox renewal cycle run to its
+   end (sandbox subscriptions renew a limited number of times, then stop).
 
 ### Two ways this test lies to you
 
@@ -55,9 +86,12 @@ Account line, versus `[Environment: Xcode]` for synthetic.
 does **not** mean non-entitled — the app resolves to Solo whenever identity is
 absent, whatever the subscription is doing, and on 2026-08-11 a device sat in
 Solo with a live entitlement for an hour before that was noticed. With the
-diagnostic instrumentation now removed, **the sandbox tester's purchase history
-in App Store Connect is the authoritative check**, and clearing it is what
-guarantees the state rather than assuming it.
+diagnostic instrumentation now removed, **Apple's own Manage Membership sheet on
+the device is the authoritative check** — it names the plan, the price, the
+renewal date and whether access continues after cancellation. Prefer it to App
+Store Connect's purchase-history view, which showed a cleared history on
+2026-08-12 while the device still held a live, renewing subscription. **Clearing
+purchase history does not guarantee any state; see step 4 above.**
 
 ### TestFlight remains a required checkpoint
 
@@ -78,7 +112,7 @@ them.
 | Installs | Release only | Release **and** Debug, side by side |
 | iCloud account | its own | a second, different one |
 | Sandbox tester | dedicated tester #1 | dedicated tester #2 |
-| After a destructive run | clear tester #1's purchase history to restore a first-purchase state | left intact |
+| After a destructive run | **a new sandbox tester, or wait out the current period.** Clearing purchase history does **not** withdraw a live entitlement — see step 4 above | left intact |
 
 ### Why the constraints are what they are
 
@@ -133,12 +167,43 @@ second client will muddy the snapshot.
 | # | Steps | Expected |
 |---|---|---|
 | B1 | Profile → Explore Connected → Continue → Monthly → purchase | Sandbox purchase, then SIWA, then Connected active |
-| B2 | **C-13 probe:** repeat B1 several times on a slow or throttled connection | Purchase must always complete through to sign-in. A permanently spinning Continue button confirms the unterminating loop. **First-run coverage, not a re-test:** the loop made `refreshEntitlement`'s forced re-entry unreachable, so the second, fresh entitlement refresh has never executed in any build. Watch for a wrong entitlement state after a verified purchase — "Purchase verified but no active membership" — as well as for a hang. **This has now been observed: C-38, 2026-08-11.** The alert appears immediately after a successful purchase and Connected activates on the next foreground, so a tester who backgrounds the app before re-reading the screen will record a pass. When running this row, treat the alert itself as the failure and do not let the subsequent recovery erase it |
+| B2 | **C-13 probe:** repeat B1 several times on a slow or throttled connection. **PARTIALLY RUN 2026-08-12 on TestFlight build 131 (Device B) — see the result note, and read step 4 of the development loop before planning a re-run.** The repetition this row asks for **was not runnable**: it assumes a clean first-purchase state can be restored between attempts by clearing the tester's purchase history, and that assumption is false. The single attempt that did run was a genuine distributed-artifact purchase and passed | Purchase must always complete through to sign-in. A permanently spinning Continue button confirms the unterminating loop. **First-run coverage, not a re-test:** the loop made `refreshEntitlement`'s forced re-entry unreachable, so the second, fresh entitlement refresh has never executed in any build. Watch for a wrong entitlement state after a verified purchase — "Purchase verified but no active membership" — as well as for a hang. **This has now been observed: C-38, 2026-08-11.** The alert appears immediately after a successful purchase and Connected activates on the next foreground, so a tester who backgrounds the app before re-reading the screen will record a pass. When running this row, treat the alert itself as the failure and do not let the subsequent recovery erase it |
 | B3 | Check pre-existing Group A sessions | Still present, still private. Confirm none appear in another account's feed |
 | B4 | Create a session, tap Save without touching Visibility | Observe whether it shares — D-1 behaviour check |
 | B5 | Delete and reinstall; Restore Purchases | Entitlement restored, Connected reactivated |
 | B6 | Sign out, sign back in | Connected restored; no data loss; no account deletion |
 | B7 | **C-36 probe — does the Solo location survive joining?** Set a Location (and a Name) in Solo. Join Connected as in B1. Watch the Location field at the instant sign-in completes, then query `account_directory.location` for the new user **and** check what a second account sees on your profile | The field must not blank out, and the column must hold the location, not `NULL`. Blank field is the read at `ProfileView:1687`; `NULL` in the column is the debounced write ~650 ms later. Both can occur while Profile *later* shows the location again, because `AuthManager:529` repairs the local copy — so **the column is the verdict, not the screen**. Repeat once with the Name field left empty: that path skips the publish entirely and should fail the same way without any race |
+
+### B2 result — 2026-08-12, TestFlight build 131, Device B
+
+**One attempt, and it passed.** Monthly purchase on the distribution artifact,
+on real sandbox StoreKit: the purchase completed, **no C-13 hang** (Continue
+resolved normally), **no C-38 false-failure alert**, and Connected activated.
+Device B held surviving Connected identity, so it went straight to Connected
+with no Sign in with Apple prompt — expected, not a deviation.
+
+**The throttled repetitions were not run, and the reason is a defect in this
+plan rather than a decision to skip them.** B2's design assumed the tester could
+be returned to a first-purchase state between attempts by clearing purchase
+history. That does not work on an already-active subscription — the full
+observation is in step 4 of the development loop above. Restoring the state
+would have meant either creating several more sandbox testers or waiting out
+subscription periods, neither of which is worth it to manufacture repetitions.
+
+**What this does and does not establish.** It establishes the acquisition path
+on the artifact beta testers install, which is what C-9 required and which no
+sandbox run could supply. It does **not** exercise C-13's hazard condition — a
+forced entitlement refresh racing one already in flight — which has still never
+occurred in any run, throttled or otherwise. C-13 remains closed on the source
+being provably gone and build-verified, exactly as its cell already states; this
+run does not strengthen that and was never going to on a single attempt.
+
+**If the repetitions are ever wanted**, budget a fresh sandbox tester per
+attempt and use the two shapes designed for it: throttled with the device
+untouched after payment (the honest read for C-38, whose alert self-heals on the
+next foreground), and throttled with a deliberate lock/unlock immediately after
+payment to force a `scenePhase` refresh into the window (the most direct route
+to C-13's hazard, accepting that it can mask C-38).
 
 ## Group C — Membership lifecycle (disposable account)
 

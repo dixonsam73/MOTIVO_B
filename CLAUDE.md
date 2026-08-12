@@ -256,9 +256,18 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   exactly how a Release QA pass was once mistaken for real-StoreKit evidence.
 - **Preferred StoreKit testing loop**, documented in full in `docs/qa-plan.md`:
   Xcode + Release + StoreKit Configuration **None** + a dedicated Sandbox Apple
-  Account, clearing that tester's purchase history in App Store Connect between
-  clean-purchase tests. Repeatable, and needs neither new accounts nor a
-  subscription lapse — the C-38 attempt waited a day for one.
+  Account. **It is not cheaply repeatable — corrected 2026-08-12.** This line
+  used to claim that clearing the tester's purchase history in App Store Connect
+  restores a first-purchase state "without creating a new account and without
+  waiting for a subscription to lapse". **That was written from expectation and
+  is false.** Observed on Device B: history cleared, >10 minutes waited, app
+  force-quit and relaunched, tester signed out and in, device restarted — and
+  the subscription stayed live, with Apple's own Manage Membership sheet showing
+  it active and renewing. Cancelling does not help either; access runs to the
+  period end by design. **A clean first-purchase state needs a new sandbox
+  tester or a waited-out period**, so design runs to need one purchase rather
+  than several. Note the one clean run on record, C-38's, used a *fresh* tester
+  — clearing has never been observed to work.
 - **TestFlight is still a required checkpoint before StoreKit work is settled.**
   The sandbox loop proves the purchase path; it does not prove the artifact beta
   testers actually install. Cut a build at the next clean checkpoint and run QA
