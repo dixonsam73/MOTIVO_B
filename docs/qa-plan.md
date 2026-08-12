@@ -197,7 +197,7 @@ second client will muddy the snapshot.
 | B2 | **C-13 probe:** repeat B1 several times on a slow or throttled connection. **PARTIALLY RUN 2026-08-12 on TestFlight build 131 (Device B) — see the result note, and read step 4 of the development loop before planning a re-run.** The repetition this row asks for **was not runnable**: it assumes a clean first-purchase state can be restored between attempts by clearing the tester's purchase history, and that assumption is false. The single attempt that did run was a genuine distributed-artifact purchase and passed | Purchase must always complete through to sign-in. A permanently spinning Continue button confirms the unterminating loop. **First-run coverage, not a re-test:** the loop made `refreshEntitlement`'s forced re-entry unreachable, so the second, fresh entitlement refresh has never executed in any build. Watch for a wrong entitlement state after a verified purchase — "Purchase verified but no active membership" — as well as for a hang. **This has now been observed: C-38, 2026-08-11.** The alert appears immediately after a successful purchase and Connected activates on the next foreground, so a tester who backgrounds the app before re-reading the screen will record a pass. When running this row, treat the alert itself as the failure and do not let the subsequent recovery erase it |
 | B3 | Check pre-existing Group A sessions | Still present, still private. Confirm none appear in another account's feed |
 | B4 | Create a session, tap Save without touching Visibility | Observe whether it shares — D-1 behaviour check |
-| B5 | Delete and reinstall; Restore Purchases | Entitlement restored, Connected reactivated |
+| B5 | Delete and reinstall; Restore Purchases. **iOS-level app deletion only — never "Erase All Études Data", which is a backend account deletion and would destroy the state this row checks survives.** **CORRECTED 2026-08-12: this row asks for a step that is unreachable on a successful run, and the reason is by design.** There are two outcomes, and the *better* one has no Restore button. **(a) Automatic recovery — the expected pass.** The Keychain survives app deletion and the entitlement is account-bound, so the reinstalled app restores identity and entitlement unaided and lands in Connected. **(b) Automatic recovery fails** — the app sits in Solo, and only then is Restore Purchases reachable. `restorePurchases()` has exactly one UI entry point, `MembershipSelectionView:217`, reached only via Profile → *Explore Connected* → Continue; `ProfileView:317` renders that section only in the `else` branch of `canShowConnectedAccountManagement`, which is true only when `mode == .connected`. **So Restore is unreachable to anyone already Connected — correct, since the control exists for the state where recovery did not happen.** Do not manufacture a failure state to expose the button. Record Restore as *not applicable* whenever (a) occurs | **(a) is the pass**: entitlement and identity restored automatically, Connected reactivated, no SIWA sheet, no blank-chevron state, no Solo fallback. Local journal and Scores are **empty and correctly so** — the container is gone and, until Phase 2 (C-4), media does not participate in Apple backup, so this loss is permanent and expected. The backend must be **untouched**: verify against a count baseline recorded *before* the run, and treat any new `auth.users` row as a failure — it would mean the reinstall minted a new account instead of restoring the existing one |
 | B6 | **PASS — 2026-08-12, TestFlight build 131, Device B.** Signed out normally; local journal, Scores and local attachments all intact; no backend or account deletion; signed back in with SIWA and Connected restored, with existing local data, backend posts and follow relationships unchanged. **Confirmed backend-side rather than from the screen:** `auth.users` for Device B still shows `created_at = 2026-07-23`, so sign-in restored the *same* row rather than minting a new one — the failure this row exists to catch. Note what was **not** covered: nobody checked the Location field across the sign-out, so C-27 is untouched by this run | Sign out, sign back in | Connected restored; no data loss; no account deletion |
 | B7 | **C-36 probe — does the Solo location survive joining?** Set a Location (and a Name) in Solo. Join Connected as in B1. Watch the Location field at the instant sign-in completes, then query `account_directory.location` for the new user **and** check what a second account sees on your profile | The field must not blank out, and the column must hold the location, not `NULL`. Blank field is the read at `ProfileView:1687`; `NULL` in the column is the debounced write ~650 ms later. Both can occur while Profile *later* shows the location again, because `AuthManager:529` repairs the local copy — so **the column is the verdict, not the screen**. Repeat once with the Name field left empty: that path skips the publish entirely and should fail the same way without any race |
 
@@ -222,6 +222,40 @@ the aftermath — D14's lesson.
 **Any movement here is a failure**, and specifically a 17th `auth.users` row
 would mean the reinstall minted a new account instead of restoring the existing
 one — the worst outcome this row can produce.
+
+### B5 result — 2026-08-12, TestFlight build 131, Device B
+
+**Reinstall half: PASS, via automatic recovery.** Release/TestFlight Études
+deleted at the iOS level (Études Dev untouched), build 131 reinstalled from
+TestFlight. Onboarding appeared briefly and dismissed itself, then the app landed
+directly on the timer **in Connected, already signed in** — no SIWA sheet, no
+blank-chevron state, no Solo fallback. **That re-verifies C-24's fix on the
+distribution artifact**, where it had previously been verified only on a
+development build and under the synthetic StoreKit configuration.
+
+**The backend was untouched, checked against a baseline recorded before the
+run.** All eight counts identical: `auth.users` 16, `account_directory` 16,
+`posts` 98 (Device B's own 3), `follows` 8, `post_comments` 4,
+`connected_attachments` 35, `attachments` objects 10, `avatars` objects 4.
+**No 17th user row** — the reinstall restored `dfaf8d18…` rather than minting a
+new account, which is the worst outcome this row can produce. Device B's
+directory row also survived intact: display name, account ID, location, avatar
+key, six instruments, both flags true.
+
+**Restore Purchases: NOT APPLICABLE, not skipped.** Automatic restoration
+succeeded, and the control is unreachable from Connected by design — see the row
+above for the mechanism. Opening Manage Membership reaches Apple's own sandbox
+sheet (headed `[Sandbox]`, £4.99/month, renewing 13 August, offering only Cancel
+Subscription), which is Apple's UI and has no Restore button by nature. A
+failure state was deliberately **not** manufactured to expose ours.
+
+**Two observations, neither a defect.** The brief onboarding flash is the empty
+container being detected and then superseded once Keychain identity restored.
+And the feed correctly shows posts originally authored through the **Debug**
+client under Account B — because SIWA identifiers are team-scoped, so Études Dev
+and the Release install have always been two clients on one backend account.
+No container crossover is implied, and the deleted container could not have
+supplied them.
 
 ### B2 result — 2026-08-12, TestFlight build 131, Device B
 
