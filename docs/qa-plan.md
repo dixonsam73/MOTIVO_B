@@ -198,8 +198,30 @@ second client will muddy the snapshot.
 | B3 | Check pre-existing Group A sessions | Still present, still private. Confirm none appear in another account's feed |
 | B4 | Create a session, tap Save without touching Visibility | Observe whether it shares — D-1 behaviour check |
 | B5 | Delete and reinstall; Restore Purchases | Entitlement restored, Connected reactivated |
-| B6 | Sign out, sign back in | Connected restored; no data loss; no account deletion |
+| B6 | **PASS — 2026-08-12, TestFlight build 131, Device B.** Signed out normally; local journal, Scores and local attachments all intact; no backend or account deletion; signed back in with SIWA and Connected restored, with existing local data, backend posts and follow relationships unchanged. **Confirmed backend-side rather than from the screen:** `auth.users` for Device B still shows `created_at = 2026-07-23`, so sign-in restored the *same* row rather than minting a new one — the failure this row exists to catch. Note what was **not** covered: nobody checked the Location field across the sign-out, so C-27 is untouched by this run | Sign out, sign back in | Connected restored; no data loss; no account deletion |
 | B7 | **C-36 probe — does the Solo location survive joining?** Set a Location (and a Name) in Solo. Join Connected as in B1. Watch the Location field at the instant sign-in completes, then query `account_directory.location` for the new user **and** check what a second account sees on your profile | The field must not blank out, and the column must hold the location, not `NULL`. Blank field is the read at `ProfileView:1687`; `NULL` in the column is the debounced write ~650 ms later. Both can occur while Profile *later* shows the location again, because `AuthManager:529` repairs the local copy — so **the column is the verdict, not the screen**. Repeat once with the Name field left empty: that path skips the publish entirely and should fail the same way without any race |
+
+### Pre-B5 backend baseline — 2026-08-12, recorded *before* the run
+
+B5 deletes the app at the iOS level and reinstalls. **App deletion is not
+account deletion**, so the prediction is that every one of these is unchanged
+afterwards. Written down first, so the check is binary rather than a reading of
+the aftermath — D14's lesson.
+
+| | Baseline |
+|---|---|
+| `auth.users` | 16 |
+| `account_directory` | 16 |
+| `posts` (Device B's own) | 98 (3) |
+| `follows` | 8 |
+| `post_comments` | 4 |
+| `connected_attachments` rows | 35 |
+| `attachments` storage objects | 10 |
+| `avatars` storage objects | 4 |
+
+**Any movement here is a failure**, and specifically a 17th `auth.users` row
+would mean the reinstall minted a new account instead of restoring the existing
+one — the worst outcome this row can produce.
 
 ### B2 result — 2026-08-12, TestFlight build 131, Device B
 
