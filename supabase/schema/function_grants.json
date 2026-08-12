@@ -75,7 +75,7 @@
     "proname": "follow_requests_open"
   },
   {
-    "can_execute": true,
+    "can_execute": false,
     "grantee": "anon",
     "proname": "get_account_directory_by_user_ids"
   },
@@ -85,7 +85,7 @@
     "proname": "get_account_directory_by_user_ids"
   },
   {
-    "can_execute": true,
+    "can_execute": false,
     "grantee": "service_role",
     "proname": "get_account_directory_by_user_ids"
   },
@@ -165,7 +165,7 @@
     "proname": "respond_to_commenters"
   },
   {
-    "can_execute": true,
+    "can_execute": false,
     "grantee": "anon",
     "proname": "search_account_directory"
   },
@@ -175,7 +175,7 @@
     "proname": "search_account_directory"
   },
   {
-    "can_execute": true,
+    "can_execute": false,
     "grantee": "service_role",
     "proname": "search_account_directory"
   },
