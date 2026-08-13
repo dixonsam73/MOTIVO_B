@@ -1645,9 +1645,36 @@ case .failure(let error):
              return
          }
 
-         // Connected mode: delete the backend account first, then perform the same local factory reset.
-         guard BackendEnvironment.shared.isConnected else {
-             deleteAccountErrorMessage = "Études Connected is not currently available. Please try again."
+         // Delete the backend account first, then perform the same local factory reset.
+         //
+         // C-35, SECOND MECHANISM — found by QA on 2026-08-13, after the first fix
+         // had passed a structural audit.
+         //
+         // This guard read `BackendEnvironment.shared.isConnected`, which is
+         // `currentBackendMode() == .backendConnected` — a runtime SERVICE-SELECTION
+         // mode, chosen by AppModeManager.applyBackendRuntimeMode, which sets
+         // .localSimulation for .solo and .backendConnected for .connected. AppMode
+         // is resolved from `isEntitled`. So the moment a member lapsed, this guard
+         // failed and the alert said "not currently available. Please try again" —
+         // a retry that could never succeed.
+         //
+         // That is C-35's own defect a second time, reached by a different route:
+         // an ENTITLEMENT DEPENDENCY LAUNDERED THROUGH A UserDefaults KEY. The
+         // deletion path was audited for `isEntitled`, `AppMode` and
+         // `canShowConnectedAccountManagement` and contained none of them by name,
+         // which is precisely why a grep could not find this and running it could.
+         //
+         // BackendConfig.isConfigured is the right precondition: it reads the
+         // bundled apiBaseURL and apiToken, is independent of AppMode, and is the
+         // actual requirement of the request — deleteCurrentConnectedAccount builds
+         // its own URLRequest against BackendConfig.apiBaseURL via URLSession and
+         // never touches BackendEnvironment at all. The service re-checks the same
+         // condition and throws .backendNotConfigured, so this is a friendly
+         // pre-check rather than the authority.
+         //
+         // Do not reintroduce any BackendEnvironment or AppMode term here.
+         guard BackendConfig.isConfigured else {
+             deleteAccountErrorMessage = "Études Connected is unavailable. Please try again."
              showDeleteAccountErrorAlert = true
              return
          }
