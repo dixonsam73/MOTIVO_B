@@ -68,6 +68,12 @@ struct MOTIVOApp: App {
     private let identityService: IdentityService
     @StateObject private var auth: AuthManager
     @StateObject private var appRoute = AppRouteStore()
+    // C-44 — TN3194's manual-revocation fallback notice. Owned here, and
+    // presented from the root ZStack below, because ProfileView (where deletion
+    // is initiated) is a conditional overlay driven by appRoute.isProfilePresented
+    // and can legitimately be gone by the time the notice is due. The root
+    // WindowGroup content is never destroyed while the app runs.
+    @StateObject private var appleRevocationNotice = AppleRevocationNotice.shared
     @StateObject private var appModeManager: AppModeManager
     @StateObject private var connectedMembershipStore: ConnectedMembershipStore
     @Environment(\.scenePhase) private var scenePhase
@@ -216,6 +222,19 @@ struct MOTIVOApp: App {
                 }
             }
                 .environment(\.managedObjectContext, persistenceController.container.viewContext)
+                // C-44 — TN3194 step 2: "Direct the user to manually revoke
+                // access for your client." Shown only when revocation did not
+                // succeed and deletion did, so it never contradicts itself by
+                // pointing at an entry that is no longer there. Attached to the
+                // root so it survives the navigation hierarchy being reset.
+                .alert(
+                    "Remove Études from your Apple Account",
+                    isPresented: $appleRevocationNotice.isPending
+                ) {
+                    Button("OK", role: .cancel) { }
+                } message: {
+                    Text("Your Études account and data have been deleted.\n\nWe couldn’t remove Études from your Apple Account automatically. To finish, open Settings → your name → Sign in with Apple, select Études, and choose Stop using Apple Account.")
+                }
                 .environmentObject(auth)
                 .environmentObject(appRoute)
                 .environmentObject(appModeManager)

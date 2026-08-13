@@ -1638,10 +1638,14 @@ case .failure(let error):
          // If there is no Connected identity there is genuinely nothing remote to
          // delete, and the local reset is correct.
          guard auth.hasConnectedIdentity else {
-             deleteAccountInFlight = true
-             showDeleteAccountSheet = false
-             await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
-             deleteAccountInFlight = false
+             // C-44: wrapped so the whole destructive workflow is covered, not
+             // just the reset phase. See AccountDeletionTransaction.
+             await AccountDeletionTransaction.run(reason: "erase-all-etudes-data-local") {
+                 deleteAccountInFlight = true
+                 defer { deleteAccountInFlight = false }
+                 showDeleteAccountSheet = false
+                 await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
+             }
              return
          }
 
@@ -1679,8 +1683,32 @@ case .failure(let error):
              return
          }
 
+         // C-44: the entire destructive workflow runs inside one transaction —
+         // Apple authorization, revocation, backend deletion, local reset. C-45's
+         // credential-state observer reads this flag and defers, because a
+         // SUCCESSFUL revocation makes Apple report `.revoked`, and signing out
+         // on that signal mid-workflow would destroy the Supabase session that
+         // delete_account_v1 still needs.
+         await AccountDeletionTransaction.run(reason: "delete-account") {
          deleteAccountInFlight = true
          defer { deleteAccountInFlight = false }
+
+         // C-44: revoke BEFORE deleting. The order is forced — delete_account_v1
+         // removes the auth.users row that authenticates this call. The converse
+         // was checked and is safe: revoking at Apple does not invalidate the
+         // Supabase JWT, which is independent of Apple's grant.
+         //
+         // `attemptRevocation` cannot throw. That is the structural guarantee
+         // that a revocation failure can never prevent deletion (TN3194: "you
+         // must still fulfill the user's account deletion request"). Do not
+         // "improve" this into a throwing call.
+         let revocation = await AppleRevocationService.attemptRevocation(
+             auth: auth,
+             reason: "delete-account"
+         )
+         #if DEBUG
+         NSLog("[C-44] revocation outcome=%@", revocation.summary)
+         #endif
 
          do {
              try await ConnectedAccountDeletionService.deleteCurrentConnectedAccount(
@@ -1689,6 +1717,14 @@ case .failure(let error):
              )
              showDeleteAccountSheet = false
              await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
+
+             // TN3194 step 2 — "Direct the user to manually revoke access for
+             // your client" — shown only when revocation did not succeed, and
+             // only after deletion has. Presented from the app root, not here:
+             // ProfileView is a conditional overlay and may be gone by now.
+             if !revocation.didRevoke {
+                 AppleRevocationNotice.shared.isPending = true
+             }
          } catch {
              // C-35: distinguish "your session expired" from "we couldn't reach the
              // server", because the recoveries differ and the old copy told the user
@@ -1704,6 +1740,7 @@ case .failure(let error):
                  : "Your session has expired. Sign in with Apple again to delete your account — you don’t need to re-subscribe."
              showDeleteAccountErrorAlert = true
          }
+         } // AccountDeletionTransaction.run
      }
 
 private func initials(from string: String) -> String {

@@ -14,6 +14,18 @@
 
 project_id = "rlwtqxumfobakvdueugm"
 
+[functions.revoke_apple_identity_v1]
+# C-44 — Sign in with Apple revocation at account-deletion time.
+#
+# verify_jwt = false mirrors delete_account_v1 rather than being stricter than
+# it, deliberately: this function performs its own auth.getUser(token) and
+# derives the caller from the verified token, never from the request body, and
+# both destructive-path functions should have ONE authorisation story rather
+# than two. It also binds the exchanged Apple `sub` to that verified caller's
+# Apple provider identity before revoking anything, so it cannot be aimed at a
+# third party's authorization.
+verify_jwt = false
+
 [functions.delete_account_v1]
 # verify_jwt = false is NOT a relaxation. The function performs its own check
 # and it is stricter than the gateway's: it calls auth.getUser(token) and
