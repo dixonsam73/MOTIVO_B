@@ -812,12 +812,35 @@ private var sessionSetupSection: some View {
          }
      }
 
+     // C-35: every user-facing string below and the operation itself switch on the
+     // SAME expression, `auth.hasConnectedIdentity`. That is deliberate and
+     // structural — it makes it impossible to promise account deletion and perform
+     // only a local wipe, or the reverse. Do not introduce a second predicate here,
+     // and never gate any of it on entitlement or AppMode: a lapsed member holding
+     // a backend account must get the Delete Account wording and behaviour.
+
+     /// Destructive control title. Names account deletion explicitly whenever
+     /// there is an account to delete.
+     private var destructiveActionTitle: String {
+         auth.hasConnectedIdentity ? "Delete Account & All Études Data" : "Erase All Études Data"
+     }
+
+     /// The word the user must type. Matches the verb in the title so the
+     /// confirmation cannot read incongruously against the button.
+     private var destructiveConfirmWord: String {
+         auth.hasConnectedIdentity ? "DELETE" : "ERASE"
+     }
+
+     private var destructiveInFlightTitle: String {
+         auth.hasConnectedIdentity ? "Deleting…" : "Erasing…"
+     }
+
      private var eraseAllEtudesDataButton: some View {
          Button {
              deleteAccountConfirmText = ""
              showDeleteAccountSheet = true
          } label: {
-             Text("Erase All Études Data")
+             Text(destructiveActionTitle)
                  .foregroundStyle(.red)
                  .frame(maxWidth: .infinity, alignment: .leading)
                  .frame(minHeight: 44, alignment: .center)
@@ -1483,8 +1506,25 @@ case .failure(let error):
      
 
      private var eraseAllEtudesDataExplanation: String {
-         if appModeManager.canShowConnectedAccountManagement {
-             return "This permanently erases everything stored in Études on this device and deletes your Études Connected account, including its profile, posts, attachments, follows, comments, and avatar. Études will return to its first-launch state. This can’t be undone."
+         // C-35: gated on identity, never on entitlement — a lapsed member holding
+         // a backend account must be told the truth about what will be deleted.
+         //
+         // The Connected text was also inaccurate before 2026-08-13: it promised
+         // deletion of "comments" while B-3 retained them and B-1 preserved sent
+         // attachments. Both rules were revised so the promise and the operation
+         // now match; if that ever changes again, this string changes with it.
+         if auth.hasConnectedIdentity {
+             return """
+             This permanently deletes your Études Connected account and the data associated with it — your profile, posts, comments, avatar, follows, and the attachments you have sent.
+
+             It also erases everything stored in Études on this device: your Journal, Scores, profile, attachments, instruments, activities and settings. Études will return to its first-launch state.
+
+             Files you have already sent may remain on the devices of people you sent them to.
+
+             Deleting your account does not cancel an App Store subscription.
+
+             This can’t be undone.
+             """
          }
          return "This permanently erases everything stored in Études on this device, including your Journal, Scores, profile, attachments, instruments, activities, and settings. Études will return to its first-launch state. This can’t be undone."
      }
@@ -1500,10 +1540,35 @@ case .failure(let error):
                      }
                      .cardSurface()
 
-                     VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
-                         Text("Type ERASE to confirm").sectionHeader()
+                     // Non-destructive, and deliberately kept separate from the
+                     // confirmation below. Deleting the account does not cancel App
+                     // Store billing, so this offers the native sheet rather than
+                     // only naming Settings. It is a convenience beside deletion,
+                     // never a prerequisite for it: the delete action stays
+                     // immediately available whatever the subscription state, which
+                     // is why this is gated on identity like everything else here
+                     // and not on entitlement.
+                     if auth.hasConnectedIdentity {
+                         Button {
+                             Task { await openManageMembership() }
+                         } label: {
+                             HStack {
+                                 Text("Manage Subscription")
+                                 Spacer()
+                                 Image(systemName: "arrow.up.forward.app")
+                             }
+                             .font(Theme.Text.body)
+                             .frame(minHeight: 44)
+                         }
+                         .buttonStyle(.plain)
+                         .contentShape(Rectangle())
+                         .cardSurface()
+                     }
 
-                         TextField("ERASE", text: $deleteAccountConfirmText)
+                     VStack(alignment: .leading, spacing: Theme.Spacing.inline) {
+                         Text("Type \(destructiveConfirmWord) to confirm").sectionHeader()
+
+                         TextField(destructiveConfirmWord, text: $deleteAccountConfirmText)
                              .textInputAutocapitalization(.characters)
                              .autocorrectionDisabled()
                              .font(Theme.Text.body)
@@ -1527,7 +1592,7 @@ case .failure(let error):
                                  ProgressView()
                                      .padding(.trailing, 6)
                              }
-                             Text(deleteAccountInFlight ? "Erasing…" : "Erase All Études Data")
+                             Text(deleteAccountInFlight ? destructiveInFlightTitle : destructiveActionTitle)
                                  .font(Theme.Text.body.weight(.semibold))
                              Spacer()
                          }
@@ -1540,15 +1605,15 @@ case .failure(let error):
                          )
                      }
                      .buttonStyle(.plain)
-                     .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "ERASE")
-                     .opacity(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != "ERASE" ? 0.5 : 1.0)
+                     .disabled(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != destructiveConfirmWord)
+                     .opacity(deleteAccountInFlight || deleteAccountConfirmText.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() != destructiveConfirmWord ? 0.5 : 1.0)
                  }
                  .padding(.horizontal, Theme.Spacing.l)
                  .padding(.vertical, Theme.Spacing.section)
              }
              .appBackground()
              .tint(Theme.Colors.accent)
-             .navigationTitle("Erase All Études Data")
+             .navigationTitle(destructiveActionTitle)
              .navigationBarTitleDisplayMode(.inline)
              .toolbar {
                  ToolbarItem(placement: .cancellationAction) {
@@ -1562,8 +1627,17 @@ case .failure(let error):
 
 
      private func performDeleteAccount() async {
-         // In Études mode there is no backend account to delete. Perform the local factory reset directly.
-         guard appModeManager.canShowConnectedAccountManagement else {
+         // C-35: gated on IDENTITY, not on AppMode.
+         //
+         // This guard used to read `appModeManager.canShowConnectedAccountManagement`,
+         // which is `mode == .connected` and therefore folds in `isEntitled`. A lapsed
+         // member holding a full backend account fell through to the local-only branch,
+         // so the only route to deleting their account was to re-subscribe first.
+         //
+         // Membership must never decide whether an existing account can be deleted.
+         // If there is no Connected identity there is genuinely nothing remote to
+         // delete, and the local reset is correct.
+         guard auth.hasConnectedIdentity else {
              deleteAccountInFlight = true
              showDeleteAccountSheet = false
              await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
@@ -1589,7 +1663,18 @@ case .failure(let error):
              showDeleteAccountSheet = false
              await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
          } catch {
-             deleteAccountErrorMessage = error.localizedDescription
+             // C-35: distinguish "your session expired" from "we couldn't reach the
+             // server", because the recoveries differ and the old copy told the user
+             // to sign out — which by this point has usually already happened.
+             //
+             // The discriminator is free rather than plumbed: a genuine refresh
+             // failure runs signOut(), so the identity is gone; transient and offline
+             // failures are guarded against that in refreshSupabaseSession and leave
+             // it intact. Neither message may ever suggest re-subscribing —
+             // re-AUTHENTICATION can be required, re-SUBSCRIPTION never.
+             deleteAccountErrorMessage = auth.hasConnectedIdentity
+                 ? "Couldn’t reach Études Connected. Check your connection and try again."
+                 : "Your session has expired. Sign in with Apple again to delete your account — you don’t need to re-subscribe."
              showDeleteAccountErrorAlert = true
          }
      }

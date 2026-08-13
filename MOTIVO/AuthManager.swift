@@ -249,6 +249,30 @@ final class AuthManager: NSObject, ObservableObject {
 
     var isSignedIn: Bool { currentUserID != nil }
 
+    /// True when this device holds a Connected identity it could authenticate with:
+    /// an Apple credential, a stored Supabase access token, and a resolved backend
+    /// user id. Synchronous and side-effect free — it describes what we hold, not
+    /// whether the session still works. Liveness is established separately by
+    /// `ensureValidSessionForConnectedAccountCleanup`, which refreshes.
+    ///
+    /// DELIBERATELY ENTITLEMENT-FREE, AND IT MUST STAY THAT WAY.
+    ///
+    /// Membership governs *access* to Connected; it is not what makes an identity
+    /// real. C-35 existed because account deletion was gated on AppMode, and
+    /// `ProductionAppModeActivation.resolve` folds in `isEntitled` — so a lapsed
+    /// member holding a full backend account was shown a local-only wipe and had
+    /// to re-subscribe before they could delete their account. Apple requires an
+    /// in-app deletion path, and paying to reach it is not one.
+    ///
+    /// Adding an entitlement term here reintroduces that defect. `resolve` composes
+    /// this with `isEntitled` precisely so the two questions stay separable.
+    var hasConnectedIdentity: Bool {
+        guard isSignedIn else { return false }
+        guard hasSupabaseAccessToken else { return false }
+        let backendID = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return !backendID.isEmpty
+    }
+
 
     // MARK: - M7B Avatar promotion
 

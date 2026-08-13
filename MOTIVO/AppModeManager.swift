@@ -116,15 +116,15 @@ public final class AppModeManager: ObservableObject {
 
 @MainActor
 enum ProductionAppModeActivation {
+    /// Connected requires BOTH an entitlement and an identity. Keeping the two
+    /// terms visibly separate is deliberate: the identity half is
+    /// `auth.hasConnectedIdentity`, which account deletion consumes on its own,
+    /// without the entitlement (C-35). One definition, so the deletion gate and
+    /// the mode resolver cannot drift apart.
     static func resolve(auth: AuthManager, isEntitled: Bool) -> AppMode {
         guard BackendConfig.isConfigured else { return .solo }
         guard isEntitled else { return .solo }
-        guard auth.isSignedIn else { return .solo }
-        guard auth.hasSupabaseAccessToken else { return .solo }
-
-        let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !backendID.isEmpty else { return .solo }
-
+        guard auth.hasConnectedIdentity else { return .solo }
         return .connected
     }
 }
