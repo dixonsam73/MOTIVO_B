@@ -190,8 +190,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @Environment(\.managedObjectContext) private var ctx
      @EnvironmentObject private var auth: AuthManager
     @EnvironmentObject private var appModeManager: AppModeManager
-    // TEMPORARY — C-44 empirical gate (b2). Remove with C44Probe.swift.
-    @ObservedObject private var c44Probe = C44Probe.shared
     @Environment(\.colorScheme) private var colorScheme
  
      // Close-first strategy
@@ -312,7 +310,6 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                     } else {
                         Form {
                      Group {
-                         c44ProbeSection
                          profileSection
                          sessionSetupSection
                      }
@@ -604,35 +601,6 @@ private struct KeyboardDismissFormTapCatcher: UIViewRepresentable {
                 .padding(.vertical, profileSectionSpacing / 2)
      }
 
-
-// TEMPORARY INSTRUMENTATION — C-44 empirical gate (b2). Remove together with
-// C44Probe.swift by `git restore`-ing this file; do not hand-edit it out.
-//
-// Deliberately the FIRST section in the Form, as far as the layout allows from
-// the Account section at the bottom that carries Delete Account and Erase All.
-// A probe button is not something to place next to an irreversible one.
-private var c44ProbeSection: some View {
-         Section(header: Text("C-44 probe (temporary)").sectionHeader()) {
-             VStack(alignment: .leading, spacing: 8) {
-                 Button {
-                     C44Probe.shared.run()
-                 } label: {
-                     navigationRow(title: "Run authorization-code exchange probe")
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .frame(minHeight: 44, alignment: .center)
-                 .font(Theme.Text.body)
-
-                 Text(c44Probe.lastResult)
-                     .font(.footnote)
-                     .foregroundStyle(.secondary)
-                     .textSelection(.enabled)
-                     .fixedSize(horizontal: false, vertical: true)
-             }
-             .padding(.vertical, 4)
-         }
-     }
 
 private var sessionSetupSection: some View {
          Section(header: Text("Settings").sectionHeader()) {

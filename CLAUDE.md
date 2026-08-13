@@ -162,14 +162,26 @@ B-22 (historical residue, needs its own authorisation — `Mo`/`qwerty` is anoth
 tester, treat conservatively), B-14's runtime approval check, and the cheap
 investigations C-42, C-39/C-40 and C-28.
 
-**Rig state, changed 2026-08-13 — read before planning device QA.** **Device A
-no longer has a Connected account**; it was the C-35 fixture and was deleted, so
-re-creating a two-account rig needs a fresh Sign in with Apple on A, which mints
-a new `auth.users` row. **Device B Release is a lapsed member still holding a
-live backend account** — C-35's exact condition, now also the only surviving
-Connected identity on the rig, and shared with the long-running Études Dev
-install. Do not spend it casually and never run Erase All on it. Update this line
-as work lands.
+**Rig state, updated 2026-08-13 after C-44 gate (b2) — read before planning
+device QA.** **Device A now holds a FRESH DISPOSABLE Connected identity**, minted
+by a new Sign in with Apple during gate (b2). It is the intended fixture for the
+eventual real revoke-and-delete end-to-end test and is meant to be spent. It also
+carries **one live Apple refresh token that was minted and abandoned** by the
+(b2) exchange — nobody holds it, and the end-to-end revoke clears it. **Device B
+Release is a lapsed member still holding a live backend account** — C-35's exact
+condition, and shared with the long-running Études Dev install. It was used only
+for gate (a), which wrote nothing and made no network call. Do not spend it
+casually and never run Erase All on it. Update this line as work lands.
+
+**The four `APPLE_*` Supabase secrets are production infrastructure, not
+instrumentation.** `APPLE_SIWA_P8_B64` (base64 of the `.p8` — base64 because a
+multi-line PEM gets its newlines mangled in an env var, and the resulting
+`importKey` failure looks nothing like its cause), `APPLE_SIWA_KEY_ID`,
+`APPLE_TEAM_ID`, `APPLE_CLIENT_ID`. They were set for gate (b2) and deliberately
+**retained** when its probe was removed, so that `revoke_apple_identity_v1` needs
+no further handling of the private key. The `.p8` itself lives at
+`~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
+already blocks `*.p8` and `*.pem`.
 
 **Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
 sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
