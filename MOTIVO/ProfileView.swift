@@ -1638,6 +1638,18 @@ case .failure(let error):
      }
 
 
+     /// C-46. Called ONLY after a `LocalFactoryReset` has completed successfully,
+     /// on either destructive branch. Never on a failed or cancelled deletion:
+     /// dismissing Profile as generic cleanup would hide the error alert that
+     /// tells the user their account was NOT deleted.
+     ///
+     /// Nothing in `LocalFactoryReset` clears `appRoute.isProfilePresented`, and
+     /// it should not — the reset owns data, not navigation. This is the one
+     /// place that knows the erase both finished and succeeded.
+     private func dismissProfileAfterSuccessfulErase() {
+         onClose?()
+     }
+
      private func performDeleteAccount() async {
          // C-35: gated on IDENTITY, not on AppMode.
          //
@@ -1657,6 +1669,7 @@ case .failure(let error):
                  defer { deleteAccountInFlight = false }
                  // The sheet is already dismissed — onDismiss is what started us.
                  await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
+                 dismissProfileAfterSuccessfulErase()
              }
              return
          }
@@ -1729,6 +1742,7 @@ case .failure(let error):
                  reason: "delete-account"
              )
              await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
+             dismissProfileAfterSuccessfulErase()
 
              // TN3194 step 2 — "Direct the user to manually revoke access for
              // your client" — shown only when revocation did not succeed, and

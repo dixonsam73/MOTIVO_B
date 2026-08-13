@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Foundation
+import os
 
 /// C-45 — react to Apple revoking, or losing, the Sign in with Apple credential.
 ///
@@ -64,6 +65,29 @@ final class AppleCredentialStateMonitor {
     private var observer: NSObjectProtocol?
     private var checkInFlight = false
 
+    /// Release-readable, for the same reason C-44 needed one: the rig runs
+    /// Release, so a `#if DEBUG` diagnostic does not exist in the only build
+    /// that can execute this path, and C-44's first Device A run was
+    /// undiagnosable because of exactly that.
+    ///
+    /// **Everything logged is a fixed enum.** Never the Apple user ID, the
+    /// Supabase uid, an email, or any token.
+    private let log = Logger(subsystem: "com.sdsongs.etudes", category: "credentialstate")
+
+    private func emit(_ line: String) {
+        log.notice("[C-45] \(line, privacy: .public)")
+    }
+
+    private func name(for state: ASAuthorizationAppleIDProvider.CredentialState) -> String {
+        switch state {
+        case .authorized: return "authorized"
+        case .revoked: return "revoked"
+        case .notFound: return "notFound"
+        case .transferred: return "transferred"
+        @unknown default: return "unknown"
+        }
+    }
+
     /// Idempotent; safe to call on every appearance.
     func start(auth: AuthManager) {
         guard observer == nil else { return }
@@ -103,9 +127,7 @@ final class AppleCredentialStateMonitor {
         } catch {
             // A lookup failure is not evidence of revocation. Retain state and
             // let a later lifecycle event retry. Never act destructively here.
-            #if DEBUG
-            NSLog("[C-45] credentialState lookup failed reason=%@ — no action", reason)
-            #endif
+            emit("check reason=\(reason) lookup=failed action=none")
             return
         }
 
@@ -115,16 +137,15 @@ final class AppleCredentialStateMonitor {
         guard !AccountDeletionTransaction.isInProgress, !LocalFactoryReset.isInProgress else { return }
 
         switch state {
-        case .revoked:
-            auth.clearConnectedIdentity(reason: "appleCredentialRevoked/\(reason)")
-        case .notFound:
-            auth.clearConnectedIdentity(reason: "appleCredentialNotFound/\(reason)")
-        case .authorized:
-            break
-        case .transferred:
-            break
+        case .revoked, .notFound:
+            // Authentication withdrawal only. Nothing is erased — see the note
+            // at the top on why this is not `signOut()`.
+            emit("check reason=\(reason) state=\(name(for: state)) action=clearConnectedIdentity")
+            auth.clearConnectedIdentity(reason: "appleCredential/\(name(for: state))/\(reason)")
+        case .authorized, .transferred:
+            emit("check reason=\(reason) state=\(name(for: state)) action=none")
         @unknown default:
-            break
+            emit("check reason=\(reason) state=unknown action=none")
         }
     }
 }
