@@ -133,34 +133,34 @@ contained none of them **by name**. No grep could have found it; only running it
 did. `delete_account_v1` was redeployed the same day (version 6) with the revised
 B-1/B-3 semantics and verified byte-identical to source.
 
-**Next: C-44 — Sign in with Apple token revocation. P1, and the largest
-remaining compliance item before submission.** Account deletion currently
-revokes nothing and we hold no credential that could; the register row carries
-the full audit and an auth-flow trace with line numbers. **Its Apple-specific
-assumptions were verified against Apple's live documentation on 2026-08-13 and
-the row now carries the citations, three corrections and the open questions.**
-Endpoints, ES256 client-secret construction, the five-minute single-use code and
-`client_id` = bundle ID all held. **Two things did not, and both change the
-build:** `/auth/revoke` refuses authorization codes outright, so the `/auth/token`
-exchange is mandatory rather than an optimisation; and TN3194's manual-revocation
-fallback does **not** dissolve under the store-nothing design — its trigger
-merely moves to "no fresh code obtainable". **One assumption is load-bearing and
-Apple does not state it:** that a *repeat* authorization for an already-authorized
-user still returns a non-nil `authorizationCode`. Establish that on device before
-any Edge Function is written; if it is false, the store-nothing design collapses
-and TN3194's stored-refresh-token flow becomes mandatory. **Fetch Apple's docs
-via `developer.apple.com/tutorials/data/documentation/….json`** — the HTML is an
-SPA shell and returns no body text.
+**C-44 and C-45 are both RESOLVED and device-verified (2026-08-13).** Sign in
+with Apple revocation now runs at account deletion via
+`revoke_apple_identity_v1`, and the client reacts to Apple revoking a
+credential. Every Apple-specific assumption was verified against Apple's live
+documentation first, then two empirical gates were run **before any code was
+written**: a repeat authorization does return an `authorizationCode`, and a real
+native code exchanges at `/auth/token` with **no `redirect_uri`**. Fetch Apple's
+docs via `developer.apple.com/tutorials/data/documentation/….json` — the HTML is
+an SPA shell and returns no body text.
 
-**C-45 was filed out of that verification and is also release-blocking.** Études
-observes neither `credentialRevokedNotification` nor `getCredentialState`, and
-Sign in with Apple is the *only* authentication mechanism — so a `.revoked` or
-`.notFound` credential leaves a live Supabase session and Keychain identity with
-nothing left to justify them. Built separately from C-44 (no secrets, no backend
-surface), but C-44 cannot be called TN3194-compliant until it lands. Then
-B-22 (historical residue, needs its own authorisation — `Mo`/`qwerty` is another
-tester, treat conservatively), B-14's runtime approval check, and the cheap
-investigations C-42, C-39/C-40 and C-28.
+**Three lessons from that work are worth more than the feature.** (1) **A probe
+validates a mechanism, not the presentation context it ships in.** Gate (b2)
+exchanged a real code from a plain Profile row; the first production run failed
+because the same authorization cannot present while the delete confirmation
+sheet is up. Where a probe's environment differs from the shipping call site,
+that difference is untested surface. (2) **`#if DEBUG` diagnostics do not exist
+in the only build that can execute these paths** — the rig runs Release, and
+that is why the first failure could not be diagnosed at all. Use `os.Logger`
+with `privacy: .public`, through one funnel. (3) **Check the premise before
+explaining the symptom.** An attachment title appeared to vanish on credential
+withdrawal and produced a confident, fully-reasoned, wrong mechanism — including
+an exhaustive proof that nothing had deleted it, which was true and beside the
+point. A controlled single-variable re-run showed the title survives; it had
+most likely never been saved. See C-47, downgraded to P3.
+
+**Next: B-22** (historical residue, needs its own authorisation — `Mo`/`qwerty`
+is another tester, treat conservatively), B-14's runtime approval check, and the
+cheap investigations C-42, C-39/C-40 and C-28.
 
 **Rig state, updated 2026-08-13 after C-44 gate (b2) — read before planning
 device QA.** **Device A now holds a FRESH DISPOSABLE Connected identity**, minted
