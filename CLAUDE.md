@@ -18,7 +18,11 @@ expiry-deletion authority removed), C-2 (Scores survived Erase All).
 Verification batch cleared: C-7, C-8, C-19. Filed along the way: C-23, C-25,
 C-26, C-27, C-28, from the avatar audit C-33, C-34, C-35 and B-20 (avatar
 lifecycle — deletion on erase, and replacement propagation), and C-36 from the
-location audit (Solo location published on join, then clobbered).
+location audit (Solo location published on join, then clobbered). From the
+2026-08-13 TestFlight run and the B-14 unit: C-42 (membership screen priced in
+USD while Apple's sheet showed GBP), C-41 (vestigial `lookup_enabled` client
+plumbing) and C-43 (Unfollow and Remove Follower each delete *both* directional
+follow rows).
 
 **`delete_account_v1` is deployed, and QA runs 1 and 2 have both passed.** The
 rewrite (`ca00189`) plus the B-20 avatar fix (`5714c53`) carry eight findings.
@@ -89,15 +93,40 @@ processing time. **The Run action must stay on Release** — Debug carries
 `com.samueldixon.motivo.dev`, which App Store Connect does not know, so products
 return an empty array and you get C-29's signature instead of a purchase.
 
-Next: C-28 and C-35 (both need a product decision first), directory and
-follow-policy hardening, zero-dependency cleanup, C-3 measurement, B-6
-two-account test. **A two-device, two-Apple-ID rig now exists** — Device A on a
-dedicated sandbox tester, Device B running Release *alongside* its long-serving
-Debug install under a second iCloud account — which unblocks D5–D8, E2 and E8
-as well. **Plus a standing
-release-hardening checkpoint: cut a fresh TestFlight build at the next clean
-point and run QA Group B against it.** Sandbox proves the purchase path, not the
-artifact beta testers install; C-9 does not close until that runs. Update this
+**The TestFlight checkpoint is DONE — 2026-08-13, build 131. C-9 is Resolved.**
+Group B ran on the distribution artifact: B1, B3, B4, B5 and B6 all passed, B2
+counted as a single attempt (its throttled repetitions are not runnable on
+TestFlight — see the environment notes), and B7 needs a first-join account. E12
+and E13 ran on the same build and carried B-5 to Resolved.
+
+**Directory hardening is complete.** B-5 Resolved — both directory RPCs are now
+authenticated-only, at the grant *and* in the body. B-2's `lookup_enabled`
+premise was **withdrawn**, not deferred: there is no discovery opt-out in the
+product, and gating either RPC on that column would have blanked names and
+avatars for existing followers. B-18 closed as **not a defect** — its
+anon-executable claim was false against the deployed grant, and its
+`SECURITY DEFINER` is load-bearing in the fail-*open* direction.
+
+**B-14 fixed as a column privilege, not a policy predicate**, because RLS cannot
+pin a column to its previous value — `WITH CHECK` has no `OLD`. `authenticated`
+can no longer UPDATE either participant ID. **Its normal-approval regression
+check is pending by choice**, so as not to spend Device B's lapsed-member
+fixture; close it opportunistically when B is next entitled.
+
+**A genuine lapse was observed on the artifact, 2026-08-13.** C-1's client
+authority removal and C-26's retention both held: Connected withdrawn, identity
+kept without re-authenticating, and **nothing deleted** — verified against a
+baseline recorded while still entitled, read once before the device foregrounded
+and again after. C-1's *local durability* half is **not** covered by that run;
+Device B had no local journal to lose.
+
+Next: C-28 and C-35 (both need a product decision first), follow-policy
+hardening beyond B-14, zero-dependency cleanup, C-3 measurement, B-6 two-account
+test. **A two-device, two-Apple-ID rig exists** — Device A on a dedicated sandbox
+tester, Device B running Release *alongside* its long-serving Debug install under
+a second iCloud account — which unblocks D5–D8, E2 and E8. **Device B Release is
+currently a lapsed member holding a live backend account**, which is C-35's exact
+condition; do not spend it casually, and never run Erase All on it. Update this
 line as work lands.
 
 **Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
