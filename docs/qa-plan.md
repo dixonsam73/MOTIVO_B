@@ -239,21 +239,37 @@ a lapse deletes nothing** — no server-side authority exists to act on expiry, 
 since C-1 the client has none either — so this is the prediction to check
 afterwards. Recorded now because it cannot be taken after the fact.
 
-| | Pre-lapse |
-|---|---|
-| `auth.users` | 16 |
-| `account_directory` | 16 |
-| `posts` (Device B's own) | 98 (3) |
-| `follows` (edges touching Device B) | 8 (6) |
-| `post_comments` | 4 |
-| `connected_attachments` rows | 35 |
-| `attachments` storage objects | 10 |
-| `avatars` storage objects | 4 |
+| | 12 Aug ~12:52 | **13 Aug 11:20 — use this one** |
+|---|---|---|
+| `auth.users` | 16 | 16 |
+| `account_directory` | 16 | 16 |
+| `posts` (Device B's own) | 98 (3) | **99 (4)** |
+| `follows` (edges touching Device B) | 8 (6) | 8 (6) |
+| `post_comments` | 4 | 4 |
+| `connected_attachments` rows | 35 | 35 |
+| `attachments` storage objects | 10 | **11** |
+| `avatars` storage objects | 4 | 4 |
 
 Device B's directory row, all present: display name, account ID, **location**,
-avatar key, 6 instruments, `lookup_enabled` and `follow_requests_enabled` both
-true. `auth.users.created_at = 2026-07-23 13:42:16Z` — the value that proves
-identity was not re-minted.
+avatar key, **8** instruments, `lookup_enabled` and `follow_requests_enabled`
+both true. `auth.users.created_at = 2026-07-23 13:42:16Z` — the value that
+proves identity was not re-minted.
+
+**Re-baselined 13 Aug 11:20, and the reason is the Études Dev trap this plan
+already warns about.** Between the two readings the developer recorded two real
+practice sessions in **Études Dev** on Device B. That is a different app with a
+different bundle ID and its own container — but SIWA identifiers are
+team-scoped, so it writes to the **same backend Account B**, and its writes land
+in exactly the counts a lapse run is watching. The deltas (+1 post, +1 storage
+object, +2 instruments) are entirely its work. **Nothing was deleted, so C-26's
+claim is untouched by this.**
+
+The lesson is operational rather than a finding: **the second client is
+invisible in the numbers.** A reading taken while Études Dev is in use cannot
+distinguish its writes from the app under test, and "two sessions recorded, one
+post created" is the kind of discrepancy that would send someone hunting a
+defect that does not exist. Keep Études Dev closed for the remainder of this
+run.
 
 **Pre-lapse device state, 2026-08-12 12:57.** The subscription was **cancelled
 deliberately**, to convert an open-ended run of daily TestFlight renewals into an
