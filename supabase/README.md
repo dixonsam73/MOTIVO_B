@@ -57,9 +57,21 @@ deployment record.** Observed 2026-08-13, CLI 2.113.0: deploying only
 line — also bumped `delete_account_v1` from version 6 to version 7. Its source
 was verified byte-identical to the tree immediately afterwards by the download
 check above, and `verify_jwt` was still `false`, so nothing about its behaviour
-changed. The trigger was almost certainly the new `[functions.…]` block added to
-`config.toml` in the same change, causing the CLI to apply function config
-across every declared function.
+changed.
+
+**The originally stated cause was wrong, and the correction matters more than
+the observation.** This note first said the trigger was "almost certainly the new
+`[functions.…]` block added to `config.toml`". **Deploying
+`revoke_apple_identity_v1` on 2026-08-13 did the same thing — brand-new function,
+new config block, named explicitly — and `delete_account_v1` stayed at version 7.**
+So the config-block hypothesis is not supported.
+
+The better hypothesis, still **unverified**: the 6→7 bump came from
+`supabase secrets set`, which ran shortly before that deploy and not before this
+one. Changing function environment plausibly requires re-versioning every
+function that consumes it. Recorded as a hypothesis, not a finding.
+
+The operational rule is unchanged and does not depend on knowing the cause:
 
 Two consequences worth having in writing, because this is exactly the drift
 class `config.toml` and B-17 exist to prevent:
