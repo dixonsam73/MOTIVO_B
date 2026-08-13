@@ -1,0 +1,517 @@
+[
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "DELETE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "INSERT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "SELECT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "TRIGGER",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "TRUNCATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "anon",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "connected_attachments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "follows"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "post_comment_views"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "post_comments"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "post_shares"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "DELETE",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRIGGER",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "TRUNCATE",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "DELETE",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRIGGER",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "TRUNCATE",
+    "table_name": "posts"
+  },
+  {
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "posts"
+  }
+]

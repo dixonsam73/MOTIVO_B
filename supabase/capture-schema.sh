@@ -45,6 +45,23 @@ q columns "select table_name, column_name, ordinal_position, data_type, is_nulla
 
 q function_grants "select p.proname, r.rolname as grantee, has_function_privilege(r.rolname, p.oid, 'EXECUTE') as can_execute from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' order by 1,2;"
 
+# Table and column privileges.
+#
+# Added 2026-08-13 with B-14, which exposed a blind spot: the snapshot recorded
+# FUNCTION grants but no table or column privileges at all, so a whole class of
+# backend authority was invisible to the diff. B-14's fix lives entirely here —
+# it removes UPDATE on follows.follower_user_id from `authenticated` — and
+# without these two queries the only durable record of it would have been a
+# commit message, which is precisely what B-17 exists to prevent.
+#
+# column_privileges expands table-level grants down to each column, so it shows
+# the effective per-column privilege regardless of how it was granted. That is
+# what makes a column-scoped REVOKE/GRANT visible as a diff.
+
+q table_grants "select table_name, grantee, privilege_type from information_schema.role_table_grants where table_schema='public' and grantee in ('anon','authenticated','service_role') order by 1,2,3;"
+
+q column_grants "select table_name, column_name, grantee, privilege_type from information_schema.column_privileges where table_schema='public' and grantee in ('anon','authenticated','service_role') order by 1,2,3,4;"
+
 q storage_buckets "select id, name, public, file_size_limit, allowed_mime_types from storage.buckets order by 1;"
 
 echo
