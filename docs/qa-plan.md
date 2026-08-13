@@ -307,6 +307,63 @@ behaviour, which has never been observed on the distribution artifact.
 C-35's condition and it would destroy the account and the two-device control
 fixture with it. C-35 belongs on a disposable account.
 
+### C-35 destructive run — PREDICTION, written 2026-08-13 before the erase
+
+Device A (`92d6b718`) deleted while **lapsed**, without re-subscribing, against
+the revised deletion semantics deployed as `c4f6d0f` (version 6). Account B
+(`dfaf8d18`) is the control. Written first so the check is binary — D14's rule.
+
+**Fixture staged, all six comment cases present:**
+
+| Comment | Post owner | Author | Recipient | Fate |
+|---|---|---|---|---|
+| `6ed7b788` | **B** | **A** | B | **DELETED — revised B-3** |
+| `e9325a3c` | A | A | B | deleted (author step, and cascade) |
+| `68691822` | A | **B** | A | **deleted BY CASCADE ONLY** with A's post |
+| `944a70cb` | **B** | **B** | **A** | **MUST SURVIVE — B-19 discriminator** |
+| `4862883b` | B | B | dead | must survive |
+| `f0daf6d7` | B | dead | B | must survive (B-22 residue) |
+
+**Predicted counts:**
+
+| | Before | After |
+|---|---|---|
+| `auth.users` | 16 | **15** |
+| `account_directory` | 16 | **15** |
+| `posts` | 100 | **98** |
+| `post_comments` | 6 | **3** |
+| `connected_attachments` | 36 | **35** |
+| `attachments` objects | 13 | **10** |
+| `avatars` objects | 4 | **3** |
+| `follows` | 8 | **6** |
+| A: posts / comments / follows / comment_views | 2 / 2 / 2 / 1 | **0 / 0 / 0 / 0** |
+| **B: posts** | 4 | **4 — unchanged** |
+| **B: comments authored** | 3 | **2** — `68691822` cascades with A's post |
+| **B: attachment objects** | 6 | **6 — unchanged** |
+| **B: attachment rows** | 5 | **4** — the A→B row goes |
+
+**Exact objects to be removed (4):**
+
+```
+attachments/users/92d6b718…/CC2B351B…/F453E774….jpg      post attachment
+attachments/users/92d6b718…/DCE002F7…/2ECDA3A3….jpg      post attachment
+attachments/users/92d6b718…/connected/30a975b5….jpg      Connected send to B  <- revised B-1
+avatars/users/92d6b718…/avatar.jpg                       avatar
+```
+
+**The two assertions that make this discriminating.** `b105d553` — A's live
+Connected attachment to B, `deleted_at IS NULL` — **must be deleted along with
+its object**. Under the previous semantics it was explicitly *preserved*, so
+this single row distinguishes the deployed function from its predecessor. And
+`944a70cb` **must survive**: a predicate that wrongly reached `recipient_user_id`
+would pass every other assertion in this table and fail only that one.
+
+**Device-side, verified separately because none of it has a backend
+representation:** both Scores PDFs gone, both journal sessions gone, the photo
+gone, app at first-launch state. **Expected NON-effect:** any copy of A's photo
+already downloaded to B's device persists — backend deletion cannot reach
+another device, which is why the confirmation copy says so.
+
 ### Lapse result — 2026-08-13 ~11:20, TestFlight build 131, Device B
 
 The subscription cancelled on 12 Aug at 12:57 expired as scheduled. **PASS on
