@@ -97,7 +97,7 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "follows",
-    "with_check": "((followed_user_id = auth.uid()) AND (follower_user_id = follower_user_id) AND (followed_user_id = followed_user_id) AND (status = 'approved'::text))"
+    "with_check": "((followed_user_id = auth.uid()) AND (status = 'approved'::text))"
   },
   {
     "cmd": "SELECT",

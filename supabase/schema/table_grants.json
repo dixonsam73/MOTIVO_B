@@ -205,11 +205,6 @@
     "table_name": "follows"
   },
   {
-    "grantee": "authenticated",
-    "privilege_type": "UPDATE",
-    "table_name": "follows"
-  },
-  {
     "grantee": "service_role",
     "privilege_type": "DELETE",
     "table_name": "follows"

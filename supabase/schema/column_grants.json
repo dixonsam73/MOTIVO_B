@@ -1483,12 +1483,6 @@
   },
   {
     "column_name": "created_at",
-    "grantee": "authenticated",
-    "privilege_type": "UPDATE",
-    "table_name": "follows"
-  },
-  {
-    "column_name": "created_at",
     "grantee": "service_role",
     "privilege_type": "INSERT",
     "table_name": "follows"
@@ -1531,12 +1525,6 @@
   },
   {
     "column_name": "followed_user_id",
-    "grantee": "authenticated",
-    "privilege_type": "UPDATE",
-    "table_name": "follows"
-  },
-  {
-    "column_name": "followed_user_id",
     "grantee": "service_role",
     "privilege_type": "INSERT",
     "table_name": "follows"
@@ -1575,12 +1563,6 @@
     "column_name": "follower_user_id",
     "grantee": "authenticated",
     "privilege_type": "SELECT",
-    "table_name": "follows"
-  },
-  {
-    "column_name": "follower_user_id",
-    "grantee": "authenticated",
-    "privilege_type": "UPDATE",
     "table_name": "follows"
   },
   {
