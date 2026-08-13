@@ -295,6 +295,47 @@ behaviour, which has never been observed on the distribution artifact.
 C-35's condition and it would destroy the account and the two-device control
 fixture with it. C-35 belongs on a disposable account.
 
+### Lapse result — 2026-08-13 ~11:20, TestFlight build 131, Device B
+
+The subscription cancelled on 12 Aug at 12:57 expired as scheduled. **PASS on
+both claims under test, and both for the first time on the distribution
+artifact.**
+
+**Backend: nothing deleted, nothing added.** Two reads taken — one *before*
+Device B foregrounded, one *after* it had launched, run, and had SIWA performed
+on it — and every value is identical to the re-baseline: `auth.users` 16,
+`account_directory` 16, `posts` 99 (Device B's own 4), `follows` 8 (6 touching
+B), `post_comments` 4, `connected_attachments` 35, `attachments` objects 11,
+`avatars` objects 4, Device B's instruments 8, and
+`auth.users.created_at = 2026-07-23 13:42:16Z`. **C-26's retention claim is now
+observed rather than argued, and C-1's removal of client expiry authority held
+on the artifact beta testers install.**
+
+**Device: Connected withdrawn, identity kept.** The app resolved to Solo, and
+**did not require Sign in with Apple** — identity survived the lapse
+untouched, matching C-1's recorded behaviour. Profile name, avatar and location
+all present. SIWA was then performed *voluntarily*, to see whether Manage
+Membership would open; it did not, and the app correctly **remained in Solo**,
+because identity without an entitlement resolves to Solo by design.
+
+**Manage Membership is unreachable in Solo, and that is the C-35 gate, not a new
+finding.** `ProfileView:317` renders `appSettingsSection` only when
+`canShowConnectedAccountManagement` is true, i.e. `mode == .connected` — the
+same gate that hides Restore Purchases from Connected users, here hiding account
+management from a lapsed one. C-35 already owns this and is unchanged. Note the
+lapsed member is *not* stranded: Explore Connected → Continue still reaches
+`MembershipSelectionView`, which offers both purchase and Restore Purchases.
+
+**What this run does NOT establish, stated so a green result is not read as
+broader than it is.** C-1 also claims the **local journal, Scores and media
+survive expiry**, and **this run cannot speak to that**: B5 deleted the Release
+container the previous day, and the two practice sessions recorded since went
+into Études Dev, a different container. There was nothing local to survive.
+Profile name, avatar and location showing is likewise consistent both with local
+preservation *and* with re-hydration from `account_directory` via
+`fetchSelfRow`; this run does not discriminate between them. The local-durability
+half of C-1 remains verified only by the 2026-08-09 development-build run.
+
 ### Pre-B5 backend baseline — 2026-08-12, recorded *before* the run
 
 B5 deletes the app at the iOS level and reinstalls. **App deletion is not
