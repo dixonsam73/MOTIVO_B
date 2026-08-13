@@ -357,11 +357,14 @@ backend call — so the fixture survived intact and was reused without restaging
 Fixed at `863f2a9` by gating on `BackendConfig.isConfigured`, which is what the
 request actually needs and is independent of `AppMode`.
 
-**Still to confirm on device:** both `c35` journal sessions and both Scores PDFs
-gone (the app returned to onboarding, which is consistent), and on Device B the
-photo A sent should have vanished from the inbox — the revised B-1 semantics
-visible in the UI. Neither has a backend representation, so neither is provable
-from the counts above.
+**Device side CONFIRMED, and it is not provable from the counts above because
+none of it has a backend representation.** On Device A the journal and the Scores
+library are both **empty** and the app returned to onboarding — so the local
+factory reset reached Scores, which is C-2's fix still holding on a path C-2
+never tested. On Device B **the photo A sent is gone from the inbox, and A's
+comment is gone from the thread** — the revised B-1 and B-3 semantics visible in
+the UI rather than inferred from a row count, and the clearest demonstration that
+this is a product behaviour change and not merely a database one.
 
 ### C-35 destructive run — PREDICTION, written 2026-08-13 before the erase
 
