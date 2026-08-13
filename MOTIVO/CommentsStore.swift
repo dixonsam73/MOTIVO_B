@@ -184,6 +184,40 @@ public final class CommentsStore: ObservableObject {
         save()
     }
 
+    /// C-48 — Local Factory Reset coverage for locally persisted comments.
+    ///
+    /// `CommentsStore.json` lives at the Application Support **root**, not under
+    /// `MOTIVO/`, so every sweep in `LocalFactoryReset` missed it: comment
+    /// bodies plus the `authorByCommentID` / `recipientByCommentID` maps —
+    /// other people's words and their user ids — survived Erase All.
+    ///
+    /// THREE SURVIVAL PATHS, EXACTLY C-2's SHAPE, AND REMOVING THE FILE CLOSES
+    /// ONLY THE FIRST.
+    ///
+    /// 1. The JSON file itself.
+    /// 2. The live singleton. Every mutation calls `save()`, which writes the
+    ///    whole in-memory state back wholesale, so leaving the three
+    ///    dictionaries populated after a file delete means the next `add` or
+    ///    `delete` restores everything.
+    /// 3. The legacy `commentsStore_v1` UserDefaults blob, which `load()`
+    ///    migrates forward **whenever the file is absent** — which is precisely
+    ///    the post-reset state. `LocalFactoryReset` does wipe the UserDefaults
+    ///    domain, so today this is belt-and-braces; it is done here anyway so
+    ///    the store's own wipe is correct independently of call order.
+    ///
+    /// Deliberately NOT `clearAll()`, which is the closest existing primitive:
+    /// it calls `save()` and therefore re-creates an empty JSON file where a
+    /// factory reset should leave none.
+    func wipeOnDiskAndCacheForFactoryReset() {
+        try? FileManager.default.removeItem(at: Self.fileURL)
+
+        UserDefaults.standard.removeObject(forKey: defaultsKey)
+
+        commentsBySessionID = [:]
+        authorByCommentID = [:]
+        recipientByCommentID = [:]
+    }
+
     /// Developer aid to clear all comments. Not called anywhere by default.
     public func clearAll() {
         commentsBySessionID = [:]

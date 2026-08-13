@@ -444,6 +444,33 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
         }
     }
 
+    /// C-28 — Local Factory Reset coverage for the Connected inbox.
+    ///
+    /// `Application Support/ReceivedConnectedAttachments/` is the only durable
+    /// local home for media other members sent, and it had no reset counterpart
+    /// at all: `LocalFactoryReset` swept `Documents`, `Documents/Scores`,
+    /// `App Support/MOTIVO/*` and `App Support/Profiles`, and never touched this
+    /// directory. So an explicit "erase everything" left other people's photos,
+    /// audio and PDFs on the device.
+    ///
+    /// Both halves are required, and the second is C-2's lesson rather than
+    /// caution: this is a singleton that outlives the reset, so clearing the
+    /// directory while leaving `items` populated would leave the inbox rendering
+    /// rows for files that no longer exist, and any subsequent `delete(_:)`
+    /// would operate on a backend account that has just been destroyed.
+    ///
+    /// Deliberately NOT touched: copies the user explicitly exported to Files or
+    /// Photos. Those left Études-managed storage by an explicit user action and
+    /// are no longer ours to delete.
+    func wipeOnDiskAndCacheForFactoryReset() {
+        if let directory = try? receivedDirectory() {
+            try? fileManager.removeItem(at: directory)
+        }
+
+        items = []
+        errorMessage = nil
+    }
+
     private func localURLIfPresent(for item: ConnectedAttachment) async throws -> URL? {
         let destination = try localDestination(for: item)
         return fileManager.fileExists(atPath: destination.path) ? destination : nil

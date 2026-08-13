@@ -88,6 +88,15 @@ enum LocalFactoryReset {
         // C-2: Documents/Scores is a directory, so the extension-filtered sweep above
         // never reaches the PDFs inside it. The Scores store owns its own wipe.
         ScoreLibraryStore.shared.wipeOnDiskAndCacheForFactoryReset()
+        // C-28: Application Support/ReceivedConnectedAttachments is outside every
+        // sweep above — not under MOTIVO/, not extension-filtered Documents — so
+        // media other members sent survived an explicit full erase. Note an
+        // adopted PDF exists TWICE: the Scores copy above, and the inbox original
+        // here. Wiping only the first is what made this look fixed.
+        ReceivedConnectedAttachmentStore.shared.wipeOnDiskAndCacheForFactoryReset()
+        // C-48: CommentsStore.json sits at the Application Support ROOT rather
+        // than under MOTIVO/, and was likewise never reached.
+        CommentsStore.shared.wipeOnDiskAndCacheForFactoryReset()
         StagingStore.wipeOnDiskForFactoryReset()
         PracticeTimerStore.wipeOnDiskForFactoryReset()
         SessionSyncQueue.shared.wipeOnDiskForFactoryReset()
@@ -118,7 +127,13 @@ enum LocalFactoryReset {
                 includingPropertiesForKeys: [.isRegularFileKey],
                 options: [.skipsHiddenFiles]
             )
-            let exts = Set(["m4a", "mov", "mp4", "jpg", "jpeg", "png"])
+            // C-28: this was its own shorter literal — no `pdf`, no
+            // `wav/aif/aiff/caf/heic/m4v/dat` — while the Documents sweep
+            // covered all of them. "Save to Files" copies a received attachment
+            // into tmp/ before presenting the exporter, and PDFSubsetExporter
+            // writes there too, so exported PDFs outlived the reset. One
+            // authoritative set now serves both sweeps.
+            let exts = AttachmentStore.factoryResetSweepExtensions
             for url in urls where exts.contains(url.pathExtension.lowercased()) {
                 try? fm.removeItem(at: url)
             }

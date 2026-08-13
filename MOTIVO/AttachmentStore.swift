@@ -407,6 +407,24 @@ struct AttachmentStore {
 
     // MARK: - Delete Account v2 (Local Factory Reset)
 
+    /// The one authoritative extension set for every factory-reset file sweep.
+    ///
+    /// C-28: this used to be a literal here and a SECOND, SHORTER literal in
+    /// `LocalFactoryReset.wipeTemporaryMediaArtifactsBestEffort`. The tmp list
+    /// omitted `pdf`, so a received PDF exported via Save to Files — which
+    /// copies into `tmp/` first — survived Erase All, as did every page subset
+    /// written by `PDFSubsetExporter`. Two lists that must agree and no reason
+    /// for them to differ is a drift defect waiting to happen; one set removes
+    /// the class rather than re-aligning the instance.
+    ///
+    /// Scope is deliberate: this constrains the sweep to media and documents
+    /// Études itself writes, so a reset cannot delete unrelated user files that
+    /// happen to share a directory.
+    static let factoryResetSweepExtensions: Set<String> = [
+        "m4a", "mp4", "mov", "m4v", "jpg", "jpeg", "png",
+        "heic", "wav", "aif", "aiff", "caf", "dat", "pdf"
+    ]
+
     /// Best-effort wipe of attachment media persisted in the app's Documents directory.
     /// - Important: Constrained to common media extensions to avoid deleting unrelated user documents.
     static func wipeDocumentsAttachmentsForFactoryReset() {
@@ -416,7 +434,7 @@ struct AttachmentStore {
             return
         }
 
-        let exts: Set<String> = ["m4a","mp4","mov","m4v","jpg","jpeg","png","heic","wav","aif","aiff","caf","dat","pdf"]
+        let exts = factoryResetSweepExtensions
         guard let items = try? fm.contentsOfDirectory(at: docs, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) else {
             print("[AttachmentStore] wipeDocumentsAttachmentsForFactoryReset — unable to list Documents")
             return
