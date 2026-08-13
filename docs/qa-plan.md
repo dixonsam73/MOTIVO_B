@@ -321,6 +321,48 @@ behaviour, which has never been observed on the distribution artifact.
 C-35's condition and it would destroy the account and the two-device control
 fixture with it. C-35 belongs on a disposable account.
 
+### C-35 destructive run — RESULT, 2026-08-13. PASS on every assertion.
+
+Device A deleted **while lapsed, without re-subscribing**. All eight counts,
+all nine A-residue checks and both discriminators matched the prediction below,
+which was committed before the erase.
+
+**Counts:** `auth.users` 16→15, directory 16→15, posts 100→98, comments 6→3,
+`connected_attachments` 36→35, attachment objects 13→10, avatar objects 4→3,
+follows 8→6. **A residue: zero on all nine.** **Account B untouched** — 4 posts,
+6 attachment objects, directory row and avatar all unchanged, with comments
+authored 3→2, the single loss being the predicted cascade.
+
+**The two discriminating assertions both held.** `b105d553` — A's **live**
+Connected attachment to B — was deleted **with its storage object**, which is
+the row the previous function explicitly preserved; that is what distinguishes
+the deployed semantics from their predecessor rather than merely re-passing a
+test the old code would also have passed. And `944a70cb` — B's own reply on B's
+own post, merely addressed to A — **survived**, proving the new comments
+predicate did not overreach into B-19's territory. A predicate that wrongly
+reached `recipient_user_id` would have passed every other line in the table.
+
+**IT TOOK TWO ATTEMPTS, AND THE FIRST FAILURE IS THE MOST VALUABLE THING HERE.**
+Attempt one was refused with *"Études Connected is not currently available.
+Please try again"* — a retry that could never succeed. `performDeleteAccount`'s
+second guard read `BackendEnvironment.shared.isConnected`, a runtime
+service-selection mode that `AppModeManager` sets to `.localSimulation` for
+`.solo`, and `AppMode` is resolved from `isEntitled`. So C-35's defect existed
+twice, and the second instance was an **entitlement dependency laundered through
+a `UserDefaults` key**. The deletion path had been audited for `isEntitled`,
+`AppMode` and `canShowConnectedAccountManagement` and passed, because it
+contained none of them by name. **No grep could have found it; only running it
+did.** Nothing was deleted by the failed attempt — it returned before any
+backend call — so the fixture survived intact and was reused without restaging.
+Fixed at `863f2a9` by gating on `BackendConfig.isConfigured`, which is what the
+request actually needs and is independent of `AppMode`.
+
+**Still to confirm on device:** both `c35` journal sessions and both Scores PDFs
+gone (the app returned to onboarding, which is consistent), and on Device B the
+photo A sent should have vanished from the inbox — the revised B-1 semantics
+visible in the UI. Neither has a backend representation, so neither is provable
+from the counts above.
+
 ### C-35 destructive run — PREDICTION, written 2026-08-13 before the erase
 
 Device A (`92d6b718`) deleted while **lapsed**, without re-subscribing, against
