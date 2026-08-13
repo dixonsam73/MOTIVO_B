@@ -9,18 +9,26 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 //
 // Guarantees, in the order they were agreed:
 //
-//   - Comments the departing member wrote on other members' posts are RETAINED
-//     (B-3). Third-party replies merely *addressed to* them are also RETAINED
-//     (B-19) — those are another member's words on another member's post.
-//     Both fall out of deleting no post_comments rows explicitly: the
-//     post_comments -> posts cascade already removes every comment on the
-//     departing member's own posts.
+//   - Comments the departing member WROTE are DELETED (B-3, revised
+//     2026-08-13). Third-party replies merely *addressed to* them are still
+//     RETAINED (B-19) — those are another member's words on another member's
+//     post, and deleting them was the original B-19 defect. The dividing line
+//     is authorship: delete what this member wrote, never what was written to
+//     them.
 //   - The departing member's own received-attachment references are removed.
-//   - Attachments they SENT survive while any live recipient reference remains
-//     (B-1). "Live" means connected_attachments.deleted_at IS NULL.
-//   - Their sent rows that no recipient still holds — the soft-deleted ones —
-//     are removed with them (B-9), so no connected_attachments row outlives
-//     the account without a live reference behind it.
+//   - Attachments they SENT are DELETED, rows and objects, even where a
+//     recipient still holds a live reference (B-1, revised 2026-08-13).
+//   - Consequently every connected_attachments row naming them on either side
+//     is gone (B-9 subsumed).
+//
+// B-1 AND B-3 WERE REVISED, NOT FOUND WRONG. Both rules were correct given the
+// architecture and the settled decisions as they stood. What changed is an
+// input: Apple's account-deletion guidance treats content shared with others —
+// photos, video, text posts, reviews — as user-generated content that account
+// deletion should remove, and the deployed representation could not sustain the
+// "that is the recipient's own copy" defence the old rule leaned on. See the
+// note at step 2 for the structural reason. Do not "restore" the old behaviour
+// on the strength of the earlier register wording.
 //   - The avatar is removed by prefix as well as by pointer (B-20), because
 //     the directory column is not a reliable pointer to it.
 //   - Every operation checks its result and fails immediately and honestly
@@ -113,9 +121,8 @@ Deno.serve(async (req) => {
   try {
     // 1. Remove the departing member's own received-attachment references.
     //
-    // Rows where they are the SENDER are deliberately left alone here: those
-    // are the recipients' references and must survive while any recipient
-    // still holds one (B-1). Step 3b below removes only the dead ones.
+    // Rows where they are the SENDER are handled by step 3 below, which now
+    // removes all of them. This step is only the inbox half (B-9).
     //
     // ORDERING IS NOT LOAD-BEARING. This comment claimed the opposite until
     // 2026-08-11, on the grounds that a member could send an attachment to
@@ -125,12 +132,7 @@ Deno.serve(async (req) => {
     // CHECK (sender_user_id <> recipient_user_id), and the RLS insert policy
     // `connected_attachments_insert_sender` independently requires
     // recipient_user_id <> auth.uid(). The sender-scoped and recipient-scoped
-    // row sets are therefore disjoint, and this delete cannot change step 2's
-    // result set. Both are verified in supabase/schema/.
-    //
-    // What IS still load-bearing: do not merge the two connected_attachments
-    // queries into one pass, and never widen this delete to sender rows with a
-    // live recipient reference — that is the B-1 guarantee itself.
+    // row sets are therefore disjoint. Both are verified in supabase/schema/.
     {
       const { error } = await admin
         .from("connected_attachments")
@@ -139,33 +141,39 @@ Deno.serve(async (req) => {
       must("connected_attachments.received", error);
     }
 
-    // 2. Compute which of their sent assets must be preserved.
+    // 2. (REMOVED 2026-08-13.) This step computed the set of sent assets to
+    //    PRESERVE — those with a live recipient reference — and step 3 skipped
+    //    them. That was the B-1 guarantee, and it is deliberately gone.
     //
-    // The row carries storage_path directly, so no path parsing is needed and
-    // the rule reduces to one sentence: preserve exactly those object paths
-    // that appear as a live sent reference. Post attachments never appear in
-    // connected_attachments, so they are not preserved — correct, because the
-    // posts that reference them are being deleted.
-    const livePaths = new Set<string>();
-    {
-      const { data, error } = await admin
-        .from("connected_attachments")
-        .select("storage_path")
-        .eq("sender_user_id", uid)
-        .eq("storage_bucket", ATTACHMENTS_BUCKET)
-        .is("deleted_at", null);
-      must("connected_attachments.live", error);
-      for (const row of data ?? []) {
-        if (row.storage_path) livePaths.add(row.storage_path as string);
-      }
-    }
+    //    B-1 IS REVISED, NOT OVERTURNED AS AN ERROR. Its rule — attachments a
+    //    departing member sent survive for existing recipients — was correct
+    //    given the architecture and the settled decisions as they stood. What
+    //    changed on 2026-08-13 is an input, not the reasoning: Apple's
+    //    account-deletion guidance treats shared photos, video and text posts
+    //    as user-generated content that account deletion should remove, and the
+    //    deployed representation could not support the "this is the recipient's
+    //    own copy" defence that B-1's rule leaned on. `sender_user_id` is
+    //    NOT NULL with no FK, and `connected_attachments_sender_storage_path`
+    //    pins storage_path to users/<sender_user_id>/connected/<asset_id>.<ext>
+    //    — so the object provably remains in the departing member's namespace,
+    //    under their uid, with their uid on the row. That is the deleted
+    //    account's data, whoever can read it.
+    //
+    //    Recipient copies already adopted into genuinely local, recipient-owned
+    //    storage (Scores) are out of scope: they live on another device and no
+    //    backend deletion can or should reach them. See the confirmation copy,
+    //    which states this plainly rather than implying total recall.
+    //
+    //    A recipient-owned/delivered-copy representation — a neutral storage
+    //    path with no sender uid — is a Phase 4 architecture question, tracked
+    //    separately. It is NOT a reason to keep preserving assets meanwhile.
 
-    // 3. Delete storage objects under users/<uid>/ except the preserved paths.
+    // 3. Delete every storage object under users/<uid>/.
     //
     // Both producers write under this prefix and are distinguished by shape:
     //   users/<uid>/<postID>/<attachmentID>.<ext>   post attachments
     //   users/<uid>/connected/<assetID>.<ext>       Connected shares
-    // The livePaths set handles both without needing to inspect the shape.
+    // Both are now swept unconditionally, so the shape does not matter.
     const doomed: string[] = [];
 
     async function collect(folder: string): Promise<void> {
@@ -179,7 +187,7 @@ Deno.serve(async (req) => {
         // supabase-js reports folders as entries with null metadata.
         if (item.metadata == null) {
           await collect(fullPath);
-        } else if (!livePaths.has(fullPath)) {
+        } else {
           doomed.push(fullPath);
         }
       }
@@ -193,47 +201,33 @@ Deno.serve(async (req) => {
       must(`storage.remove:${i}`, error);
     }
 
-    // 3b. Drop the departing member's SENT rows that no recipient still holds
-    //     (B-9). Step 1 removed the rows where they were the recipient; these
-    //     are the other half, and without this they outlive the account with
-    //     no live reference and — usually — no object either.
+    // 3b. Delete ALL of the departing member's SENT rows.
     //
-    //     THE JUSTIFICATION IS ABOUT REFERENCES, NOT STORAGE. B-9's own cell
-    //     described these as "precisely the ones whose objects were just
-    //     swept", and that is wrong.
+    //     REVISED 2026-08-13. This step previously deleted only sender rows
+    //     that were already soft-deleted (`deleted_at IS NOT NULL`) — the
+    //     tombstone cleanup added for B-9 — because rows with a live recipient
+    //     reference were preserved under B-1. B-1 is now revised (see step 2),
+    //     so the narrower predicate is subsumed: every sender row goes, live or
+    //     soft-deleted, and the objects they name were removed by step 3.
+    //
+    //     B-9's own lesson still applies to how this is scoped, and it is the
+    //     reason this delete is keyed on `sender_user_id` and nothing else.
     //     `connected_attachments_asset_recipient_unique` is
-    //     UNIQUE (asset_id, recipient_user_id), and
-    //     `connected_attachments_sender_storage_path` pins storage_path to
-    //     users/<sender_user_id>/connected/<asset_id>.<ext> — derived from
-    //     sender and asset alone. So one asset sent to two recipients is TWO
-    //     rows sharing ONE storage_path. With one recipient live and the other
-    //     soft-deleted, step 3 correctly preserves the object (B-1) while the
-    //     soft-deleted row still matches this delete. That is intended: the
-    //     row is a dead reference either way, and this step reasons about
-    //     references, never about what step 3 did or did not remove.
+    //     UNIQUE (asset_id, recipient_user_id), so one asset sent to two
+    //     recipients is TWO rows sharing ONE storage_path. Scoping by sender
+    //     removes exactly this member's rows and cannot reach a row whose
+    //     sender is somebody else — which is what a predicate written as
+    //     "delete every soft-deleted row" would have done, destroying a third
+    //     party's reference. That trap is now avoided by construction rather
+    //     than by a predicate that happened to be right.
     //
-    //     The rule that survives inspection: a soft-deleted row is nobody's
-    //     live inbox reference. B-1 requires only that LIVE recipient
-    //     references survive, and this cannot touch one — `deleted_at IS NULL`
-    //     is exactly the set step 2 preserved.
-    //
-    //     Ordering is free for the same reason: livePaths was computed on
-    //     deleted_at IS NULL, so these rows were never in it. Placed after the
-    //     sweep so that a row outlives its object on failure rather than the
-    //     reverse.
-    //
-    //     Nothing observable changes for anyone.
-    //     `connected_attachments_select_recipient` is
-    //     USING (recipient_user_id = auth.uid()), so the sender has no read
-    //     access to these rows at all, and the recipient already soft-deleted
-    //     theirs. Idempotent: a second pass matches nothing.
+    //     Idempotent: a second pass matches nothing.
     {
       const { error } = await admin
         .from("connected_attachments")
         .delete()
-        .eq("sender_user_id", uid)
-        .not("deleted_at", "is", null);
-      must("connected_attachments.sent_tombstones", error);
+        .eq("sender_user_id", uid);
+      must("connected_attachments.sent", error);
     }
 
     // 4. Avatar — BY PREFIX AND BY POINTER, not by pointer alone (B-20).
@@ -328,6 +322,37 @@ Deno.serve(async (req) => {
         .delete()
         .eq("recipient_user_id", uid);
       must("post_shares.received", error);
+    }
+
+    // Comments the departing member AUTHORED, anywhere (B-3, revised
+    // 2026-08-13). Previously nothing deleted post_comments explicitly and the
+    // posts cascade did all the work; that retained this member's comments on
+    // other members' posts, which is what the revision changes.
+    //
+    // SCOPED TO author_user_id ALONE. Two clauses must never be added here:
+    //
+    //   owner_user_id  — redundant. post_comments_post_id_fkey is
+    //                    ON DELETE CASCADE, so deleting their posts below
+    //                    already removes every comment on those posts.
+    //
+    //   recipient_user_id — THIS CLAUSE WAS B-19, a P1 defect. It matches
+    //                    replies AUTHORED BY ANOTHER MEMBER, on that member's
+    //                    OWN post, merely addressed to the departing member.
+    //                    `reply_to_commenter` and `respond_to_commenters` both
+    //                    write owner=postOwner, author=postOwner,
+    //                    recipient=theCommenter, so this would destroy third-
+    //                    party content because the departing member happened to
+    //                    be the addressee. Verified in supabase/schema/.
+    //
+    // Ordering against the posts delete is immaterial — both are .eq()-scoped
+    // and idempotent, and the overlap (their own comments on their own posts)
+    // is deleted either way.
+    {
+      const { error } = await admin
+        .from("post_comments")
+        .delete()
+        .eq("author_user_id", uid);
+      must("post_comments.authored", error);
     }
 
     // posts has no FK to auth.users, so this must be explicit or the rows
