@@ -116,9 +116,21 @@ at the time.
    This is exactly why Device B showed **"Renews 13 August"** while Tester #2
    is configured for a five-minute Monthly cadence: the setting was not being
    applied, because the purchase was made on TestFlight. Nothing was
-   misconfigured. *(Source: Apple's current TestFlight documentation, reported
-   2026-08-12 — external, not observed here. The 13 August renewal date on
-   Device B is consistent with it.)*
+   misconfigured.
+
+   **BOTH HALVES ARE NOW OBSERVED HERE, not merely documented.** The table above
+   was first recorded from Apple's documentation on 2026-08-12. On 2026-08-13
+   both sides were seen directly, on the same day, on two devices:
+
+   - **Device B (TestFlight):** purchased 12 Aug, renewed daily, still live on
+     13 Aug — the tester's five-minute rate ignored throughout.
+   - **Device A (development sandbox, same five-minute rate):** purchased and
+     **expired the same day**, 12 Aug.
+
+   A TestFlight purchase cannot expire the day it is made under daily renewal,
+   so A's entitlement demonstrably honoured the accelerated rate while B's
+   demonstrably did not. **Runs needing a lapse on demand belong on Device A
+   from Xcode, where the whole cycle takes about thirty minutes.**
 
    **An earlier version of this step listed the per-tester Subscription Renewal
    Rate as a plausible lever for resetting a TestFlight entitlement. It is
