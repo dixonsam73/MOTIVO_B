@@ -162,18 +162,36 @@ most likely never been saved. See C-47, downgraded to P3.
 position before doing anything.** `CLAUDE.md`, `docs/audit-findings.md` and
 `docs/qa-plan.md` are the state; no conversation is.
 
+**A full reconciliation against deployed state was run on 2026-08-13 and found
+NO disagreement.** Both Edge Functions ACTIVE with `verify_jwt: false` and
+byte-identical to committed source (`delete_account_v1` v7 sha256 `993b505b…`,
+`revoke_apple_identity_v1` v1 sha256 `3a7c2035…`); `capture-schema.sh` produced
+an empty diff across all ten snapshot files; B-14's column privileges and B-5's
+directory grants both as their cells claim; and every backend count identical to
+C-45's committed baseline. Device A's `44a6018e…` exists with **no**
+`account_directory` row, which is exactly what accounts for 16 `auth.users`
+against 15 directory rows. The reconciliation is worth re-running rather than
+assumed — but as of that date the documents and production agreed completely.
+
 **Agreed order, set 2026-08-13:**
 
-1. **B-22 — historical deletion residue. READ-ONLY FIRST, and nothing is
-   cleaned automatically.** Establish exactly what historical rows and objects
-   remain, and separate what is genuinely orphaned or dead from what could still
-   be user-visible. Then *propose* any production cleanup and wait for explicit
-   authorisation before a single write. **`Mo`/`qwerty` is another tester —
-   treat their data conservatively.** Note the trap already recorded on B-8: an
-   orphan heuristic keyed on the `users/<uid>/` path prefix produces false
-   positives, because the prefix carries the *sender's* uid and a dead sender is
-   the correct state for a preserved asset. Read liveness from
-   `connected_attachments.deleted_at`, never from the path.
+1. ~~**B-22 — historical deletion residue.**~~ **DONE 2026-08-13. B-22 is
+   RESOLVED**, cleared under explicit authorisation after a read-only sweep, and
+   verified against a prediction committed beforehand — all nine measures
+   matched. Five records and two storage objects went, **by explicit id and
+   explicit path, with no liveness predicate anywhere**, so it was never
+   generalised into an orphan sweep. **Deliberately left behind, and the
+   distinction is the point:** 29 `connected_attachments` rows with both parties
+   deleted, one live row from a *live* sender to a deleted recipient, one
+   unreferenced object under a live user's prefix, and one orphan
+   `post_comment_views` row. None is made non-compliant by the revised deletion
+   rule; all belong to B-8, B-10 and B-16 in Phase 4. **B-22 closed the policy
+   gap, not the backend.** Two lessons landed with it — B-22's own low-stakes
+   reasoning was wrong even though its conclusion held (the Mo rows *were*
+   visible in the inbox; `fetchReceived` tests neither sender liveness nor object
+   existence), and **`supabase storage rm` silently no-ops** at CLI 2.113.0, exit
+   0 with an empty `deleted` list and no DELETE request issued at all. See
+   `supabase/README.md`, which now carries the working route.
 2. **B-14's runtime approval check.** The structural fix is already live. Close
    the remaining normal request → approval regression check **opportunistically**,
    once a coherent A/B Connected fixture exists. **No crafted exploit write.**

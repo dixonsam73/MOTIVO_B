@@ -83,6 +83,36 @@ class `config.toml` and B-17 exist to prevent:
    must not move, verify it explicitly after the deploy rather than reasoning
    from the command line you typed.
 
+### Storage objects — two traps, both hit on 2026-08-13
+
+**`supabase storage rm` SILENTLY DID NOTHING.** Observed clearing B-22 on CLI
+2.113.0: the command exited **0** and printed `{"deleted":[],"buckets_deleted":[],"message":""}`
+for an object that demonstrably existed — `supabase storage ls` listed it
+immediately before and after, and `storage.objects` was unmoved. Re-running with
+`--linked` changed nothing; `--debug` showed the CLI fetching
+`/v1/projects/<ref>/api-keys` and then **issuing no DELETE request at all**.
+
+So the failure is upstream of permissions, and its shape is the dangerous part:
+an empty `deleted` array reads exactly like "nothing matched", and exit 0 reads
+like success. **Never accept a storage deletion on the command's exit status.
+Verify against `storage.objects` afterwards.** The working route is the Storage
+REST API with the service-role key:
+
+```bash
+curl -s -w ' [HTTP %{http_code}]\n' -X DELETE \
+  -H "Authorization: Bearer $KEY" \
+  "https://<ref>.supabase.co/storage/v1/object/<bucket>/<path>"
+```
+
+Fetch `$KEY` into a shell variable in the same command
+(`supabase projects api-keys --project-ref <ref> -o json`) and never echo it.
+
+**And never delete a `storage.objects` row with SQL.** That row is an index over
+S3, not the file. Deleting it removes the only pointer and leaves the bytes
+behind — untracked residue in place of tracked residue, unreachable by every
+policy path and invisible to the orphan sweep that would otherwise find it. Go
+through the Storage API, which removes both.
+
 ### SQL
 
 No migrations until Phase 3, which is a deliberate deferral — migration tooling
