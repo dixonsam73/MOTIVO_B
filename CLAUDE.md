@@ -213,10 +213,27 @@ These are interaction principles rather than architectural invariants.
 - Expiry removes Connected, not the musician. Local journal, Scores, media,
   profile name, avatar, location, instruments, activities, settings and
   preferences all survive untouched.
-- Comments a departing member wrote on others' surviving posts are RETAINED.
-- Attachments a departing member sent survive for existing recipients. The
-  departing member's own received-attachment references are removed. The asset
-  itself is removed only when no live recipient reference remains.
+- **Deleting a Connected account deletes the departing member's own backend
+  UGC** — their comments on others' posts, and the Connected attachments they
+  sent, rows and objects, even where recipients hold live inbox references.
+  **Revised 2026-08-13 on an App Review constraint, not because the earlier rule
+  was wrong.** Retention was correct given the architecture as it stood; Apple's
+  account-deletion guidance treats content shared with others as UGC that
+  deletion must remove, and the deployed representation could not sustain the
+  "that is the recipient's copy" defence — `sender_user_id` is NOT NULL with no
+  FK, and the path CHECK pins the object under `users/<sender>/`. Verified
+  end-to-end on Device A.
+- **B-19 is untouched and is the line to hold:** content authored by somebody
+  else and merely *addressed to* the departing member must survive. The comments
+  predicate is scoped to `author_user_id` alone for exactly that reason.
+- **Membership never gates account deletion.** Deletion authority is
+  `auth.hasConnectedIdentity`, deliberately entitlement-free — a lapsed member
+  must never re-subscribe to delete their account (C-35). It had to be fixed
+  twice: the second gate was an entitlement dependency laundered through a
+  `UserDefaults` key, invisible to a structural audit for identifiers.
+- Recipient copies already adopted into local, recipient-owned storage (Scores),
+  and files already downloaded to another person's device, are out of scope —
+  no backend deletion can reach them. The confirmation copy says so.
 - M13 (iPad) and M14 (personal iCloud sync) are deliberately deferred. Their
   absence is not a defect.
 
