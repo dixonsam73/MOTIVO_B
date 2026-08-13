@@ -14,6 +14,21 @@
 
 project_id = "rlwtqxumfobakvdueugm"
 
+[functions.c44_exchange_probe]
+# TEMPORARY — C-44 gate (b2). This block is removed with the function itself,
+# and the function is removed the moment b2 reports. It is not a draft of
+# revoke_apple_identity_v1 and must not be evolved into one.
+#
+# verify_jwt = false deliberately MIRRORS delete_account_v1 rather than being
+# stricter than it. An earlier proposal pinned this true on defence-in-depth
+# grounds; that was rejected for a better reason than the one it was offered
+# under — gateway JWT verification would be a probe-only variable, and the
+# point of b2 is to exercise the authorisation topology we intend to ship, not
+# a safer one that production will not have. The function performs its own
+# auth.getUser(token) and derives the caller from the verified token, never
+# from the request body, exactly as delete_account_v1 does.
+verify_jwt = false
+
 [functions.delete_account_v1]
 # verify_jwt = false is NOT a relaxation. The function performs its own check
 # and it is stricter than the gateway's: it calls auth.getUser(token) and

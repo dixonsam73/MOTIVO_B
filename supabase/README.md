@@ -51,6 +51,26 @@ supabase functions download delete_account_v1 && git diff --stat supabase/functi
 
 A non-empty diff means production drifted; resolve that before making changes.
 
+**`supabase functions deploy <name>` is NOT scoped to that one function's
+deployment record.** Observed 2026-08-13, CLI 2.113.0: deploying only
+`c44_exchange_probe` — a brand-new function, named explicitly on the command
+line — also bumped `delete_account_v1` from version 6 to version 7. Its source
+was verified byte-identical to the tree immediately afterwards by the download
+check above, and `verify_jwt` was still `false`, so nothing about its behaviour
+changed. The trigger was almost certainly the new `[functions.…]` block added to
+`config.toml` in the same change, causing the CLI to apply function config
+across every declared function.
+
+Two consequences worth having in writing, because this is exactly the drift
+class `config.toml` and B-17 exist to prevent:
+
+1. **A version number is not evidence that code changed, and an unchanged
+   version number is not evidence that it did not.** Only the download diff
+   settles it. Run it after *every* deploy, not only before editing.
+2. **Never assume a named deploy leaves its neighbours alone.** If a P0 function
+   must not move, verify it explicitly after the deploy rather than reasoning
+   from the command line you typed.
+
 ### SQL
 
 No migrations until Phase 3, which is a deliberate deferral — migration tooling
