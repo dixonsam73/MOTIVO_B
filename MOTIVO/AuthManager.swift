@@ -808,14 +808,35 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         return ok
     }
 
-    /// Clears only Connected authentication and backend identity after membership expiry.
-    /// Device-local Études content, profile fields and attachment metadata remain untouched.
+    /// Clears Connected authentication and backend identity, and nothing else.
+    /// Device-local Études content, profile fields and attachment metadata remain
+    /// untouched. This is authentication-state withdrawal, not erasure.
     ///
-    /// C-1: deliberately uncalled. No client-side entitlement path may reach this —
-    /// the client governs access only, and a negative StoreKit read is not authority
-    /// to destroy a session. Retained for Phase 3's server-authoritative expiry flow,
-    /// driven by App Store Server Notifications. Not dead code; unwired on purpose.
-    func clearConnectedIdentityAfterMembershipExpiry() {
+    /// RENAMED 2026-08-13 (closes C-25). It was
+    /// `clearConnectedIdentityAfterMembershipExpiry`, which named a caller's motive
+    /// rather than what the function does — and it has just acquired a caller whose
+    /// motive is not membership expiry at all.
+    ///
+    /// **PREFER THIS OVER `signOut()` FOR ANY NON-USER-INITIATED WITHDRAWAL.**
+    /// The two are identical except that `signOut()` additionally removes the
+    /// per-user attachment *title* mappings (`:880-883`). Those titles are content
+    /// the user typed, so destroying them in response to an external signal —
+    /// Apple revoking a credential, a server-side expiry — would be silent data
+    /// loss the user never asked for. `signOut()` remains correct where the user
+    /// themselves chose to sign out, and inside `LocalFactoryReset`, where
+    /// everything is going anyway.
+    ///
+    /// C-1 still holds and is unchanged in substance: **no client-side entitlement
+    /// path may reach this.** The client governs access only, and a negative
+    /// StoreKit read is not authority to destroy a session. It is no longer
+    /// uncalled — C-45's credential-state monitor calls it on `.revoked` /
+    /// `.notFound`, which is an authoritative signal from Apple about the
+    /// credential itself, not an inference from entitlement. Phase 3's
+    /// server-authoritative expiry flow will be its second caller.
+    func clearConnectedIdentity(reason: String) {
+        #if DEBUG
+        NSLog("[Auth] clearConnectedIdentity reason=%@", reason)
+        #endif
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
         lastHydratedDirectoryUserID = nil

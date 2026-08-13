@@ -264,11 +264,28 @@ struct MOTIVOApp: App {
 
                     // Ensure staging area exists early and exclude from backups
                     try? StagingStore.bootstrap()
+
+                    // C-45: Sign in with Apple is the only authentication
+                    // mechanism, so a revoked or missing credential leaves
+                    // nothing that could justify the authenticated state.
+                    // Observe the notification and check at launch; the monitor
+                    // self-guards against deletion and factory reset.
+                    AppleCredentialStateMonitor.shared.start(auth: auth)
+                    Task {
+                        await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "launch")
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
+
+                    // C-45: re-check on every foreground. Apple documents no
+                    // notification for the account-deleted case on native apps,
+                    // so the polled check is required rather than redundant.
+                    Task {
+                        await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "foreground")
+                    }
 
                     Task {
                         // StoreKit remains the entitlement authority. Refresh whenever the app becomes active
