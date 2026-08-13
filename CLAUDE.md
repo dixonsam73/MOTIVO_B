@@ -136,8 +136,28 @@ B-1/B-3 semantics and verified byte-identical to source.
 **Next: C-44 — Sign in with Apple token revocation. P1, and the largest
 remaining compliance item before submission.** Account deletion currently
 revokes nothing and we hold no credential that could; the register row carries
-the full audit, an auth-flow trace with line numbers, and a recommended
-architecture whose Apple-specific assumptions are flagged **unverified**. Then
+the full audit and an auth-flow trace with line numbers. **Its Apple-specific
+assumptions were verified against Apple's live documentation on 2026-08-13 and
+the row now carries the citations, three corrections and the open questions.**
+Endpoints, ES256 client-secret construction, the five-minute single-use code and
+`client_id` = bundle ID all held. **Two things did not, and both change the
+build:** `/auth/revoke` refuses authorization codes outright, so the `/auth/token`
+exchange is mandatory rather than an optimisation; and TN3194's manual-revocation
+fallback does **not** dissolve under the store-nothing design — its trigger
+merely moves to "no fresh code obtainable". **One assumption is load-bearing and
+Apple does not state it:** that a *repeat* authorization for an already-authorized
+user still returns a non-nil `authorizationCode`. Establish that on device before
+any Edge Function is written; if it is false, the store-nothing design collapses
+and TN3194's stored-refresh-token flow becomes mandatory. **Fetch Apple's docs
+via `developer.apple.com/tutorials/data/documentation/….json`** — the HTML is an
+SPA shell and returns no body text.
+
+**C-45 was filed out of that verification and is also release-blocking.** Études
+observes neither `credentialRevokedNotification` nor `getCredentialState`, and
+Sign in with Apple is the *only* authentication mechanism — so a `.revoked` or
+`.notFound` credential leaves a live Supabase session and Keychain identity with
+nothing left to justify them. Built separately from C-44 (no secrets, no backend
+surface), but C-44 cannot be called TN3194-compliant until it lands. Then
 B-22 (historical residue, needs its own authorisation — `Mo`/`qwerty` is another
 tester, treat conservatively), B-14's runtime approval check, and the cheap
 investigations C-42, C-39/C-40 and C-28.
