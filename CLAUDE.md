@@ -158,20 +158,64 @@ an exhaustive proof that nothing had deleted it, which was true and beside the
 point. A controlled single-variable re-run showed the title survives; it had
 most likely never been saved. See C-47, downgraded to P3.
 
-**Next: B-22** (historical residue, needs its own authorisation — `Mo`/`qwerty`
-is another tester, treat conservatively), B-14's runtime approval check, and the
-cheap investigations C-42, C-39/C-40 and C-28.
+**Start by reading these durable sources and reconciling the current Phase 1
+position before doing anything.** `CLAUDE.md`, `docs/audit-findings.md` and
+`docs/qa-plan.md` are the state; no conversation is.
 
-**Rig state, updated 2026-08-13 after C-44 gate (b2) — read before planning
-device QA.** **Device A now holds a FRESH DISPOSABLE Connected identity**, minted
-by a new Sign in with Apple during gate (b2). It is the intended fixture for the
-eventual real revoke-and-delete end-to-end test and is meant to be spent. It also
-carries **one live Apple refresh token that was minted and abandoned** by the
-(b2) exchange — nobody holds it, and the end-to-end revoke clears it. **Device B
-Release is a lapsed member still holding a live backend account** — C-35's exact
-condition, and shared with the long-running Études Dev install. It was used only
-for gate (a), which wrote nothing and made no network call. Do not spend it
-casually and never run Erase All on it. Update this line as work lands.
+**Agreed order, set 2026-08-13:**
+
+1. **B-22 — historical deletion residue. READ-ONLY FIRST, and nothing is
+   cleaned automatically.** Establish exactly what historical rows and objects
+   remain, and separate what is genuinely orphaned or dead from what could still
+   be user-visible. Then *propose* any production cleanup and wait for explicit
+   authorisation before a single write. **`Mo`/`qwerty` is another tester —
+   treat their data conservatively.** Note the trap already recorded on B-8: an
+   orphan heuristic keyed on the `users/<uid>/` path prefix produces false
+   positives, because the prefix carries the *sender's* uid and a dead sender is
+   the correct state for a preserved asset. Read liveness from
+   `connected_attachments.deleted_at`, never from the path.
+2. **B-14's runtime approval check.** The structural fix is already live. Close
+   the remaining normal request → approval regression check **opportunistically**,
+   once a coherent A/B Connected fixture exists. **No crafted exploit write.**
+3. **The cheap investigations, in this order unless the register argues
+   otherwise:** C-42, then C-39/C-40, then C-28.
+4. **C-36 / QA B7 stay parked until a genuinely fresh first-join fixture
+   exists.** Do not manufacture a pass from an established account — a
+   first-join path exercised by an account that has already joined proves
+   nothing.
+
+**Keep deliberately infrastructure-blocked and later-phase items where they
+belong.** Do not pull them into Phase 1 to make the register look tidier.
+
+**A Phase 1 exit / reconciliation view is wanted at a sensible point:** what is
+genuinely left before the phase can close, what is explicitly deferred and why,
+and whether anything still carries material release or security risk rather than
+being cleanup or later-phase work. **Produce it from the evidence, not by moving
+statuses to improve the numbers.** An item that is open stays open.
+
+**Rig state at end of 2026-08-13, after C-44 and C-45 — read before planning
+device QA.** **Device A is a MIXED-STATE fixture and must not be used as-is.** It
+holds the live Supabase identity `44a6018e…` created for C-45's runtime
+verification, **but its Apple credential was manually revoked during that test**,
+so the app has withdrawn authentication while the backend account survives. It
+also carries local fixture data — sessions with notes, a titled attachment, a
+Score. **Perform a fresh Sign in with Apple before relying on A for anything**,
+and expect that sign-in to reuse the same Supabase row rather than mint a new one
+(same Apple `sub` → same uid, observed twice today). **Its backend account was
+deliberately NOT cleaned up**; that was an instruction, not an oversight. Two
+earlier A identities were spent and deleted today (gate b2's, and run 1's), and
+one **live Apple refresh token minted and abandoned by the b2 exchange** is still
+outstanding — nobody holds it, and it was never revoked, because the run that
+would have cleared it used a different, later grant.
+
+**Device B Release is the established / lapsed control fixture** — a lapsed member
+still holding a live backend account, C-35's exact condition, shared with the
+long-running Études Dev install. It was used only for C-44 gate (a), which wrote
+nothing and made no network call. Do not spend it casually and never run Erase
+All on it. **B is also what B-14's outstanding approval check is waiting on**, so
+preserving it has a specific purpose rather than being general caution.
+
+Update this section as work lands.
 
 **The four `APPLE_*` Supabase secrets are production infrastructure, not
 instrumentation.** `APPLE_SIWA_P8_B64` (base64 of the `.p8` — base64 because a
