@@ -1,6 +1,7 @@
 import AuthenticationServices
 import Foundation
 import UIKit
+import os
 
 /// C-44 — Sign in with Apple revocation at account-deletion time.
 ///
@@ -77,12 +78,35 @@ final class AppleRevocationNotice: ObservableObject {
 @MainActor
 enum AppleRevocationService {
 
+    /// Release-readable by design. The first Device A run (2026-08-13) failed at
+    /// revocation and could not be diagnosed, because the only diagnostic was a
+    /// `#if DEBUG NSLog` while the rig runs Release — Debug carries a bundle ID
+    /// App Store Connect does not know, so it is not a build this path can
+    /// execute in. `os.Logger` with `privacy: .public` is what CLAUDE.md already
+    /// prescribed after the MembershipTrace episode.
+    ///
+    /// **EVERYTHING LOGGED HERE IS A FIXED ENUM, AN HTTP STATUS, OR AN OS ERROR
+    /// CODE.** Never an authorization code, access/refresh/id token, Apple `sub`,
+    /// Supabase uid or email, client secret, or Apple's raw response body. The
+    /// server's `reason` values are themselves a closed set, and the only
+    /// pass-through is Apple's short error enum (`invalid_grant` and friends).
+    private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "revocation")
+
     /// Attempts revocation. **Cannot throw, by design — see the note above.**
     ///
     /// Gated on identity, never on entitlement. A lapsed member deleting their
     /// account must not be asked to re-subscribe in order to revoke, which is
     /// C-35's rule and the reason that finding had to be fixed twice.
+    ///
+    /// One log line per attempt, through a single funnel, so no early return can
+    /// escape unlogged — the lesson from the ActivationTrace work.
     static func attemptRevocation(auth: AuthManager, reason: String) async -> AppleRevocationOutcome {
+        let outcome = await performRevocation(auth: auth, reason: reason)
+        log.notice("[C-44] revocation reason=\(reason, privacy: .public) outcome=\(outcome.summary, privacy: .public)")
+        return outcome
+    }
+
+    private static func performRevocation(auth: AuthManager, reason: String) async -> AppleRevocationOutcome {
         guard auth.hasConnectedIdentity else {
             return .notAttempted("noConnectedIdentity")
         }
@@ -96,9 +120,17 @@ enum AppleRevocationService {
         }
 
         let request = DeletionAuthorizationRequest()
-        guard let credential = await request.requestCredential() else {
-            // Cancelled, failed, or no code issued. Deletion proceeds regardless.
-            return .notAttempted("authorizationUnavailable")
+        let credential: ASAuthorizationAppleIDCredential
+        switch await request.requestCredential() {
+        case .credential(let c):
+            credential = c
+        case .failed(let domain, let code):
+            // The error code is the whole point of carrying this through rather
+            // than collapsing it to a boolean: `.canceled` (1001) means the user
+            // dismissed Apple's sheet, while `.unknown`/`.failed` (1000/1004)
+            // is what a blocked PRESENTATION looks like — which is the standing
+            // hypothesis for the first Device A run, still unproven.
+            return .notAttempted("authorization/\(domain)/\(code)")
         }
 
         // Client-side identity check, in addition to the server's `sub` binding.
@@ -162,12 +194,20 @@ enum AppleRevocationService {
 /// delegate weakly and nothing else would keep it alive across the await.
 private final class DeletionAuthorizationRequest: NSObject {
 
-    private var continuation: CheckedContinuation<ASAuthorizationAppleIDCredential?, Never>?
+    /// Carries the failure's error code rather than collapsing to nil, because
+    /// distinguishing "the user cancelled" from "the UI could not present" is
+    /// the difference between expected behaviour and a defect.
+    enum Result {
+        case credential(ASAuthorizationAppleIDCredential)
+        case failed(domain: String, code: Int)
+    }
+
+    private var continuation: CheckedContinuation<Result, Never>?
     private var controller: ASAuthorizationController?
     private var selfRetain: DeletionAuthorizationRequest?
 
     @MainActor
-    func requestCredential() async -> ASAuthorizationAppleIDCredential? {
+    func requestCredential() async -> Result {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
             self.selfRetain = self
@@ -186,11 +226,11 @@ private final class DeletionAuthorizationRequest: NSObject {
         }
     }
 
-    private func finish(_ credential: ASAuthorizationAppleIDCredential?) {
+    private func finish(_ result: Result) {
         let pending = continuation
         continuation = nil
         controller = nil
-        pending?.resume(returning: credential)
+        pending?.resume(returning: result)
         selfRetain = nil
     }
 }
@@ -201,15 +241,23 @@ extension DeletionAuthorizationRequest: ASAuthorizationControllerDelegate {
         controller: ASAuthorizationController,
         didCompleteWithAuthorization authorization: ASAuthorization
     ) {
-        finish(authorization.credential as? ASAuthorizationAppleIDCredential)
+        if let credential = authorization.credential as? ASAuthorizationAppleIDCredential {
+            finish(.credential(credential))
+        } else {
+            finish(.failed(domain: "unexpectedCredentialType", code: 0))
+        }
     }
 
     func authorizationController(
         controller: ASAuthorizationController,
         didCompleteWithError error: Error
     ) {
-        // Includes the user cancelling Apple's sheet. Deletion proceeds anyway.
-        finish(nil)
+        // Includes the user cancelling Apple's sheet (ASAuthorizationError
+        // .canceled = 1001). Deletion proceeds regardless of what happened here.
+        // Code and domain only — never `localizedDescription`, which is
+        // free-form system text and not worth the risk in a shipped log.
+        let nsError = error as NSError
+        finish(.failed(domain: nsError.domain, code: nsError.code))
     }
 }
 

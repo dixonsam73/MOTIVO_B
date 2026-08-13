@@ -239,6 +239,9 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
     // SCOPE: ProfileView — add Delete Account UI + confirmation sheet (calls Edge Function delete_account_v1); no other UI/logic changes.
     // SEARCH-TOKEN: 20260227_114900_DeleteAccount_UIHook
     @State private var showDeleteAccountSheet: Bool = false
+    // C-44: set ONLY by the explicit DELETE action, consumed by the sheet's
+    // onDismiss before the workflow starts. See both sites for why.
+    @State private var pendingDeletionConfirmed: Bool = false
     @State private var deleteAccountConfirmText: String = ""
     @State private var deleteAccountInFlight: Bool = false
     @State private var deleteAccountErrorMessage: String? = nil
@@ -1584,7 +1587,16 @@ case .failure(let error):
                      .cardSurface()
 
                      Button(role: .destructive) {
-                         Task { await performDeleteAccount() }
+                         // C-44 PRESENTATION BOUNDARY. Deletion is NOT started
+                         // here. It starts from the sheet's onDismiss, once this
+                         // sheet is fully gone, because the workflow presents
+                         // Apple's authorization UI and ASAuthorizationController
+                         // presents from the anchor window's root view
+                         // controller — which cannot work while this sheet is
+                         // still up. Only this explicit action sets the flag, so
+                         // a swipe or Cancel dismissal can never start deletion.
+                         pendingDeletionConfirmed = true
+                         showDeleteAccountSheet = false
                      } label: {
                          HStack {
                              Spacer()
@@ -1643,7 +1655,7 @@ case .failure(let error):
              await AccountDeletionTransaction.run(reason: "erase-all-etudes-data-local") {
                  deleteAccountInFlight = true
                  defer { deleteAccountInFlight = false }
-                 showDeleteAccountSheet = false
+                 // The sheet is already dismissed — onDismiss is what started us.
                  await LocalFactoryReset.perform(reason: "erase-all-etudes-data-local", auth: auth)
              }
              return
@@ -1702,20 +1714,20 @@ case .failure(let error):
          // that a revocation failure can never prevent deletion (TN3194: "you
          // must still fulfill the user's account deletion request"). Do not
          // "improve" this into a throwing call.
+         // The outcome is logged inside the service, through a single funnel,
+         // with os.Logger at privacy: .public — deliberately NOT `#if DEBUG`.
+         // The first Device A run failed here and could not be diagnosed because
+         // the only diagnostic was Debug-gated while the rig runs Release.
          let revocation = await AppleRevocationService.attemptRevocation(
              auth: auth,
              reason: "delete-account"
          )
-         #if DEBUG
-         NSLog("[C-44] revocation outcome=%@", revocation.summary)
-         #endif
 
          do {
              try await ConnectedAccountDeletionService.deleteCurrentConnectedAccount(
                  auth: auth,
                  reason: "delete-account"
              )
-             showDeleteAccountSheet = false
              await LocalFactoryReset.perform(reason: "erase-all-etudes-data-connected", auth: auth)
 
              // TN3194 step 2 — "Direct the user to manually revoke access for
@@ -1870,7 +1882,19 @@ private func initials(from string: String) -> String {
              } message: {
                  Text(deleteAccountErrorMessage ?? "Couldn’t erase your Études data. Please try again.")
              }
-             .sheet(isPresented: $showDeleteAccountSheet) {
+             .sheet(isPresented: $showDeleteAccountSheet, onDismiss: {
+                 // C-44: the destructive workflow starts HERE, not in the
+                 // button, so Apple's authorization UI has a clean presentation
+                 // context. No sleep and no timing guess — onDismiss fires only
+                 // once the sheet is actually gone.
+                 //
+                 // The flag is CONSUMED before the async work begins, so an
+                 // unrelated later dismissal of this sheet cannot replay
+                 // deletion. Ordinary swipe-to-dismiss and Cancel never set it.
+                 guard pendingDeletionConfirmed else { return }
+                 pendingDeletionConfirmed = false
+                 Task { await performDeleteAccount() }
+             }) {
                  deleteAccountSheet
              }
 
