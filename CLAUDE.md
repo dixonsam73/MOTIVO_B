@@ -120,14 +120,36 @@ baseline recorded while still entitled, read once before the device foregrounded
 and again after. C-1's *local durability* half is **not** covered by that run;
 Device B had no local journal to lose.
 
-Next: C-28 and C-35 (both need a product decision first), follow-policy
-hardening beyond B-14, zero-dependency cleanup, C-3 measurement, B-6 two-account
-test. **A two-device, two-Apple-ID rig exists** — Device A on a dedicated sandbox
-tester, Device B running Release *alongside* its long-serving Debug install under
-a second iCloud account — which unblocks D5–D8, E2 and E8. **Device B Release is
-currently a lapsed member holding a live backend account**, which is C-35's exact
-condition; do not spend it casually, and never run Erase All on it. Update this
-line as work lands.
+**C-35 is RESOLVED — 2026-08-13, device-verified end to end.** A lapsed member
+deleted their Connected account **without re-subscribing**: every one of eight
+counts, nine residue checks and both discriminators matched a prediction
+committed before the erase. It took two attempts, and the first failure is worth
+more than the fix — **C-35's defect existed twice**, and the second instance was
+an entitlement dependency laundered through a `UserDefaults` key
+(`AppModeManager` writes the backend runtime mode from `AppMode`, which is
+resolved from `isEntitled`). The deletion path had been audited for `isEntitled`,
+`AppMode` and `canShowConnectedAccountManagement` and passed, because it
+contained none of them **by name**. No grep could have found it; only running it
+did. `delete_account_v1` was redeployed the same day (version 6) with the revised
+B-1/B-3 semantics and verified byte-identical to source.
+
+**Next: C-44 — Sign in with Apple token revocation. P1, and the largest
+remaining compliance item before submission.** Account deletion currently
+revokes nothing and we hold no credential that could; the register row carries
+the full audit, an auth-flow trace with line numbers, and a recommended
+architecture whose Apple-specific assumptions are flagged **unverified**. Then
+B-22 (historical residue, needs its own authorisation — `Mo`/`qwerty` is another
+tester, treat conservatively), B-14's runtime approval check, and the cheap
+investigations C-42, C-39/C-40 and C-28.
+
+**Rig state, changed 2026-08-13 — read before planning device QA.** **Device A
+no longer has a Connected account**; it was the C-35 fixture and was deleted, so
+re-creating a two-account rig needs a fresh Sign in with Apple on A, which mints
+a new `auth.users` row. **Device B Release is a lapsed member still holding a
+live backend account** — C-35's exact condition, now also the only surviving
+Connected identity on the rig, and shared with the long-running Études Dev
+install. Do not spend it casually and never run Erase All on it. Update this line
+as work lands.
 
 **Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
 sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
