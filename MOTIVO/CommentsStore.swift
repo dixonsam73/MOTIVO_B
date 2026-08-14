@@ -208,7 +208,13 @@ public final class CommentsStore: ObservableObject {
     /// Deliberately NOT `clearAll()`, which is the closest existing primitive:
     /// it calls `save()` and therefore re-creates an empty JSON file where a
     /// factory reset should leave none.
-    func wipeOnDiskAndCacheForFactoryReset() {
+    /// - Returns: whether the JSON file was present beforehand. Legacy residue is
+    ///   the only way it can exist on a current install (the `.localSession`
+    ///   write path is unreachable from the shipping UI), so `false` means this
+    ///   device simply had none — not that the wipe failed.
+    @discardableResult
+    func wipeOnDiskAndCacheForFactoryReset() -> Bool {
+        let existed = FileManager.default.fileExists(atPath: Self.fileURL.path)
         try? FileManager.default.removeItem(at: Self.fileURL)
 
         UserDefaults.standard.removeObject(forKey: defaultsKey)
@@ -216,6 +222,7 @@ public final class CommentsStore: ObservableObject {
         commentsBySessionID = [:]
         authorByCommentID = [:]
         recipientByCommentID = [:]
+        return existed
     }
 
     /// Developer aid to clear all comments. Not called anywhere by default.

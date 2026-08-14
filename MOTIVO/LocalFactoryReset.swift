@@ -12,6 +12,7 @@
 // SEARCH-TOKEN: 20260303_173500-DELETE-ACCOUNT-V2-STAGE6-RUNTIMEBOOTSTRAP
 
 import Foundation
+import os
 
 /// Delete Account v2 — Local Factory Reset coordinator.
 /// Stage 5: invoked from delete-account success path; performs sign-out, stops publish queue, wipes backend config,
@@ -21,6 +22,8 @@ enum LocalFactoryReset {
 
     // In-memory gate is sufficient for current acceptance tests; no persistence across relaunch required.
     private(set) static var isInProgress: Bool = false
+
+    private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "factoryreset")
 
     static func perform(reason: String, auth: AuthManager) async {
         guard !isInProgress else {
@@ -93,15 +96,32 @@ enum LocalFactoryReset {
         // media other members sent survived an explicit full erase. Note an
         // adopted PDF exists TWICE: the Scores copy above, and the inbox original
         // here. Wiping only the first is what made this look fixed.
-        ReceivedConnectedAttachmentStore.shared.wipeOnDiskAndCacheForFactoryReset()
+        let receivedRemoved = ReceivedConnectedAttachmentStore.shared.wipeOnDiskAndCacheForFactoryReset()
         // C-48: CommentsStore.json sits at the Application Support ROOT rather
         // than under MOTIVO/, and was likewise never reached.
-        CommentsStore.shared.wipeOnDiskAndCacheForFactoryReset()
+        let commentsFileExisted = CommentsStore.shared.wipeOnDiskAndCacheForFactoryReset()
         StagingStore.wipeOnDiskForFactoryReset()
         PracticeTimerStore.wipeOnDiskForFactoryReset()
         SessionSyncQueue.shared.wipeOnDiskForFactoryReset()
         AttachmentPrivacy.wipeOnDiskAndCacheForFactoryReset()
-        wipeTemporaryMediaArtifactsBestEffort()
+        let temporaryRemoved = wipeTemporaryMediaArtifactsBestEffort()
+
+        // Release-readable outcome for the three C-28/C-48 sweeps, through one
+        // funnel, deliberately NOT `#if DEBUG` — the rig runs Release, and
+        // CLAUDE.md already carries this lesson twice (MembershipTrace, then
+        // C-44 run 1, where the one line that would have named the cause was
+        // compiled out of the only build that could execute the path).
+        //
+        // This is an outcome line on a destructive path, not temporary
+        // instrumentation, so the standing removal condition does not apply.
+        //
+        // WHY COUNTS RATHER THAN "ran": an empty directory afterwards is
+        // produced equally by "the wipe ran", "the wipe threw" and "this build
+        // predates the wipe". Only a count taken before removal separates them,
+        // and the run that raises the question destroys the fixture that could
+        // answer it. Counts and booleans only — never a filename or a path.
+        log.notice("[C-28] localReset receivedAttachmentsRemoved=\(receivedRemoved, privacy: .public) temporaryFilesRemoved=\(temporaryRemoved, privacy: .public)")
+        log.notice("[C-48] localReset commentsStoreFileExisted=\(commentsFileExisted, privacy: .public)")
 
         // Reset Core Data persistent stores (store-safe wipe via batch delete).
         do {
@@ -118,7 +138,9 @@ enum LocalFactoryReset {
         }
     }
 
-    private static func wipeTemporaryMediaArtifactsBestEffort() {
+    @discardableResult
+    private static func wipeTemporaryMediaArtifactsBestEffort() -> Int {
+        var removed = 0
         let fm = FileManager.default
         let tmp = fm.temporaryDirectory
         do {
@@ -135,10 +157,16 @@ enum LocalFactoryReset {
             // authoritative set now serves both sweeps.
             let exts = AttachmentStore.factoryResetSweepExtensions
             for url in urls where exts.contains(url.pathExtension.lowercased()) {
-                try? fm.removeItem(at: url)
+                do {
+                    try fm.removeItem(at: url)
+                    removed += 1
+                } catch {
+                    // Best effort — ignore.
+                }
             }
         } catch {
             // Best effort — ignore.
         }
+        return removed
     }
 }

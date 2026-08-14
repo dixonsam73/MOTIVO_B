@@ -462,13 +462,23 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
     /// Deliberately NOT touched: copies the user explicitly exported to Files or
     /// Photos. Those left Études-managed storage by an explicit user action and
     /// are no longer ours to delete.
-    func wipeOnDiskAndCacheForFactoryReset() {
+    /// - Returns: the number of files that were present and removed. Reported by
+    ///   `LocalFactoryReset` in a Release-readable log line, because the
+    ///   filesystem alone cannot distinguish "this wipe ran" from "this build
+    ///   predates the wipe" — and the destructive run that would ask the
+    ///   question also spends the fixture that could answer it.
+    @discardableResult
+    func wipeOnDiskAndCacheForFactoryReset() -> Int {
+        var removed = 0
         if let directory = try? receivedDirectory() {
+            let contents = (try? fileManager.contentsOfDirectory(atPath: directory.path)) ?? []
+            removed = contents.count
             try? fileManager.removeItem(at: directory)
         }
 
         items = []
         errorMessage = nil
+        return removed
     }
 
     private func localURLIfPresent(for item: ConnectedAttachment) async throws -> URL? {
