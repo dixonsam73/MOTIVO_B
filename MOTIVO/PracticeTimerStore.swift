@@ -30,13 +30,14 @@ enum PracticeTimerStore {
         let fileManager = FileManager.default
         do {
             try fileManager.createDirectory(at: baseDir, withIntermediateDirectories: true, attributes: nil)
-            
-            // Exclude MOTIVO folder from backups
-            var motivoDir = baseDir.deletingLastPathComponent()
-            var resourceValues = URLResourceValues()
-            resourceValues.isExcludedFromBackup = true
-            
-            try motivoDir.setResourceValues(resourceValues)
+
+            // This store used to exclude its PARENT (`Application Support/MOTIVO/`) from
+            // backup — a directory it does not own — as a side effect of a UserDefaults
+            // migration helper that happens to run at launch. The outcome was right and
+            // the ownership was wrong, and it is how AttachmentPrivacy.json came to be
+            // excluded with no code saying so. `BackupPolicy` now owns that directory and
+            // applies it from `MOTIVOApp.init()`. This store flags only its own scratch.
+            BackupPolicy.exclude(baseDir)
         } catch {
             #if DEBUG
             print("PracticeTimerStore.bootstrap error: \(error)")

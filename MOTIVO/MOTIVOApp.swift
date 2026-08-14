@@ -135,6 +135,10 @@ struct MOTIVOApp: App {
 
         LegacyDefaultsPurge.runOnce()
 
+        // Phase 2 (C-4): apply the directory-level backup policy from its owner, rather
+        // than inheriting it as a side effect of the staged-video migration below.
+        BackupPolicy.applyDirectoryPolicyAtLaunch()
+
         // Migrate oversized PracticeTimer.stagedVideo from UserDefaults to file store (no-op if already migrated)
         _ = PracticeTimerStore.loadStagedVideo()
 

@@ -155,13 +155,10 @@ struct AttachmentStore {
     }
 
     
-    // Best-effort: exclude persisted attachments from iCloud/iTunes backup.
-    // Failure to set the flag must not abort saves.
+    // Backup policy for persisted attachments is owned by `BackupPolicy`.
+    // Failure to apply it must not abort saves.
     private static func bestEffortExcludeFromBackup(_ url: URL) {
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var mutableURL = url
-        try? mutableURL.setResourceValues(values)
+        BackupPolicy.exclude(url)
     }
 
 // Best-effort removal helper (safe no-op if missing)

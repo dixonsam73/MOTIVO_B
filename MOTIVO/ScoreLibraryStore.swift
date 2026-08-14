@@ -293,10 +293,9 @@ final class ScoreLibraryStore: ObservableObject {
         return trimmed.isEmpty ? fallback : trimmed
     }
 
+    // Backup policy is owned by `BackupPolicy`. Applying it is best-effort: a failure
+    // here must not abort a score import, which is what the previous `throws` did.
     private func excludeFromBackup(_ url: URL) throws {
-        var mutableURL = url
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try mutableURL.setResourceValues(values)
+        BackupPolicy.exclude(url)
     }
 }

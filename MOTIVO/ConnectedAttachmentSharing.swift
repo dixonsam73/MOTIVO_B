@@ -414,10 +414,10 @@ public final class ReceivedConnectedAttachmentStore: ObservableObject {
         switch await BackendEnvironment.shared.connectedAttachments.download(item) {
         case .success(let data):
             try data.write(to: destination, options: .atomic)
-            var values = URLResourceValues()
-            values.isExcludedFromBackup = true
-            var mutable = destination
-            try? mutable.setResourceValues(values)
+            // A received attachment is a local cache of a backend-authoritative object,
+            // not recipient-owned permanent data — durability comes from adopting it
+            // (Save to Scores). Excluded deliberately; see BackupPolicy.
+            BackupPolicy.exclude(destination)
             return destination
         case .failure(let error): throw error
         }

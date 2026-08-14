@@ -50,10 +50,10 @@ enum StagingStore {
         if !fm.fileExists(atPath: dir.path) {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         }
-        var resourceValues = URLResourceValues()
-        resourceValues.isExcludedFromBackup = true
-        var mutable = dir
-        try mutable.setResourceValues(resourceValues)
+        // Staging is scratch. Backup policy is owned by `BackupPolicy`; the parent
+        // `MOTIVO/` directory is excluded at launch, and this is belt-and-braces for the
+        // case where staging is bootstrapped before that runs.
+        BackupPolicy.exclude(dir)
     }
 
     /// Save a new staged media by moving/copying from a source URL.
