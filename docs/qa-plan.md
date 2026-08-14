@@ -568,6 +568,60 @@ next foreground), and throttled with a deliberate lock/unlock immediately after
 payment to force a `scenePhase` refresh into the window (the most direct route
 to C-13's hazard, accepting that it can mask C-38).
 
+### C-28 / C-48 destructive run — RESULT, 2026-08-14. PASS on every assertion.
+
+Device A, Release from `ea0beb2`, built and installed from the clean tree so the
+binary provably carried the fix. Every container, log and backend assertion below
+matched the prediction committed at `995603f` before the erase.
+
+**Container — all target paths absent.** `ReceivedConnectedAttachments/` gone,
+`CommentsStore.json` gone, `tmp/…SelectedPages….pdf` gone, `Documents/Scores/`
+gone, both local media gone. What remains is an empty `Documents/`, empty
+`MOTIVO/` and `Profiles/`, `tmp/TemporaryItems`, and a rebuilt Core Data store.
+**The first three would all have survived on the pre-fix build** — they are the
+test.
+
+**Release log, in the predicted order:**
+
+```
+[C-44] revocation reason=delete-account outcome=revoked
+[LocalFactoryReset] begin (stage 5c) reason=erase-all-etudes-data-connected
+[C-28] localReset receivedAttachmentsRemoved=2 temporaryFilesRemoved=1
+[C-48] localReset commentsStoreFileExisted=true
+```
+
+**The counts are the result, not the decoration.** `receivedAttachmentsRemoved=2`
+and `commentsStoreFileExisted=true` establish that the files were present when the
+wipe ran — which no post-hoc absence check can. `temporaryFilesRemoved=1` matched
+the predicted 1-not-2 exactly, because `tmp/TemporaryItems` is a directory with no
+path extension. Revocation succeeded and preceded the reset; no manual-revocation
+notice appeared, which is itself an assertion (`didRevoke == true`).
+
+**Backend 9/9.** `auth.users` 16→15, `account_directory` 16→15,
+`connected_attachments` 33→31, `follows` 8→6; `posts` 98, `post_comments` 2,
+`post_comment_views` 9, `avatars` 3 unchanged. A is zero on every per-account
+measure. B intact: 4 posts, directory row, 8 objects.
+
+**`attachments` objects stayed at 10, as predicted.** Both received objects live
+under the *sender's* prefix and A's sweep is scoped to `users/<A>/`, so they
+survive unreferenced the moment their rows go — D14's expected residue, +2 on
+B-8's Phase 4 pile. **A count of 8 would have meant the function reached outside
+the departing member's prefix.**
+
+**Both overreach checks held:** the PDF exported to Files and the photo saved to
+Photos both survived. The boundary is verified in both directions.
+
+**ONE DEVIATION — filed as C-49, and it is navigation only.** The app landed on
+the journal rather than first-launch onboarding. A force-quit and relaunch showed
+onboarding correctly, which both proves the reset cleared persistent state and
+eliminates the competing mechanism: the onboarding gate lives only in
+`appRoute.route == .timer`, and dismissing Profile revealed `.content`
+underneath. No data implication; every other assertion on this run passed.
+
+**B-14 closed incidentally.** The `connected_attachments` insert policy requires
+an approved follow, so staging this fixture forced a real request → approval
+cycle — the runtime check B-14 had been holding Device B for. See its row.
+
 ### C-28 / C-48 destructive run — PREDICTION, written 2026-08-14 before the erase
 
 Device A (`44a6018e…`, directory `c45verification`) deletes its Connected account

@@ -192,12 +192,29 @@ assumed — but as of that date the documents and production agreed completely.
    existence), and **`supabase storage rm` silently no-ops** at CLI 2.113.0, exit
    0 with an empty `deleted` list and no DELETE request issued at all. See
    `supabase/README.md`, which now carries the working route.
-2. **B-14's runtime approval check.** The structural fix is already live. Close
-   the remaining normal request → approval regression check **opportunistically**,
-   once a coherent A/B Connected fixture exists. **No crafted exploit write.**
-3. **The cheap investigations, in this order unless the register argues
-   otherwise:** C-42, then C-39/C-40, then C-28.
-4. **C-36 / QA B7 stay parked until a genuinely fresh first-join fixture
+2. ~~**B-14's runtime approval check.**~~ **DONE 2026-08-14 — B-14 is RESOLVED.**
+   It closed incidentally, which is exactly how the cell said it should: the
+   `connected_attachments` insert policy demands an approved follow, so staging
+   C-28's fixture forced a real request → approval cycle, and both rows read back
+   `approved`. Approving client was Études Dev under a synthetic entitlement, so
+   Device B's lapsed Release fixture was never spent. No crafted exploit write.
+3. ~~**C-28.**~~ **DONE 2026-08-14 — C-28 and C-48 are both RESOLVED**,
+   device-verified against a prediction committed beforehand. Product rule
+   settled: **Erase All erases everything Études owns or manages locally on that
+   device regardless of provenance, and reaches nothing the user has explicitly
+   exported to Files or Photos.** Both overreach checks held. **Three lessons
+   landed with it, all the same shape:** the received-inbox instruction, the
+   `CommentsStore` staging instruction and the tmp "Save to Files" rationale were
+   each produced by reading what a function does without asking what can reach
+   it — and two of the three were caught by the tester refusing to act rather
+   than by the analysis. **C-49 filed** from the one deviation: after a
+   successful erase the app lands on the journal, not onboarding — navigation
+   state only, clears on relaunch, but on the path App Review exercises.
+4. **The remaining cheap investigations, in this order unless the register argues
+   otherwise:** C-33, then B-7 and B-10 (both cheap defuses), then C-3's
+   measurement. **C-49** is a one-line fix in a function C-46 already owns and is
+   worth pulling in alongside C-33.
+5. **C-36 / QA B7 stay parked until a genuinely fresh first-join fixture
    exists.** Do not manufacture a pass from an established account — a
    first-join path exercised by an account that has already joined proves
    nothing.
