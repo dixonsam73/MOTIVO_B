@@ -139,6 +139,11 @@ struct MOTIVOApp: App {
         // than inheriting it as a side effect of the staged-video migration below.
         BackupPolicy.applyDirectoryPolicyAtLaunch()
 
+        // Phase 2 (C-4): move the privacy map out of the excluded scratch directory. Must
+        // happen at launch, not only on first read — otherwise a user who upgrades and
+        // backs up before opening a session with attachments still loses their choices.
+        AttachmentPrivacy.migrateStorageLocationIfNeeded()
+
         // Phase 2 (C-4): make permanent media that already exists on this device
         // backup-eligible. Runs off the main actor, once per install. U3 only affects
         // files written from now on, so without this an existing user's whole library

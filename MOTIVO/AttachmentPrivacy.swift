@@ -136,10 +136,23 @@ public enum AttachmentPrivacy {
 
     /// Moves the map out of the scratch directory, once.
     ///
-    /// Runs inside `loadMap()` rather than at launch so it cannot race the first read.
+    /// **Called at launch AND from `loadMap()`, and it must be both.** It was originally
+    /// only lazy, on the reasoning that running inside `loadMap()` cannot race the first
+    /// read. That reasoning was fine and the placement was still wrong: `loadMap()` only
+    /// runs when something actually queries attachment privacy, so a user who upgraded and
+    /// then backed up without opening a session with attachments would still have the map
+    /// sitting in the excluded directory — unmigrated, and therefore still not backed up.
+    /// Simulator QA caught it; a bare launch moved nothing.
+    ///
+    /// Idempotent and guarded by file existence, so calling it from both places is free.
+    ///
     /// A pre-existing file at the new location always wins — if both exist, the new one is
     /// authoritative and the legacy copy is removed, so a half-completed earlier migration
     /// cannot resurrect stale choices.
+    static func migrateStorageLocationIfNeeded() {
+        queue.sync { migrateFromLegacyLocationIfNeeded() }
+    }
+
     private static func migrateFromLegacyLocationIfNeeded() {
         let fm = FileManager.default
         guard let legacy = legacyFileURL(), fm.fileExists(atPath: legacy.path) else { return }
