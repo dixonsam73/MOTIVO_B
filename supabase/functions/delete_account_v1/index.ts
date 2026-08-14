@@ -287,25 +287,42 @@ Deno.serve(async (req) => {
 
     // 5. Relational rows.
     //
-    // THERE IS NO post_comments STATEMENT HERE, AND THAT IS THE FIX — do not
-    // add one back. Deleting a statement to repair two findings looks like an
-    // omission, so the reasoning is spelled out.
+    // post_comments IS deleted, further down, SCOPED TO author_user_id ALONE.
+    // The full reasoning sits immediately above that statement; it is
+    // summarised here because this is the first place a reader looks.
     //
-    // `post_comments_post_id_fkey` is ON DELETE CASCADE (verified in
-    // supabase/schema/constraints.json), so removing this member's posts
-    // already removes every comment on them. What a delete here would reach in
-    // addition is exactly the content we decided to keep:
+    //   author_user_id = uid     DELETED. The departing member's own comments
+    //                            wherever they were written, including on
+    //                            OTHER members' posts. B-3, RULE REVISED
+    //                            2026-08-13 on Apple's account-deletion
+    //                            guidance, which treats content shared with
+    //                            others as UGC that deletion must remove.
     //
-    //   author_user_id = uid     their comments on OTHER members' posts (B-3)
-    //   recipient_user_id = uid  replies written BY another member, on that
-    //                            member's own post, merely addressed to this
-    //                            one (B-19) — someone else's words entirely
-    //   owner_user_id = uid      redundant; the cascade above covers it
+    //   recipient_user_id = uid  NEVER a deletion criterion, and adding it
+    //                            would re-open B-19 (P1). It matches replies
+    //                            AUTHORED BY ANOTHER MEMBER, on that member's
+    //                            OWN post, merely addressed to the departing
+    //                            one — somebody else's words entirely.
     //
-    // Retained comments will hold author/recipient IDs pointing at a deleted
-    // account, and account_directory cascades from auth.users, so those names
-    // will not resolve. That is a client rendering concern, not a reason to
-    // delete conversation history.
+    //   owner_user_id = uid      Not needed. post_comments_post_id_fkey is
+    //                            ON DELETE CASCADE (verified in
+    //                            supabase/schema/constraints.json), so deleting
+    //                            this member's posts already removes every
+    //                            comment on them.
+    //
+    // Surviving comments may hold a recipient_user_id pointing at a deleted
+    // account, and account_directory cascades from auth.users, so that identity
+    // will not resolve. That is intended and is a client-rendering concern, not
+    // a reason to delete somebody else's conversation history. See B-19 in
+    // docs/audit-findings.md.
+    //
+    // HISTORICAL NOTE, because this block used to say the opposite. Until
+    // 2026-08-13 there was deliberately no post_comments statement anywhere in
+    // this function, and this comment instructed the reader not to add one.
+    // The retention rule it defended was correct for the architecture as it
+    // stood; the input changed, not the reasoning. Both halves of the current
+    // rule were device-verified on 2026-08-13 against a prediction committed
+    // before the erase — see docs/qa-plan.md, "C-35 destructive run".
     {
       const { error } = await admin
         .from("post_comment_views")

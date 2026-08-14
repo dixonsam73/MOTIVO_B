@@ -51,6 +51,20 @@ supabase functions download delete_account_v1 && git diff --stat supabase/functi
 
 A non-empty diff means production drifted; resolve that before making changes.
 
+**KNOWN, DELIBERATE DIVERGENCE AS OF 2026-08-14 — `delete_account_v1`, COMMENTS
+ONLY.** The download check above will report a non-empty diff for this function,
+and it is **not** drift. A stale comment block was corrected in the tree: it
+described the pre-2026-08-13 retention rule and explicitly instructed the reader
+not to add a `post_comments` statement, twenty lines above the `author_user_id`
+statement the revised rule requires. Deployed **v7 is byte-identical to the tree
+apart from that comment**, verified by stripping comments and blank lines from
+both and diffing: the executable body is identical. **The correction has NOT been
+deployed**, because deploying it would mean shipping a change to the P0 deletion
+path for a comment, and the deploy is not scoped to one function (see below).
+**Fold it into the next legitimate deploy of this function**, and re-run the
+download check afterwards to return the diff to empty. Until then, read the tree
+for intent and remember that the running code is the same code.
+
 **`supabase functions deploy <name>` is NOT scoped to that one function's
 deployment record.** Observed 2026-08-13, CLI 2.113.0: deploying only
 `c44_exchange_probe` — a brand-new function, named explicitly on the command

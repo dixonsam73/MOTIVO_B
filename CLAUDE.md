@@ -12,7 +12,62 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**Current position: Phase 1 work is COMPLETE, pending an independent closure audit.** Every Phase 1 row is resolved, measured, or carried with a stated reason: **C-49** (fixed, device acceptance pending), **C-36 / QA B7** (fixture-blocked — needs a genuinely fresh first-join account), and **B-4, B-12, B-13** (fixes deployed, verification deferred to Phase 3 for want of a disposable backend). **C-26 and B-11 remain release blockers owned by Phase 3**, not Phase 1 debt. The closure audit is deliberately being reconstructed from this repository rather than from any conversation.
+**Current position: Phase 1 is NOT YET CLOSED. One bounded closure unit is in
+progress.** An independent closure audit ran on 2026-08-14, reconstructed from
+this repository and from read-only production checks rather than from any
+conversation, and it found the substantive work sound but the *record* wrong in
+four places. The corrections have landed; one device acceptance remains.
+
+**The corrected arithmetic — 31 of 36, not "31 of 34".** The old headline's
+denominator is not reproducible from the register. Counting every row whose Phase
+cell contains `1` gives **36** (19 client, 17 backend): 29 resolved or closed
+with verification, **C-38** closed under the agreed stopping rule, and **C-3**
+discharged as *measured* (Phase 1 owned the severity; Phase 5 owns the fix) —
+**31 discharged**, with **5 carried**: C-49, C-36, B-4, B-12, B-13. The old
+denominator silently dropped C-49 and C-36, which are open Phase 1 rows. The
+prose was right; the arithmetic was not.
+
+**What the audit found, none of it a behavioural defect.** Every load-bearing
+backend claim was re-verified live and holds: both Edge Functions ACTIVE and
+byte-identical to source, B-14's column privileges, B-5's grants, B-6's
+owner-bound policy `qual`, and B-7/B-10's three functions absent. **The failures
+were all in the record**, and they share one shape — *a document written under a
+rule that later changed, and never re-read*. (i) `delete_account_v1` carried a
+comment block instructing the next maintainer **not** to add the `post_comments`
+statement that the revised rule requires, twenty lines above that statement.
+(ii) B-3 and B-19's **state** cells still described the superseded retention rule
+— the finding columns had been revised on 2026-08-13, the state columns had not,
+untouched since `1889b48`. (iii) QA **D7** and **C7** still specified the retired
+expected outcome. (iv) The shared note under the backend table blamed the
+unreached client half on a blocker that the C-35 run had already disproved, and
+attributed it to the wrong half (the *author*, which is now moot, rather than the
+*recipient*, which is B-19's). **All four are corrected.** The function change is
+comments-only and is **not deployed** — see `supabase/README.md` for the recorded
+divergence and the condition for closing it.
+
+**Ownership gaps closed in the same unit:** B-12's pagination verification and
+B-9's two-recipient case both had a stated blocker and **no owner**, which is how
+they survived a phase gate unnoticed; both are now Phase 3, grouped with B-4 and
+B-13 as one backend-verification unit. QA **E8/E8b** are marked superseded so no
+crafted production-write exploit appears to be outstanding. QA **A2, C1–C4, C11,
+C12** — which carried no execution status at all — are each dispositioned as
+satisfied by later evidence, superseded by architecture, or given a named
+later-phase owner, with the uncovered parts named rather than absorbed. **No new
+QA was manufactured to tick a box.**
+
+**The one thing still open in this unit: B-19's client-rendering acceptance.** It
+needs no staging — a live fixture already exists in production and was located
+read-only. See `docs/qa-plan.md` D8. A source read narrowed it first:
+`CommentsView` never hydrates or renders `recipientUserID`, so an unresolvable
+recipient has no render site at which to fail, which makes this a cheap
+confirmation rather than an open risk.
+
+**Still carried, unchanged by this unit:** **C-49** (fixed, device acceptance
+pending — do not spend a fixture solely for it; fold it into the next legitimate
+destructive run), **C-36 / QA B7** (genuinely fixture-blocked — needs a fresh
+first-join account), and **B-4, B-12, B-13** (fixes deployed, verification is
+Phase 3's). **C-26 and B-11 remain release blockers owned by Phase 3**, not
+Phase 1 debt.
 
 **Historic detail below is kept as the record of how the phase was worked.** Landed and device-verified: C-13
 (purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
