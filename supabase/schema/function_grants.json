@@ -17,36 +17,6 @@
   {
     "can_execute": true,
     "grantee": "anon",
-    "proname": "cleanup_post_attachments_on_delete"
-  },
-  {
-    "can_execute": true,
-    "grantee": "authenticated",
-    "proname": "cleanup_post_attachments_on_delete"
-  },
-  {
-    "can_execute": true,
-    "grantee": "service_role",
-    "proname": "cleanup_post_attachments_on_delete"
-  },
-  {
-    "can_execute": true,
-    "grantee": "anon",
-    "proname": "cleanup_post_attachments_on_update"
-  },
-  {
-    "can_execute": true,
-    "grantee": "authenticated",
-    "proname": "cleanup_post_attachments_on_update"
-  },
-  {
-    "can_execute": true,
-    "grantee": "service_role",
-    "proname": "cleanup_post_attachments_on_update"
-  },
-  {
-    "can_execute": true,
-    "grantee": "anon",
     "proname": "enforce_connected_attachment_recipient_update"
   },
   {
@@ -178,21 +148,6 @@
     "can_execute": false,
     "grantee": "service_role",
     "proname": "search_account_directory"
-  },
-  {
-    "can_execute": true,
-    "grantee": "anon",
-    "proname": "sign_attachment_rpc"
-  },
-  {
-    "can_execute": true,
-    "grantee": "authenticated",
-    "proname": "sign_attachment_rpc"
-  },
-  {
-    "can_execute": true,
-    "grantee": "service_role",
-    "proname": "sign_attachment_rpc"
   },
   {
     "can_execute": true,
