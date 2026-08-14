@@ -160,6 +160,40 @@ dependency, stop and report — do not reach for `CASCADE`.** A dependency we di
 not predict means the analysis was wrong, and cascading would destroy whatever
 it was rather than surfacing it.
 
+### B-6 policy hardening — expected snapshot delta, written before applying (2026-08-14)
+
+| Snapshot file | Before | After | Change |
+|---|---|---|---|
+| `policies` | 33 | **33** | **row count unchanged** — one row MODIFIED: `attachments_select_via_visible_post` on `storage.objects`, `qual` only |
+| `functions` | 11 | **11** | none |
+| `function_grants` | 33 | **33** | none |
+| `triggers` | 5 | **5** | none |
+| `rls_enabled` | 7 | **7** | none |
+| `constraints` | 24 | **24** | none |
+| `columns` | 60 | **60** | none |
+| `table_grants` | 102 | **102** | none |
+| `column_grants` | 523 | **523** | none |
+| `storage_buckets` | 2 | **2** | none |
+
+**This delta differs in kind from B-7/B-10's.** Those were deletions and the
+whole diff was removals. This is a **single-row modification**: `policies.json`
+must show exactly one changed entry, its `policyname` unchanged, its `cmd`,
+`roles` and `permissive` unchanged, and **only `qual` differing**. Any change to
+`with_check`, to the roles list, or to a second policy row means something other
+than the intended edit landed.
+
+`ALTER POLICY` is used rather than DROP + CREATE precisely so the name, command
+and role list cannot move.
+
+**No storage object and no application row is touched.** Backend counts are
+re-read afterwards to confirm rather than assumed.
+
+**The regression this must not cause is a read failure, not a write failure**,
+and the snapshot cannot detect it. A device read-path check is therefore part of
+the acceptance, not an optional extra: owner reading their own post's
+attachments, and an approved follower reading another member's — the second
+being the one a naive `auth.uid()` binding would have broken.
+
 ### Never
 
 Write experiments against production, even with synthetic values and a
