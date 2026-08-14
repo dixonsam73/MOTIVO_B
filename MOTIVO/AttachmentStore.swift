@@ -21,8 +21,11 @@
 //  MOTIVO
 //
 
-// CHANGE-ID: 20260222_200155_LH_FileHygiene_AttachmentStore_BackupExclusion
-// SCOPE: Local Attachment Deletion & Filesystem Hygiene Hardening — Fix4: exclude persisted attachment media in Documents from backup (best-effort)
+// CHANGE-ID: 20260815_PHASE2_U3_PERMANENT_MEDIA_BACKUP_PARTICIPATION
+// SCOPE: Phase 2 (C-4) unit 3 — persisted attachment media participates in Apple backup.
+// Reverses 20260222_200155_LH_FileHygiene_AttachmentStore_BackupExclusion Fix4, which
+// excluded it as collateral in a hygiene commit with no durability rationale recorded.
+// SEARCH-TOKEN: 20260815_PHASE2_U3_PERMANENT_MEDIA_BACKUP_PARTICIPATION
 
 import Foundation
 import CoreData
@@ -139,7 +142,7 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
         let url = dir.appendingPathComponent(filename, isDirectory: false)
         try data.write(to: url, options: [.atomic])
-        bestEffortExcludeFromBackup(url)
+        applyPermanentMediaBackupPolicy(url)
         return url.path
     }
 
@@ -149,16 +152,26 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: dir)
         let url = dir.appendingPathComponent(filename, isDirectory: false)
         try data.write(to: url, options: [.atomic])
-        bestEffortExcludeFromBackup(url)
+        applyPermanentMediaBackupPolicy(url)
         let rollback = { removeIfExists(path: url.path) }
         return (url.path, rollback)
     }
 
     
-    // Backup policy for persisted attachments is owned by `BackupPolicy`.
-    // Failure to apply it must not abort saves.
-    private static func bestEffortExcludeFromBackup(_ url: URL) {
-        BackupPolicy.exclude(url)
+    /// Phase 2 (C-4): persisted attachment media now participates in ordinary Apple
+    /// device backup.
+    ///
+    /// This used to set `isExcludedFromBackup = true` on every persisted attachment. That
+    /// arrived in `5c845e2` — "Local Attachment Deletion & Filesystem Hygiene Hardening" —
+    /// grouped with four orphan/tmp cleanup fixes and declared "no behavior changes". No
+    /// rationale for excluding permanent user media was recorded anywhere. It was never a
+    /// durability decision; it was collateral in a hygiene commit, and the consequence was
+    /// that a device restore returned a journal whose media was all missing.
+    ///
+    /// Deliberately left as a call site rather than deleted outright, so the reversal is
+    /// findable from the four places that used to exclude.
+    private static func applyPermanentMediaBackupPolicy(_ url: URL) {
+        BackupPolicy.include(url)
     }
 
 // Best-effort removal helper (safe no-op if missing)
@@ -354,7 +367,7 @@ struct AttachmentStore {
 
         // Move temp into Documents (atomic move removes tempURL path on success).
         try fm.moveItem(at: tempURL, to: finalURL)
-        bestEffortExcludeFromBackup(finalURL)
+        applyPermanentMediaBackupPolicy(finalURL)
 
         // Delete old/original file (best-effort, restricted to Documents).
         deleteAttachmentFile(atPath: existingPath)
@@ -383,7 +396,7 @@ struct AttachmentStore {
         let filename = uniqueFilename(base: suggestedName, ext: ext, in: docs)
         let finalURL = docs.appendingPathComponent(filename, isDirectory: false)
         try FileManager.default.moveItem(at: tempURL, to: finalURL)
-        bestEffortExcludeFromBackup(finalURL)
+        applyPermanentMediaBackupPolicy(finalURL)
         #if canImport(UIKit)
         if kind == .video { _ = generateVideoPoster(url: finalURL) }
         #endif

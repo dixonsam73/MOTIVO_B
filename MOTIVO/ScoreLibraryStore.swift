@@ -293,9 +293,20 @@ final class ScoreLibraryStore: ObservableObject {
         return trimmed.isEmpty ? fallback : trimmed
     }
 
-    // Backup policy is owned by `BackupPolicy`. Applying it is best-effort: a failure
-    // here must not abort a score import, which is what the previous `throws` did.
+    /// Phase 2 (C-4): score PDFs now participate in ordinary Apple device backup.
+    ///
+    /// Applied to the `Scores` directory *and* to each PDF, because the two are separate
+    /// facts: the exclusion attribute lives only on the item it was set on, and a child's
+    /// own attribute survives its parent being un-flagged. Clearing only the directory
+    /// would leave every existing PDF excluded — and that failure is invisible until a
+    /// real restore, which is the worst possible place to discover it.
+    ///
+    /// **Adopted received scores are the decisive case.** A score adopted from another
+    /// member is recipient-owned permanent data and is *not* reconstructible: under the
+    /// revised deletion rule the sender's account deletion removes the backend object. If
+    /// adopted scores did not survive a restore, "adoption" would not mean what the
+    /// product says it means.
     private func excludeFromBackup(_ url: URL) throws {
-        BackupPolicy.exclude(url)
+        BackupPolicy.include(url)
     }
 }

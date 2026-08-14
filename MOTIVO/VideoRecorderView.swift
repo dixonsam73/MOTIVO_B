@@ -1224,6 +1224,15 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
             return
         }
 
+        // Phase 2 (C-4): an in-flight capture is transient — swept at launch by
+        // `sweepAbandonedCaptureFilesInDocuments()`, and promoted through StagingStore into
+        // a persisted attachment when kept. It sits in Documents purely as a working
+        // location, so it must not ride into a backup. Before Phase 2 this was the one
+        // media class whose policy was inverted: permanent media was excluded and this
+        // scratch file was not. Applied here rather than at creation because the file only
+        // exists from this point.
+        BackupPolicy.exclude(url)
+
         recordingURL = url
         player = AVPlayer(url: url)
         playerCurrentTime = 0
@@ -1631,6 +1640,9 @@ private func canAppendVideo(_ pts: CMTime) -> Bool {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd_HHmmss"
         let filename = "motivo_vid_\(formatter.string(from: Date())).mov"
+        // Backup policy is applied in `handleRecordingFinishedSuccessfully(url:)`, not
+        // here — this URL names a file that does not exist yet, and setting a resource
+        // value on a non-existent path fails.
         return documentsDirectory().appendingPathComponent(filename)
     }
 
