@@ -246,6 +246,71 @@ second client will muddy the snapshot.
 | A4 | Record a 30s video, background the app, return | Returns promptly. **Time it** — small-scale C-3 probe |
 | A5 | Repeat with a 5-minute video | Hang or kill on foreground confirms C-3 |
 
+### C-3 measurement — PROCEDURE AND STOPPING RULE, written 2026-08-14 before running
+
+**What Phase 1 owns is the severity, not the fix.** C-3's mechanism is not in
+doubt and was re-verified in source today; Phase 5 owns any change. This run
+exists only to decide whether `P1?` becomes P1, P2 or P3.
+
+**The mechanism, restated so the measurement targets the right thing.** On every
+`scenePhase == .active`, inside the SwiftUI `onChange` closure and therefore
+**synchronously on the main actor**, `hydrateTimerFromStorage()` calls
+`Data(contentsOf:)` for each staged attachment — the **whole** video into RAM —
+and then `generateVideoThumbnail(from:id:)` **writes that data back out** to
+`tmp/<id>.mov` (`PracticeTimerView:4705`) and runs a synchronous
+`AVAssetImageGenerator.copyCGImage`. So per foreground, per staged video: a full
+read, a full write, and a synchronous decode, before the UI can respond.
+
+**MEASURED ON DEVICE A, NOT THE SIMULATOR, AND THE REASON IS NOT CAUTION.** The
+cost is disk I/O, memory pressure and AVFoundation decode. The simulator uses
+the Mac's SSD and CPU and is not subject to jetsam or the watchdog, so it would
+**systematically understate** every term and could not observe the one outcome
+that would make this P1. A simulator number here would be worse than no number,
+because it would look like evidence.
+
+**Instrumentation: one line, temporary.** `[C-3] foreground mainActorMs=… videos=…
+videoBytes=… otherBytes=…`, `os.Logger` at `privacy: .public` — Release-readable
+because the rig runs Release, and a `#if DEBUG` probe would not exist in the build
+under test (C-44's lesson). It reports a duration and byte counts only: no
+filename, no id, no user content. It times the whole `.active` branch rather than
+`hydrateTimerFromStorage` alone, because what C-3 is about is the user-visible
+stall, and that whole branch blocks the main actor. **Standing condition: this
+comes out as soon as the severity is recorded**, as `ActivationTrace` and
+`MembershipTrace` did.
+
+**Fixture constraint discovered while scoping this, and it shapes the run.** The
+only route into `stageVideoURL` is the in-app `VideoRecorderView`
+(`PracticeTimerView+Sheets:254`) — there is **no import-from-Photos path for a
+staged video** — so a "5-minute video" fixture means genuinely recording for five
+minutes. The run is therefore designed to escalate and stop early rather than to
+start at the worst case.
+
+**PROCEDURE — escalate, and stop at the first rung that settles it.**
+
+| Rung | Fixture | Action |
+|---|---|---|
+| 1 | ~30 s video staged, unsaved | background → foreground ×3, record `mainActorMs` |
+| 2 | ~2 min | as above |
+| 3 | ~5 min | as above — only if rungs 1–2 have not already crossed a threshold |
+
+Three foregrounds per rung, because the first may be warmed differently by the
+recorder having just written the file. **Record the median, and report all three.**
+
+**STOPPING RULE — thresholds fixed before any number is seen.**
+
+| Observed at any rung | Verdict |
+|---|---|
+| Watchdog kill, or app visibly frozen > 5 000 ms | **P1 confirmed.** Stop immediately; the fix is Phase 5's and becomes a release blocker |
+| 1 000 – 5 000 ms | **P2.** A real, user-visible stall. Stop escalating; Phase 5 fixes on UX grounds |
+| 250 – 1 000 ms | **P3.** Perceptible but tolerable. Record and move on |
+| < 250 ms at rung 3 | **Severity overstated — downgrade to P3** and record the numbers as the reason |
+
+**Do not refactor on the strength of this, whatever it shows.** Phase 5 owns the
+fix, and the register's `1 (measure) / 5 (fix)` split is deliberate. The one thing
+this run may change is the severity and the priority Phase 5 gives it.
+
+**No production Supabase access is involved at any point.**
+
 ## Group B — Connected acquisition
 
 | # | Steps | Expected |
