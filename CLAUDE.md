@@ -12,11 +12,27 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**Current position: Phase 1 is NOT YET CLOSED. One bounded closure unit is in
-progress.** An independent closure audit ran on 2026-08-14, reconstructed from
-this repository and from read-only production checks rather than from any
-conversation, and it found the substantive work sound but the *record* wrong in
-four places. The corrections have landed; one device acceptance remains.
+**Current position: PHASE 1 IS FORMALLY CLOSED — 2026-08-14.** It closed on an
+independent audit reconstructed from this repository and from read-only
+production checks rather than from any conversation, followed by one bounded
+reconciliation unit. **It did not close on the numbers being tidy.** Five rows
+remain open and are carried explicitly, named below; anyone reading "closed" as
+"nothing left" is reading it wrong. **Phase 2 is not open.**
+
+**The closure judgement, stated so it can be audited later.** Every Phase 1
+obligation is now in exactly one of four states: executed with durable evidence;
+closed under a stopping rule agreed *before* the attempt; fixture- or
+infrastructure-blocked with that fact recorded; or assigned to a named later
+phase. **No obligation is ownerless**, which was not true before this unit ran —
+B-12's pagination check and B-9's two-recipient case each had a blocker and no
+owner, and B-19's client half had been unowned since 2026-08-11.
+
+**The audit found no behavioural defect.** Every load-bearing backend claim was
+re-verified against live production and holds: both Edge Functions ACTIVE and
+byte-identical to source, B-14's column privileges, B-5's directory grants,
+B-6's owner-bound policy `qual`, and B-7/B-10's three dropped functions absent
+from `pg_proc`. **What was wrong was the record**, in four places sharing one
+shape — *a document written under a rule that later changed, and never re-read.*
 
 **The corrected arithmetic — 31 of 36, not "31 of 34".** The old headline's
 denominator is not reproducible from the register. Counting every row whose Phase
@@ -55,19 +71,41 @@ satisfied by later evidence, superseded by architecture, or given a named
 later-phase owner, with the uncovered parts named rather than absorbed. **No new
 QA was manufactured to tick a box.**
 
-**The one thing still open in this unit: B-19's client-rendering acceptance.** It
-needs no staging — a live fixture already exists in production and was located
-read-only. See `docs/qa-plan.md` D8. A source read narrowed it first:
-`CommentsView` never hydrates or renders `recipientUserID`, so an unresolvable
-recipient has no render site at which to fail, which makes this a cheap
-confirmation rather than an open risk.
+**B-19's client-rendering half is RESOLVED — device-observed 2026-08-14, and it
+closed the last unowned Phase 1 obligation.** No staging, no new account, no
+destructive action: a live production fixture already existed and was located
+read-only. The C-35 discriminator thread (`944a70cb`, recipient `92d6b718`,
+deleted 2026-08-13 with no directory identity) opened instantly on Device B /
+Études Dev and rendered normally — author "You" with avatar, body intact, no raw
+UUID, no blank or broken identity UI, no null/undefined, no spinner. **The
+non-failure was predicted from source first** — `CommentsView` hydrates identity
+for authors, owner and viewer only and never for `recipientUserID`, so the
+recipient has no render site at which to fail — which is what makes this a
+confirmed mechanism rather than a green screen. **The cost of the correction is
+the lesson:** it had sat unowned since 2026-08-11 behind a blocker disproved on
+2026-08-13 and a premise the rule change had made moot, and it took one existing
+fixture and one thread open. The expensive part was never the test.
 
-**Still carried, unchanged by this unit:** **C-49** (fixed, device acceptance
-pending — do not spend a fixture solely for it; fold it into the next legitimate
-destructive run), **C-36 / QA B7** (genuinely fixture-blocked — needs a fresh
-first-join account), and **B-4, B-12, B-13** (fixes deployed, verification is
-Phase 3's). **C-26 and B-11 remain release blockers owned by Phase 3**, not
-Phase 1 debt.
+**FIVE ROWS ARE CARRIED PAST CLOSURE. They are open, and closure does not make
+them less so.**
+
+| Row | Why it is carried | Owner |
+|---|---|---|
+| **C-49** | Fix applied and build-verified; device acceptance deliberately given no fixture of its own | Fold into the **next legitimate destructive run**. Do not spend a fixture solely for it |
+| **C-36 / QA B7** | Genuinely fixture-blocked: needs a **fresh first-join account**. A first-join path exercised by an account that has already joined proves nothing | Blocked until such an account exists |
+| **B-4** | Only the positive direction executed; the honest `success: false` needs fault injection (D10) | **Phase 3** |
+| **B-12** | Never executed — 5 objects against a 1000-entry page boundary | **Phase 3** |
+| **B-13** | Idempotency by inspection; D10 deferred | **Phase 3** |
+
+**B-4, B-12, B-13 and B-9's two-recipient case are ONE Phase 3 unit, not four
+errands.** All four are blocked on the same thing — a disposable or local
+backend where destructive fixtures are free. **State the dependency precisely,
+because it is easy to overstate: the instance makes those fixtures safe to
+build; it does not build them.** Generating >1000 objects under one prefix, and
+minting a third identity without an Apple ID, are both explicit work to schedule.
+
+**C-26 and B-11 remain release blockers owned by Phase 3**, not Phase 1 debt.
+C-31 is a Phase 3 prerequisite; C-30 and C-32 are RC.
 
 **Historic detail below is kept as the record of how the phase was worked.** Landed and device-verified: C-13
 (purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
