@@ -96,19 +96,72 @@ public enum AttachmentPrivacy {
         do {
             let urls = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
             guard let appSupportURL = urls.first else { return nil }
-            let directory = appSupportURL.appendingPathComponent("MOTIVO", isDirectory: true)
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            return directory
+            try FileManager.default.createDirectory(at: appSupportURL, withIntermediateDirectories: true)
+            return appSupportURL
         } catch {
             return nil
         }
     }
 
+    /// Phase 2 (C-4): the privacy map lives at the Application Support **root**, beside
+    /// `CommentsStore.json`.
+    ///
+    /// It used to live in `Application Support/MOTIVO/`, which is excluded from backup —
+    /// so a user's per-attachment privacy choices did not survive a device restore. The
+    /// map is permanent user intent, not scratch, and it was only ever excluded by
+    /// accident: `PracticeTimerStore` flagged the whole `MOTIVO/` directory as a side
+    /// effect of a migration helper (see BackupPolicy).
+    ///
+    /// **It had to move rather than be exempted.** Exclusion resolves by ancestor walk and
+    /// there is no per-item "include" override — a child of an excluded directory cannot
+    /// be made backup-eligible in place. Establishing that empirically is what settled the
+    /// design; the alternative of un-flagging `MOTIVO/` would have dragged staging, timer
+    /// scratch and the pending publish queue into backups with it.
+    ///
+    /// Losing the map fails *closed* — `isPrivate` defaults to `true`, so a lost map means
+    /// everything reads private rather than everything leaking. That is the right
+    /// direction to fail, and it is why this was P3-shaped rather than urgent. It is still
+    /// silent loss of a user's choices.
     private static func fileURL() -> URL? {
         applicationSupportDirectory()?.appendingPathComponent("AttachmentPrivacy.json")
     }
 
+    /// The pre-Phase-2 location, read once so existing installs keep their choices.
+    private static func legacyFileURL() -> URL? {
+        FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("MOTIVO", isDirectory: true)
+            .appendingPathComponent("AttachmentPrivacy.json")
+    }
+
+    /// Moves the map out of the scratch directory, once.
+    ///
+    /// Runs inside `loadMap()` rather than at launch so it cannot race the first read.
+    /// A pre-existing file at the new location always wins — if both exist, the new one is
+    /// authoritative and the legacy copy is removed, so a half-completed earlier migration
+    /// cannot resurrect stale choices.
+    private static func migrateFromLegacyLocationIfNeeded() {
+        let fm = FileManager.default
+        guard let legacy = legacyFileURL(), fm.fileExists(atPath: legacy.path) else { return }
+        guard let destination = fileURL() else { return }
+
+        if !fm.fileExists(atPath: destination.path) {
+            do {
+                try fm.moveItem(at: legacy, to: destination)
+                NSLog("[AttachmentPrivacy] migrated privacy map out of scratch storage")
+                return
+            } catch {
+                NSLog("[AttachmentPrivacy] privacy map migration failed; leaving legacy copy in place")
+                return
+            }
+        }
+
+        // Destination already authoritative — drop the superseded legacy copy.
+        try? fm.removeItem(at: legacy)
+    }
+
     private static func loadMap() -> [String: Bool] {
+        migrateFromLegacyLocationIfNeeded()
         guard let url = fileURL() else { return [:] }
         guard FileManager.default.fileExists(atPath: url.path) else { return [:] }
         do {
@@ -134,18 +187,27 @@ public enum AttachmentPrivacy {
 
     /// Deletes the on-disk privacy map and clears the in-memory cache.
     /// Best-effort; safe to call multiple times.
+    /// Phase 2 (C-4): wipes **both** the current and the legacy location.
+    ///
+    /// The current location follows `fileURL()` automatically, so the move alone would
+    /// have kept this correct on any device where migration completed. Covering the legacy
+    /// path too is the C-28 lesson applied rather than restated: a file sitting at a
+    /// location no sweep reaches is exactly how received attachments and
+    /// `CommentsStore.json` survived a full erase. A migration that failed once leaves a
+    /// legacy copy behind, and it must not outlive Erase All.
     public static func wipeOnDiskAndCacheForFactoryReset() {
         queue.sync {
             cache = nil
         }
-        guard let url = fileURL() else { return }
-        do {
-            if FileManager.default.fileExists(atPath: url.path) {
-                try FileManager.default.removeItem(at: url)
+        for url in [fileURL(), legacyFileURL()].compactMap({ $0 }) {
+            do {
+                if FileManager.default.fileExists(atPath: url.path) {
+                    try FileManager.default.removeItem(at: url)
+                }
+            } catch {
+                // Best-effort
+                NSLog("[AttachmentPrivacy] wipeOnDiskAndCacheForFactoryReset — failed to remove \(url.lastPathComponent): \(error)")
             }
-        } catch {
-            // Best-effort
-            NSLog("[AttachmentPrivacy] wipeOnDiskAndCacheForFactoryReset — failed to remove \(url.path): \(error)")
         }
     }
 }
