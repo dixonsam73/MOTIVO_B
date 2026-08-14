@@ -233,7 +233,7 @@
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "attachments_select_via_visible_post",
-    "qual": "((bucket_id = 'attachments'::text) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE (EXISTS ( SELECT 1\n           FROM jsonb_array_elements(p.attachments) a(value)\n          WHERE (((a.value ->> 'bucket'::text) = objects.bucket_id) AND ((a.value ->> 'path'::text) = objects.name)))))))",
+    "qual": "((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] = 'users'::text) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE ((lower((storage.foldername(objects.name))[2]) = lower((p.owner_user_id)::text)) AND (EXISTS ( SELECT 1\n           FROM jsonb_array_elements(p.attachments) a(value)\n          WHERE (((a.value ->> 'bucket'::text) = objects.bucket_id) AND ((a.value ->> 'path'::text) = objects.name))))))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
