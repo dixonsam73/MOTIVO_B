@@ -132,6 +132,34 @@ The snapshot diff is the only record of what changed in production before
 Phase 3. If step 3 is skipped, the repository stops reflecting production and
 the value of all of this evaporates.
 
+### B-7 / B-10 drops — expected snapshot delta, written before applying (2026-08-14)
+
+Committed ahead of the change so the diff is a binary check rather than a
+reading of the aftermath. D14's rule, applied to DDL.
+
+| Snapshot file | Before | After | Change |
+|---|---|---|---|
+| `functions` | 14 | **11** | −3: `sign_attachment_rpc`, `cleanup_post_attachments_on_delete`, `cleanup_post_attachments_on_update` |
+| `function_grants` | 42 | **33** | −9: the same three × `anon` / `authenticated` / `service_role` |
+| `policies` | 33 | **33** | none |
+| `triggers` | 5 | **5** | none |
+| `rls_enabled` | 7 | **7** | none |
+| `constraints` | 24 | **24** | none |
+| `columns` | 60 | **60** | none |
+| `table_grants` | 102 | **102** | none |
+| `column_grants` | 523 | **523** | none |
+| `storage_buckets` | 2 | **2** | none |
+
+**Nothing else may move.** No policy, trigger, column, constraint, RLS setting,
+table or column privilege, or bucket configuration. **No storage object and no
+application row is touched** — these are `DROP FUNCTION` statements and nothing
+else; backend counts are re-read afterwards to confirm rather than assumed.
+
+Both statements are `RESTRICT` by default. **If either fails on an unexpected
+dependency, stop and report — do not reach for `CASCADE`.** A dependency we did
+not predict means the analysis was wrong, and cascading would destroy whatever
+it was rather than surfacing it.
+
 ### Never
 
 Write experiments against production, even with synthetic values and a
