@@ -1,0 +1,53 @@
+-- B-7 — drop `sign_attachment_rpc`.
+--
+-- NOT YET APPLIED. Reviewed as a diff first, per supabase/README.md.
+--
+-- WHY DROP RATHER THAN REPAIR THE PREDICATE
+--
+-- The function is dead and its only defect is an escape hatch that has no
+-- legitimate production purpose. Repairing the predicate would leave a
+-- SECURITY DEFINER signed-URL minter in the schema that nothing calls, which is
+-- strictly more surface than removing it. Subtraction over repair.
+--
+-- VERIFIED AGAINST LIVE DEPLOYED STATE, 2026-08-14, BEFORE WRITING THIS:
+--
+--   signature            sign_attachment_rpc(uuid, integer, integer)
+--   security definer     true
+--   EXECUTE granted to   anon, authenticated, service_role   (all true)
+--   referencing funcs    0
+--   referencing policies 0
+--   client references    0   (grep across MOTIVO/)
+--   objects under debug/ 0   (both buckets)
+--
+-- WHAT THE REGISTER GETS RIGHT, AND WHERE ITS WORDING MISLEADS
+--
+-- B-7 calls this "dormant". That is true of *our* usage — no client calls it —
+-- but the function is live and executable by any authenticated member, so
+-- "dormant" should not be read as "unreachable".
+--
+-- In the other direction the anon grant looks worse than it is: the first
+-- statement in the body is `v_viewer := auth.uid()`, returning
+-- `{"error":"unauthenticated"}` when null. So the PUBLIC/anon EXECUTE grant is
+-- NOT exploitable, and anyone escalating this on the grant alone would be
+-- wrong — the same mistake B-18 was closed for.
+--
+-- THE ACTUAL BYPASS, AND ITS REACH
+--
+-- The path guard admits either `users/<owner>/<session_id>/…` or anything
+-- beginning `debug/`:
+--
+--   if left(lower(v_path), length(v_prefix)) <> lower(v_prefix)
+--      and left(v_path, 6) <> 'debug/' then return forbidden;
+--
+-- `v_path` is read from the post's own `attachments` jsonb, which
+-- `posts_insert_owner` does not validate (B-6's premise). So a post owner can
+-- write an arbitrary `debug/…` path into their own post and have this function
+-- mint a signed URL for it. Reach is the `debug/` prefix only, and that prefix
+-- is currently EMPTY in both buckets — so there is nothing to reach today. That
+-- is what keeps this P2 rather than higher, and it is a fact about the data
+-- rather than about the code, which is exactly why the code should go.
+--
+-- RESTRICT (the default) is deliberate: if anything unexpectedly depends on
+-- this, the statement must fail loudly rather than cascade.
+
+drop function if exists public.sign_attachment_rpc(uuid, integer, integer);

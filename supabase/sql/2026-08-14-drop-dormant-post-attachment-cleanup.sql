@@ -1,0 +1,48 @@
+-- B-10 — drop the dormant `cleanup_post_attachments_on_delete` / `_on_update`.
+--
+-- NOT YET APPLIED. Reviewed as a diff first, per supabase/README.md.
+--
+-- VERIFIED AGAINST LIVE DEPLOYED STATE, 2026-08-14, BEFORE WRITING THIS:
+--
+--   cleanup_post_attachments_on_delete()   security definer, returns trigger
+--   cleanup_post_attachments_on_update()   security definer, returns trigger
+--   triggers using either                  0   — attached to nothing
+--
+-- Both carry EXECUTE for anon and authenticated, which reads alarmingly and is
+-- not: they return `trigger`, and Postgres refuses to call a trigger function
+-- outside a trigger context. The grant is inert. Recorded so nobody escalates
+-- on it, the same trap B-18 and B-7 both carry.
+--
+-- WHY DROP RATHER THAN REPAIR AND ATTACH IN PHASE 4
+--
+-- B-10 offers both. Drop is now the better half of that choice, for a reason
+-- the row does not record:
+--
+-- 1. NO OWNERSHIP PREDICATE. Both loop over the post's own `attachments` jsonb
+--    and delete `storage.objects` rows by the bucket/path they find there,
+--    while running SECURITY DEFINER — so RLS does not apply. `posts_insert_owner`
+--    does not validate that jsonb (B-6's premise), so if either were ever
+--    attached, a post owner could name SOMEBODY ELSE'S object path and have
+--    deleting or editing their own post delete another member's file. Latent
+--    today only because nothing is attached.
+--
+-- 2. THE DESIGN IS WRONG EVEN REPAIRED, AND THIS IS THE NEW ARGUMENT. Both
+--    delete FROM storage.objects in SQL. That row is an index over S3, not the
+--    file: removing it destroys the only pointer and leaves the bytes behind —
+--    untracked residue in place of tracked residue, unreachable by every policy
+--    path and invisible to the orphan sweep that would otherwise find it. This
+--    was observed first-hand on 2026-08-14 while clearing B-22, and is now
+--    written up in supabase/README.md. An ownership predicate would fix the
+--    authorisation hole and leave the storage bug fully intact.
+--
+-- So the Phase 4 cleanup B-8/B-10 anticipate must go through the Storage API
+-- from a service-role context, not through a SQL trigger. These two functions
+-- are not a starting point for that work; keeping them would invite someone to
+-- attach them.
+--
+-- RESTRICT (the default) is deliberate: if a trigger is attached between this
+-- being written and applied, the statement must fail loudly rather than cascade
+-- and silently detach it.
+
+drop function if exists public.cleanup_post_attachments_on_delete();
+drop function if exists public.cleanup_post_attachments_on_update();
