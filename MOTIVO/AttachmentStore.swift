@@ -164,7 +164,10 @@ struct AttachmentStore {
 // Best-effort removal helper (safe no-op if missing)
     static func removeIfExists(path: String) {
         let fm = FileManager.default
-        let target = URL(fileURLWithPath: path).standardizedFileURL
+        // Resolve rather than trusting the stored absolute path. On the rollback paths
+        // that call this the path is always current, so step 1 of the resolver hits and
+        // nothing changes; after a restore it is what stops the removal silently missing.
+        let target = (AttachmentPathResolver.resolve(path) ?? URL(fileURLWithPath: path)).standardizedFileURL
 
         if isProtectedScoreLibraryURL(target) {
             #if DEBUG
@@ -240,8 +243,21 @@ struct AttachmentStore {
     }
 
     /// Convenience overload for Core Data `fileURL` String attributes.
+    ///
+    /// **Phase 2 (C-4): this resolves before deleting.** Every deletion path in the app
+    /// arrives here holding a raw `Attachment.fileURL` value, and that value is an
+    /// absolute path containing the app container's UUID — which changes on restore. Left
+    /// as a raw path, `deleteAttachmentFile(at:)` finds no file, returns silently, and the
+    /// media is orphaned on disk forever with nothing in the UI to show for it. The defect
+    /// was unreachable before C-4 only because the media never survived a restore at all.
     static func deleteAttachmentFile(atPath path: String) {
-        deleteAttachmentFile(at: URL(fileURLWithPath: path))
+        guard let resolved = AttachmentPathResolver.resolve(path) else {
+            #if DEBUG
+            print("[AttachmentStore] deleteAttachmentFile — unresolved stored path; nothing deleted")
+            #endif
+            return
+        }
+        deleteAttachmentFile(at: resolved)
     }
 
     /// Batch helper for URL-based deletions.

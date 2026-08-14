@@ -1562,54 +1562,16 @@ private func splitAttachments() -> (images: [Attachment], videos: [Attachment], 
     }
 
     private func resolveURL(_ a: Attachment) -> URL? {
-        guard let s = a.fileURL, !s.isEmpty else { return nil }
-        let fm = FileManager.default
-        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) { return u }
-        if fm.fileExists(atPath: s) { return URL(fileURLWithPath: s) }
-        let filename = URL(fileURLWithPath: s).lastPathComponent
-        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let candidate = docs.appendingPathComponent(filename, isDirectory: false)
-            if fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return nil
+        AttachmentPathResolver.resolve(a.fileURL)
     }
 
     // Resolves legacy/new stored fileURL strings to actual local file URLs on disk.
-    // Handles: file:// URLs, absolute paths, and bare filenames (searching common app dirs).
+    // Phase 2 (C-4): delegates to the canonical resolver. This used to search Caches,
+    // Library, Application Support and tmp as well — tmp in particular is a guaranteed
+    // collision source, because a persisted file and its viewer surrogate are written with
+    // the same UUID stem and extension.
     private func resolveAttachmentURL(from stored: String?) -> URL? {
-        guard let s = stored, !s.isEmpty else { return nil }
-
-        let fm = FileManager.default
-
-        if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
-            return u
-        }
-
-        if s.hasPrefix("/") {
-            let u = URL(fileURLWithPath: s)
-            if fm.fileExists(atPath: u.path) { return u }
-        }
-
-        let filename = URL(fileURLWithPath: s).lastPathComponent
-        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-
-        let candidateDirs: [URL] = [
-            documents,
-            documents?.appendingPathComponent("Scores", isDirectory: true),
-            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-            fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
-            fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-            fm.temporaryDirectory
-        ].compactMap { $0 }
-
-        for base in candidateDirs {
-            let candidate = base.appendingPathComponent(filename)
-            if fm.fileExists(atPath: candidate.path) {
-                return candidate
-            }
-        }
-
-        return nil
+        AttachmentPathResolver.resolve(stored)
     }
 
     private func loadImage(_ a: Attachment) -> UIImage? {
@@ -1861,40 +1823,8 @@ fileprivate struct AttachmentRow: View {
     }
 
     private func resolvedAttachmentURL(from stored: String?) -> URL? {
-        guard let s = stored, !s.isEmpty else { return nil }
-        
-         let fm = FileManager.default
-        
-         if let u = URL(string: s), u.isFileURL, fm.fileExists(atPath: u.path) {
-             return u
-         }
-        
-         if s.hasPrefix("/") {
-             let u = URL(fileURLWithPath: s)
-             if fm.fileExists(atPath: u.path) { return u }
-         }
-        
-         let filename = URL(fileURLWithPath: s).lastPathComponent
-         let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-        
-         let candidateDirs: [URL] = [
-             documents,
-             documents?.appendingPathComponent("Scores", isDirectory: true),
-             fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-             fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
-             fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-             fm.temporaryDirectory
-         ].compactMap { $0 }
-        
-         for base in candidateDirs {
-             let candidate = base.appendingPathComponent(filename)
-             if fm.fileExists(atPath: candidate.path) {
-                 return candidate
-             }
-         }
-        
-         return nil
-     }
+        AttachmentPathResolver.resolve(stored)
+    }
 
     private func icon(for kind: String) -> String {
         switch kind {

@@ -498,24 +498,10 @@ func attachmentKind(_ a: Attachment) -> String {
 
 func attachmentFileURL(_ a: Attachment) -> URL? {
 
+    // Phase 2 (C-4): delegates to the canonical resolver, which searches only the two
+    // directories a persisted attachment may legitimately live in.
     func fallbackByFilename(_ filename: String) -> URL? {
-        let fm = FileManager.default
-        let documents = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-        let library = fm.urls(for: .libraryDirectory, in: .userDomainMask).first
-        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        let dirs: [URL?] = [
-            documents,
-            documents?.appendingPathComponent("Scores", isDirectory: true),
-            fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-            library,
-            appSupport,
-            URL(fileURLWithPath: NSTemporaryDirectory())
-        ]
-        for d in dirs.compactMap({ $0 }) {
-            let candidate = d.appendingPathComponent(filename)
-            if fm.fileExists(atPath: candidate.path) { return candidate }
-        }
-        return nil
+        AttachmentPathResolver.resolve(filename)
     }
     let props = a.entity.propertiesByName
 

@@ -535,17 +535,36 @@ isPrivate: { url in
         }
     }
 
+    /// Safety constraint: never delete a URL that is already referenced by any `Attachment.fileURL`.
+    ///
+    /// **Phase 2 (C-4): matched by resolution, not by string equality.** The old predicate
+    /// was `fileURL == %@` against the raw stored value, which cannot survive a container
+    /// change: after a restore no stored string equals the live path, so the guard returns
+    /// false and the caller deletes a file that is still referenced. This cannot be fixed
+    /// by swapping in a resolver at the call site, because the comparison happened inside
+    /// Core Data — so candidates are narrowed by filename and then resolved in memory.
     func isPathReferencedInCoreData(_ path: String) -> Bool {
-        // Safety constraint: never delete a URL that is already referenced by any Attachment.fileURL.
-        // Cheap check: exact match on stored fileURL string.
+        let candidateURL = URL(fileURLWithPath: path)
+        let filename = candidateURL.lastPathComponent
+        guard !filename.isEmpty else { return false }
+
         let req = NSFetchRequest<NSManagedObject>(entityName: "Attachment")
-        req.fetchLimit = 1
-        req.predicate = NSPredicate(format: "fileURL == %@", path)
+        // Narrow in the store by the one component that survives a container change, then
+        // decide in memory. ENDSWITH can over-match (e.g. "take.m4a" vs "retake.m4a"), which
+        // is safe here: over-matching only ever protects more, and the resolver comparison
+        // below is what actually decides.
+        req.predicate = NSPredicate(format: "fileURL ENDSWITH %@", filename)
         do {
             let hits = try viewContext.fetch(req)
-            return !hits.isEmpty
-        } catch {
+            for hit in hits {
+                let stored = hit.value(forKey: "fileURL") as? String
+                if stored == path { return true }
+                if AttachmentPathResolver.storedPath(stored, refersTo: candidateURL) { return true }
+            }
             return false
+        } catch {
+            // Fail closed: if we cannot establish that the file is unreferenced, do not delete it.
+            return true
         }
     }
 

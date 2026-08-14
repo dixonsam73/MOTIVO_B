@@ -1078,25 +1078,16 @@ private func localFileSizeBytes(_ url: URL) -> Int64? {
     }
 
 
+    /// Resolves a persisted `Attachment.fileURL` for the publish pipeline.
+    ///
+    /// **Phase 2 (C-4): this had no filename fallback, and it is the highest-impact of the
+    /// stale-path consumers — not a deletion path at all.** Any stored value containing a
+    /// slash was returned verbatim, so after a restore the caller's `fileExists` check
+    /// fails and `loadIncludedAttachments` *silently skips the attachment rather than
+    /// blocking publish*. The user shares a session and the post arrives with its media
+    /// quietly missing, with no error anywhere.
     private func resolveLocalFileURL(from stored: String) -> URL? {
-        let s = stored.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-        guard !s.isEmpty else { return nil }
-
-        // If we stored a file:// URL string, prefer parsing it directly.
-        if s.lowercased().hasPrefix("file://"), let u = URL(string: s) {
-            return u
-        }
-
-        // If the string already looks like a path (contains a slash), treat it as a path.
-        if s.contains("/") {
-            return URL(fileURLWithPath: s)
-        }
-
-        // Otherwise assume it's a filename in Documents/.
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return docs.appendingPathComponent(s, isDirectory: false)
+        AttachmentPathResolver.resolve(stored)
     }
 
     @MainActor

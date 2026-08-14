@@ -327,79 +327,18 @@ extension AddEditSessionView {
     /// Resolves a stored Attachment.fileURL string into a valid on-disk file URL.
     /// Mirrors the resolution strategy used by loadImageData(at:), but returns URL without loading bytes.
     func resolveStoredFileURL(at pathOrURLString: String) -> URL? {
-        let trimmed = pathOrURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        let fm = FileManager.default
-
-        // Case A: absolute filesystem path
-        if trimmed.hasPrefix("/") {
-            if fm.fileExists(atPath: trimmed) { return URL(fileURLWithPath: trimmed) }
-            if let filename = URL(fileURLWithPath: trimmed).pathComponents.last, !filename.isEmpty {
-                let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first
-                if let hit = docs?.appendingPathComponent(filename), fm.fileExists(atPath: hit.path) { return hit }
-            }
-        }
-
-        // Case B: URL string (e.g., "file:///...")
-        if let url = URL(string: trimmed), url.isFileURL, fm.fileExists(atPath: url.path) {
-            return url
-        }
-
-        // Case C: relative path previously stored (resolve against Documents directory)
-        if !trimmed.contains(":"), !trimmed.hasPrefix("/") {
-            if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
-                let hit = docs.appendingPathComponent(trimmed)
-                if fm.fileExists(atPath: hit.path) { return hit }
-            }
-        }
-
-        return nil
+        AttachmentPathResolver.resolve(pathOrURLString)
     }
 
-/// Attempts to read image bytes from: absolute path → file:// URL → relative path in Documents directory.
+/// Reads image bytes for a stored Attachment.fileURL value.
+    /// Phase 2 (C-4): location is decided by the canonical resolver; this only loads bytes.
     func loadImageData(at pathOrURLString: String) -> Data? {
-        let trimmed = pathOrURLString.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        func loadAtAbsolutePath(_ abs: String) -> Data? {
-            if FileManager.default.fileExists(atPath: abs) {
-                if let ui = UIImage(contentsOfFile: abs) {
-                    if let jpg = ui.jpegData(compressionQuality: 0.85) { return jpg }
-                }
-                if let raw = try? Data(contentsOf: URL(fileURLWithPath: abs)) { return raw }
-            }
-            return nil
+        guard let url = AttachmentPathResolver.resolve(pathOrURLString) else { return nil }
+        if let ui = UIImage(contentsOfFile: url.path),
+           let jpg = ui.jpegData(compressionQuality: 0.85) {
+            return jpg
         }
-
-        // Case A: absolute filesystem path
-        if trimmed.hasPrefix("/") {
-            if let d = loadAtAbsolutePath(trimmed) { return d }
-            // Fallback: treat as stale absolute path; try lastPathComponent in Documents
-            if let filename = URL(fileURLWithPath: trimmed).pathComponents.last, !filename.isEmpty {
-                let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
-                if let hit = docs?.appendingPathComponent(filename), FileManager.default.fileExists(atPath: hit.path) {
-                    if let ui = UIImage(contentsOfFile: hit.path) {
-                        if let jpg = ui.jpegData(compressionQuality: 0.85) { return jpg }
-                    }
-                    if let raw = try? Data(contentsOf: hit) { return raw }
-                }
-            }
-        }
-
-        // Case B: URL string (e.g., "file:///...")
-        if let url = URL(string: trimmed), url.isFileURL {
-            if let d = loadAtAbsolutePath(url.path) { return d }
-            if let raw = try? Data(contentsOf: url) { return raw }
-        }
-
-        // Case C: relative path previously stored (resolve against Documents directory)
-        if !trimmed.isEmpty, !trimmed.contains(":"), !trimmed.hasPrefix("/") {
-            if let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                let candidate = docs.appendingPathComponent(trimmed).path
-                if let d = loadAtAbsolutePath(candidate) { return d }
-            }
-        }
-
-        return nil
+        return try? Data(contentsOf: url)
     }
 
     func stageData(_ data: Data, kind: AttachmentKind, displayName: String? = nil) {
@@ -805,14 +744,26 @@ extension AddEditSessionView {
         }
     }
 
+    /// Paths that must never be deleted because a persisted attachment still references them.
+    ///
+    /// **Phase 2 (C-4): these are RESOLVED paths, not raw stored ones.** This guard used to
+    /// collect `Attachment.fileURL` verbatim and compare it against a live candidate URL.
+    /// After a restore the container UUID differs, so a stored path never equals the live
+    /// path, the guard concludes "not protected", and `bestEffortDeleteNewURLIfSafe_edit`
+    /// deletes a file a persisted attachment still points at. A guard that fails *open* is
+    /// worse than no guard, because the calling code was written trusting it.
     func protectedPersistedAttachmentPaths_edit(for session: Session?) -> Set<String> {
         guard let session else { return [] }
         var out: Set<String> = []
         if let set = session.attachments as? Set<Attachment> {
             for a in set {
-                if let path = a.value(forKey: "fileURL") as? String, !path.isEmpty {
-                    out.insert(path)
+                guard let path = a.value(forKey: "fileURL") as? String, !path.isEmpty else { continue }
+                if let resolved = AttachmentPathResolver.resolve(path) {
+                    out.insert(resolved.resolvingSymlinksInPath().path)
                 }
+                // Keep the raw value too: it costs nothing and preserves the pre-Phase-2
+                // behaviour on the common path where the stored path is already current.
+                out.insert(path)
             }
         }
         // Also protect any currently-adopted URLs in existingAttachmentURLMap (cheap)
@@ -1446,29 +1397,21 @@ fileprivate struct VideoPosterView: View {
 
     // Prefer the surrogate temp URL if it exists on disk; otherwise fall back to the persisted file URL if available.
     func resolvedPlayableURL() async -> URL? {
+        // The surrogate itself, when it exists, is the right thing to play in edit mode.
         if let u = url, FileManager.default.fileExists(atPath: u.path) { return u }
-        // Attempt to derive from staged id embedded in the surrogate path (..../<uuid>.mov)
+        // Otherwise derive the persisted attachment from the staged id embedded in the
+        // surrogate path (..../<uuid>.mov) and resolve it canonically. Phase 2 (C-4): this
+        // used to search Caches and tmp as well, which is unsafe here of all places — the
+        // surrogate this method exists to fall back FROM is itself `tmp/<uuid>.<ext>`.
         if let u = url, let id = UUID(uuidString: u.deletingPathExtension().lastPathComponent) {
-            // Search Core Data for an Attachment with this id to get the persisted file path
             let ctx = PersistenceController.shared.container.viewContext
             let req: NSFetchRequest<Attachment> = Attachment.fetchRequest()
             req.fetchLimit = 1
             req.predicate = NSPredicate(format: "id == %@", id as CVarArg)
-            if let match = try? ctx.fetch(req).first, let stored = match.value(forKey: "fileURL") as? String, !stored.isEmpty {
-                // Resolve to a real file URL on disk
-                if let direct = URL(string: stored), direct.isFileURL, FileManager.default.fileExists(atPath: direct.path) { return direct }
-                if FileManager.default.fileExists(atPath: stored) { return URL(fileURLWithPath: stored) }
-                let filename = URL(fileURLWithPath: stored).lastPathComponent
-                let fm = FileManager.default
-                let dirs: [URL?] = [
-                    fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-                    fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
-                    fm.temporaryDirectory
-                ]
-                for base in dirs.compactMap({ $0 }) {
-                    let candidate = base.appendingPathComponent(filename)
-                    if fm.fileExists(atPath: candidate.path) { return candidate }
-                }
+            if let match = try? ctx.fetch(req).first,
+               let stored = match.value(forKey: "fileURL") as? String,
+               let resolved = AttachmentPathResolver.resolve(stored) {
+                return resolved
             }
         }
         return url // last resort
