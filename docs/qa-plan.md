@@ -568,6 +568,112 @@ next foreground), and throttled with a deliberate lock/unlock immediately after
 payment to force a `scenePhase` refresh into the window (the most direct route
 to C-13's hazard, accepting that it can mask C-38).
 
+### C-28 / C-48 destructive run — PREDICTION, written 2026-08-14 before the erase
+
+Device A (`44a6018e…`, directory `c45verification`) deletes its Connected account
+via **Delete Account & All Études Data**, on a Release build installed from
+`ea0beb2`. Account B (`dfaf8d18…`) is the control. Written first so the check is
+binary — D14's rule.
+
+**The verdict is the container, not the screen.** `ReceivedConnectedAttachmentStore.items`
+is in-memory and empty after any reset, so a broken implementation and a fixed one
+look identical in the UI. Same trap as D13 and C-34.
+
+**Two fixture states are SIMULATED, NOT PROVOKED, under the D13 precedent.**
+
+1. **`CommentsStore.json`** — a synthetic file (fabricated bodies, non-sensitive
+   placeholder ids) placed in A's container. The real write path is **unreachable
+   in the shipping UI** (see C-48's four-link proof), so it cannot be provoked at
+   all on a current install. Genuine legacy residue *was* observed read-only on
+   Device B (7 KB, 2026-01-10); none of that file's data was copied.
+2. **`tmp/SYNTHETIC-QA-FIXTURE-SelectedPages-….pdf`** — placed directly. The state
+   is **source-proven reachable** via a real supported path: A sends a
+   page-selected Score subset to another Connected member
+   (`ConnectedAttachmentShareUI:488`), which exports to `tmp/` and never cleans up.
+   Provoking it would have required a second Études Dev cycle and another follow
+   direction, and was judged not worth it.
+
+**In both cases the assertion under test is the RESET's behaviour given the state,
+not the creation path.** D13's reasoning exactly, and stronger here for C-48,
+because the state was observed in production first.
+
+**Container baseline, read 2026-08-14 12:04:**
+
+| Path | Baseline |
+|---|---|
+| `…/ReceivedConnectedAttachments/83704256….pdf` | 53 KB — received original, adopted |
+| `…/ReceivedConnectedAttachments/f207e3b0….jpg` | 306 KB — received original, not adopted |
+| `Documents/Scores/057BB98E….pdf` | 53 KB — **the adopted copy; same size, same minute as the original** |
+| `Documents/Scores/40712B3C….pdf` | 11.2 MB — pre-existing Score |
+| `Documents/EBF6F8A7….mov` | 5.3 MB — local attachment |
+| `Documents/FA313C95….jpg` | 12.1 MB — local attachment |
+| `Library/Application Support/CommentsStore.json` | 1 KB — synthetic |
+| `tmp/SYNTHETIC-QA-FIXTURE-SelectedPages-….pdf` | 642 bytes — synthetic |
+
+**Backend baseline:** `auth.users` 16, `account_directory` 16, `posts` 98,
+`follows` 8, `post_comments` 2, `connected_attachments` 33,
+`post_comment_views` 9, `attachments` objects 10, `avatars` objects 3.
+A's own measures: 0 posts, 0 comments authored, 0 addressed, **2 follows**
+(both directions, both approved, created 10:21), **2 received**, 0 sent,
+0 comment views, **0 storage objects under A's own prefix**, no avatar.
+
+**PREDICTED CONTAINER AFTER THE ERASE**
+
+| Assertion | Expected | Fails on the pre-fix build? |
+|---|---|---|
+| `ReceivedConnectedAttachments/` | **absent** — both originals gone | **YES — 2 files survive** |
+| `CommentsStore.json` | **absent** | **YES** |
+| `tmp/…SelectedPages….pdf` | **absent** | **YES** |
+| `Documents/Scores/` | empty — both PDFs gone | no (C-2 holds) |
+| `Documents/*.mov`, `*.jpg` | absent | no |
+| App state | returns to onboarding | no (C-46 holds) |
+
+**PREDICTED RELEASE LOG — the discriminator the filesystem cannot supply.**
+An empty directory afterwards is produced equally by "the wipe ran", "the wipe
+threw" and "this build predates the wipe":
+
+```
+[C-44] revocation reason=delete-account outcome=…      (BEFORE the reset)
+[LocalFactoryReset] begin (stage 5c) …
+[C-28] localReset receivedAttachmentsRemoved=2 temporaryFilesRemoved=1
+[C-48] localReset commentsStoreFileExisted=true
+```
+
+`temporaryFilesRemoved=1` and not 2: `tmp/TemporaryItems` is a directory with no
+path extension and cannot match the sweep.
+
+**PREDICTED BACKEND**
+
+| | Before | After |
+|---|---|---|
+| `auth.users` | 16 | **15** |
+| `account_directory` | 16 | **15** |
+| `connected_attachments` | 33 | **31** — B-9 step 1, A is recipient on both |
+| `follows` | 8 | **6** |
+| `posts` | 98 | **98 — unchanged** |
+| `post_comments` | 2 | **2 — unchanged** |
+| `post_comment_views` | 9 | **9 — unchanged** |
+| `attachments` objects | 10 | **10 — UNCHANGED, see below** |
+| `avatars` objects | 3 | **3 — unchanged** |
+
+**THE STORAGE COUNT NOT MOVING IS A PREDICTION, NOT AN OVERSIGHT.** Both received
+objects live under `users/dfaf8d18…/connected/` — the **sender's** prefix — and A's
+erase sweeps only `users/<A>/`, where A has zero objects. So both survive as
+unreferenced residue the moment their rows are deleted. That is D14's documented
+"expected residue, not a failure"; it adds two objects to **B-8**'s Phase 4 pile
+and must not be filed again. **A storage count of 8 would mean the function had
+reached outside the departing member's prefix, which would be a serious defect.**
+
+**EXTERNAL SURVIVORS — the only overreach checks in this run**
+
+| | Expected |
+|---|---|
+| The PDF exported to **Files** | **SURVIVES** |
+| The photo saved to **Photos** | **SURVIVES** |
+
+Anything else disappearing from Files or Photos means the reset reached outside
+Études-managed storage, which the settled product rule forbids.
+
 ## Group C — Membership lifecycle (disposable account)
 
 Rewritten for the settled architecture. Three properties are under test, and
