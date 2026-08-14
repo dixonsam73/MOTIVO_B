@@ -12,7 +12,9 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**Current position: Phase 1 in progress.** Landed and device-verified: C-13
+**Current position: Phase 1 work is COMPLETE, pending an independent closure audit.** Every Phase 1 row is resolved, measured, or carried with a stated reason: **C-49** (fixed, device acceptance pending), **C-36 / QA B7** (fixture-blocked — needs a genuinely fresh first-join account), and **B-4, B-12, B-13** (fixes deployed, verification deferred to Phase 3 for want of a disposable backend). **C-26 and B-11 remain release blockers owned by Phase 3**, not Phase 1 debt. The closure audit is deliberately being reconstructed from this repository rather than from any conversation.
+
+**Historic detail below is kept as the record of how the phase was worked.** Landed and device-verified: C-13
 (purchase-path hang), C-24 (reconnect after reinstall), C-1 client half (client
 expiry-deletion authority removed), C-2 (Scores survived Erase All).
 Verification batch cleared: C-7, C-8, C-19. Filed along the way: C-23, C-25,
@@ -215,10 +217,17 @@ assumed — but as of that date the documents and production agreed completely.
    than by the analysis. **C-49 filed** from the one deviation: after a
    successful erase the app lands on the journal, not onboarding — navigation
    state only, clears on relaunch, but on the path App Review exercises.
-4. **The remaining cheap investigations, in this order unless the register argues
-   otherwise:** C-33, then B-7 and B-10 (both cheap defuses), then C-3's
-   measurement. **C-49** is a one-line fix in a function C-46 already owns and is
-   worth pulling in alongside C-33.
+4. ~~**The remaining cheap investigations.**~~ **ALL DONE 2026-08-14.** C-33
+   RESOLVED (structural; the runtime failure path is recorded as unexercised
+   rather than given invented fault injection). **C-49 fixed** alongside it, as
+   an explicit `onEraseComplete` closure rather than an environment dependency —
+   **device acceptance still pending**, folded into the next legitimate
+   destructive run. **B-7 and B-10 RESOLVED** — three dormant functions dropped
+   from production under authorisation, snapshot diff deletions-only and matching
+   a committed delta. **C-3 MEASURED** — severity downgraded `P1?` → **P3**;
+   Phase 5 still owns the fix. **B-6 RESOLVED** — hardened structurally
+   (`ALTER POLICY` binding an attachment to its post's owner) and device-verified
+   on the approved-follower read, which is the only path that exercises it.
 5. **C-36 / QA B7 stay parked until a genuinely fresh first-join fixture
    exists.** Do not manufacture a pass from an established account — a
    first-join path exercised by an account that has already joined proves
@@ -233,27 +242,38 @@ and whether anything still carries material release or security risk rather than
 being cleanup or later-phase work. **Produce it from the evidence, not by moving
 statuses to improve the numbers.** An item that is open stays open.
 
-**Rig state at end of 2026-08-13, after C-44 and C-45 — read before planning
-device QA.** **Device A is a MIXED-STATE fixture and must not be used as-is.** It
-holds the live Supabase identity `44a6018e…` created for C-45's runtime
-verification, **but its Apple credential was manually revoked during that test**,
-so the app has withdrawn authentication while the backend account survives. It
-also carries local fixture data — sessions with notes, a titled attachment, a
-Score. **Perform a fresh Sign in with Apple before relying on A for anything**,
-and expect that sign-in to reuse the same Supabase row rather than mint a new one
-(same Apple `sub` → same uid, observed twice today). **Its backend account was
-deliberately NOT cleaned up**; that was an instruction, not an oversight. Two
-earlier A identities were spent and deleted today (gate b2's, and run 1's), and
-one **live Apple refresh token minted and abandoned by the b2 exchange** is still
-outstanding — nobody holds it, and it was never revoked, because the run that
-would have cleared it used a different, later grant.
+**Rig state at end of 2026-08-14 — read before planning device QA. THIS
+SUPERSEDES THE 2026-08-13 DESCRIPTION, WHICH IS NOW WRONG IN EVERY PARTICULAR
+FOR DEVICE A.**
+
+**Device A has been fully cycled twice today and is currently a live, disposable
+Connected follower of Account B.** Its 2026-08-13 identity `44a6018e…` was
+**deleted** by the C-28/C-48 destructive run — container wiped, journal and
+Scores gone, app returned to first-launch onboarding. It was then **recreated
+from scratch** for B-6's read regression: fresh Sign in with Apple, a fresh
+sandbox purchase to reach Connected, and an approved follow of Account B. So A
+now holds a **new** backend identity with an entitlement, following B, and its
+local container holds only whatever that regression created. It carries **no**
+C-45 fixture data, and its Apple credential is **not** revoked. Treat it as
+disposable, as always.
+
+**One item survives from 2026-08-13 and is unrelated to A's current state:** a
+**live Apple refresh token minted and abandoned by the C-44 gate (b2) exchange**
+is still outstanding — nobody holds it, and it was never revoked, because the
+run that would have cleared it used a different, later grant.
+
+**A build carrying no temporary instrumentation is installed on A**, from a
+clean tree.
 
 **Device B Release is the established / lapsed control fixture** — a lapsed member
 still holding a live backend account, C-35's exact condition, shared with the
 long-running Études Dev install. It was used only for C-44 gate (a), which wrote
 nothing and made no network call. Do not spend it casually and never run Erase
-All on it. **B is also what B-14's outstanding approval check is waiting on**, so
-preserving it has a specific purpose rather than being general caution.
+All on it. **B-14's approval check no longer depends on it** — that closed on
+2026-08-14 via Études Dev under a synthetic entitlement, which is also how
+Account B was made Connected for the C-28 staging and the B-6 regression. That
+route leaves the Release/lapsed fixture untouched and is the one to reuse
+whenever Account B needs to be Connected.
 
 Update this section as work lands.
 
@@ -267,8 +287,17 @@ no further handling of the private key. The `.p8` itself lives at
 `~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
 already blocks `*.p8` and `*.pem`.
 
-**Temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all 15 call
-sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
+**Temporary instrumentation: NONE PRESENT.** The most recent was C-3's
+foreground-timing probe, added and removed on 2026-08-14 within the same day.
+Its removal was verified as a *pure deletion* — `git diff` against the pre-probe
+commit is empty, so the tree is byte-identical to its state before the probe
+existed, and both configurations compile clean. **Not to be confused with the
+C-28/C-48 wipe-outcome lines, which are permanent** — those are outcome
+reporting on a destructive path, in the same family as C-44's revocation line,
+and the standing removal condition does not apply to them.
+
+**Earlier temporary instrumentation: REMOVED.** `ActivationTrace.swift` and all
+15 call sites were deleted on 2026-08-11 the moment C-38 closed, as the standing
 condition required. Nothing of it ships. Removal was done by restoring the four
 touched files to their pre-instrumentation state rather than by hand-editing the
 call sites — no client code had landed in between, so the result is provably
