@@ -139,6 +139,12 @@ struct MOTIVOApp: App {
         // than inheriting it as a side effect of the staged-video migration below.
         BackupPolicy.applyDirectoryPolicyAtLaunch()
 
+        // Phase 2 (C-4): make permanent media that already exists on this device
+        // backup-eligible. Runs off the main actor, once per install. U3 only affects
+        // files written from now on, so without this an existing user's whole library
+        // would stay excluded forever.
+        BackupReconciliation.runIfNeeded()
+
         // Migrate oversized PracticeTimer.stagedVideo from UserDefaults to file store (no-op if already migrated)
         _ = PracticeTimerStore.loadStagedVideo()
 
