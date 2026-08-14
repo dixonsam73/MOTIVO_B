@@ -109,9 +109,14 @@ anon-executable claim was false against the deployed grant, and its
 
 **B-14 fixed as a column privilege, not a policy predicate**, because RLS cannot
 pin a column to its previous value — `WITH CHECK` has no `OLD`. `authenticated`
-can no longer UPDATE either participant ID. **Its normal-approval regression
-check is pending by choice**, so as not to spend Device B's lapsed-member
-fixture; close it opportunistically when B is next entitled.
+can no longer UPDATE either participant ID. **B-14 is RESOLVED — the
+normal-approval regression check closed on 2026-08-14**, incidentally and
+without spending Device B's lapsed fixture: the `connected_attachments` insert
+policy demands an approved follow, so staging C-28's fixture forced a genuine
+request → approval cycle, and both rows read back `approved`. The approving
+client was Études Dev under a synthetic entitlement, which does not weaken the
+result — the fix is a server-side column privilege and the client sends the
+same PATCH whatever build it is.
 
 **A genuine lapse was observed on the artifact, 2026-08-13.** C-1's client
 authority removal and C-26's retention both held: Connected withdrawn, identity
