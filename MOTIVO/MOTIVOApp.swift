@@ -216,6 +216,15 @@ struct MOTIVOApp: App {
                 if appRoute.isProfilePresented {
                     ProfileView(onClose: {
                         appRoute.isProfilePresented = false
+                    }, onEraseComplete: {
+                        // C-49: this overlay sits above BOTH routes, so dismissing
+                        // it reveals whatever `route` already held. Opened from the
+                        // journal that is `.content`, where the first-launch
+                        // onboarding gate does not exist — it lives only inside the
+                        // `.timer` branch above. Without this the user lands on an
+                        // emptied journal after a successful erase and sees
+                        // onboarding only after a force-quit.
+                        appRoute.route = .timer
                     })
                     .zIndex(1)
                     .transition(.identity)

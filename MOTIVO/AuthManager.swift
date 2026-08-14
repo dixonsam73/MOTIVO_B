@@ -276,6 +276,36 @@ final class AuthManager: NSObject, ObservableObject {
 
     // MARK: - M7B Avatar promotion
 
+    /// C-33: is the avatar object known to be gone, such that dropping the
+    /// pointer to it cannot strand anything?
+    ///
+    /// True for an outright success, and for a response that says the object
+    /// was not there to begin with — in that case there is nothing to strand,
+    /// and refusing to clear the column would leave the member's deletion never
+    /// propagating to peers, which is a worse outcome than the orphan this
+    /// guard exists to prevent.
+    ///
+    /// **The exact response Supabase Storage returns for a DELETE of a missing
+    /// object is NOT established here**, and is deliberately not asserted: it
+    /// may be a bare 404 or a 400 whose body carries a 404. The body check is a
+    /// defensive superset for that reason. Everything else — transport
+    /// failures, 401/403, 5xx — is treated as "still there", which is the safe
+    /// direction: the pointer survives, nothing is orphaned, and the pending
+    /// marker retries.
+    private static func avatarObjectIsAbsent(after result: Result<Void, Error>) -> Bool {
+        switch result {
+        case .success:
+            return true
+        case .failure(let error):
+            guard case NetworkManager.NetworkError.httpError(let status, let body) = error else {
+                return false
+            }
+            if status == 404 { return true }
+            let haystack = (body ?? "").lowercased()
+            return haystack.contains("not_found") || haystack.contains("not found") || haystack.contains("\"404\"")
+        }
+    }
+
     /// Best-effort promotion of a pending Études avatar change into the active Connected scope.
     /// The pending marker is retained on any unavailable/offline/backend failure so a later
     /// authentication refresh or ProfileView appearance can retry safely.
@@ -293,7 +323,27 @@ final class AuthManager: NSObject, ObservableObject {
         if ProfileStore.hasPendingLocalAvatarDeletion() {
             ProfileStore.deleteAvatar(for: connectedStorageID)
 
-            _ = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
+            // C-33: this result used to be discarded (`_ =`) and the directory
+            // patch ran regardless. A failed object delete followed by a
+            // successful patch strands `avatars/users/<uid>/avatar.jpg` with
+            // nothing pointing at it — unrecoverable from the client, because
+            // every later path keys off the column that was just nulled, and
+            // `delete_account_v1` deletes the avatar by reading that same
+            // column (B-20). The pointer is the only handle on the object, so
+            // it must outlive any failure to remove what it points at.
+            //
+            // Ordering is therefore forced: prove the object is gone, THEN drop
+            // the pointer. On any other outcome the pending marker is retained
+            // and the whole operation retries later — the same shape the upload
+            // branch below already uses.
+            let objectDelete = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
+            guard Self.avatarObjectIsAbsent(after: objectDelete) else {
+                #if DEBUG
+                NSLog("[Auth] pending local avatar object delete retry retained user=%@ reason=%@", backendID, reason)
+                #endif
+                return
+            }
+
             let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
             guard case .success = patch else {
                 #if DEBUG

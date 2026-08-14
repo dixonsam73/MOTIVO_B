@@ -194,6 +194,17 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
  
      // Close-first strategy
      var onClose: (() -> Void)? = nil
+
+     /// C-49: how the presenter returns the app to its home route after a
+     /// SUCCESSFUL erase, and only then.
+     ///
+     /// Passed in rather than read from the environment deliberately. Each
+     /// presenter already owns the router and knows what "home" means for its
+     /// own presentation, and an `@EnvironmentObject` here would add a runtime
+     /// dependency — one that traps only when the body evaluates, on a screen
+     /// that leads to account deletion — in exchange for nothing this closure
+     /// does not already give, compile-checked, at both call sites.
+     var onEraseComplete: (() -> Void)? = nil
  
      @FetchRequest(sortDescriptors: [NSSortDescriptor(key: "name", ascending: true)])
      private var instruments: FetchedResults<Instrument>
@@ -1446,33 +1457,13 @@ case .failure(let error):
          }
      }
 
-     @MainActor
-     private func clearAvatarFromBackendIfPossible() async -> Bool {
-         guard BackendEnvironment.shared.isConnected else { return false }
-         let auth = _auth.wrappedValue
-         guard auth.hasSupabaseAccessToken else { return false }
-         guard let backendID = auth.backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !backendID.isEmpty else { return false }
-
-         avatarSyncInFlight = true
-         defer { avatarSyncInFlight = false }
-
-         // Best-effort delete (do not block UI on failure).
-         _ = await NetworkManager.shared.deleteAvatarObject(backendUserID: backendID)
-
-         // Clear avatar_key in account_directory.
-         let patch = await AccountDirectoryService.shared.updateSelfAvatarKey(userID: backendID, avatarKey: nil)
-         switch patch {
-         case .success:
-             // Bust caches for the canonical key as well, in case any surfaces still reference it.
-             await invalidateRemoteAvatarCaches(avatarKey: "users/\(backendID)/avatar.jpg")
-             ProfileStore.clearPendingLocalAvatarSync()
-             return true
-         case .failure:
-             avatarSyncErrorMessage = "Couldn’t clear your avatar right now. Please try again."
-             showAvatarSyncErrorAlert = true
-             return false
-         }
-     }
+     // C-33: `clearAvatarFromBackendIfPossible()` was removed here. It had no
+     // callers — the live deletion path is the pending-marker route in
+     // `AuthManager.syncPendingLocalAvatarToConnectedIfNeeded` — so this file
+     // held a second, independent implementation of avatar deletion that
+     // disguised which one actually ran. It carried the same discarded-result
+     // defect, and repairing both would have preserved exactly the ambiguity
+     // that made the defect hard to see. Deleted rather than fixed.
 
      private func invalidateRemoteAvatarCaches(avatarKey: String) async {
          let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1646,7 +1637,25 @@ case .failure(let error):
      /// Nothing in `LocalFactoryReset` clears `appRoute.isProfilePresented`, and
      /// it should not — the reset owns data, not navigation. This is the one
      /// place that knows the erase both finished and succeeded.
+     ///
+     /// C-49: dismissing the overlay is not enough. `MOTIVOApp.body` switches on
+     /// `appRoute.route`, and the first-launch onboarding gate
+     /// (`shouldRenderAppSetUpRoot`) exists only inside the `.timer` branch.
+     /// Clearing `isProfilePresented` reveals whatever route was already
+     /// underneath — `.content` when Profile was opened from the journal — where
+     /// that gate is not in the view tree at all and is never evaluated. The
+     /// result was an emptied journal after a successful erase, with onboarding
+     /// appearing only after a force-quit, since a fresh launch defaults to
+     /// `.timer`.
+     ///
+     /// Routing home here rather than in `LocalFactoryReset` is deliberate and
+     /// keeps C-46's own rule intact: the reset owns data, not navigation. This
+     /// is the one place that knows the erase both finished and succeeded, so it
+     /// is the one place that may move the user — and, as C-46 established, it
+     /// must never run on the failure path, where dismissing would hide the
+     /// alert saying the account was NOT deleted.
      private func dismissProfileAfterSuccessfulErase() {
+         onEraseComplete?()
          onClose?()
      }
 

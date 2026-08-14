@@ -1880,7 +1880,12 @@ private func loadPracticeDefaultsIfNeeded() {
         }
         #endif
         .sheet(isPresented: $showProfile) {
-            ProfileView(onClose: { showProfile = false })
+            // C-49: dismissing this sheet already reveals PracticeTimerView, which
+            // is where the onboarding gate lives, so this presentation was never
+            // the broken one. Set explicitly anyway — symmetry with the app-root
+            // overlay, and it stops the correct behaviour here resting on an
+            // implicit fact about which view happens to be underneath.
+            ProfileView(onClose: { showProfile = false }, onEraseComplete: { appRoute.route = .timer })
         }
         .onChange(of: showContentView) { _, newValue in
             guard isHomePresentation, newValue else { return }
