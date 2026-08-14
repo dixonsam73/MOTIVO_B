@@ -160,7 +160,6 @@ import CoreData
 import AVFoundation
 import AVKit
 import Darwin
-import os
 
 private let recorderIcon = Color(red: 0.44, green: 0.50, blue: 0.57) // slate blue-grey ~ #6F7F91
 private let tasksAccent  = Color(red: 0.66, green: 0.58, blue: 0.46) // warm neutral  ~ #A88B73
@@ -401,10 +400,6 @@ struct PracticeTimerView: View {
     // --- Inserted video recording and attachments state ---
     @State var showVideoRecorder: Bool = false
     @State var stagedVideos: [StagedAttachment] = []
-
-    /// C-3 MEASUREMENT — TEMPORARY. Delete with the two call sites in the
-    /// `scenePhase` handler once C-3's severity has been recorded.
-    static let c3Log = Logger(subsystem: "com.sdsongs.etudes", category: "c3measure")
     @State var videoThumbnails: [UUID: UIImage] = [:]
     @State var videoTitles: [UUID: String] = [:]
     // Remove old video player state:
@@ -1814,16 +1809,6 @@ private func loadPracticeDefaultsIfNeeded() {
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .active:
-                // C-3 MEASUREMENT — TEMPORARY. Remove once C-3's severity is
-                // recorded; tracked as a standing condition in CLAUDE.md, the
-                // same as ActivationTrace and MembershipTrace before it.
-                //
-                // Release-readable by necessity: the rig runs Release, so a
-                // `#if DEBUG` probe would not exist in the build under test.
-                // Emits ONLY a duration and byte counts — no filenames, no ids,
-                // no user content.
-                let c3Start = CFAbsoluteTimeGetCurrent()
-
                 // Ensure any leaked/debounced title edits are committed before hydration
                 commitAllAudioTitleBuffersAndPersist()
 
@@ -1847,22 +1832,6 @@ private func loadPracticeDefaultsIfNeeded() {
                     mirrorFromStagingStore()
                 }
                 recomputeSessionMetaTint()
-
-                // C-3 MEASUREMENT — TEMPORARY (see the note at the top of this
-                // case). Timed here rather than around `hydrateTimerFromStorage`
-                // alone, because what C-3 is really about is the user-visible
-                // foreground stall, and the whole of this branch runs
-                // synchronously on the main actor before the UI can respond.
-                // The trailing `Task { … }` is deliberately outside the window:
-                // it is asynchronous and does not block.
-                let c3ElapsedMs = (CFAbsoluteTimeGetCurrent() - c3Start) * 1000
-                let c3VideoBytes = stagedVideos.reduce(0) { $0 + $1.data.count }
-                let c3OtherBytes = stagedAudio.reduce(0) { $0 + $1.data.count }
-                    + stagedImages.reduce(0) { $0 + $1.data.count }
-                if c3VideoBytes > 0 || c3OtherBytes > 0 {
-                    Self.c3Log.notice("[C-3] foreground mainActorMs=\(String(format: "%.1f", c3ElapsedMs), privacy: .public) videos=\(stagedVideos.count, privacy: .public) videoBytes=\(c3VideoBytes, privacy: .public) otherBytes=\(c3OtherBytes, privacy: .public)")
-                }
-
                 Task { await refreshRelationalUnseenCountSources() }
             case .inactive, .background:
                 // Commit all buffered title edits before persisting snapshot

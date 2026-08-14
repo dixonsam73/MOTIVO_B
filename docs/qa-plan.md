@@ -246,6 +246,62 @@ second client will muddy the snapshot.
 | A4 | Record a 30s video, background the app, return | Returns promptly. **Time it** — small-scale C-3 probe |
 | A5 | Repeat with a 5-minute video | Hang or kill on foreground confirms C-3 |
 
+### C-3 measurement — RESULT, 2026-08-14. SEVERITY DOWNGRADED to P3.
+
+Device A, Release, three rungs, thresholds fixed beforehand. **The app was never
+killed:** every line across all three rungs came from **PID 1180**, spanning
+20:23 to 20:43, so the jetsam/watchdog outcome that would have made this P1 did
+not occur even with 279 MB of video staged.
+
+| Rung | Staged | Bytes | `mainActorMs` (each) | Median |
+|---|---|---|---|---|
+| 1 | 1 video (~30 s) | 19.1 MB | 51.6 · 53.2 · 54.8 · 56.6 · 50.8 | **53.2** |
+| 2 | 2 videos (+~2 min) | 93.6 MB | 159.2 · 120.7 · 118.3 | **120.7** |
+| 3 | 3 videos (+~5 min) | 278.7 MB | 472.7 · 322.9 · 266.7 | **322.9** |
+
+**Verdict: 322.9 ms sits in the 250–1 000 ms band — P3.** Worst single
+foreground observed was 472.7 ms, still under a second. `P1?` is retired.
+
+**Scaling: roughly 35 ms fixed + ~1 ms/MB.** The per-MB cost is 2.8 at rung 1,
+0.91 at rung 2 and 1.09 at rung 3 — so the fixed AVFoundation setup and decode
+dominate at small sizes and the byte term takes over later. **The extrapolation
+written after rung 2 predicted 220–300 ms and the observed median was 323 ms, so
+it under-predicted** — recorded because the habit of checking a prediction
+against the outcome matters more when the prediction was only roughly right.
+
+**A cold/warm split appears and widens with size:** invisible at rung 1, ~40 ms
+at rung 2, ~206 ms at rung 3. The first foreground after staging is always the
+slowest.
+
+**WHAT THE MILLISECONDS DO NOT CAPTURE, AND IT IS THE BETTER ARGUMENT FOR THE
+PHASE 5 FIX.** The measurement is of *latency*; the mechanism also costs:
+
+- **~279 MB held resident** in a `@State` array for as long as the attachments
+  stay staged — not just during the foreground transition.
+- **The same 279 MB written to `tmp` on EVERY foreground**, because
+  `generateVideoThumbnail(from:id:)` writes a full surrogate copy before
+  decoding. That is flash wear and battery on a path the user hits constantly,
+  and it is invisible in a latency figure.
+
+Neither makes it P1 today. Both are why the Phase 5 fix is worth doing on its
+merits rather than only when a stopwatch complains.
+
+**No refactor was performed**, per the committed rule: Phase 1 owned the
+severity, Phase 5 owns the fix.
+
+**Instrumentation removed the same day**, as the standing condition requires.
+Verified as a pure deletion: `git diff` against the pre-probe commit is empty,
+so the tree is byte-identical to its state before the probe existed. Debug and
+Release both compile clean afterwards.
+
+**One tooling trap worth keeping.** `zsh` has a `log` builtin, so `log show
+--archive …` fails with "too many arguments" — and with `2>/dev/null` in the
+pipeline that error is swallowed and an unreadable archive looks exactly like an
+empty one. **Use `/usr/bin/log` explicitly, and never suppress stderr while
+diagnosing why a log is empty.** `sudo log collect --device-name "<device>"
+--output <path>` also refuses to overwrite an existing archive, so use a fresh
+path per run.
+
 ### C-3 measurement — PROCEDURE AND STOPPING RULE, written 2026-08-14 before running
 
 **What Phase 1 owns is the severity, not the fix.** C-3's mechanism is not in
