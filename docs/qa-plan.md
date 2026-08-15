@@ -945,7 +945,7 @@ construction" is exactly what C-28 and C-48 each disproved on device.
 
 | # | Steps | Expected |
 |---|---|---|
-| D15 | On a disposable device holding local media, at least one attachment with a **non-default privacy choice** (so the map is non-empty), Scores, and received Connected material: perform **Erase All Études Data**. Then inspect the container | **All previously established C-28/C-48 expectations still hold, unchanged** — `ReceivedConnectedAttachments/` absent, `Documents/Scores/` gone, local `Documents` media absent, `tmp/` export copies absent, `CommentsStore.json` gone, Core Data store rebuilt. **PLUS THE NEW ASSERTION: `Library/Application Support/AttachmentPrivacy.json` is ABSENT.** Check the **root**, not `MOTIVO/` — a run that only inspects `MOTIVO/` passes vacuously, because after U4 the file is not there whether the wipe worked or not. Confirm `Application Support/MOTIVO/` itself contains no `AttachmentPrivacy.json` either (the legacy sweep). Release log should carry `[C-28] localReset receivedAttachmentsRemoved=… temporaryFilesRemoved=…` and `[C-48] localReset commentsStoreFileExisted=…` as before |
+| D15 | On a disposable device holding local media, at least one attachment with a **non-default privacy choice** (so the map is non-empty), Scores, and received Connected material: invoke the destructive operation **the device's own state presents**, then inspect the container. **NAME IT CORRECTLY — the two operations are not interchangeable.** `ProfileView:839` selects by `auth.hasConnectedIdentity`: a device holding a Connected identity presents **Delete Account & All Études Data**, confirmed by typing **DELETE**, and that path additionally revokes the Sign in with Apple credential and runs `delete_account_v1`; a genuinely Solo-only device presents **Erase All Études Data**, confirmed by typing **ERASE**. Both converge on `LocalFactoryReset`, which is why the local assertions below are identical either way — but they are different product operations with different blast radii, and a run that records the wrong one has mis-stated what it tested. **Device A will hold a Connected identity at this point (restored from the encrypted backup), so the expected operation is Delete Account & All Études Data / DELETE, and the backend and revocation assertions apply.** | **All previously established C-28/C-48 expectations still hold, unchanged** — `ReceivedConnectedAttachments/` absent, `Documents/Scores/` gone, local `Documents` media absent, `tmp/` export copies absent, `CommentsStore.json` gone, Core Data store rebuilt. **PLUS THE NEW ASSERTION: `Library/Application Support/AttachmentPrivacy.json` is ABSENT.** Check the **root**, not `MOTIVO/` — a run that only inspects `MOTIVO/` passes vacuously, because after U4 the file is not there whether the wipe worked or not. Confirm `Application Support/MOTIVO/` itself contains no `AttachmentPrivacy.json` either (the legacy sweep). Release log should carry `[C-28] localReset receivedAttachmentsRemoved=… temporaryFilesRemoved=…` and `[C-48] localReset commentsStoreFileExisted=…` as before, preceded by `[C-44] revocation reason=delete-account outcome=…` **on the Connected path only** |
 
 **The container is the verdict, not the screen** — the same trap C-28, C-34 and
 D13 each set. `AttachmentPrivacy`'s in-memory cache is cleared regardless, so the
@@ -1042,6 +1042,78 @@ Phase 3 local instance — never on production.
 | F3 | After restore, **publish a session** with a non-private attachment | All non-private attachments upload. Pre-Phase-2 this silently omitted them: `resolveLocalFileURL` had no filename fallback, so `loadIncludedAttachments` skipped the attachment rather than blocking publish, and the post arrived with its media missing and no error |
 | F4 | After restore, **delete a session** that has attachments, then inspect `Documents/` | The media files are gone. Pre-Phase-2 the deletion paths passed the raw stored path, found nothing, and returned silently — orphaning the files forever with nothing in the UI to show for it |
 | F5 | After restore, confirm **Erase All** still removes everything | Unchanged. The factory-reset sweeps are directory- and extension-based and never read `Attachment.fileURL`, so they are path-independent by construction |
+
+## Device A acceptance run — PREDICTION, written 2026-08-15 before any device mutation
+
+**Three gates, SEPARATELY SCORED. None is run. A pass on one is not a pass on
+another, and this section must never be summarised as a single result.**
+
+| Gate | Claim | Status |
+|---|---|---|
+| **F1/F2** | Genuine encrypted Finder backup → restore | NOT RUN |
+| **D15** | Destructive-operation regression after U4's privacy-map move | NOT RUN |
+| **C-49** | Onboarding immediately after that destructive operation | NOT RUN |
+
+### Why the fixture has to be authored by a pre-Phase-2 build
+
+**F2's claim is about provenance, not presence.** It must show that a file
+written by code that *excluded it at write time* was made backup-eligible by the
+U5 reconciliation and then survived a genuine restore. A file's presence after
+restore proves nothing on its own — a post-Phase-2 file would also be present,
+via U3, having never been excluded at all. That is a false pass, and it is the
+single most likely way this gate gets mis-scored.
+
+Device A's container was inspected on 2026-08-15 and is **genuinely empty**:
+`Documents/` has no files and no `Scores/`, Core Data holds **0 sessions and 0
+attachments**, and there is no `AttachmentPrivacy.json`,
+`ReceivedConnectedAttachments/` or `CommentsStore.json`. So the fixture must be
+authored by a build predating `4d28754`, and `a8eb050` — the Phase 1 closure
+commit — is the one used.
+
+**F2's load-bearing claim is the provenance chain above.** The
+received-cache/adopted-Score control below is a strong additional discriminator
+and is *not* a redefinition of F2.
+
+### The provenance discriminator, checked BEFORE the backup
+
+On first launch of the Phase 2 build over the fixture, U5 emits one line. It
+separates an honest fixture from a false one before anything is backed up:
+
+- `cleared=N, alreadyEligible=0` ⟹ every file carried the exclusion attribute
+  and had it removed. **Pre-Phase-2 provenance confirmed.**
+- `alreadyEligible>0, cleared=0` ⟹ the files were never excluded. **The fixture
+  is post-Phase-2 and F2 MUST NOT be run against it.**
+
+**The exact expected counts are deliberately NOT asserted here.** They are
+derived from the implementation's counting semantics applied to the observed
+pre-upgrade inventory, and committed as a concrete number *before* the Phase 2
+build is first launched. Asserting an abstract `N = fixture file count` in
+advance would be a prediction about arithmetic rather than about behaviour.
+
+### F1/F2 predictions
+
+| # | Assertion | Prediction |
+|---|---|---|
+| 1 | Privacy map before backup | At Application Support **root**, absent from `MOTIVO/`, contents intact |
+| 2 | **F2 — pre-Phase-2 attachment media after restore** | **Present and openable.** The gate |
+| 3 | **F2 — pre-Phase-2 Scores PDFs after restore** | **Present and openable** |
+| 4 | **Control: same document, opposite outcomes** — a received attachment opened (inbox copy materialised) *and* adopted to Scores | Scores copy **PRESENT**, inbox copy **ABSENT**. One backup, one restore, opposite results — matrix row 5 (adopted scores are recipient-owned and not reconstructible) against row 10 (received cache is backend-derived) |
+| 5 | Scores index, favourites, resume state | Present. These restored before Phase 2 too — the pre-fix control was a *populated* library whose files were missing, never an empty one |
+| 6 | Privacy choices after restore | Preserved. Any loss fails **closed** (everything reads private), never a leak |
+| 7 | Staging scratch after restore | **Absent** — secondary negative control |
+| 8 | **F2b** — reconciliation after restore | **Does not run; no `[C-4]` line.** The completion key is in `UserDefaults`, which restores. A line appearing after restore is itself a finding |
+| 9 | Container UUID across the restore | **Measured, not assumed.** If unchanged, F3/F4 are recorded as **NOT EXERCISED** — the stale-path consumers were never put under test. That does not invalidate F1/F2 and is not grounds for manufacturing a second-device run |
+| 10 | Connected identity after restore | Restored without re-authenticating (encrypted backup restores the Keychain) |
+| 11 | F3 publish / F4 delete after restore | Attachments upload; a deleted session's files leave `Documents/`. **Meaningful only if (9) shows a changed UUID** |
+
+### D15 and C-49
+
+Predictions for these are in Group D, "Phase 2 erase-regression gate". They are
+scored separately from F1/F2 and from each other, and **C-49's assertion is the
+screen shown the instant the destructive operation completes, before any
+relaunch** — relaunching destroys the observation.
+
+---
 
 ## Group G — Accessibility
 
