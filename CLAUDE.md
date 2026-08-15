@@ -77,12 +77,26 @@ THEY MUST BE SCORED SEPARATELY.**
 
 | Gate | What it proves | Where |
 |---|---|---|
-| **F1/F2** | Permanent media, Scores and the privacy map survive a genuine encrypted Finder backup → restore. **F2 is proved by a genuinely pre-Phase-2 file being present and openable afterwards — never by a reconciliation log line after restore** | QA Group F |
+| ~~**F1/F2**~~ | **DONE 2026-08-15 — BOTH PASS.** Genuine encrypted Finder backup → restore on Device A. All 7 files authored by `a8eb050` (excluded at write time, cleared only by U5) came back **byte-identical**; the adopted Scores copy survived while the byte-identical inbox cache did not; excluded scratch did not restore; the privacy map and its choices came back intact; reconciliation correctly did **not** re-run. **F3 is NOT EXERCISED and is not a pass** | QA Group F |
 | **Erase-regression gate (D15)** | U4 moved `AttachmentPrivacy.json` to the Application Support **root**, structurally the same shape as C-48. Every prior C-28/C-48 expectation still holds **plus** the root-level map is removed | QA Group D, "Phase 2 erase-regression gate" |
 | **C-49** | After a legitimate Erase All the app returns to onboarding, not the journal | Carried Phase 1 row |
 
 **C-49 is carried and unchanged. The restore does not discharge it** — only a
 legitimate destructive run does, which the D15 gate conveniently provides.
+
+**TWO THINGS THE RESTORE TAUGHT US THAT OUTLIVE THE GATE.** (i) **An ordinary
+in-place app update rotates the data container**, established from the pre-backup
+database rather than the restore — so stale absolute paths in `Attachment.fileURL`
+are a *routine* condition, not a rare restore artifact, and U2's resolver is
+load-bearing on every update. A pre-backup note claiming the UUID was unchanged
+was **wrong**, caused by `limit 1` sampling one row; it is corrected in
+`docs/qa-plan.md`. (ii) **F3 could not be exercised through the shipping UI at
+all**: the only publish trigger is the editor's save, which rewrites
+`Attachment.fileURL` from resolved URLs ~80 lines before publishing, so the save
+*self-heals* the very condition F3 exists to test. The genuine exposure is a
+`SessionSyncQueue` publish surviving a container rotation, which needs fault
+injection; it is recorded as an **observation with no owner** and Phase 2 was not
+expanded to manufacture it.
 
 ---
 

@@ -1039,7 +1039,7 @@ Phase 3 local instance — never on production.
 | F1 | Genuine **encrypted Finder backup → restore onto Device A** (disposable). Encrypted so the Keychain restores too, which exercises the Connected-identity half. **Not substitutable by inspecting resource flags** — that establishes what the API reports, never what Apple's backup daemon copied | After Phase 2: journal, attachment media and Scores all present and openable; stored absolute paths are stale but every consumer resolves by filename. **CORRECTED 2026-08-15 — the pre-Phase-2 control is NOT "empty Scores".** The Scores index lives in `UserDefaults` (`scoreLibrary_v2`) and restores, so the broken state is a **fully populated library whose every PDF is missing** — titles, favourites and resume state that open to nothing. Anyone expecting emptiness would read that as a pass |
 | F2 | Prove the **existing-install** half — **by the file's presence and openability after restore, NEVER by a reconciliation log line**, which F2b explains will not appear: a media file written *before* Phase 2, which therefore carries the exclusion attribute, must become backup-eligible through reconciliation **and survive a genuine restore** | Present after restore. If it is absent while a post-Phase-2 file is present, reconciliation did not reach item-level flags — the specific failure the design guards against, since a child's own attribute survives its parent being un-flagged and `Documents/Scores/` was flagged at both levels |
 | F2b | After restore, check whether the reconciliation pass runs at all | **It does NOT run, and that is the pass.** Its completion key `backupReconciliation_v1_complete` lives in `UserDefaults` — matrix row 4, ordinary iOS backup, never touched by `BackupPolicy` — so it restores as `true` and `runIfNeeded()` returns before any traversal. **Expect NO `[C-4] backupReconciliation` line after restore.** An earlier draft of this prediction said to expect `examined=N cleared=0 alreadyEligible=N`; that was wrong and is corrected here. **A line appearing after restore is itself a finding**: it means the key did not restore, or was never written because the source device's pass ended `failed > 0`. Note the corollary — a source device with `failed > 0` correctly carries no key, so reconciliation retries on the restored device, which is the intended behaviour rather than a fault |
-| F3 | After restore, **publish a session** with a non-private attachment | All non-private attachments upload. Pre-Phase-2 this silently omitted them: `resolveLocalFileURL` had no filename fallback, so `loadIncludedAttachments` skipped the attachment rather than blocking publish, and the post arrived with its media missing and no error |
+| F3 | After restore, **publish a session** with a non-private attachment. **NOT EXERCISED — 2026-08-15, and it is not reachable through the shipping UI.** The only publish trigger is `AddEditSessionView:2081`, reached via the editor's save — and ~80 lines earlier that same save rewrites `attachment.fileURL` from `existingAttachmentURLMap`, which holds **resolved** URLs. So opening and saving a session **self-heals every stale path in it before the publish runs**, and `loadIncludedAttachments` never sees a stale path. Running it would have produced a green result for an assertion the test never reached. **Deliberately not run rather than run and caveated** | All non-private attachments upload. Pre-Phase-2 this silently omitted them: `resolveLocalFileURL` had no filename fallback, so `loadIncludedAttachments` skipped the attachment rather than blocking publish, and the post arrived with its media missing and no error |
 | F4 | After restore, **delete a session** that has attachments, then inspect `Documents/` | The media files are gone. Pre-Phase-2 the deletion paths passed the raw stored path, found nothing, and returned silently — orphaning the files forever with nothing in the UI to show for it |
 | F5 | After restore, confirm **Erase All** still removes everything | Unchanged. The factory-reset sweeps are directory- and extension-based and never read `Attachment.fileURL`, so they are path-independent by construction |
 
@@ -1236,6 +1236,99 @@ Predictions for these are in Group D, "Phase 2 erase-regression gate". They are
 scored separately from F1/F2 and from each other, and **C-49's assertion is the
 screen shown the instant the destructive operation completes, before any
 relaunch** — relaunching destroys the observation.
+
+---
+
+### F1/F2 RESULT — 2026-08-15. F1 PASS, F2 PASS. F3 NOT EXERCISED.
+
+Scored against the predictions committed in `f48ac50` and `3d08529` **before** any
+device mutation. Device A, Release, Phase 2 HEAD.
+
+**Backup:** encrypted local Finder backup, `IsEncrypted = true`, dated
+`Sat 15 Aug 19:06:13 GMT 2026`, device `SD beta burner`, verified from
+`Manifest.plist` before restoring — including that `com.sdsongs.etudes` was
+actually captured, so we could have aborted rather than spend the fixture on a
+restore with nothing in it.
+
+| # | Assertion | Result |
+|---|---|---|
+| 2 | **F2 — pre-Phase-2 attachment media present and openable** | **PASS** — 4/4 byte-identical |
+| 3 | **F2 — pre-Phase-2 Scores PDFs present and openable** | **PASS** — 3/3 byte-identical |
+| — | post-Phase-2 controls present | **PASS** — both |
+| 4 | Adopted Score **present**, inbox cache **absent** | **PASS** — Scores copy `b5e1e33f…` present; `ReceivedConnectedAttachments/` restored **empty** |
+| 5 | Scores index, favourite, rename, resume | **PASS** — 4 entries, favourite and rename preserved, confirmed on device |
+| 1,6 | Privacy map at root; choices preserved | **PASS** — 520 bytes, 10 entries, **byte-identical**, 9 explicitly *included* |
+| 7 | Staging / operational scratch absent | **PASS** — `App Support/MOTIVO/` entirely absent from the restore |
+| 8 | **F2b — reconciliation does NOT run after restore** | **PASS** — **zero** `[C-4]` lines; the completion key restored as `true` |
+| 9 | Data container UUID | **Measured. See the correction below** |
+| 10 | Connected identity without re-authenticating | **PASS** — `[C-45] state=authorized`, no SIWA sheet, display name intact, and the destructive button reads **"Delete Account & All Études Data"**, i.e. `hasConnectedIdentity == true`. The Solo *display* is the inactive entitlement, which is the settled semantics — expiry removes Connected, not the musician |
+| — | Rendering / openability | **PASS** — 3 sessions with all attachments, 4 scores in the library |
+| 11a | **F4 — delete a session with stale paths** | **PASS** — see below |
+| 11b | **F3 — publish after restore** | **NOT EXERCISED** — see the F3 row. **This is not a pass and must never be summarised as one** |
+
+**F4 in detail, because it tests two directions at once.** Session 8's two
+attachments both carried paths under `AF087FE9…`, a container **two generations
+stale**. On delete: the 12.6 MB image was **removed** — pre-U2 the sink would
+have taken the raw path, found nothing, returned silently and orphaned it — while
+`Documents/Scores/5E7A2948-…pdf` **survived**, because it is a score-derived
+attachment and `isProtectedScoreLibraryURL` refuses to delete library originals.
+Files 9 → 8, Core Data 3 → 2 sessions and 6 → 4 attachments, sessions 7 and 9
+untouched. Both files disappearing would have been a failure.
+
+#### CORRECTION to the pre-backup gate record
+
+`2d10def` recorded "the data container UUID was unchanged by the in-place
+upgrade". **That was wrong, and the fault was the query, not the device:** it used
+`select distinct ZFILEURL … limit 1`, which samples one row and can never detect a
+second value. Surveyed properly, the **pre-backup** database already held
+`AF087FE9…` ×5 and `D1F670BF…` ×1.
+
+**The in-place app upgrade rotated the data container.** The split predates the
+backup and is not a restore artifact.
+
+**That finding is worth more than the correction.** Stale stored paths are **not
+restore-specific — an ordinary app update rotates the container and stales every
+absolute path in Core Data.** U2's resolver is therefore load-bearing on *every
+update*, not merely on the rare restore the Phase 2 analysis was built around. It
+also means the app had been running on five stale paths before the backup and
+rendered and reconciled correctly throughout, which is independent evidence the
+resolver works.
+
+#### OBSERVATION — the genuine publish exposure, recorded not chased
+
+The publish path's stale-path branch is reachable in exactly one way: a publish
+**enqueued in `SessionSyncQueue`** that flushes *after* the container rotates. The
+queue is file-backed and survives launches, so an offline publish that queues,
+followed by an ordinary app update, would reach `loadIncludedAttachments` with
+stale paths — and pre-U2 would have silently dropped the attachments.
+
+**Backup/restore does not preserve that route**, because the queue lives in the
+excluded `App Support/MOTIVO/` and did not restore — decision **P5** behaving
+exactly as designed: a restored device does not inherit historical pending-publish
+intent.
+
+**Owner: unassigned. This is an observation, not a finding, and it reassigns
+nothing.** It needs fault injection to exercise, which is the same reason B-4's
+and B-13's negative directions sit where they do. **Phase 2 is not expanded to
+manufacture it.**
+
+#### Method findings for anyone re-running this gate
+
+1. **A development-signed app is not restored by a Finder restore.** After the
+   restore the app was **entirely absent** — not even a placeholder — because iOS
+   re-downloads apps from the App Store and there is no App Store record for a
+   dev-signed build. **Installing the same-signed build reattached the restored
+   container intact**, so the fixture survived. Real users are unaffected; this is
+   purely a property of the test vehicle.
+2. The restore also **disables Developer Mode** and **drops developer-profile
+   trust**. Both must be restored (the trust check needs Wi-Fi) before the app
+   will launch; `devicectl` reports `RequestDenied … profile has not been
+   explicitly trusted`.
+3. **`log` is a zsh builtin on this machine** and silently swallows every query
+   with "too many arguments", which reads exactly like the log tool rejecting the
+   predicate. **Use `/usr/bin/log`.**
+4. **`devicectl copy from` strips extended attributes**, so on-device backup-flag
+   state cannot be read from a container copy. Use the `[C-4]` log line instead.
 
 ---
 
