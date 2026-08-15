@@ -1332,6 +1332,86 @@ manufacture it.**
 
 ---
 
+### D15 + C-49 — PREDICTION, written 2026-08-15 before the destructive operation
+
+**One legitimate destructive operation, TWO separately scored gates.** Device A
+holds a Connected identity, so the operation presented is **Delete Account & All
+Études Data**, confirmed by typing **DELETE** (`ProfileView:839`). This is *not*
+the Solo-only Erase All path, though both converge on `LocalFactoryReset`.
+Account A = `cfadb7cb-12d3-47cc-ac79-c574e5341eb1`.
+
+#### Which fixtures are genuinely populated — and which are not
+
+**Scoring rule for this run: an empty precondition is NOT a pass.** Assertions
+without a populated fixture are recorded as *not re-exercised*, and the existing
+2026-08-14 evidence stands on its own rather than being restated as new.
+
+| Fixture | State | Scored? |
+|---|---|---|
+| **`App Support/AttachmentPrivacy.json` (ROOT)** | **520 bytes, 10 entries** | **YES — the load-bearing new assertion** |
+| `Documents/` permanent media | 4 files | YES |
+| `Documents/Scores/` PDFs | 4 files | YES |
+| Core Data journal | 2 sessions / 4 attachments | YES |
+| Scores index (`UserDefaults`) | 4 entries | YES |
+| `MOTIVO/` scratch | present, empty of media | YES (directory-level) |
+| Legacy `MOTIVO/AttachmentPrivacy.json` | **absent** (migrated away by U4) | **NOT re-exercised** |
+| `ReceivedConnectedAttachments/` | **0 files** | **NOT re-exercised** — the excluded cache correctly did not survive the F1/F2 restore. **The 2026-08-14 C-28 device acceptance remains the evidence that a populated cache is removed. This run does not re-prove it and must not claim to** |
+| `CommentsStore.json` | **absent** | **NOT re-exercised** — C-48's 2026-08-14 evidence stands |
+| `Profiles/` local avatar | **0 files** | **NOT re-exercised** |
+
+#### D15 — local predictions
+
+| # | Assertion | Predicted |
+|---|---|---|
+| **L1** | **`App Support/AttachmentPrivacy.json` at the ROOT** | present before → **ABSENT after**. **The whole reason D15 exists.** Check the **root**, not `MOTIVO/` — after U4 the file is not in `MOTIVO/` either way, so inspecting only there passes vacuously |
+| L2 | `Documents/` permanent media (4 files) | absent |
+| L3 | `Documents/Scores/` (4 PDFs) | directory gone |
+| L4 | Core Data | 0 sessions / 0 attachments, store rebuilt |
+| L5 | Scores index in `UserDefaults` | gone |
+| L6 | `MOTIVO/` scratch | wiped (may be recreated empty at next launch) |
+
+#### D15 — backend predictions (blast radius)
+
+Baseline taken read-only immediately beforehand.
+
+| Measure | Before | Predicted after |
+|---|---|---|
+| `auth.users` | 16 | **15** |
+| `account_directory` total / A | 16 / 1 | **15 / 0** |
+| `posts` total / A-owned | 101 / 2 | **99 / 0** |
+| `post_comments` total / A-authored | 2 / 0 | **2 / 0** — B's survive (B-19) |
+| `post_comment_views` | 9 | 9 |
+| `connected_attachments` total / A-recipient | 32 / 1 | **31 / 0** |
+| `follows` total / A-involved | 8 / 2 | **6 / 0** |
+| storage `attachments` total / A-prefix | 17 / 4 | **13 / 0** |
+| storage `avatars` | 3 | **3** (A has none) |
+
+**One case is deliberately an observation, not an assertion.** A's single
+received-attachment row points at an object under the **sender's** prefix
+(`users/dfaf8d18…/`, Account B). Whether that object is swept when A's last live
+recipient reference goes is reference-counting behaviour that **B-8 owns in Phase
+4**. Either outcome is defensible under the settled rule; it is recorded, and it
+is **not** a D15 pass/fail. D15 fails on the backend only if **B's own posts,
+directory row or unrelated follows are damaged**.
+
+#### D15 — log predictions
+
+`[C-44] revocation reason=delete-account outcome=…` — **attempted; failure must
+not block deletion**. Then `[C-28] localReset receivedAttachmentsRemoved=0
+temporaryFilesRemoved=N` (**0 is correct here and is not a pass for the
+received-cache assertion**), and `[C-48] localReset
+commentsStoreFileExisted=false`.
+
+#### C-49 — SEPARATELY SCORED
+
+**The assertion is the screen shown the instant the operation completes, with NO
+relaunch.** Expected: **first-launch onboarding**, not a stale Profile or Journal.
+Relaunching destroys the observation, and **later relaunch behaviour cannot
+substitute for it** — the deviation filed as C-49 on 2026-08-14 was precisely that
+the app landed on the journal and then cleared on relaunch.
+
+---
+
 ## Group G — Accessibility
 
 | # | Steps | Expected |
