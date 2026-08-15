@@ -1090,6 +1090,70 @@ pre-upgrade inventory, and committed as a concrete number *before* the Phase 2
 build is first launched. Asserting an abstract `N = fixture file count` in
 advance would be a prediction about arithmetic rather than about behaviour.
 
+### Pre-upgrade fixture inventory and the DERIVED U5 prediction — committed 2026-08-15 before the Phase 2 build was ever launched on Device A
+
+Fixture authored on Device A running **`a8eb050`** (pre-Phase-2 Release, installed
+in place; container preserved). That revision excludes at write time —
+`AttachmentStore:162` and `ScoreLibraryStore:299` — so every file below carries
+the exclusion attribute by construction. Device A's container was empty
+beforehand (0 sessions, 0 attachments, no `Documents/` files), so there is no
+pre-existing state of uncertain provenance mixed in.
+
+**Data container UUID at fixture time: `AF087FE9-401F-40FE-992A-BC3709D58EE9`**,
+read from the stored `Attachment.fileURL` values. This is the value prediction 9
+compares against after the restore.
+
+| Location | File | Bytes | sha256 (16) |
+|---|---|---|---|
+| `Documents/` | `7519234D-…-C84C.jpg` | 12672323 | `0c89acbf8c9bb7f4` |
+| `Documents/` | `A386D79E-…-3965.jpg` | 2822459 | `05a19068a7352d9c` |
+| `Documents/` | `AF96A061-…-9A20.mov` | 3194738 | `9af818acfb4e7446` |
+| `Documents/` | `Audio test .m4a` | 122530 | `20d2c75f76d983c7` |
+| `Documents/Scores/` | `5E7A2948-…-6CFA8.pdf` | 11753193 | `0b21a15612f611d3` |
+| `Documents/Scores/` | `9543D0F2-…-6D31.pdf` | 148684 | `b5e1e33f998be61e` |
+| `Documents/Scores/` | `E56EF28C-…-E478.pdf` | 12109620 | `46212d38e753f1d2` |
+
+Core Data: **2 sessions, 5 attachments**. Two are worth noting because they
+exercise paths the filename audit singled out: the audio is **user-renamed**
+(`Audio test .m4a` — an arbitrary stem with a space, not a UUID), and one
+attachment is a **score-derived PDF whose stored path points into
+`Documents/Scores/`**, which is the only case that reaches the resolver's
+Scores-branch disambiguation.
+
+**The adopted-Score control is correctly staged:**
+`Documents/Scores/9543D0F2-…pdf` and
+`App Support/ReceivedConnectedAttachments/bb3ce29f-…pdf` are **byte-identical**
+(sha256 `b5e1e33f998be61e`, 148684 bytes) — the same document in a permanent
+location and in a backend-derived cache.
+
+`AttachmentPrivacy.json` exists at the **legacy** location
+(`App Support/MOTIVO/`, 416 bytes) with 8 entries — **7 explicitly `false`
+(included) and 1 explicitly `true`**. Both directions are represented, so a lost
+map after restore is distinguishable from a preserved one: losing it makes
+everything read `true`, and the seven `false` entries are the discriminator.
+
+#### Derived expected U5 outcome
+
+Derived from the counting semantics in `BackupReconciliation.reconcile()` applied
+to the inventory above: roots are `Documents` and `Documents/Scores`, enumeration
+is non-recursive and skips hidden files, non-regular files are skipped (so the
+`Scores` directory is not counted), and `motivo_vid_*` is skipped (none present).
+That gives 4 + 3 = 7 examined. All 7 were written by `a8eb050` and are therefore
+excluded, so none can be `alreadyEligible`.
+
+```
+[C-4] backupReconciliation traversalComplete=true recordedComplete=true \
+      examined=7 alreadyEligible=0 cleared=7 failed=0
+```
+
+**`alreadyEligible=0` with `cleared=7` is the F2 provenance discriminator.** Any
+`alreadyEligible>0` means a file was not excluded at write time, the fixture is
+not purely pre-Phase-2, and **F2 must not be run against it**.
+
+Also predicted at first launch: `AttachmentPrivacy.json` moves to the Application
+Support **root** with its 416 bytes and 8 entries unchanged; `MOTIVO/` remains
+excluded; the `Documents/Scores` directory flag is cleared.
+
 ### F1/F2 predictions
 
 | # | Assertion | Prediction |
