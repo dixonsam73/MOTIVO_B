@@ -72,9 +72,17 @@ attachment privacy — so a user who upgraded and backed up without opening a
 session with attachments would still have had the map in the excluded directory.
 A bare simulator launch moved nothing. It now runs at launch as well.
 
-**Carried into Phase 2 and unchanged: C-49's device acceptance.** After F1/F2 land,
-Device A is conveniently in a state where a subsequent Erase All can pick it up.
-**The restore itself does not discharge C-49.**
+**THREE SEPARATE DEVICE GATES REMAIN BEFORE PHASE 2 CAN CLOSE. NONE IS RUN, AND
+THEY MUST BE SCORED SEPARATELY.**
+
+| Gate | What it proves | Where |
+|---|---|---|
+| **F1/F2** | Permanent media, Scores and the privacy map survive a genuine encrypted Finder backup → restore. **F2 is proved by a genuinely pre-Phase-2 file being present and openable afterwards — never by a reconciliation log line after restore** | QA Group F |
+| **Erase-regression gate (D15)** | U4 moved `AttachmentPrivacy.json` to the Application Support **root**, structurally the same shape as C-48. Every prior C-28/C-48 expectation still holds **plus** the root-level map is removed | QA Group D, "Phase 2 erase-regression gate" |
+| **C-49** | After a legitimate Erase All the app returns to onboarding, not the journal | Carried Phase 1 row |
+
+**C-49 is carried and unchanged. The restore does not discharge it** — only a
+legitimate destructive run does, which the D15 gate conveniently provides.
 
 ---
 

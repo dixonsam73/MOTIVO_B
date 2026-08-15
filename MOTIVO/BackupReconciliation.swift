@@ -24,17 +24,28 @@ import os
 /// ## Completion semantics
 ///
 /// **The completion key is written only when the traversal reaches its defined stopping
-/// rule: every eligible file examined.** It is not an optimisation that may be taken
-/// early. If enumeration cannot be started or is interrupted, the key is not written and a
-/// later launch retries from scratch.
+/// rule — every eligible file examined — AND every examined file ended up eligible.**
+/// It is not an optimisation that may be taken early, and there is no processing cap:
+/// "off the main actor" is about not blocking launch, never a licence to process a capped
+/// number of files and declare victory.
 ///
-/// Individual per-item failures are counted and tolerated — they do not block completion.
-/// That is a deliberate trade: a single permanently-unwritable file would otherwise make
-/// the pass retry on every launch forever, and the counts are there to make such a file
-/// visible rather than silent.
+/// Two distinct incomplete outcomes, both retried on a later launch:
 ///
-/// "Off the main actor" is about not blocking launch. It is **not** a licence to process a
-/// capped number of files and declare victory.
+/// - **Traversal interrupted** — enumeration could not be started, or failed partway.
+/// - **`failed > 0`** — the traversal finished, but at least one file could not be made
+///   backup-eligible.
+///
+/// The second case used to record completion, on the reasoning that a permanently
+/// unwritable file would otherwise retry forever. **That trade is withdrawn: a known
+/// incomplete durability migration must not be recorded as complete.** Retrying costs one
+/// directory scan per launch; the alternative is a file that silently never participates
+/// in backup, with a single log line as the only evidence it ever existed. Operationally
+/// the pass stays best-effort — a per-item failure never becomes fatal launch behaviour,
+/// it only withholds the completion record.
+///
+/// Repeated traversal after a partial failure is safe and idempotent: an already-eligible
+/// file is counted `alreadyEligible` and skipped without a write, and clearing the flag on
+/// an item that never carried it is a clean no-op.
 enum BackupReconciliation {
 
     private static let log = Logger(subsystem: "com.sdsongs.etudes", category: "backuppolicy")
@@ -51,24 +62,26 @@ enum BackupReconciliation {
 
         Task.detached(priority: .utility) {
             let outcome = reconcile()
-            guard outcome.completed else {
-                // Traversal did not reach its stopping rule. Leave the key unwritten so a
-                // later launch retries; a partial pass must never look like a finished one.
-                log.notice("[C-4] backupReconciliation incomplete — will retry on a later launch")
-                return
-            }
-            UserDefaults.standard.set(true, forKey: completionKey)
 
             // Counts only, never a filename or a path. `examined` alone cannot distinguish
             // "ran and had nothing to do" from "ran and silently failed", which is the same
             // reasoning the C-28 wipe-outcome lines were written from.
+            let recorded = outcome.completed && outcome.failed == 0
             log.notice("""
-                [C-4] backupReconciliation complete \
+                [C-4] backupReconciliation \
+                traversalComplete=\(outcome.completed, privacy: .public) \
+                recordedComplete=\(recorded, privacy: .public) \
                 examined=\(outcome.examined, privacy: .public) \
                 alreadyEligible=\(outcome.alreadyEligible, privacy: .public) \
                 cleared=\(outcome.cleared, privacy: .public) \
                 failed=\(outcome.failed, privacy: .public)
                 """)
+
+            // Record completion only when the migration is genuinely finished. An
+            // interrupted traversal and a traversal with per-item failures are both
+            // incomplete durability migrations, and neither may be recorded as done.
+            guard recorded else { return }
+            UserDefaults.standard.set(true, forKey: completionKey)
         }
     }
 

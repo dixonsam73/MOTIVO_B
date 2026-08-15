@@ -149,6 +149,8 @@ public enum AttachmentPrivacy {
     /// A pre-existing file at the new location always wins — if both exist, the new one is
     /// authoritative and the legacy copy is removed, so a half-completed earlier migration
     /// cannot resurrect stale choices.
+    /// - Invariant: call only from **outside** `queue`. It takes the lock; the private
+    ///   variant below is what the already-locked paths (`loadMap`) use.
     static func migrateStorageLocationIfNeeded() {
         queue.sync { migrateFromLegacyLocationIfNeeded() }
     }
@@ -161,15 +163,26 @@ public enum AttachmentPrivacy {
         if !fm.fileExists(atPath: destination.path) {
             do {
                 try fm.moveItem(at: legacy, to: destination)
+                // D3: apply the include explicitly rather than relying on the legacy file
+                // happening to carry no item-level exclusion attribute today. `moveItem`
+                // preserves extended attributes, so if anything ever flagged the legacy
+                // file the exclusion would ride into the new location — silently, and
+                // outside the reconciliation pass's traversal roots, which cover only
+                // Documents and Documents/Scores.
+                BackupPolicy.include(destination)
                 NSLog("[AttachmentPrivacy] migrated privacy map out of scratch storage")
                 return
             } catch {
+                // Retryable: the legacy copy is left untouched and the next launch tries
+                // again. There is no completion flag, so migration state is derived from
+                // the filesystem and cannot record a false success.
                 NSLog("[AttachmentPrivacy] privacy map migration failed; leaving legacy copy in place")
                 return
             }
         }
 
         // Destination already authoritative — drop the superseded legacy copy.
+        BackupPolicy.include(destination)
         try? fm.removeItem(at: legacy)
     }
 
@@ -191,6 +204,14 @@ public enum AttachmentPrivacy {
         do {
             let data = try JSONEncoder().encode(map)
             try data.write(to: url, options: .atomic)
+            // D3, the other half of the invariant: **a permanent privacy map at the new
+            // location is backup-eligible however it got there.** Migration covers the file
+            // that moved; this covers one created here, which is the only other way a file
+            // appears at this path. (A file arriving by restore was necessarily eligible
+            // already — an excluded file is not in the backup to be restored from.)
+            // `.atomic` writes via a replacement inode, so the flag is re-applied per write
+            // rather than assumed to persist.
+            BackupPolicy.include(url)
         } catch {
             // silently ignore write errors
         }

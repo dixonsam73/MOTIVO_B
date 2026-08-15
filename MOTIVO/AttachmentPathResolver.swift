@@ -43,6 +43,19 @@ import Foundation
 /// This eligible set is deliberately identical to `BackupPolicy.permanentMediaDirectories`
 /// and to the set the Phase 2 reconciliation pass traverses. If one changes, all change.
 ///
+/// ## Accepted consequence of the narrowing
+///
+/// **Canonical recovery searches permanent storage only, so a tmp surrogate is never
+/// treated as the durable attachment when the permanent file is missing.** Before Phase 2
+/// the wider fallback could render an attachment from its surrogate; now that case
+/// resolves unresolved and the attachment is omitted from the viewer instead. That is the
+/// correct direction — the surrogate is a working copy, potentially pre-trim, and treating
+/// it as the attachment is how stale bytes reach publish — but it is a real behavioural
+/// change in an edge case, accepted deliberately. Surfaces that legitimately want the
+/// surrogate still ask for it directly (`resolvedPlayableURL` returns it when present,
+/// before consulting this resolver). **Phase 2 does not broaden to improve that edge
+/// case.**
+///
 /// ## Filename uniqueness — what is actually guaranteed
 ///
 /// `AttachmentStore.uniqueFilename` guarantees uniqueness **within `Documents/`** only.
@@ -65,8 +78,17 @@ enum AttachmentPathResolver {
     /// 1. If the stored absolute path exists, use it.
     /// 2. Otherwise match by filename against the eligible permanent locations.
     /// 3. Zero matches → `nil`.
-    /// 4. Matches in both locations → disambiguate by the stored path's own parent
-    ///    directory; if it gives no hint, return `nil` rather than guess.
+    /// 4. Matches in **both** locations → the stored path's own parent decides: a stored
+    ///    path ending `/Scores/<name>` selects the `Documents/Scores` candidate, anything
+    ///    else selects the `Documents` one.
+    ///
+    /// **Rule 4 is total, and that is a property of the two-directory model rather than an
+    /// accident.** "Parent is Scores" is a predicate over exactly two candidates, so it
+    /// partitions them and always selects exactly one. There is therefore no "no hint"
+    /// case to fall through, and **no code path can select a candidate by search order**,
+    /// which is the safety invariant that matters. If the eligible set ever grows beyond
+    /// two directories this stops being total and needs an explicit unresolved branch —
+    /// which is one more reason the set is deliberately narrow.
     static func resolve(_ stored: String?) -> URL? {
         guard let raw = stored?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
             return nil
