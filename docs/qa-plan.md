@@ -1154,6 +1154,66 @@ Also predicted at first launch: `AttachmentPrivacy.json` moves to the Applicatio
 Support **root** with its 416 bytes and 8 entries unchanged; `MOTIVO/` remains
 excluded; the `Documents/Scores` directory flag is cleared.
 
+#### PRE-BACKUP GATE RESULT — 2026-08-15. PASS on every assertion.
+
+**Observed, 09:04:37, Device A, Release, Phase 2 HEAD `3d08529`:**
+
+```
+[C-4] backupReconciliation traversalComplete=true recordedComplete=true \
+      examined=7 alreadyEligible=0 cleared=7 failed=0
+```
+
+**Identical to the prediction committed in `3d08529` before the build was ever
+launched.** `alreadyEligible=0` with `cleared=7` is the F2 provenance
+discriminator, and it passes: every file carried the exclusion attribute at write
+time and had it removed. The fixture is genuinely pre-Phase-2, and F2 may be run
+against it honestly.
+
+| Check | Result |
+|---|---|
+| U5 counts vs prediction | **Exact, 4/4** |
+| F2 provenance discriminator | **PASS** |
+| U4 privacy map | Moved to root, 416 bytes, **byte-identical**, legacy copy gone |
+| Fixture integrity across upgrade | All 7 files **hash-identical** |
+| Adoption control | Byte-identical in both locations (sha256 `b5e1e33f998be61e`) |
+| Reconciliation re-run | **Did not** — completion key stayed `true` (idempotent on device) |
+| Data container UUID | **`AF087FE9-…` unchanged** by the in-place upgrade |
+
+**Final pre-backup inventory: 9 files in `Documents/`** — the 7 pre-Phase-2
+fixture files, plus 2 post-Phase-2 controls written by the Phase 2 build
+(`6CE4ED70-…jpg` and `Scores/DFA744DC-…pdf`). Core Data holds 3 sessions and 6
+attachments; the privacy map at the root has grown to 10 entries.
+
+**The two controls are the point of the pair.** Both classes should be present
+after restore, but for different reasons — the 7 because U5 reconciled them, the
+2 because U3 never excluded them. If the 7 were ever absent while the 2 were
+present, the failure is isolated to U5 rather than to backup participation.
+
+**The container UUID being unchanged by the upgrade matters for prediction 9:** it
+establishes that any change observed after the restore is attributable to the
+restore itself rather than to reinstalling.
+
+##### One incidental finding — observability, not behaviour
+
+**U4's migration outcome line is not readable on device.** Zero hits for
+`AttachmentPrivacy` across an archive containing 9,499 Etudes process lines, while
+the `BackupPolicy`/`BackupReconciliation` lines came through cleanly. The
+migration provably ran (file at root, byte-identical, legacy gone), so this is a
+diagnostic gap, not a defect. Cause: `AttachmentPrivacy` uses `NSLog`, which logs
+at info level and is **not persisted**, so `log collect` never sees it;
+`Logger.notice` persists. **Same class as the MembershipTrace and C-44 run 1
+lessons** — a diagnostic that does not exist in the only build that can execute
+the path. It does **not** block D15: the `[C-28]`/`[C-48]` lines use
+`Logger.notice`, and D15's new assertion was always specified as a container
+check.
+
+##### Tooling correction
+
+**`log` is a zsh builtin on this machine and silently swallows every query**,
+reporting "too many arguments" as if the log tool had rejected it. **Use
+`/usr/bin/log`.** This cost a diagnostic round trip and would otherwise read as
+"the line was never emitted".
+
 ### F1/F2 predictions
 
 | # | Assertion | Prediction |
