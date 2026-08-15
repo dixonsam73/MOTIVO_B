@@ -132,7 +132,7 @@ three together is useful; pretending the code owns all three would not be.
 | 3 | Scores library PDFs | `Documents/Scores/*.pdf` | Permanent | **Included** | Études |
 | 4 | Scores index, favourites, resume | `UserDefaults` `scoreLibrary_v2` | Permanent | Included | iOS |
 | 5 | Adopted received scores | as #3 | Permanent, recipient-owned | **Included** | Études |
-| 6 | Per-attachment privacy map | `App Support/AttachmentPrivacy.json` | Permanent (intent) | Included | iOS (after the U4 move) |
+| 6 | Per-attachment privacy map | `App Support/AttachmentPrivacy.json` | Permanent (intent) | Included | **Études** (see below) |
 | 7 | Local comments | `App Support/CommentsStore.json` | Permanent | Included | iOS |
 | 8 | Local avatar | `App Support/Profiles/<uid>-*` | Permanent | Included | iOS |
 | 9 | Profile name/location/instruments | `UserDefaults` `profile.*` | Permanent | Included | iOS |
@@ -154,6 +154,20 @@ would not mean what the product says it means.
 Excluding received attachments rests on the object remaining fetchable while its
 row lives, which is B-8's storage-orphan lifecycle. If Phase 4 changes what a
 live row guarantees, this row is revisited.
+
+**Row 6's Control is Études, not iOS, and the distinction was earned by
+remediation D3.** The U4 move alone would have left inclusion resting on the
+platform default plus the accident that the legacy file happens to carry no
+item-level flag today. `moveItem` **preserves** extended attributes — proven
+directly, not assumed — so anything that had ever flagged the legacy file would
+have ridden the exclusion into the new location silently, and outside the
+reconciliation pass's traversal roots, which cover only `Documents` and
+`Documents/Scores`. Études therefore now **actively asserts inclusion** at this
+path on all three routes by which a file can arrive there: after the migration
+move, after adopting a pre-existing destination, and after every `saveMap` write
+(`.atomic` writes via a replacement inode, so the flag is re-applied per write
+rather than assumed to persist). The invariant is that **a permanent privacy map
+at this location is backup-eligible however it got there.**
 
 **Row 13 is deliberate:** a restored device must not inherit historical
 pending-publish intent.

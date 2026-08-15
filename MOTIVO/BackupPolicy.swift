@@ -18,7 +18,7 @@ import os
 /// - **Platform-excluded / transient**: `Library/Caches` and `tmp`, which iOS already
 ///   omits from backup.
 ///
-/// The full 17-row durability matrix lives in `docs/audit-findings.md`; this file is the
+/// The full 17-row durability matrix lives in `docs/architecture.md`; this file is the
 /// executable subset.
 ///
 /// ## Why a single owner

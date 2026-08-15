@@ -924,7 +924,7 @@ B-3, B-4, B-9, B-12, B-13 and B-19 while destroying accounts to do it.
 
 | D14 | **B-9, both halves — the received path has never executed.** Staged on A (departing) and B. Requires approved follows in both directions, since the attachment insert policy demands one. **Three legs, one erase:** (1) **B sends to A; A leaves it in their inbox** — this is the row step 1 deletes, and the 2026-08-11 run could not reach it because that account had zero received attachments; (2) **A sends X to B; B soft-deletes it** — tombstone row plus a swept object; (3) **A sends Y to B; B keeps it** — the B-1 guard. Snapshot `connected_attachments` (id, sender, recipient, storage_path, deleted_at) for both accounts and the storage listing under `attachments/users/<A>/` and `users/<B>/`, read-only, before and after. Then A performs Erase All | **1.** The `sender=B, recipient=A` row is **gone** — B-9's untested half. **2.** The `sender=A, recipient=B, deleted_at IS NOT NULL` row is **gone** — step 3b, the new behaviour, and the only assertion the current deployed function would fail. **3.** The `sender=A, recipient=B, deleted_at IS NULL` row **survives**, and B can still open Y — B-1 must not regress. **4.** Object X removed, object Y retained (D5/D6 re-confirmed). **5.** `{ success: true }` (D11, positive direction only). **6.** None of B's other rows touched. **EXPECTED RESIDUE, NOT A FAILURE:** leg 1 leaves B's object under `users/<B>/connected/` with no surviving reference — A's erase only sweeps `users/<A>/`, and B is still alive. That is the same unowned-object lifecycle the function's header already defers to **B-8/B-10 in Phase 4**; record it, do not file it again. **NOT COVERED, and do not let this run imply otherwise:** the two-recipient case — one asset, one live recipient and one soft-deleted — needs a sender plus two distinct recipients, so three accounts. Under step 3b it deletes a row whose object correctly survives, which is intended and remains unverified. **RUN 2026-08-11: PASS on every assertion.** Both accounts on separate devices under different iCloud Apple IDs. Received row deleted (step 1's first ever execution), sender tombstone deleted (step 3b), live sender row and its object survived and the recipient reopened the file. All eight blast-radius counts matched a prediction recorded before the erase. **One unstaged control carried the run:** B already held a soft-deleted row from a third-party sender, which step 3b's `sender_user_id` scoping had to spare — and did | 1 |
 
-### Phase 2 erase-regression gate — MANDATORY BEFORE PHASE 2 CLOSURE. NOT RUN.
+### Phase 2 erase-regression gate — RUN 2026-08-15. PASS. Phase 2 is closed.
 
 **Why this exists.** Phase 2 U4 moved `AttachmentPrivacy.json` out of
 `Application Support/MOTIVO/` to the Application Support **ROOT**. That is
@@ -935,13 +935,17 @@ file is assumed covered. The erase is believed correct by construction
 the new location and also sweeps the legacy path), but "believed correct by
 construction" is exactly what C-28 and C-48 each disproved on device.
 
-**This gate is DISTINCT from, and must not be conflated with:**
+**This gate is DISTINCT from, and must not be conflated with, the others. All
+three ran on 2026-08-15 and all three passed, scored separately. Full results are
+below, after the predictions; this table is the summary a reader arriving at the
+specification needs first.**
 
-| Gate | Scores | Status |
+| Gate | Scored | Outcome |
 |---|---|---|
-| **F1/F2** backup/restore acceptance | Group F | **NOT RUN** |
-| **This erase-regression gate** | here | **NOT RUN** |
-| **C-49** opportunistic onboarding acceptance | carried Phase 1 row | **NOT RUN — and the restore does not discharge it** |
+| **F1/F2** backup/restore acceptance | Group F | **PASS 2026-08-15** on a genuine encrypted Finder backup → restore. **F3 within Group F is NOT EXERCISED and is NOT a pass** — see the F3 row and C-51 |
+| **This erase-regression gate (D15)** | here | **PASS 2026-08-15.** Load-bearing assertion **L1** held: the root-level `AttachmentPrivacy.json` (520 B, 10 entries) was present before and **absent** after. 10 of 10 backend measures matched. Received-cache and `CommentsStore.json` assertions **not re-exercised** (empty preconditions) and **not counted as passes** |
+| **C-49** opportunistic onboarding acceptance | carried Phase 1 row | **PASS 2026-08-15**, discharged by *this* run and scored separately. **The restore did not discharge it; the deletion did** |
+| **F5** erase-after-restore | Group F, satisfied here | **Satisfied by this run** — D15 executed on the restored device, which is F5's condition. See the F5 row for the evidence relationship |
 
 | # | Steps | Expected |
 |---|---|---|
@@ -1039,16 +1043,25 @@ Phase 3 local instance — never on production.
 | F1 | Genuine **encrypted Finder backup → restore onto Device A** (disposable). Encrypted so the Keychain restores too, which exercises the Connected-identity half. **Not substitutable by inspecting resource flags** — that establishes what the API reports, never what Apple's backup daemon copied | After Phase 2: journal, attachment media and Scores all present and openable; stored absolute paths are stale but every consumer resolves by filename. **CORRECTED 2026-08-15 — the pre-Phase-2 control is NOT "empty Scores".** The Scores index lives in `UserDefaults` (`scoreLibrary_v2`) and restores, so the broken state is a **fully populated library whose every PDF is missing** — titles, favourites and resume state that open to nothing. Anyone expecting emptiness would read that as a pass |
 | F2 | Prove the **existing-install** half — **by the file's presence and openability after restore, NEVER by a reconciliation log line**, which F2b explains will not appear: a media file written *before* Phase 2, which therefore carries the exclusion attribute, must become backup-eligible through reconciliation **and survive a genuine restore** | Present after restore. If it is absent while a post-Phase-2 file is present, reconciliation did not reach item-level flags — the specific failure the design guards against, since a child's own attribute survives its parent being un-flagged and `Documents/Scores/` was flagged at both levels |
 | F2b | After restore, check whether the reconciliation pass runs at all | **It does NOT run, and that is the pass.** Its completion key `backupReconciliation_v1_complete` lives in `UserDefaults` — matrix row 4, ordinary iOS backup, never touched by `BackupPolicy` — so it restores as `true` and `runIfNeeded()` returns before any traversal. **Expect NO `[C-4] backupReconciliation` line after restore.** An earlier draft of this prediction said to expect `examined=N cleared=0 alreadyEligible=N`; that was wrong and is corrected here. **A line appearing after restore is itself a finding**: it means the key did not restore, or was never written because the source device's pass ended `failed > 0`. Note the corollary — a source device with `failed > 0` correctly carries no key, so reconciliation retries on the restored device, which is the intended behaviour rather than a fault |
-| F3 | After restore, **publish a session** with a non-private attachment. **NOT EXERCISED — 2026-08-15, and it is not reachable through the shipping UI.** The only publish trigger is `AddEditSessionView:2081`, reached via the editor's save — and ~80 lines earlier that same save rewrites `attachment.fileURL` from `existingAttachmentURLMap`, which holds **resolved** URLs. So opening and saving a session **self-heals every stale path in it before the publish runs**, and `loadIncludedAttachments` never sees a stale path. Running it would have produced a green result for an assertion the test never reached. **Deliberately not run rather than run and caveated** | All non-private attachments upload. Pre-Phase-2 this silently omitted them: `resolveLocalFileURL` had no filename fallback, so `loadIncludedAttachments` skipped the attachment rather than blocking publish, and the post arrived with its media missing and no error |
+| F3 | After restore, **publish a session** with a non-private attachment. **NOT EXERCISED — 2026-08-15, and it is not reachable through the shipping UI.** The only publish trigger is `AddEditSessionView:2081`, reached via the editor's save — and ~80 lines earlier that same save rewrites `attachment.fileURL` from `existingAttachmentURLMap`, which holds **resolved** URLs. So opening and saving a session **self-heals every stale path in it before the publish runs**, and `loadIncludedAttachments` never sees a stale path. Running it would have produced a green result for an assertion the test never reached. **Deliberately not run rather than run and caveated.** **The remaining obligation is C-51, owned by Phase 4** — the *implementation* exposure is already closed by U2, which routes `resolveLocalFileURL` through the canonical resolver; what is outstanding is **runtime verification** of the one route that can still reach upload selection with stale paths, a publish enqueued in `SessionSyncQueue` that flushes after a container rotation. That needs fault injection, and Phase 4 owns it because Phase 4 rewrites the upload-selection surface itself | All non-private attachments upload. Pre-Phase-2 this silently omitted them: `resolveLocalFileURL` had no filename fallback, so `loadIncludedAttachments` skipped the attachment rather than blocking publish, and the post arrived with its media missing and no error |
 | F4 | After restore, **delete a session** that has attachments, then inspect `Documents/` | The media files are gone. Pre-Phase-2 the deletion paths passed the raw stored path, found nothing, and returned silently — orphaning the files forever with nothing in the UI to show for it |
-| F5 | After restore, confirm **Erase All** still removes everything | Unchanged. The factory-reset sweeps are directory- and extension-based and never read `Attachment.fileURL`, so they are path-independent by construction |
+| F5 | After restore, confirm **Erase All** still removes everything. **SATISFIED 2026-08-15 BY THE D15 RUN — not by a separate destructive run, and this is an evidence relationship rather than a rename.** F5's condition is *a factory reset executed on a restored device, where stored absolute paths are stale*. D15 instantiated exactly that: it ran on Device A **after** the F1/F2 restore, on a device whose stored paths were demonstrably two container generations stale — F4 had already exercised that staleness on the same device state — and every **populated** fixture was removed: 8 `Documents` files, `Documents/Scores/`, the 4-entry Scores index, the journal (2 sessions / 4 attachments → 0/0, store rebuilt) and the root `AttachmentPrivacy.json`. **One honest caveat, recorded rather than smoothed over:** the operation invoked was **Delete Account & All Études Data** (Device A held a Connected identity), not the Solo-only **Erase All Études Data**. Both converge on `LocalFactoryReset`, so the local sweep behaviour is identical and the Connected path is a strict superset — which is why the D15 row's own local assertions are stated as identical either way. **Carve-outs are D15's, unchanged:** the received cache, `CommentsStore.json`, the local avatar and the legacy privacy-map location were all absent, are recorded as **not re-exercised**, and are **not counted as passes**. **No separate destructive run is required**, and spending one would cost a fixture to re-observe a sweep already observed under the exact condition F5 specifies | Unchanged. The factory-reset sweeps are directory- and extension-based and never read `Attachment.fileURL`, so they are path-independent by construction — which is the property D15 confirmed against genuinely stale paths |
 
 ## Device A acceptance run — PREDICTION, written 2026-08-15 before any device mutation
+
+> **NAVIGATIONAL NOTE, added 2026-08-15 at closure — the section below is
+> PRESERVED VERBATIM as committed before the runs, and its "NOT RUN" statuses are
+> historically correct as of the moment it was written.** They are the provenance
+> that makes these gates prediction-first rather than a reading of the aftermath,
+> and rewriting them would destroy exactly that. **All three gates have since run
+> and all three passed** — results are recorded further down this file, under
+> "F1/F2 RESULT" and "D15 + C-49 RESULT", and summarised in Group D's gate table.
+> **F3 remains NOT EXERCISED and is not a pass.**
 
 **Three gates, SEPARATELY SCORED. None is run. A pass on one is not a pass on
 another, and this section must never be summarised as a single result.**
 
-| Gate | Claim | Status |
+| Gate | Claim | Status (at time of writing) |
 |---|---|---|
 | **F1/F2** | Genuine encrypted Finder backup → restore | NOT RUN |
 | **D15** | Destructive-operation regression after U4's privacy-map move | NOT RUN |
@@ -1307,10 +1320,29 @@ excluded `App Support/MOTIVO/` and did not restore — decision **P5** behaving
 exactly as designed: a restored device does not inherit historical pending-publish
 intent.
 
-**Owner: unassigned. This is an observation, not a finding, and it reassigns
-nothing.** It needs fault injection to exercise, which is the same reason B-4's
-and B-13's negative directions sit where they do. **Phase 2 is not expanded to
-manufacture it.**
+**FILED AS C-51, OWNED BY PHASE 4 — P3, Confirmed gap, NOT resolved.** It was
+first written down here as an unassigned observation; it was given an ID and an
+owner the same day, in `60c8c06`, so that no Phase 2 obligation was left
+ownerless. Read it in four parts, because collapsing them is how it gets misread:
+
+1. **The implementation exposure is already closed by U2**, which routes
+   `BackendShim.resolveLocalFileURL` through the canonical resolver. Pre-U2 the
+   consequence was a shared post arriving with its media silently missing.
+2. **F3 was not exercised because the shipping editor/save route self-heals
+   stale paths before publish** — not because it was skipped for convenience.
+3. **What remains is runtime/coverage verification** of the queued-publish /
+   container-rotation path described above. It needs fault injection — enqueue a
+   publish, force a container rotation, then flush — which is the same class of
+   blocker as B-4's and B-13's negative directions.
+4. **Phase 4 owns that verification**, because Phase 4's shared-only upload
+   architecture rewrites the upload-selection surface itself and already carries
+   A2's proxy-based network acceptance, the natural vehicle for observing what
+   actually uploads. Deliberately **not** Phase 3, which is `delete_account_v1`
+   and storage-pagination work — a different subsystem that merely shares the
+   blocker.
+
+**Phase 2 was not expanded to manufacture it, and Phase 4 implementation is not
+expanded now.**
 
 #### Method findings for anyone re-running this gate
 
@@ -1477,9 +1509,16 @@ C-44's TN3194 step-2 fallback: *"Your Études account and data have been deleted
 We couldn't remove Études from your Apple Account automatically…"*.
 
 **This is C-44 behaving as accepted, not a new defect**, and it is not reopened.
-**Operational note: Device A's Apple credential for Études was NOT revoked on
-this run** — the manual Settings step was offered and is outstanding if revocation
-is wanted.
+
+**Operational note, and the two halves must not be merged.** *As recorded on the
+run:* Device A's Apple credential for Études was **NOT** revoked in-app — the
+outcome was and remains `notAttempted(authorization/AuthorizationError/1001)`,
+and the app showed C-44's TN3194 step-2 manual fallback. **That historical result
+stands and must never be rewritten as an in-app revocation success.** *Since the
+run:* the user completed the manual Settings step, so no live Études credential
+remains on Device A. **Separately outstanding, and unrelated:** the live Apple
+refresh token minted and abandoned by the C-44 gate (b2) exchange on 2026-08-13 —
+pre-existing operational test residue, not created by Phase 2.
 
 ---
 

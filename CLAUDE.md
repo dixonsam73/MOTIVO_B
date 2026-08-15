@@ -12,12 +12,21 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**PHASE 2 IS IN PROGRESS — implementation landed 2026-08-15, NOT yet exit-complete.**
-C-4 is built (units U1–U5) and verified statically and on the simulator. **It
-cannot be closed until QA F1/F2 run a genuine encrypted Finder backup → restore
-onto Device A**, and no amount of resource-flag inspection substitutes for that:
-the experiments establish what the URL API reports, never what Apple's backup
-daemon copied. **If F1/F2 cannot be run, Phase 2 lands but stays formally open.**
+**PHASE 2 IS FORMALLY CLOSED — 2026-08-15.** C-4 is **Resolved**: built as units
+U1–U6 plus a bounded D1–D6 remediation, and discharged on a **genuine encrypted
+Finder backup → restore onto Device A**, scored against predictions committed
+before every mutation. The gate was never substitutable by resource-flag
+inspection — the experiments establish what the URL API reports, never what
+Apple's backup daemon copied — which is why it was held open until a real backup
+and a real restore had run.
+
+**Phase 2 owned exactly one register row and discharged it. It also discharged
+C-49, a carried Phase 1 row, from the same destructive run, and filed C-51 to
+Phase 4.** Nine device assertions were scored: **seven PASS** (the U5 pre-backup
+reconciliation gate, F1, F2, F2b, F4, D15, C-49), **one NOT EXERCISED with a
+named owner** (F3 → C-51, Phase 4), and **F5 satisfied by the D15 run** on the
+restored device rather than by a separate destructive run. Closure was audited
+independently against the repository on 2026-08-15 before being recorded.
 
 **What Phase 2 turned out to be, beyond C-4 as filed.** Three things the original
 finding did not say, each found by looking rather than assuming. (i) The Scores
@@ -72,14 +81,31 @@ attachment privacy — so a user who upgraded and backed up without opening a
 session with attachments would still have had the map in the excluded directory.
 A bare simulator launch moved nothing. It now runs at launch as well.
 
-**THREE SEPARATE DEVICE GATES REMAIN BEFORE PHASE 2 CAN CLOSE. NONE IS RUN, AND
-THEY MUST BE SCORED SEPARATELY.**
+**THE THREE PHASE 2 DEVICE GATES ARE ALL RUN AND ALL DISCHARGED, 2026-08-15.
+They were scored separately, and they stay separately scored in the record.**
 
 | Gate | What it proves | Where |
 |---|---|---|
-| ~~**F1/F2**~~ | **DONE 2026-08-15 — BOTH PASS.** Genuine encrypted Finder backup → restore on Device A. All 7 files authored by `a8eb050` (excluded at write time, cleared only by U5) came back **byte-identical**; the adopted Scores copy survived while the byte-identical inbox cache did not; excluded scratch did not restore; the privacy map and its choices came back intact; reconciliation correctly did **not** re-run. **F3 is NOT EXERCISED and is not a pass** | QA Group F |
-| ~~**Erase-regression gate (D15)**~~ | **DONE 2026-08-15 — PASS.** The root-level `AttachmentPrivacy.json` (520 bytes, 10 entries) was **removed**, along with all 8 Documents files, Scores, the Scores index and the journal; backend blast radius matched **10 of 10** measures and B's data survived. Received-cache and CommentsStore assertions **not re-exercised** (empty preconditions) and **not counted as passes** | QA Group D |
-| ~~**C-49**~~ | **DONE 2026-08-15 — PASS.** Immediately on completion, without relaunching, the app was on **first-launch onboarding**, not the journal | Carried Phase 1 row — now discharged |
+| **F1/F2** | **DONE 2026-08-15 — BOTH PASS.** Genuine encrypted Finder backup → restore on Device A. All 7 files authored by `a8eb050` (excluded at write time, cleared only by U5) came back **byte-identical**; the adopted Scores copy survived while the byte-identical inbox cache did not; excluded scratch did not restore; the privacy map and its choices came back intact; reconciliation correctly did **not** re-run. **F3 is NOT EXERCISED and is not a pass** | QA Group F |
+| **Erase-regression gate (D15)** | **DONE 2026-08-15 — PASS.** The root-level `AttachmentPrivacy.json` (520 bytes, 10 entries) was **removed**, along with all 8 Documents files, Scores, the Scores index and the journal; backend blast radius matched **10 of 10** measures and B's data survived. Received-cache and CommentsStore assertions **not re-exercised** (empty preconditions) and **not counted as passes**. **This run also satisfies QA F5** — see below | QA Group D |
+| **C-49** | **DONE 2026-08-15 — PASS.** Immediately on completion, without relaunching, the app was on **first-launch onboarding**, not the journal | Carried Phase 1 row — **now Resolved** |
+
+**F5 needed no gate of its own, and this is an evidence relationship rather than
+a rename.** F5 asks that a factory reset still removes everything *after a
+restore*, when stored absolute paths are stale — its stated rationale being that
+the sweeps are directory- and extension-based and never read `Attachment.fileURL`.
+The D15 run instantiated exactly that condition: it ran **on the restored Device
+A**, with paths two container generations stale (F4 had already demonstrated the
+staleness on the same device state), and every populated fixture was removed —
+8 `Documents` files, `Documents/Scores/`, the 4-entry Scores index, the journal
+(2 sessions / 4 attachments → 0/0, store rebuilt) and the root privacy map. The
+one honest caveat: the button pressed was **Delete Account & All Études Data**,
+not the Solo-only **Erase All Études Data**, because Device A held a Connected
+identity. Both converge on `LocalFactoryReset`, so the local sweep behaviour is
+identical and the Connected path is a strict superset. F5's empty-precondition
+carve-outs are D15's, unchanged: the received cache, `CommentsStore.json`, the
+local avatar and the legacy privacy-map location were all absent and are **not
+counted as passes**.
 
 **C-49 was discharged by the D15 run on 2026-08-15, as designed** — one
 legitimate destructive operation, two separately scored gates. The restore did
@@ -94,19 +120,53 @@ was **wrong**, caused by `limit 1` sampling one row; it is corrected in
 `docs/qa-plan.md`. (ii) **F3 could not be exercised through the shipping UI at
 all**: the only publish trigger is the editor's save, which rewrites
 `Attachment.fileURL` from resolved URLs ~80 lines before publishing, so the save
-*self-heals* the very condition F3 exists to test. The genuine exposure is a
-`SessionSyncQueue` publish surviving a container rotation, which needs fault
-injection; it is recorded as an **observation with no owner** and Phase 2 was not
-expanded to manufacture it.
+*self-heals* the very condition F3 exists to test.
+
+**F3's remaining obligation is C-51, owned by Phase 4. It is coverage, not a
+defect, and it is not resolved.** State it in these four parts, because
+collapsing them is how it gets misread: (a) **the implementation exposure is
+already fixed by U2**, which routes `BackendShim.resolveLocalFileURL` through the
+canonical resolver — pre-U2 `loadIncludedAttachments` silently skipped the
+attachment and the shared post arrived with its media missing; (b) **F3 was not
+exercised because the shipping editor/save route self-heals stale paths before
+publish**, so running it would have scored an assertion the test never reached;
+(c) **what remains is runtime verification** of the one route that can still
+reach upload selection with stale paths — a publish enqueued in `SessionSyncQueue`
+that flushes after an ordinary container rotation, which needs fault injection;
+(d) **Phase 4 owns that verification** because Phase 4's shared-only upload work
+rewrites the upload-selection surface itself and already carries A2's proxy-based
+network acceptance. Deliberately **not** Phase 3, which is a different subsystem
+that merely shares the fault-injection blocker. Phase 2 was not expanded to
+manufacture it, and Phase 4 implementation is not expanded now.
+
+**Three Phase 2 obligations are closed on source verification only, and are
+recorded as such rather than dressed as device passes.** (i) The transient
+`motivo_vid_*` exclusion — the fixture contained none, so the reconciliation
+skip was traversed vacuously. It is accepted because its failure direction is
+*a scratch capture riding into a backup*, never loss of permanent data, and
+C-4's obligation is the latter. (ii) The two **deletion-safety guards**, whose
+Phase 2 changes are provably monotone in the safe direction:
+`protectedPersistedAttachmentPaths_edit` inserts resolved *and* raw paths, a
+strict superset of pre-Phase-2, and `isPathReferencedInCoreData` protects on more
+paths and fails **closed** on a fetch error. Their worst case is a retained
+orphan, never deletion of referenced media. (iii) The **legacy
+`MOTIVO/AttachmentPrivacy.json` erase sweep**, absent at D15 time because U4 had
+migrated it away: it is the same statement as the exercised root sweep with a
+different element of the same array, and `legacyFileURL()` was independently
+exercised by the migration on the same device. **None of the three is given a
+later verification owner**, because each closes on a stated sufficiency argument
+rather than being blocked on a fixture.
 
 ---
 
 **Phase 1 position: FORMALLY CLOSED — 2026-08-14.** It closed on an
 independent audit reconstructed from this repository and from read-only
 production checks rather than from any conversation, followed by one bounded
-reconciliation unit. **It did not close on the numbers being tidy.** Five rows
+reconciliation unit. **It did not close on the numbers being tidy.** Four rows
 remain open and are carried explicitly, named below; anyone reading "closed" as
-"nothing left" is reading it wrong. **Phase 2 is not open.**
+"nothing left" is reading it wrong. **C-49, the fifth, was discharged on
+2026-08-15 by Phase 2's destructive run**, exactly as its carry condition
+specified.
 
 **The closure judgement, stated so it can be audited later.** Every Phase 1
 obligation is now in exactly one of four states: executed with durable evidence;
@@ -123,14 +183,29 @@ B-6's owner-bound policy `qual`, and B-7/B-10's three dropped functions absent
 from `pg_proc`. **What was wrong was the record**, in four places sharing one
 shape — *a document written under a rule that later changed, and never re-read.*
 
-**The corrected arithmetic — 31 of 36, not "31 of 34".** The old headline's
-denominator is not reproducible from the register. Counting every row whose Phase
-cell contains `1` gives **36** (19 client, 17 backend): 29 resolved or closed
-with verification, **C-38** closed under the agreed stopping rule, and **C-3**
-discharged as *measured* (Phase 1 owned the severity; Phase 5 owns the fix) —
-**31 discharged**, with **5 carried**: C-49, C-36, B-4, B-12, B-13. The old
-denominator silently dropped C-49 and C-36, which are open Phase 1 rows. The
-prose was right; the arithmetic was not.
+**The arithmetic — 32 of 36, recomputed from the register on 2026-08-15.** The
+denominator is reproducible: counting every row whose Phase cell contains `1`
+gives **36** (19 client, 17 backend). Of those, **30** are resolved or closed
+with verification, **C-38** is closed under the agreed stopping rule, and **C-3**
+is discharged as *measured* (Phase 1 owned the severity; Phase 5 owns the fix) —
+**32 discharged**, with **4 carried**: C-36, B-4, B-12, B-13. It was 31 with 5
+carried until **C-49** was device-verified on 2026-08-15 by the D15 destructive
+run. An older headline of "31 of 34" was worse still — its denominator was not
+reproducible at all, having silently dropped C-49 and C-36.
+
+**Row arithmetic and outstanding verification are two different counts, and
+conflating them is how B-9's subcase went missing once already.** The Phase 3
+backend-verification unit holds **four** obligations, not three: **B-4**,
+**B-12**, **B-13** — which *are* carried Phase 1 rows and appear in the 4 above —
+plus **B-9's two-recipient case**, which does **not**, because B-9's row is
+**Resolved**. B-9's Phase 1 obligation was the fix, and D14 device-verified it on
+2026-08-11; only the two-recipient subcase was transferred, and a Resolved row
+correctly contributes nothing to a carried count. **Read the Phase cell, not the
+state word:** B-9 is `1 (fix) / 3 (two-recipient case)`.
+
+**Two further Phase-1-discharged rows carry remainders owned elsewhere, and
+those are not Phase 1 debt either:** **C-3** (measurement done; the fix is Phase
+5) and **B-10** (functions dropped; the real Storage-API cleanup is Phase 4).
 
 **What the audit found, none of it a behavioural defect.** Every load-bearing
 backend claim was re-verified live and holds: both Edge Functions ACTIVE and
@@ -175,12 +250,13 @@ the lesson:** it had sat unowned since 2026-08-11 behind a blocker disproved on
 2026-08-13 and a premise the rule change had made moot, and it took one existing
 fixture and one thread open. The expensive part was never the test.
 
-**FIVE ROWS ARE CARRIED PAST CLOSURE. They are open, and closure does not make
-them less so.**
+**FOUR ROWS ARE CARRIED PAST CLOSURE. They are open, and closure does not make
+them less so.** C-49 was the fifth; it is **Resolved** as of 2026-08-15, having
+been folded into Phase 2's destructive run exactly as its carry condition
+required, without a fixture of its own ever being spent.
 
 | Row | Why it is carried | Owner |
 |---|---|---|
-| **C-49** | Fix applied and build-verified; device acceptance deliberately given no fixture of its own | Fold into the **next legitimate destructive run**. Do not spend a fixture solely for it |
 | **C-36 / QA B7** | Genuinely fixture-blocked: needs a **fresh first-join account**. A first-join path exercised by an account that has already joined proves nothing | Blocked until such an account exists |
 | **B-4** | Only the positive direction executed; the honest `success: false` needs fault injection (D10) | **Phase 3** |
 | **B-12** | Never executed — 5 objects against a 1000-entry page boundary | **Phase 3** |
@@ -424,25 +500,43 @@ and whether anything still carries material release or security risk rather than
 being cleanup or later-phase work. **Produce it from the evidence, not by moving
 statuses to improve the numbers.** An item that is open stays open.
 
-**Rig state at end of 2026-08-14 — read before planning device QA. THIS
-SUPERSEDES THE 2026-08-13 DESCRIPTION, WHICH IS NOW WRONG IN EVERY PARTICULAR
+**Rig state at end of 2026-08-15 — read before planning device QA. THIS
+SUPERSEDES THE 2026-08-14 DESCRIPTION, WHICH IS NOW WRONG IN EVERY PARTICULAR
 FOR DEVICE A.**
 
-**Device A has been fully cycled twice today and is currently a live, disposable
-Connected follower of Account B.** Its 2026-08-13 identity `44a6018e…` was
-**deleted** by the C-28/C-48 destructive run — container wiped, journal and
-Scores gone, app returned to first-launch onboarding. It was then **recreated
-from scratch** for B-6's read regression: fresh Sign in with Apple, a fresh
-sandbox purchase to reach Connected, and an approved follow of Account B. So A
-now holds a **new** backend identity with an entitlement, following B, and its
-local container holds only whatever that regression created. It carries **no**
-C-45 fixture data, and its Apple credential is **not** revoked. Treat it as
-disposable, as always.
+**Device A holds NO account, NO identity and NO fixture. It sits at first-launch
+onboarding.** The Connected identity it carried through Phase 2 —
+`cfadb7cb-12d3-47cc-ac79-c574e5341eb1`, restored intact from the encrypted backup
+— was **deleted by the D15 destructive run on 2026-08-15**, a legitimate gate,
+not an accident. The container went with it: all 8 `Documents` files, `Scores`,
+the Scores index, the journal and the root `AttachmentPrivacy.json`. Backend
+counts dropped as predicted (`auth.users` 16 → 15).
 
-**One item survives from 2026-08-13 and is unrelated to A's current state:** a
+**The Phase 2 fixture no longer exists and cannot be re-created cheaply.** The
+pre-Phase-2 media, the privacy map and the adopted-Score control were all
+destroyed by the run that scored them. Re-authoring an equivalent would mean
+rebuilding `a8eb050`, reinstalling it, and recreating every file by hand. Plan
+around that rather than assuming a re-run is available.
+
+**Device A's Apple credential for Études HAS been revoked — manually, by the
+user, after the run.** Do not let that overwrite the historical result: the
+in-app revocation during D15 was **`[C-44] revocation reason=delete-account
+outcome=notAttempted(authorization/AuthorizationError/1001)`** — 1001 is
+*canceled*, the re-authorization sheet was dismissed — after which **the account
+deletion continued regardless**, which is the settled semantics, and the app
+showed C-44's TN3194 step-2 manual fallback. **That result stands as recorded and
+must not be rewritten as an in-app revocation success.** The manual Settings step
+that the fallback asked for has since been completed, so no live Études
+credential remains on Device A.
+
+**One item survives from 2026-08-13 and is unrelated to any of the above:** a
 **live Apple refresh token minted and abandoned by the C-44 gate (b2) exchange**
-is still outstanding — nobody holds it, and it was never revoked, because the
-run that would have cleared it used a different, later grant.
+is still outstanding — nobody holds it, and it was never revoked, because the run
+that would have cleared it used a different, later grant. It is **pre-existing
+operational test residue, not created by Phase 2**, and it remains outstanding.
+
+**Device B Release is UNTOUCHED by Phase 2** — still the established / lapsed
+control fixture. No Phase 2 commit touched it and no Phase 2 run spent it.
 
 **A build carrying no temporary instrumentation is installed on A**, from a
 clean tree.
