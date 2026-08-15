@@ -12,7 +12,73 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
-**Current position: PHASE 1 IS FORMALLY CLOSED — 2026-08-14.** It closed on an
+**PHASE 2 IS IN PROGRESS — implementation landed 2026-08-15, NOT yet exit-complete.**
+C-4 is built (units U1–U5) and verified statically and on the simulator. **It
+cannot be closed until QA F1/F2 run a genuine encrypted Finder backup → restore
+onto Device A**, and no amount of resource-flag inspection substitutes for that:
+the experiments establish what the URL API reports, never what Apple's backup
+daemon copied. **If F1/F2 cannot be run, Phase 2 lands but stays formally open.**
+
+**What Phase 2 turned out to be, beyond C-4 as filed.** Three things the original
+finding did not say, each found by looking rather than assuming. (i) The Scores
+restore failure is **not** an empty library — the index lives in `UserDefaults`
+and restores, so the user gets a populated library whose every PDF is missing;
+QA F1's old expectation would have read that as a pass. (ii) `AttachmentPrivacy.json`
+was excluded too, **incidentally** — `PracticeTimerStore` flagged the whole
+`Application Support/MOTIVO/` directory as a side effect of a migration helper,
+so permanent user intent sat in scratch storage with no code saying so. Losing it
+fails *closed*, which is why it was P3-shaped rather than urgent. (iii) **Backup
+participation alone was insufficient.** `Attachment.fileURL` stores an absolute
+path containing the container UUID, which changes on restore, and **nine**
+consumers read it — not the three first identified. Two of the five extra are
+deletion-safety guards that fail **open**, and one is the publish path, where a
+missing fallback made `loadIncludedAttachments` *silently skip* attachments so a
+shared post arrived with its media missing and no error anywhere.
+
+**Two experiments settled design questions that reasoning had got wrong.**
+Backup exclusion resolves by **ancestor walk**, not attribute inheritance: there
+is **no per-item "include" override**, so a child of an excluded directory cannot
+be exempted — which is why the privacy map had to *move* rather than be
+un-excluded in place — and **a child's own flag survives its parent being
+un-flagged**, which is why reconciliation must clear item-level flags and not just
+directories. `Documents/Scores/` was flagged at both levels; clearing only the
+directory would have left every PDF excluded, invisibly, until a real restore.
+**Standing rule: never rely on ancestor resolution for inclusion.**
+
+**Three separate first-run results in this work were misleading, all from
+caching.** The exclusion experiment's first run was incoherent because `NSURL`
+caches resource values; the reconciliation's first simulator run appeared to do
+nothing because `cfprefsd` served a stale completion key; and the device
+container download showed no exclusion attributes at all because `devicectl copy
+from` **strips xattrs** — proven by a control, since `Application Support/MOTIVO/`
+provably carries one. In each case the second, controlled run was the real
+result. **Re-run before believing a first observation that involves a cache.**
+
+**The filename-uniqueness audit narrowed the resolver rather than widening it.**
+Persisted media has always been written to `Documents/` (true since `7c54aae`),
+and `tmp/` is a **guaranteed** collision source — a persisted file is
+`Documents/<stagedAttachmentID>.<ext>` while its viewer surrogate is
+`tmp/<stagedAttachmentID>.<ext>`, same id, same stem, same extension. Feeding
+publish and deletion from a resolver that could return a tmp surrogate would mean
+uploading stale bytes or aiming a delete at the wrong file. Eligible locations are
+now `Documents/` and `Documents/Scores/` only, ambiguity resolves by the stored
+path's own parent, and otherwise returns unresolved — never "first directory
+wins". That eligible set is deliberately the same set `BackupPolicy` calls
+permanent media and the same set reconciliation traverses.
+
+**One defect was introduced and caught by QA, not by review.** U4 ran the privacy-map
+migration lazily inside `loadMap()`, which only executes when something queries
+attachment privacy — so a user who upgraded and backed up without opening a
+session with attachments would still have had the map in the excluded directory.
+A bare simulator launch moved nothing. It now runs at launch as well.
+
+**Carried into Phase 2 and unchanged: C-49's device acceptance.** After F1/F2 land,
+Device A is conveniently in a state where a subsequent Erase All can pick it up.
+**The restore itself does not discharge C-49.**
+
+---
+
+**Phase 1 position: FORMALLY CLOSED — 2026-08-14.** It closed on an
 independent audit reconstructed from this repository and from read-only
 production checks rather than from any conversation, followed by one bounded
 reconciliation unit. **It did not close on the numbers being tidy.** Five rows

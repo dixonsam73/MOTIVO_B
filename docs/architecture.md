@@ -55,9 +55,20 @@ user who never pays can use it. Durability is never gated on monetisation.
 **Roadmap:** M14, after M13. iPad creates the need for multi-device continuity;
 sync satisfies it.
 
-**Dependency:** if normal device backup includes local media, M14 is a
-convenience. If it does not, M14 becomes load-bearing for durability and its
-timeline becomes a risk. This is why the backup decision is Phase 2, not M14.
+**Durability model — three layers, not one. Settled in Phase 2.**
+
+- **Ordinary Apple device backup and restore provides baseline single-device
+  durability** for the whole local Études library: journal, attachment media,
+  Scores and adopted copies.
+- **M14 provides optional cross-device private-library synchronisation.**
+- **Connected/Supabase carries interpersonal and shared data only.**
+
+**M14 must never be required for recovery of an ordinary local Études library.**
+If it were, durability would depend on an unshipped feature, and every user
+without it would be one device failure away from losing everything. That is why
+the backup decision is Phase 2 and not M14, and it is why M14 should not be
+described as a "convenience" — it is a different capability, not a weaker version
+of backup.
 
 ---
 
@@ -100,6 +111,77 @@ cleanup; the client independently drops to Solo. Neither waits on the other.
 
 Membership reaches into exactly one domain. Paying or not changes what you can
 *share*, never what you *have*.
+
+---
+
+# Local durability matrix — what participates in Apple backup
+
+**Settled in Phase 2 (C-4), 2026-08-15.** Locations are relative to the app
+container.
+
+The **Control** column matters as much as the policy. Only rows marked *Études*
+are decided by our code — those, and only those, are owned by `BackupPolicy`.
+Rows marked *iOS* are ordinary platform behaviour that we deliberately do not
+touch; rows marked *Platform* are excluded by iOS regardless. Documenting all
+three together is useful; pretending the code owns all three would not be.
+
+| # | Data class | Location | Kind | Backup | Control |
+|---|---|---|---|---|---|
+| 1 | Core Data journal | `App Support/MOTIVO.sqlite` (+`-wal`,`-shm`) | Permanent | Included | iOS |
+| 2 | Attachment media | `Documents/*.{m4a,mp4,mov,jpg,heic,pdf,…}` | Permanent | **Included** | Études |
+| 3 | Scores library PDFs | `Documents/Scores/*.pdf` | Permanent | **Included** | Études |
+| 4 | Scores index, favourites, resume | `UserDefaults` `scoreLibrary_v2` | Permanent | Included | iOS |
+| 5 | Adopted received scores | as #3 | Permanent, recipient-owned | **Included** | Études |
+| 6 | Per-attachment privacy map | `App Support/AttachmentPrivacy.json` | Permanent (intent) | Included | iOS (after the U4 move) |
+| 7 | Local comments | `App Support/CommentsStore.json` | Permanent | Included | iOS |
+| 8 | Local avatar | `App Support/Profiles/<uid>-*` | Permanent | Included | iOS |
+| 9 | Profile name/location/instruments | `UserDefaults` `profile.*` | Permanent | Included | iOS |
+| 10 | Received Connected attachments | `App Support/ReceivedConnectedAttachments/` | Backend-derived cache | **Excluded** | Études |
+| 11 | Staging media + `staged.json` | `App Support/MOTIVO/Staging/` | Staging scratch | **Excluded** | Études |
+| 12 | Timer staged video | `App Support/MOTIVO/PracticeTimer/` | Scratch | **Excluded** | Études |
+| 13 | Pending publish queue | `App Support/MOTIVO/SessionSyncQueue_v1.json` | Operational | **Excluded** | Études |
+| 14 | In-flight video capture | `Documents/motivo_vid_*.mov` | Transient | **Excluded** | Études |
+| 15 | Surrogates, exports, PDF subsets | `tmp/` | Temporary | Excluded | Platform |
+| 16 | Avatar/thumbnail caches | in-memory `NSCache`; `Library/Caches` | Cache | Excluded | Platform |
+| 17 | Auth tokens | Keychain (`WhenUnlocked`) | Credential | Restores | iOS |
+
+**Row 5 is why Scores are backed up at all.** An adopted score is recipient-owned
+permanent data and is **not** reconstructible — under the revised deletion rule
+the sender's account deletion removes the backend object. Excluded, "adoption"
+would not mean what the product says it means.
+
+**Row 10 carries a Phase 4 dependency, recorded rather than implemented.**
+Excluding received attachments rests on the object remaining fetchable while its
+row lives, which is B-8's storage-orphan lifecycle. If Phase 4 changes what a
+live row guarantees, this row is revisited.
+
+**Row 13 is deliberate:** a restored device must not inherit historical
+pending-publish intent.
+
+**`Application Support/MOTIVO/` is scratch, and now honestly so.** It holds rows
+11–13 and nothing permanent. Row 6 used to live there and was excluded by
+accident, which is the whole reason the directory's meaning had to be made
+explicit.
+
+## Backup-exclusion semantics — established empirically, 2026-08-15
+
+`isExcludedFromBackup` resolves by **ancestor walk**, not attribute inheritance.
+The extended attribute exists only on the item explicitly flagged, but everything
+beneath a flagged directory reports excluded — items that existed before the flag
+was set and items created after, at any depth. Two consequences are load-bearing:
+
+1. **There is no per-item "include" override.** A child of an excluded directory
+   cannot be exempted. This is why row 6 had to *move*.
+2. **A child's own flag survives its parent being un-flagged.** So clearing a
+   directory does not make individually-flagged contents eligible — which is
+   exactly the state `Documents/Scores/` was in.
+
+**Standing rule: never rely on ancestor resolution for the outcome we care
+about.** Exclusion may lean on it; *inclusion* must guarantee both that no
+ancestor is flagged and that no item flag remains.
+
+**All of that describes what the URL API reports. It is not evidence about what
+Apple's backup daemon copies** — only QA F1/F2 settle that.
 
 ---
 
