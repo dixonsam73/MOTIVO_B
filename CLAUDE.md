@@ -78,11 +78,12 @@ THEY MUST BE SCORED SEPARATELY.**
 | Gate | What it proves | Where |
 |---|---|---|
 | ~~**F1/F2**~~ | **DONE 2026-08-15 — BOTH PASS.** Genuine encrypted Finder backup → restore on Device A. All 7 files authored by `a8eb050` (excluded at write time, cleared only by U5) came back **byte-identical**; the adopted Scores copy survived while the byte-identical inbox cache did not; excluded scratch did not restore; the privacy map and its choices came back intact; reconciliation correctly did **not** re-run. **F3 is NOT EXERCISED and is not a pass** | QA Group F |
-| **Erase-regression gate (D15)** | U4 moved `AttachmentPrivacy.json` to the Application Support **root**, structurally the same shape as C-48. Every prior C-28/C-48 expectation still holds **plus** the root-level map is removed | QA Group D, "Phase 2 erase-regression gate" |
-| **C-49** | After a legitimate Erase All the app returns to onboarding, not the journal | Carried Phase 1 row |
+| ~~**Erase-regression gate (D15)**~~ | **DONE 2026-08-15 — PASS.** The root-level `AttachmentPrivacy.json` (520 bytes, 10 entries) was **removed**, along with all 8 Documents files, Scores, the Scores index and the journal; backend blast radius matched **10 of 10** measures and B's data survived. Received-cache and CommentsStore assertions **not re-exercised** (empty preconditions) and **not counted as passes** | QA Group D |
+| ~~**C-49**~~ | **DONE 2026-08-15 — PASS.** Immediately on completion, without relaunching, the app was on **first-launch onboarding**, not the journal | Carried Phase 1 row — now discharged |
 
-**C-49 is carried and unchanged. The restore does not discharge it** — only a
-legitimate destructive run does, which the D15 gate conveniently provides.
+**C-49 was discharged by the D15 run on 2026-08-15, as designed** — one
+legitimate destructive operation, two separately scored gates. The restore did
+not discharge it; the deletion did.
 
 **TWO THINGS THE RESTORE TAUGHT US THAT OUTLIVE THE GATE.** (i) **An ordinary
 in-place app update rotates the data container**, established from the pre-backup

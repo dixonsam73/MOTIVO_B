@@ -1412,6 +1412,77 @@ the app landed on the journal and then cleared on relaunch.
 
 ---
 
+### D15 + C-49 RESULT — 2026-08-15. D15 PASS. C-49 PASS. Scored separately.
+
+One legitimate destructive operation on Device A: **Delete Account & All Études
+Data**, confirmed with **DELETE**, as predicted for a device holding a Connected
+identity. Scored against `8487bc1`, committed beforehand.
+
+#### D15 — local (the regression this gate exists for)
+
+| # | Assertion | Before | After | Result |
+|---|---|---|---|---|
+| **L1** | **`App Support/AttachmentPrivacy.json` (ROOT)** | **520 bytes, 10 entries** | **ABSENT** | **PASS — the load-bearing assertion** |
+| L2 | `Documents/` regular files | 8 | 0 | PASS |
+| L3 | `Documents/Scores/` | 4 PDFs | directory gone | PASS |
+| L4 | Core Data | 2 sessions / 4 attachments | 0 / 0, store rebuilt | PASS |
+| L5 | Scores index (`UserDefaults`) | 4 entries | gone | PASS |
+| L6 | `MOTIVO/` scratch | present | wiped, recreated empty | PASS |
+
+**NOT RE-EXERCISED — empty preconditions, and NOT counted as passes.** The log
+confirms both: `[C-28] receivedAttachmentsRemoved=0 temporaryFilesRemoved=0` and
+`[C-48] commentsStoreFileExisted=false`. **Those zeros are the predicted
+consequence of the F1/F2 restore correctly not restoring an excluded cache — they
+are not evidence that a populated cache is removed.** The genuine 2026-08-14 C-28
+device acceptance remains the evidence for that, on its own terms.
+
+#### D15 — backend blast radius: 10 of 10 measures matched
+
+| Measure | Before | Predicted | Actual |
+|---|---|---|---|
+| `auth.users` | 16 | 15 | **15** |
+| A's `auth.users` row | 1 | 0 | **0** |
+| `account_directory` total / A | 16 / 1 | 15 / 0 | **15 / 0** |
+| `posts` total / A-owned | 101 / 2 | 99 / 0 | **99 / 0** |
+| `post_comments` | 2 | 2 | **2** — B's survive (B-19) |
+| `connected_attachments` total / A-recipient | 32 / 1 | 31 / 0 | **31 / 0** |
+| `follows` (A involved) | 2 | 0 | **0** |
+| storage `attachments` total / A-prefix | 17 / 4 | 13 / 0 | **13 / 0** |
+| storage `avatars` | 3 | 3 | **3** |
+
+**Observation, as flagged in advance rather than scored:** the object A referenced
+as *recipient* lives under the **sender's** prefix (Account B) and **survived** —
+5 objects still under `users/dfaf8d18…/con%`. A's reference row went; B's object
+did not. That is the conservative outcome and B's data is untouched. Reference
+counting here is **B-8, Phase 4**; it was never a D15 assertion.
+
+#### C-49 — SEPARATELY SCORED: **PASS**
+
+**Immediately on completion, without relaunching, the app was on first-launch
+onboarding** — "Set up Études — Add your name and your first instrument to
+start", with an empty Display name field. Not the journal, not a stale Profile.
+The C-49 fix (`dismissProfileAfterSuccessfulErase` → `onEraseComplete` →
+`route = .timer`) is device-verified.
+
+**A transient intermediate frame was captured ~30s earlier and is worth recording
+so it is not mistaken for a failure later.** Mid-deletion the screen showed
+Profile/Settings with a **Sign in with Apple** sheet over it. The log explains it
+exactly: `[C-44] revocation reason=delete-account
+outcome=notAttempted(authorization/…AuthorizationError/1001)` — 1001 is
+*canceled*. That sheet was **C-44's re-authorization request**, needed to obtain
+an authorization code for revocation; it did not complete, revocation was
+therefore `notAttempted`, and the deletion **continued regardless**, exactly as
+the settled semantics require. The app then routed to onboarding and showed
+C-44's TN3194 step-2 fallback: *"Your Études account and data have been deleted.
+We couldn't remove Études from your Apple Account automatically…"*.
+
+**This is C-44 behaving as accepted, not a new defect**, and it is not reopened.
+**Operational note: Device A's Apple credential for Études was NOT revoked on
+this run** — the manual Settings step was offered and is outstanding if revocation
+is wanted.
+
+---
+
 ## Group G — Accessibility
 
 | # | Steps | Expected |
