@@ -1222,7 +1222,7 @@ specification**: ordinary expiry explicitly *retains* both `membership` and
 no cascade ties the binding to a membership row — and the behavioural assertion
 belongs to U7's worker.
 
-### U3 — RESULTS, 2026-08-16. 45 of 45 U3-owned assertions pass.
+### U3 — RESULTS, 2026-08-16. 63 of 63 U3-owned assertions pass.
 
 **Local implementation only. Production was not touched.** Run from a genuinely
 destroyed environment (`stop --no-backup` → `start` → `db reset --local`), so
@@ -1276,9 +1276,42 @@ on all five tables throughout.
 writers they test do not exist, and a U3 pass would have been manufactured.
 **A24's behavioural half belongs to U7** for the same reason.
 
+#### Cutover corrections, applied 2026-08-16 after the package review
+
+The review found that **SERIALIZABLE does not close the concurrent-identity
+race** (one rw-edge, no dangerous structure, so no abort — and SSI is right,
+because the schedule *is* serializable and the violation is of a business
+predicate over application data), and that **the in-transaction assertion could
+not detect it** (same snapshot as the INSERT, so it agreed by construction).
+A third finding was independent: **`auth.users.created_at` is nullable**, and a
+NULL satisfies neither side of the boundary, so such an identity would be
+invisible to every check.
+
+Corrections: READ COMMITTED; the in-transaction assertion re-labelled as
+coherence and re-run protection; **mandatory post-commit convergence, bounded to
+a single repair then stop**; a hard NULL gate; a permanent snapshot-membership
+invariant; and `cutover_verified_at` added so completeness is durably
+distinguishable from unverified.
+
+**Implementing that exposed a further schema conflict, caught by the suite:**
+`membership_control_count_with_cutover` tied `cutover_identity_count` to
+`cutover_at`, but the corrected procedure cannot know the final count until
+after commit — and CHECK constraints evaluate per statement, so the correct
+procedure was literally unexecutable. The constraint is now
+`membership_control_count_with_verification`, tying the count to
+`cutover_verified_at`, which is what it always meant.
+
+**Nine assertions added: A32–A40.** They cover the new column and its coherence
+in both directions, the boundary's totality (a pre-boundary identity captured, a
+post-boundary identity excluded and not entitled), idempotent re-running that
+still cannot admit a post-cutover identity, the convergence completeness check,
+the permanent invariant, the NULL hazard demonstrated in both directions, and
+finalisation with its re-run guard. **63 of 63 now pass from a destroyed
+environment.**
+
 #### B-23 gate state after local U3 — expected RED
 
-**149 differences, and every single one is "present locally, absent in
+**152 differences, and every single one is "present locally, absent in
 production".** Zero modified rows; the only non-additive difference in the whole
 comparison remains the one approved `account_id_format` catalog-serialization
 exception. **That shape is the evidence that U3 is purely additive** — it changes

@@ -236,6 +236,15 @@ create table public.membership_control (
   cutover_at             timestamptz,
   cutover_identity_count integer,
 
+  -- Set ONLY after post-commit convergence has genuinely passed. It durably
+  -- distinguishes "snapshot completeness verified" from "not yet verified",
+  -- which nothing else could: the in-transaction assertions run on the
+  -- cutover transaction's own snapshot and therefore cannot observe an
+  -- identity that committed after it. Without this column a later reader --
+  -- U6c in particular, whose removal rule leans on the snapshot being
+  -- complete -- would have to take completeness on trust.
+  cutover_verified_at    timestamptz,
+
   -- Defaults TRUE deliberately. The two failure modes are not symmetric:
   -- forgetting to enable it before U6b binds locks out every pre-cutover
   -- member, silently. Enabling it while nothing reads it does nothing at all.
@@ -248,10 +257,21 @@ create table public.membership_control (
 
   constraint membership_control_pkey primary key (id),
   constraint membership_control_single_row check (id),
-  constraint membership_control_count_with_cutover
-    check ((cutover_at is null) = (cutover_identity_count is null)),
+  -- The count belongs with VERIFICATION, not with the boundary. An earlier
+  -- version tied it to cutover_at, which encoded an assumption the corrected
+  -- two-phase cutover invalidates: the boundary must be declared BEFORE the
+  -- final count can be known, because completeness is only observable on a
+  -- fresh snapshot after commit. CHECK constraints are evaluated per statement,
+  -- so that version made the correct procedure literally impossible to execute.
+  -- Tying the count to cutover_verified_at instead means it is simply absent
+  -- until the snapshot is verified complete -- which is what it always meant.
+  constraint membership_control_count_with_verification
+    check ((cutover_verified_at is null) = (cutover_identity_count is null)),
   constraint membership_control_count_nonnegative
-    check (cutover_identity_count is null or cutover_identity_count >= 0)
+    check (cutover_identity_count is null or cutover_identity_count >= 0),
+  -- Verification cannot precede the boundary it verifies.
+  constraint membership_control_verified_needs_cutover
+    check (cutover_verified_at is null or cutover_at is not null)
 );
 
 comment on table public.membership_control is

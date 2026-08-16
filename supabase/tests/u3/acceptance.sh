@@ -149,6 +149,87 @@ is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgr
 is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"
 is A14b "$(psq "select coalesce((select cutover_at::text from public.membership_control),'null');")" "null" "cutover_at unset locally"
 
+# ============================= cutover boundary =============================
+# The corrected mechanism (supabase/sql/2026-08-16-u3-cutover-population.sql)
+# exercised end to end against LOCAL identities. Production is not touched.
+
+# A32 — cutover_verified_at exists, is nullable, and starts unset.
+is A32 "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_control' and column_name='cutover_verified_at' and is_nullable='YES';")" "1" "cutover_verified_at nullable column"
+is A32b "$(psq "select coalesce((select cutover_verified_at::text from public.membership_control),'null');")" "null" "verified_at unset before cutover"
+
+# A33 — verification cannot precede the boundary it verifies.
+is A33 "$(refuses "update public.membership_control set cutover_verified_at = now(), cutover_identity_count = 0 where id and cutover_at is null;")" "refused" "verified_at without cutover_at"
+# The count is tied to VERIFICATION, not to the boundary -- setting one
+# without the other is refused in both directions.
+is A33b "$(refuses "update public.membership_control set cutover_identity_count = 0 where id;")" "refused" "count without verified_at"
+
+# Local identities: C created BEFORE the boundary, D created AFTER it.
+C=$(mkuser u3c)
+psqf <<SQL >/dev/null
+begin;
+update public.membership_control set cutover_at = now(), updated_at = now() where id and cutover_at is null;
+insert into public.membership_cutover (user_id)
+select u.id from auth.users u
+ where u.created_at < (select cutover_at from public.membership_control where id)
+ on conflict (user_id) do nothing;
+commit;
+SQL
+D=$(mkuser u3d)
+
+# A34 — the predicate is total and disjoint: C in, D out.
+is A34 "$(psq "select count(*) from public.membership_cutover where user_id='$C';")" "1" "pre-boundary identity captured"
+is A34b "$(psq "select count(*) from public.membership_cutover where user_id='$D';")" "0" "POST-boundary identity excluded"
+is A34c "$(psq "select public.connected_member('$D');")" "f" "post-cutover identity not entitled"
+
+# A35 — re-running the population is idempotent and CANNOT admit D.
+BEFORE=$(psq "select count(*) from public.membership_cutover;")
+psqf <<SQL >/dev/null
+insert into public.membership_cutover (user_id)
+select u.id from auth.users u
+ where u.created_at < (select cutover_at from public.membership_control where id)
+ on conflict (user_id) do nothing;
+SQL
+is A35 "$(psq "select count(*) from public.membership_cutover;")" "$BEFORE" "re-run population changes nothing"
+is A35b "$(psq "select count(*) from public.membership_cutover where user_id='$D';")" "0" "re-run still excludes post-cutover"
+
+# A36 — convergence completeness check reports zero on a converged snapshot.
+is A36 "$(psq "select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id) and not exists (select 1 from public.membership_cutover c where c.user_id=u.id);")" "0" "missing qualifying identities"
+
+# A37 — PERMANENT INVARIANT: no post-cutover or NULL-dated row in the snapshot.
+is A37 "$(psq "select count(*) from public.membership_cutover c join auth.users u on u.id=c.user_id where u.created_at is null or u.created_at >= (select cutover_at from public.membership_control where id);")" "0" "post-cutover rows in snapshot"
+
+# A38 — the NULL hazard is real and the guard detects it.
+# auth.users.created_at is nullable with no default; a NULL satisfies NEITHER
+# side of the boundary, so it must be caught BEFORE a boundary is declared.
+psqf <<SQL >/dev/null
+update auth.users set created_at = null where id='$D';
+SQL
+is A38 "$(psq "select count(*) from auth.users where created_at is null;")" "1" "NULL created_at guard detects it"
+is A38b "$(psq "select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id) and u.id='$D';")" "0" "NULL is excluded by '<'"
+is A38c "$(psq "select count(*) from auth.users u where u.created_at >= (select cutover_at from public.membership_control where id) and u.id='$D';")" "0" "NULL is ALSO excluded by '>=' -- unclassifiable"
+psqf <<SQL >/dev/null
+update auth.users set created_at = now() where id='$D';
+SQL
+
+# A39 — finalisation sets verified_at and the counts agree.
+psqf <<SQL >/dev/null
+update public.membership_control
+   set cutover_identity_count = (select count(*) from public.membership_cutover),
+       cutover_verified_at = now(), updated_at = now()
+ where id and cutover_at is not null and cutover_verified_at is null;
+SQL
+is A39 "$(psq "select (cutover_verified_at is not null)::text from public.membership_control where id;")" "true" "verified_at set after convergence"
+is A39b "$(psq "select (cutover_identity_count = (select count(*) from public.membership_cutover))::text from public.membership_control where id;")" "true" "recorded count = materialised"
+is A39c "$(psq "select (cutover_identity_count = (select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id)))::text from public.membership_control where id;")" "true" "recorded count = by-predicate"
+
+# A40 — finalisation is itself re-run protected.
+V=$(psq "select cutover_verified_at from public.membership_control where id;")
+psqf <<SQL >/dev/null
+update public.membership_control set cutover_verified_at = now()
+ where id and cutover_at is not null and cutover_verified_at is null;
+SQL
+is A40 "$(psq "select cutover_verified_at from public.membership_control where id;")" "$V" "finalisation guard prevents overwrite"
+
 echo
 printf "  %d passed, %d failed\n" "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

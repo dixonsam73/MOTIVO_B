@@ -40,14 +40,22 @@ holds** — re-read it and record what you actually see.
 ```sql
 select
   (select count(*) from auth.users)                                as auth_users,
-  (select count(*) from public.membership_control where id)        as control_rows,
+  (select count(*) from auth.users where created_at is null)       as null_created_at,
   (select count(*) from information_schema.tables
      where table_schema='public' and table_name like 'membership%') as existing_membership_tables;
 ```
 
-**Expected:** `existing_membership_tables = 0` before step A. `auth_users` is
-whatever it is — record it; step B's assertions compare against the value read
-at execution time, not against a number written here.
+**Expected:** `existing_membership_tables = 0` before step A, and
+**`null_created_at` = 0 — a hard gate.** `auth_users` is whatever it is: record
+it, because step B compares against the value read at execution time rather than
+against any number written here.
+
+**Why the NULL gate is hard.** `auth.users.created_at` is nullable with no
+default and belongs to GoTrue, not to us. A NULL satisfies **neither**
+`< cutover_at` **nor** `>= cutover_at`, so such an identity would be excluded
+from the snapshot *and* from every completeness check — the counts would agree
+while it sat silently unclassifiable, and U6b would deny it. That is a worse
+failure shape than the race, because it leaves nothing to detect.
 
 ---
 
@@ -63,16 +71,16 @@ exactly.**
 | `policies` | 33 | **33** | **0** | **No policy is created or modified** |
 | `rls_enabled` | 7 | **12** | **+5** | The five new tables, all `rls_enabled = true` |
 | `triggers` | 5 | **5** | **0** | U3 adds no trigger |
-| `constraints` | 24 | **49** | **+25** | PK/FK/unique/check across the five tables |
-| `columns` | 60 | **106** | **+46** | Columns of the five tables |
+| `constraints` | 24 | **50** | **+26** | PK/FK/unique/check across the five tables. **+1 vs the first draft: `membership_control_verified_needs_cutover`** |
+| `columns` | 60 | **107** | **+47** | Columns of the five tables. **+1: `cutover_verified_at`** |
 | `function_grants` | 33 | **42** | **+9** | 3 helpers × 3 roles |
 | `table_grants` | 102 | **117** | **+15** | **`service_role` only** |
-| `column_grants` | 523 | **569** | **+46** | **`service_role` only** |
+| `column_grants` | 523 | **570** | **+47** | **`service_role` only. +1 for the new column** |
 | `storage_buckets` | 2 | **2** | **0** | Untouched |
 
 ### The two rows that carry the security claim
 
-**All 15 new `table_grants` and all 46 new `column_grants` rows have grantee
+**All 15 new `table_grants` and all 47 new `column_grants` rows have grantee
 `service_role`. Zero for `anon`, zero for `authenticated`.** Anything else means
 the revokes did not take, and production's default ACLs would have published
 membership state.
@@ -112,26 +120,29 @@ covering it.**
 
 ---
 
-## 4. Stopping rules
+## 4. STOP / GO sequence
 
-**No improvising through any of these. Stop and report.**
+**No improvising through any checkpoint. Stop and report.**
 
-| Condition | Action |
-|---|---|
-| Pre-flight shows any `membership*` object already present | **Stop.** Unexpected collision; the analysis is wrong |
-| `auth.users` count materially different from expectation, or changing under observation | **Stop.** Establish why before defining a cutover boundary |
-| Any DDL statement errors | **Stop.** Do not reach for `CASCADE` — an unpredicted dependency means the analysis was wrong |
-| Structural delta differs from §2 in any surface | **Stop.** Do not proceed to step B |
-| **Any client privilege appears on membership state** — any `anon`/`authenticated` row in `table_grants`/`column_grants`, or any non-false `can_execute`/`direct_execute`/`public_execute` for those roles | **Stop immediately.** The one failure with a live security consequence |
-| `ensure_membership_binding` shows any `authenticated` privilege | **Stop.** That grant belongs to U5 |
-| Step B assertion 3 fails (`captured ≠ by_pred`) | **ROLLBACK.** A straggler identity crossed the boundary. Report; **do not top up silently** |
-| `control_count ≠ captured` | **ROLLBACK** |
-| `cutover_at` already set | **ROLLBACK.** It has already run |
-| Helper returns anything contradicting the local acceptance results | **Stop.** Re-run the acceptance suite locally before touching production again |
-| Any existing policy or function modified | **Stop.** U3 must change nothing that exists |
-| Post-recapture B-23 diff shows anything outside the §2 delta and the one approved `account_id_format` exception | **Stop** |
+| # | Checkpoint | GO condition | Failure means | Rollback? |
+|---|---|---|---|---|
+| **P0** | Pre-flight read | Zero `membership*` objects; **`null_created_at` = 0**; `cutover_at`/`cutover_verified_at` null; live `auth.users` count recorded | Collision, or an unclassifiable identity | Nothing done |
+| **P1** | Structural DDL + revokes | All statements succeed | Stop. **Never `CASCADE`** — an unpredicted dependency means the analysis was wrong | Full `drop` |
+| **P2** | **Security verification** | Zero `anon`/`authenticated` table and column grants; all three helpers `public_execute=false`; `ensure_membership_binding` ungranted | **Live security consequence. Stop immediately** | Full `drop` |
+| **P3** | Structural delta vs §2 | All ten match; **zero modified rows** | Something unintended landed | Full `drop` |
+| **P4** | Boundary + population (one transaction, **READ COMMITTED**) | `boundary_declared` true; `count_still_unset` true; `captured` > 0 | ROLLBACK; nothing declared | **Yes, until commit** |
+| **P5** | **COMMIT** | — | — | **No. The boundary is now irreversible** |
+| **P6** | **Convergence check** (fresh snapshot) | `missing` = 0, `null_created_at` = 0, `invalid_members` = 0 | `missing` > 0 → **one** repair, then P7. `invalid_members` > 0 → **STOP** | Repair forward |
+| **P7** | Re-verify after the single repair | All three zero | **STOP AND REPORT. Do not repair again, do not loop** — a second divergence is not explained by a millisecond race and is itself the finding | Stop |
+| **P8** | Finalise | `cutover_identity_count` set, `cutover_verified_at` set, `materialised = by_predicate = recorded_count` | ROLLBACK the finalise transaction; boundary and snapshot survive | Yes, for this step |
+| **P9** | Production recapture | Snapshot refreshed | — | Repo file |
+| **P10** | **B-23 gate** | **GREEN**, only the approved `account_id_format` exception | Anything outside the §2 delta | Repo file |
+| **P11** | Inertness re-check | Zero policies call `connected_member`; 33 policies unchanged; 5 triggers; membership empty; nothing scheduled; functions still v7/v1 | U3 changed something | Full `drop` |
 
----
+**Convergence is bounded, deliberately.** At most one repair, then a single
+re-verification, then stop. Repeated divergence is unexpected evidence rather
+than something to retry through, and automating past it would destroy exactly
+the information needed to understand it.
 
 ## 5. Rollback
 
