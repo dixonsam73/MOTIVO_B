@@ -168,6 +168,121 @@ The snapshot diff is the only record of what changed in production before
 Phase 3. If step 3 is skipped, the repository stops reflecting production and
 the value of all of this evaporates.
 
+## Local backend (Phase 3 U1 / B-23)
+
+**Purpose: an environment where a destructive or fault-injecting experiment is
+free.** B-4, B-12, B-13 and B-9's two-recipient subcase have been blocked since
+2026-08-11 for want of one.
+
+### Prerequisites
+
+A container runtime. This machine had none, so U1 installed Colima:
+
+```bash
+brew install colima docker
+colima start --cpu 4 --memory 8 --disk 60
+export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
+```
+
+`DOCKER_HOST` matters: the Supabase CLI looks for `/var/run/docker.sock`, and
+Colima's socket is elsewhere. Without it every CLI command that needs a
+container fails with `LegacyDockerRunError`.
+
+### Start, reset, stop
+
+```bash
+supabase start                 # first run pulls ~12 images
+supabase db reset --local      # recreate the DB and apply supabase/migrations/
+supabase stop --no-backup      # destroy all local state
+```
+
+**`supabase db reset` accepts `--linked`, which resets PRODUCTION. Always pass
+`--local`.** There is no reason to type `--linked` on a reset in this project,
+ever.
+
+### The fidelity gate
+
+```bash
+./supabase/verify-baseline.sh
+```
+
+Captures the same ten structural queries from the local instance and diffs them
+against `supabase/schema/`. **All ten must diff empty.** That is B-23's whole
+acceptance criterion.
+
+```bash
+./supabase/capture-schema.sh --local <outdir>    # the capture on its own
+```
+
+The script refuses to write a `--local` capture into `supabase/schema/`, which
+would destroy the observed-truth record and make the gate compare a file with
+itself.
+
+### Two artefacts, and confusing them defeats the point
+
+| | Authority for |
+|---|---|
+| `supabase/schema/` | **Observed production truth.** Captured after the fact. The thing the baseline is measured *against* |
+| `supabase/migrations/` | **Reproducible source.** What the local instance is built *from* |
+
+**Production is not re-based onto the migration history.** The baseline
+reproduces production as it existed at U1 entrance; applying migrations to
+production is explicitly out of scope, and no Phase 3 membership object appears
+in the baseline.
+
+### Local verification is NOT production verification
+
+**Load-bearing, not pedantic.** A faithful local reproduction runs the same
+software; it is not the same deployment. Storage-listing semantics, PostgREST
+error shapes and the exact response to a delete of a missing object are all
+things this project has already been caught assuming — C-33's cell says so in as
+many words. Anything verified locally is recorded as **"verified against a
+faithful local reproduction"**, never as "verified in production", and the
+residual gap is stated rather than glossed.
+
+### KNOWN DIFFERENCE — the gate is currently 9 of 10, and B-23 is NOT resolved
+
+`constraints.json` differs in exactly one row, and only in parenthesisation:
+
+```
+production  CHECK (((account_id IS NULL) OR (((char_length(account_id) >= 3) AND (char_length(account_id) <= 24)) AND (account_id ~ '...'))))
+local       CHECK (((account_id IS NULL) OR ((char_length(account_id) >= 3) AND (char_length(account_id) <= 24) AND (account_id ~ '...'))))
+```
+
+`account_directory.account_id_format`. Production's stored parse tree is a
+**left-nested** two-way AND; local's is a **flat three-way** AND. The two are
+logically identical — `AND` is associative — and no behaviour can distinguish
+them.
+
+**It was not assumed to be irreproducible. It was tested.** Both servers are
+PostgreSQL **17.6**, so it is not a version artefact. Feeding production's own
+rendered text straight back into 17.6 produces the **flat** form, so the shape
+cannot be round-tripped; a **right**-nested source *is* preserved, which shows
+the parser flattens left-nesting specifically. **No SQL text produces
+production's shape on 17.6**, so it is almost certainly a catalog artefact
+carried through a major-version upgrade.
+
+**The gate has NOT been weakened and this difference has NOT been normalised
+away.** `verify-baseline.sh` still fails on it, deliberately. B-23 stays open
+until the criterion is either met or changed by an explicit decision.
+
+### A gap in the gate itself, found while closing it
+
+`function_grants` records `has_function_privilege(role, oid, 'EXECUTE')`, which
+answers *"can this role execute?"* — true whether the privilege is held directly
+or inherited from `PUBLIC`. Postgres grants `EXECUTE` to `PUBLIC` by default, so
+a baseline that revokes only from `anon`, `authenticated` and `service_role`
+leaves everything executable while the snapshot still reports the expected
+values for those three roles. **The baseline therefore revokes from `PUBLIC`
+first**, and that is what makes B-5's directory hardening reproduce.
+
+**The gate cannot see this on its own.** A function whose production `PUBLIC`
+grant is revoked but whose three role columns are all `true` would compare equal
+while differing underneath. Worth widening the snapshot to record the `PUBLIC`
+privilege directly — noted, not done, because changing the ten captured queries
+changes the committed snapshot and that is a deliberate act, not a side effect of
+U1.
+
 ### B-7 / B-10 drops — expected snapshot delta, written before applying (2026-08-14)
 
 Committed ahead of the change so the diff is a binary check rather than a
