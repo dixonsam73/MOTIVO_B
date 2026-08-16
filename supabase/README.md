@@ -97,6 +97,47 @@ class `config.toml` and B-17 exist to prevent:
    must not move, verify it explicitly after the deploy rather than reasoning
    from the command line you typed.
 
+### CLI options that print database credentials — observed 2026-08-16
+
+**Do not run `supabase db dump --dry-run`.** At CLI **2.113.0** it prints the
+generated `PGPASSWORD` in cleartext as part of the shell script it would have
+executed. Treat `--debug` the same way wherever it would surface generated
+connection credentials. There is no flag to suppress it; the only safe answer is
+not to run those forms.
+
+**This is recorded as behaviour observed with the currently installed tooling,
+not as a claim about every Supabase CLI version.** Re-check before assuming a
+later release behaves the same way — in either direction.
+
+**What was actually exposed, established read-only rather than assumed.** During
+U1 a dry-run printed a credential for the role **`cli_login_postgres`** — the
+role the CLI mints for itself, announced by the *“Initialising login role…”*
+line before every `--linked` command.
+
+| | |
+|---|---|
+| **Privilege while valid** | Powerful. It is a member of `postgres`, so it inherits `bypassrls` and `createrole` — full read and write with row-level security bypassed |
+| **Validity** | **Ephemeral, roughly a five-minute rolling window.** `rolvaliduntil` was observed advancing to `now() + ~4m59s` on every CLI invocation, twice, two seconds apart |
+| **What it is not** | **Not the persistent project database password.** That belongs to the `postgres` role and was never printed |
+| **Status** | **Expired.** The window closed minutes after it was printed |
+| **Runtime dependencies** | **None.** No Postgres connection string exists in the app, either Edge Function, `config.toml` or this file. The app uses `SUPABASE_URL` + `SUPABASE_ANON_KEY`; the functions use `SERVICE_ROLE_KEY` and the `APPLE_*` secrets |
+
+**Rotating the project database password would rotate a different credential and
+is not required for this incident.** It would address the `postgres` role, which
+was not exposed, and would leave the ephemeral role untouched — it is not ours to
+rotate, being minted and expired by the CLI.
+
+One limit worth stating rather than glossing: whether the CLI re-sets that role's
+*password* on each invocation, or only extends its validity, is **not
+observable** at this privilege level — `pg_authid.rolpassword` is not readable.
+It does not change the conclusion, since the printed value is past its
+`rolvaliduntil` either way, but it is the difference between “rotated many times
+since” and “expired once”, and only the weaker claim is supported.
+
+**Verify, do not test by connecting.** Confirming the window is closed is a
+read of `rolvaliduntil` against `now()`. Re-using the exposed value to see
+whether it still works would itself be use of an exposed credential.
+
 ### Storage objects — two traps, both hit on 2026-08-13
 
 **`supabase storage rm` SILENTLY DID NOTHING.** Observed clearing B-22 on CLI

@@ -66,6 +66,61 @@ than glossed.
 
 ---
 
+## Operational starting state — confirmed 2026-08-16
+
+**Observed directly in App Store Connect by the account holder**, not inferred.
+This is the baseline every S-step and every Group C gate starts from.
+
+| Setting | State at Phase 3 start |
+|---|---|
+| Billing Grace Period | **Not configured** — neither environment |
+| Production App Store Server Notification URL | **Unset** |
+| Sandbox App Store Server Notification URL | **Unset** |
+| In-App Purchase keys (App Store Server API) | **0 active** |
+| Account access | **Account Holder + Admin** — sufficient for every S-step |
+
+**Both notification URLs being unset is the safe starting point, and it is worth
+knowing why.** Apple's rule is that if a *Production* URL is set and a Sandbox
+one is not, the App Store sends **both** environments' notifications to the
+production URL. With neither set, nothing is delivered anywhere and no
+configuration can be silently receiving sandbox traffic. **Production stays
+unset**, which also means no production notifications are sent — intended until
+the later authorised phase.
+
+**No In-App Purchase key exists**, and the four `APPLE_SIWA_*` secrets are **not**
+a substitute: those are a Sign in with Apple key, a different key type for a
+different purpose. Server→Apple reconciliation needs its own.
+
+### Accepted sequencing before U4's first purchase
+
+**Refined 2026-08-16 from the operational-readiness pass, and it differs from the
+order originally written.** Two moves, each forced by a real dependency.
+
+```
+S2a  create + store the In-App Purchase server key
+ ->  S1   enable Billing Grace, SANDBOX ONLY
+ ->  U3   membership schema, inert
+ ->  U4   ingestion endpoint implemented and DEPLOYED
+ ->  S2b  configure the SANDBOX notification URL (V2) to that deployed endpoint
+ ->  test notification
+ ->  first Sandbox lifecycle purchase
+```
+
+**Why S1 moved earlier.** Billing Grace takes **up to 24 hours** to take effect
+and applies only to *upcoming* renewals. Enabling it close to a run means the
+first sandbox cycle renews without grace available, G6b cannot be scored, and a
+purchase the rig cannot cheaply replace is wasted.
+
+**Why S2 split, and why S2b moved after U4.** The notification URL needs a
+deployed endpoint to point at. **Sandbox delivers each notification exactly once,
+with no retries** — production retries five times over 72 hours, sandbox does
+not retry at all — so a URL configured before the endpoint exists does not queue
+anything; those notifications are permanently lost. S2a has no such dependency
+and is done first, partly because the `.p8` downloads **once**.
+
+**Production Billing Grace and the production notification URL remain untouched
+until their later authorised step.** Neither is part of the sequence above.
+
 ## The fundamental rule
 
 **Leaving Connected is not leaving Études.**

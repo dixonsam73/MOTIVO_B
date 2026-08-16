@@ -1,13 +1,52 @@
 #!/usr/bin/env bash
-# U2 shared helpers. LOCAL ONLY — every URL here is 127.0.0.1.
 #
-# The keys below are the Supabase CLI's well-known LOCAL demo keys, printed by
-# `supabase status` on every machine. They are not secrets and they authenticate
-# to nothing outside this host. No production credential appears in this repo.
+# U2 shared helpers. LOCAL DISPOSABLE STACK ONLY.
+#
+# CREDENTIALS ARE LOADED DYNAMICALLY FROM THE RUNNING LOCAL STACK and are never
+# written down here. Earlier revisions inlined the Supabase CLI's well-known
+# local demo JWTs. Those authenticate to nothing beyond 127.0.0.1 and were not
+# production secrets — but they are JWT-shaped, so a remote secret scanner has
+# no way to tell them apart from something that matters. Removing them costs
+# nothing and removes the ambiguity.
+#
+# There is deliberately NO hard-coded fallback. If the local stack is not
+# running, this fails loudly rather than quietly reaching for a stale constant.
+
 set -euo pipefail
-export API=${API:-http://127.0.0.1:54321}
-export SR="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU"
-export AK="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0"
+
+# ---------------------------------------------------------------- credentials
+
+_u2_die() { echo "u2: $*" >&2; exit 1; }
+
+command -v supabase >/dev/null 2>&1 || _u2_die "supabase CLI not found on PATH"
+command -v jq        >/dev/null 2>&1 || _u2_die "jq not found on PATH"
+
+_U2_STATUS="$(supabase status -o json 2>/dev/null || true)"
+[ -n "$_U2_STATUS" ] || _u2_die \
+  "could not read 'supabase status -o json'. Is the local stack running?
+   Try:  export DOCKER_HOST=\"unix://\$HOME/.colima/default/docker.sock\" && supabase start"
+
+export API=$(printf '%s' "$_U2_STATUS" | jq -r '.API_URL // empty')
+export AK=$(printf  '%s' "$_U2_STATUS" | jq -r '.ANON_KEY // empty')
+export SR=$(printf  '%s' "$_U2_STATUS" | jq -r '.SERVICE_ROLE_KEY // empty')
+
+[ -n "$API" ] || _u2_die "API_URL missing from supabase status output"
+[ -n "$AK"  ] || _u2_die "ANON_KEY missing from supabase status output"
+[ -n "$SR"  ] || _u2_die "SERVICE_ROLE_KEY missing from supabase status output"
+
+# HARD LOCALHOST GUARD. Everything below is destructive by design, so the
+# tooling must be structurally incapable of pointing at a hosted project even
+# if configuration drifts or someone exports API by hand. There is no flag to
+# turn this off, deliberately.
+case "$API" in
+  http://127.0.0.1:*|http://localhost:*|http://[::1]:*) ;;
+  *) _u2_die "refusing to run: API_URL '$API' is not localhost. U2 tooling is local-only." ;;
+esac
+
+# `supabase db query --local` is used throughout rather than --linked, for the
+# same reason. Never change these to --linked.
+
+# ------------------------------------------------------------------- helpers
 
 # A non-SELECT prints a plain command tag ("INSERT 0 1"), a SELECT prints JSON,
 # and a failure prints a JSON _tag:"Error". Fail loudly on the last of those

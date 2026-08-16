@@ -39,7 +39,7 @@ It cannot alter production behaviour:
 
 | | |
 |---|---|
-| `lib.sh` | Shared helpers. The keys are the CLI's well-known **local** demo keys, printed by `supabase status` on every machine. No production credential is in this repo |
+| `lib.sh` | Shared helpers. **Credentials are loaded dynamically from `supabase status -o json`** and never written down. No hard-coded JWT and no fallback: if the stack is not running it fails loudly, and it **refuses to run unless `API_URL` is localhost**, so the tooling cannot be pointed at a hosted project even if configuration drifts |
 | `fixture.sh` | Fixture 1 — A/B/C for B-4, B-13 and B-9's subcase. Asserts its own inventory, because an empty fixture is not a pass |
 | `fixture-b12.sh` | Fixture 2 — 1500 objects under **one** prefix, plus a protected bystander |
 | `fault-inject.sql` / `fault-remove.sql` | The named B-4 fault and its removal |
@@ -58,9 +58,15 @@ supabase db reset --local
 
 **`supabase/.env` is required and is gitignored.** The local edge runtime
 provides `SUPABASE_SERVICE_ROLE_KEY` but the function reads `SERVICE_ROLE_KEY`,
-which production supplies as a secret. Put `SERVICE_ROLE_KEY=<local service role
-key from supabase status>` in `supabase/.env`. This is local configuration
-standing in for a production secret — **not** a change to the function.
+which production supplies as a secret. Generate it rather than pasting a key:
+
+```bash
+printf 'SERVICE_ROLE_KEY=%s\n' \
+  "$(supabase status -o json | jq -r .SERVICE_ROLE_KEY)" > supabase/.env
+```
+
+This is local configuration standing in for a production secret — **not** a
+change to the function.
 
 `[edge_runtime.secrets]` in `config.toml` does **not** work at CLI 2.113.0; the
 container environment shows the variable absent. `supabase functions serve
