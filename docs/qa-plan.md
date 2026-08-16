@@ -1222,6 +1222,69 @@ specification**: ordinary expiry explicitly *retains* both `membership` and
 no cascade ties the binding to a membership row — and the behavioural assertion
 belongs to U7's worker.
 
+### U3 — RESULTS, 2026-08-16. 45 of 45 U3-owned assertions pass.
+
+**Local implementation only. Production was not touched.** Run from a genuinely
+destroyed environment (`stop --no-backup` → `start` → `db reset --local`), so
+both migrations applied from scratch.
+
+**A defect was found by the predictions and fixed before the run counted — which
+is the whole reason for writing them first.**
+
+#### The `connected_member()` NULL-propagation defect
+
+**A9a failed on the first run**, and it was not a test bug. A membership row in
+billing retry with a NULL `grace_period_expires_date` evaluates
+`true AND NULL` → **NULL**, then `false OR NULL` → **NULL**, so `bool_or`
+returned NULL *over a row that exists*. The top-level `coalesce` cannot
+distinguish that from "no rows at all", so the query **fell through to the
+grandfather clause and returned TRUE** for an identity whose real membership
+state said otherwise — **a direct violation of invariant 8, real membership
+state always wins over grandfathering.**
+
+**Fix:** `coalesce()` each term so the row-level expression is strictly
+two-valued. `bool_or` is then NULL if and only if there are no rows, which is
+exactly the distinction the clause ordering depends on. **This is a correctness
+fix that makes the implementation match the frozen architecture, not a change to
+it** — the frozen DDL contained a three-valued-logic bug that violated its own
+stated intent.
+
+**Two assertions were added after the fix**, because the original set did not
+cover the purest shape: **A9d** (every derivation input NULL on a row that
+exists → must be false) and **A9e** (`membership_state` = `expired`, never
+`grandfathered`, for that row).
+
+The second failure, **A4c**, *was* a test bug: `pg_class` matched the ten
+indexes on the new tables alongside the five tables, and an index has
+`relrowsecurity = false` by nature. Fixed with `relkind = 'r'`; RLS was enabled
+on all five tables throughout.
+
+#### Results
+
+| Group | Assertions | Result |
+|---|---|---|
+| Structure | A1, A1b | 5 tables, 3 helpers |
+| Client reachability | A3, A3b, A4, A4b, A4c | **Zero** table grants, column grants and EXECUTE for `anon`/`authenticated`; **zero PUBLIC EXECUTE**; RLS on all five |
+| Derivation | A5–A11b, A28–A28d | Unknown/NULL fail closed; grandfathered true; **expired row beats grandfather**; entitled true; grace only with an unexpired expiry; switch works both ways |
+| Constraints | A12, A23, A25–A25c, Axc | Duplicate `(environment, txn)` refused; duplicate `binding_token` refused; **membership without `binding_method` or `bound_at` refused**; invalid method refused; **`environment = 'Xcode'` refused** |
+| Notification | An1–An3 | Rejected row with **no** UUID accepted; accepted row missing UUID/env/date refused; duplicate UUID refused |
+| Binding lifecycle | A24, A24b, A26, A26b | Binding survives a membership delete; **no FK membership→binding**; binding exists with zero membership rows |
+| Cascade | A13 | Deleting `auth.users` removes membership, binding and cutover rows |
+| Inertness | A14–A16b | Zero policies call `connected_member`; 33 existing policies unchanged; no pre-existing function references membership; nothing scheduled; 5 triggers; local snapshot empty |
+
+**A29–A31 were not run and are recorded as future U5 gates**, as predicted — the
+writers they test do not exist, and a U3 pass would have been manufactured.
+**A24's behavioural half belongs to U7** for the same reason.
+
+#### B-23 gate state after local U3 — expected RED
+
+**149 differences, and every single one is "present locally, absent in
+production".** Zero modified rows; the only non-additive difference in the whole
+comparison remains the one approved `account_id_format` catalog-serialization
+exception. **That shape is the evidence that U3 is purely additive** — it changes
+nothing that exists. The gate returns to green only after the separately
+authorised production deployment and recapture.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not
