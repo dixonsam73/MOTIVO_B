@@ -881,13 +881,128 @@ this pass.
 | C3 | While entitled, sign out of the App Store account in iOS Settings, then foreground Études. **SAME DISPOSITION AS C2** — destructive half superseded by C-1's structural removal of the client deletion pathway; recovery half owned by Phase 3. **One partial observation exists already:** on 2026-08-13 SIWA was performed voluntarily on the lapsed Device B and the app correctly **remained in Solo**, identity intact, backend untouched — an un-entitled session that resolved without destroying anything | **C-1 probe.** Same invariant as C2: dropping to Solo is permitted, destroying anything is not. Backend account survives, Connected credentials remain on the device, and access returns when the entitlement resolves again |
 | C4 | Force-quit during the drop to Solo, relaunch. **SATISFIED BY LATER EVIDENCE — the 2026-08-09 genuine-lapse run, recorded on C-1.** The lapse was observed across a force-quit and relaunch, with `auth.init appleID=true backendID=true token=true` on the far side and the Supabase account still live, proven afterwards by Erase All finding and deleting it | The mode transition completes idempotently. Still no client-initiated deletion. Local data intact |
 | C5 | Let expiry occur, then re-subscribe **before** the server has processed cleanup | Entitlement restored; Connected reactivated; Connected data intact. The server must recognise the renewal and abandon any pending cleanup |
-| C6 | Failed payment on renewal (Billing Grace Period) | Entitlement retained throughout grace. App stays Connected. No cleanup at any point during grace |
-| C7 | **Server authority:** let a subscription expire and grace lapse, then **never launch the app again**. Inspect the backend after the cleanup window | Domain 3 cleanup completes server-side with no device involvement. `posts`, `post_shares`, `connected_attachments`, storage objects and `account_directory` handled per the settled decision. **CORRECTED 2026-08-14 — this row used to say comments authored on others' posts are "retained", which was the pre-2026-08-13 rule and is now wrong.** Expiry cleanup must match `delete_account_v1`'s deployed semantics: comments the departing member **authored** are deleted (`author_user_id` alone), and comments authored by *others* and merely addressed to them **survive** (B-19 — never add `recipient_user_id`). Note the separate question this row does **not** settle: whether expiry cleanup should be identical to account deletion at all is Phase 3's design decision, and if it diverges, say so here explicitly rather than inheriting by default |
+| C6 | Failed payment on renewal (Billing Grace Period). **REWRITTEN 2026-08-16 — see gate G6b below, which is the runnable form of this row.** Reaching this state needs a *billing failure*, not a cancellation: disable **Settings → App Store → Sandbox Account → "Allow Purchases &amp; Renewals"** on the device. Billing retry and grace durations are not separately configurable — Apple derives them from the tester's renewal rate | Entitlement **retained** throughout grace; app stays Connected; no cleanup scheduled at any point during grace. **And the assertion this row did not previously carry: once grace lapses without recovery, billing retry outside grace is NOT entitled** — Apple's formula entitles `isInBillingRetryPeriod` only *combined with* an unexpired `gracePeriodExpiresDate`. Access ends and quarantine starts there |
+| C7 | **Server authority:** let a subscription expire and grace lapse, then **never launch the app again**. Inspect the backend after the cleanup window | Domain 3 cleanup completes server-side with no device involvement. `posts`, `post_shares`, `connected_attachments`, storage objects and `account_directory` handled per the **expiry** retention matrix in `CLAUDE.md`. **THE 2026-08-14 CORRECTION TO THIS ROW IS WITHDRAWN, 2026-08-16.** That correction asserted "expiry cleanup must match `delete_account_v1`'s deployed semantics" on the grounds that retention was "the pre-2026-08-13 rule and is now wrong". **That was an inference, not a decision, and it was unsupported**: the 2026-08-13 revision was scoped to *explicit account deletion* by its own text and justified by Apple's *account-deletion* guidance, which says nothing about subscription expiry; `docs/architecture.md`'s "On expiry" table was untouched by it. The same cell then declared the question open — so this row asserted a requirement and left it unsettled in one breath. **The question is now settled and the answer is that they DIVERGE**, which is exactly what this row asked to be stated explicitly rather than inherited. **Expiry RETAINS** comments the lapsed member authored on other members' surviving posts, and sent attachments while a live recipient reference remains, and retains `auth.users` and the `account_directory` row (undiscoverable, `display_name` intact). **Explicit account deletion still removes them** — `author_user_id` alone — and comments authored by *others* and merely addressed to the departing member survive in both (B-19, never add `recipient_user_id`). Cleanup runs only after a live authoritative Apple read; the 60-day quarantine precedes it. Runnable form: gates G7, G9 and G10 below |
 | C8 | Deliver the same expiry notification twice (replay) | Second delivery is a no-op. No double deletion, no error surfaced, cleanup state unchanged |
 | C9 | Deliver a malformed or unsigned notification | Rejected on signature verification. Nothing is deleted |
 | C10 | **Decoupling:** with cleanup already complete server-side, launch the app while still un-entitled | App is in Solo, local journal intact, no crash and no attempt to reach Domain 3 endpoints. Re-subscribing produces a clean new Connected identity |
 | C11 | ~~**C-19 probe:** set a location while Connected, let membership expire, foreground the app **without opening Profile**~~ **SUPERSEDED BY ARCHITECTURE — C-19 is Resolved, and the mechanism this row probes for no longer exists.** The mounted-`ProfileView` dependency was a *consequence* of the expiry path clearing identity; since C-1, expiry does not clear `backendUserID` at all, so `profile.<backendUserID>.location` stays resolvable and the only code that deletes it is `wipeLocalIdentityForFactoryReset`, reachable solely from Erase All. Corroborated on device: the 2026-08-09 lapse occurred with no `ProfileView` mounted and `auth.init` reported `backendID=true` on relaunch. **Related but NOT covered here:** C-27, the sign-*out* direction, which is a live P3 owned by Phase 5, and which B6 explicitly did not check | Superseded. Location survives expiry unconditionally, with no mounted-view dependency |
 | C12 | Confirm by code inspection and by proxy that Erase All is the **only** client-initiated destructive action remaining. **CODE-INSPECTION HALF SATISFIED; PROXY HALF → PHASE 3.** The inspection has been done three times over and by three different routes, which is why this half is closed rather than merely assumed: C-1's fix removed every client entitlement path to `deleteCurrentConnectedAccount`; C-35's work re-audited the deletion path and found the *second* gate that a name-based grep could not see; and C-28 established by source that `LocalFactoryReset.perform` has exactly two callers, `ProfileView:1671` (Solo) and `:1744` (Connected), differing only in a `reason` string. **The proxy half has never been run — no proxy has been used anywhere in this project — and it is assigned to Phase 3**, which is when a *new* client→deletion path could plausibly appear, since server-side authority is the change that would introduce one. Run it then as a regression on the whole client, not as an archaeology exercise now | Invariant check. Any client path to backend deletion other than Erase All is a regression |
+
+## Phase 3 — server-authoritative membership: PLANNED GATES
+
+**Recorded 2026-08-16 at U0. NONE OF THESE HAS BEEN RUN.** Every row below is a
+plan. No PASS state is recorded anywhere in this section, and none may be added
+until the gate has actually executed against a prediction committed beforehand.
+The scope they implement is frozen in `CLAUDE.md`'s Phase 3 section.
+
+**One environment fact governs the whole group, and it is easy to miss.** Apple
+retries a failed V2 notification five times (1h, 12h, 24h, 48h, 72h) **in
+production only. In the sandbox environment the App Store attempts delivery
+exactly once.** Every run below happens in sandbox, so a single dropped response
+is unrecoverable by retry — which is why reconciliation (G3) is exercised from
+the first run rather than treated as an optimisation.
+
+**Fixture cost for the whole group:** one fresh sandbox tester · Device A ·
+**two subscription cycles on that tester** · Device B read-only as the
+visibility and attribution observer · the B-23 local instance. **No second Apple
+ID, no second device, and Device B is never written to.**
+
+### The lifecycle branches — G6a, G6b, G6c
+
+**These replace a single "cancel → grace → expiry" gate that could never have
+worked.** Voluntary cancellation is a renewal-*preference* change and does not
+produce Billing Grace; grace follows only a *billing failure*. The two are
+mutually exclusive ends of one subscription, so they need two cycles — but one
+tester, because branch B opens with a **resubscription**, and it is the clean
+first-purchase state that the rig cannot cheaply restore, not a resubscription.
+
+| # | Steps | Load-bearing assertions |
+|---|---|---|
+| G6a | **Voluntary cancellation.** Purchase → turn off auto-renew → remain entitled to the paid-through date → expiry | Entitlement is **continuous to the paid-through date**; **Billing Grace is never entered** (its appearance is a fail); at expiry `DERIVE` goes false, the presence is hidden, `pending_cleanup_at` is set. Local journal untouched throughout |
+| G6b | **Billing failure.** Resubscribe → disable **Settings → App Store → Sandbox Account → "Allow Purchases & Renewals"** → renewal fails → Grace → no recovery → retry outside Grace | (1) The record reaches a state where `DERIVE` is true **because of grace** and not an unexpired `renewalDate` — a future `gracePeriodExpiresDate` together with `isInBillingRetryPeriod` — and **access is retained throughout**. (2) After grace lapses without recovery **`DERIVE` becomes false**, presence hidden, quarantine scheduled. (3) Apple's own `status` is consistent at each step |
+| G6c | **Resubscribe during quarantine** — the G6a→G6b transition, scored separately | QA C5. `pending_cleanup_at` cleared; presence visible to Device B again; posts, follows and comments all present and unchanged |
+
+**G6a/G6b assert authoritative state, not notification choreography.** The
+specific `notificationType`/`subtype` sequence delivered, and its ordering, are
+**recorded as observations, not pass/fail** — a surprising sequence is worth
+knowing, but **any sequence Apple legitimately produces that yields the
+authoritative states above is a PASS**. A missing or differently-shaped
+notification is a finding to record, not a lifecycle failure. Genuine fails are:
+access lost during grace; access retained after grace lapses; no quarantine
+scheduled at entitlement loss; or the record disagreeing with Apple when
+reconciled. **This wording exists because the earlier version was brittle enough
+to turn a correct lifecycle into a false failure.**
+
+### Quarantine — Q1 to Q8
+
+**The 60 days is used once, at scheduling; the worker afterwards reads only the
+stored timestamp.** That separation is what lets the duration stay a hard
+constant production cannot shorten, while the worker's deadline behaviour is
+exercised by writing fixture rows whose `pending_cleanup_at` is already past or
+future — **test data in a disposable environment, not a config override, not a
+clock, and not a line of code in the production path.** The reconciliation
+outcomes use a seam that must exist anyway: Apple's sandbox and production App
+Store Server API live on different hosts, so the base URL is necessarily
+configuration.
+
+| # | Assertion | Evidence level |
+|---|---|---|
+| Q1 | Scheduling computes entitlement end + 60 days | **Real Apple sandbox.** Read the row after G6a's genuine expiry: `pending_cleanup_at − entitlement_ended_at = 60d` exactly. Costs no waiting |
+| Q2 | The worker refuses to act before the deadline | Local, deterministic — fixture row with a future deadline |
+| Q3 | Resubscription before the deadline cancels cleanup and restores presence whole | **Real Apple sandbox** — G6c, free |
+| Q4 | After a due deadline the worker becomes eligible | Local, deterministic — fixture row with a past deadline |
+| Q5 | Even when due, cleanup cannot execute without the live Apple read | Local. **The call must be observed to happen BEFORE any mutation** — a worker that deletes first and asks second passes every other row here |
+| Q6 | Apple unreachable or erroring → no cleanup, retried later | Local — stub returns 5xx, then a timeout, then a malformed body. Nothing deleted in any case |
+| Q7 | Apple reporting entitlement → cleanup aborts, schedule clears | Local — stub returns `status 1` |
+| Q8 | Apple confirming non-entitlement → the expiry-specific policy runs | Local for the full retention matrix, **and once for real at G7** |
+
+**Q2 and Q4–Q7 are stronger locally than they could ever be against Apple** —
+Q6's three failure modes cannot be induced against Apple at all.
+
+### The remaining gates
+
+| # | Covers | Notes |
+|---|---|---|
+| G1 | B-4, B-12, B-13, B-9's two-recipient subcase | Local destructive suite on the B-23 instance. Stopping rule below |
+| G2 | C8, C9 | Ingestion in observe-only mode. Per-notification outcome (`applied`/`stale`/`duplicate`/`rejected`); replay yields `duplicate` with no state change; an unsigned payload is rejected before parsing **and answered 200**, since it will never become valid and retrying it achieves nothing |
+| G3 | Missed-notification recovery | With one delivery deliberately dropped, the record still converges to Apple's answer |
+| G4 | B-11 shadow half — **U6a** | Per denied request, **which clause would have decided it**, against a prediction committed before the window opens |
+| G5 | Lapsed-member deletion **reachability only** | **NON-DESTRUCTIVE. The button is not pressed.** Control present and enabled on a lapsed Device A, confirmation sheet reaches its typed-confirmation state, grants and policies for both destructive endpoints unchanged under enforcement. **This is not the executed evidence and must not be recorded as such** |
+| G7 | C7's destructive half | Expiry cleanup on Device A's account, allowlisted. Full blast radius per measure, D14/D15 style, **including the two assertions that prove the policies distinct: a retained comment on another member's post SURVIVES, and `auth.users` SURVIVES** |
+| G8 | C12 proxy half | Zero `delete_account_v1` and zero cleanup-endpoint calls on the wire outside an explicit Erase All |
+| G9 | **Executed lapsed account deletion — LAST** | After G7, on the same identity, no renewal at any point. Possible because expiry retains `auth.users`, the directory row and all device state, so `hasConnectedIdentity` is still true and `ProfileView:1753`'s entitlement-free branch is reachable — **C-35's exact condition.** Post-cleanup the account holds precisely what expiry retained, which deletion must remove, so this is the discriminating pair. **Honest limit: this exercises C-35's *authority* half in full but its blast radius against a reduced account. The full-account version was already device-verified 2026-08-13 and those rows are Resolved; Phase 3 does not owe it again** |
+| G10 | Retained-comment attribution after expiry | **Backend half:** the comment row survives with `author_user_id` intact; `auth.users` and the directory row survive; `display_name` non-empty and unchanged; `avatar_key` null; the by-ids RPC returns the row; `search_account_directory` does not. **Client half:** Device B opens the thread on its own post and the retained comment renders with **the lapsed member's actual display name**. **Fail on** generic `"User"` (`CommentsView:1033` is the exact fallback site), a raw UUID, a blank identity row, a spinner that never resolves, or broken UI. Device B is **read-only** and spends nothing; the fixture is created by G7 itself. This is the expiry-specific *author* direction created by the retention decision — deliberately **not** B-19, which is the deletion *recipient* direction and stays closed |
+| G11 | **Dormant pre-cutover return** | **Runs BEFORE U6b binds**, so a defect costs a fix rather than a lockout. **Server half (local, deterministic):** pre-cutover identity, valid Apple status from the stub, no membership row, grandfather clause disabled → `connected_member()` false before attestation and true after; the row carries Apple's values, not the client's; a 5xx stub leaves **no row and no `pending_cleanup_at`**; a retry succeeds. **Client half (Device A + proxy):** during branch B while genuinely entitled, delete *only* the membership row under explicit authorisation on the disposable account — the simulated-setup pattern D13 used and recorded — disable the clause, cold-launch, and observe that the attestation request is issued **unconditionally, not gated on Connected mode or on a row existing**, the row is created, and Connected is reached without a second launch or a re-purchase. **Stale-session variant:** with the Supabase session no longer refreshable, Sign in with Apple returns the **same** backend identity and attestation then succeeds. **Fail if a new identity is minted or the member lands in a state offering only re-purchase.** Rides on C12's proxy — no new instrument |
+
+### What each U6 gate proves — they do not share one metric
+
+**This distinction is the point.** One metric was standing in for four questions.
+
+| Gate | Answers | Does NOT prove |
+|---|---|---|
+| **U6a** shadow | Are enforcement's *decisions* correct for traffic that occurred? | **Anything about users who generated no traffic** |
+| **U6b** bind | Is it safe to make enforcement binding? Requires **both** zero decisions resting solely on the grandfather clause **and G11 passed**. Snapshot stays active as backstop | That the snapshot is removable |
+| **U6c** remove | Is the migration provenance safe to delete? **Either** every snapshot UID has authoritative membership state **or** twelve months have elapsed since U6b — **and in either case** a final `auth.users.last_sign_in_at` check. **Any snapshot UID that signed in since U6b but still lacks authoritative membership state is evidence that U5 failed for that identity and blocks removal until dispositioned.** Post-phase, dated, owned on B-11 | — |
+| **G11** | Does a dormant pre-cutover payer reach Connected with the clause off? | — |
+
+### Local verification stopping rule — agreed before running
+
+1. **B-23's fidelity gate green at the time of the run**, or the run is not
+   evidence at all — neither pass nor fail.
+2. Predictions committed first.
+3. B-12's fixture **genuinely exceeds 1000 objects** under one prefix. A run at
+   or under 1000 does not count, whatever it shows.
+4. **One successful faithful-local run discharges the obligation at that
+   explicitly qualified evidence level** — recorded as "verified against a
+   faithful local reproduction", **never** "verified in production".
+5. **No production fault-injection run is manufactured to strengthen the
+   wording.** The three routes declined below Group D stay declined.
+6. A failure is a real defect: file, fix, re-run.
+7. **Any subsequent change to `delete_account_v1` invalidates every affected
+   local verification.**
+8. B-4 and B-13 share one induced-failure/retry run and stay **separately
+   scored**.
 
 ## Group D — Destructive (disposable device state)
 

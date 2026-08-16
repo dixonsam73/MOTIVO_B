@@ -12,6 +12,272 @@ directory are all named MOTIVO; the product is `Etudes.app`, display name
 Baseline verified at migration: Debug and Release both compile clean
 (0 errors). See `docs/audit-findings.md` for what the Release build surfaced.
 
+---
+
+# PHASE 3 — SETTLED LIFECYCLE ARCHITECTURE
+
+**Approved and frozen 2026-08-16, before any implementation.** Phase 3 makes
+membership server-authoritative and makes **leaving Connected** a distinct
+lifecycle from **deleting an account**. This section is the durable record of
+what was decided; it is not a description of what is built. **Nothing in Phase 3
+is implemented at the time of writing** beyond U0 (this record) and U1 (the local
+backend baseline).
+
+**Phase 3 accounting at implementation entrance — four counts, deliberately
+separate. Conflating them is how B-9's subcase went missing once already.**
+
+| Count | Value | What it is |
+|---|---|---|
+| Phase-3-tagged register rows | **9** | Every row whose Phase cell contains a literal `3` |
+| Open Phase 3 obligations | **8** | The nine minus C-9, which is Resolved and owes Phase 3 nothing |
+| Backend-verification obligations | **4** | B-4, B-12, B-13, B-9's two-recipient subcase |
+| QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
+
+The nine rows are **C-26, B-11, C-31, B-23, B-4, B-12, B-13, B-9, C-9**. B-23 is
+new in Phase 3 and is the only count-changing addition.
+
+---
+
+## The fundamental rule
+
+**Leaving Connected is not leaving Études.**
+
+A musician may stop paying for Connected temporarily or permanently and continue
+using Études in Solo mode indefinitely. **No subscription lifecycle event may
+delete or reset local Études data** — not cancellation, Billing Grace, Billing
+Retry, expiry, refund or revocation, a missed or delayed notification, a
+reconciliation failure, or resubscription.
+
+The local Journal, sessions and thoughts, Scores, media and attachments,
+profile, settings and every other piece of personal local data remain untouched
+through all of them.
+
+**`LocalFactoryReset.perform` remains reachable only through explicit
+user-confirmed destructive operations.** It has exactly two callers —
+`ProfileView:1680` (Solo erase) and `ProfileView:1753` (Connected delete) — and
+Phase 3 must not add a third. That caller count is a Phase 3 **exit assertion**,
+not a convention, and QA C12's proxy half is its runtime counterpart.
+
+## Expiry is NOT explicit account deletion
+
+**These are two deliberately distinct lifecycle policies on two distinct
+destructive backend paths:** explicit user-triggered account deletion, through
+the established deletion transaction and `delete_account_v1`; and
+server-scheduled expiry cleanup, through its own worker. The first is a
+*request*; the second is a *schedule*. Do not describe them as "two workers", and
+do not reuse `delete_account_v1` as the expiry worker merely because it already
+deletes an account.
+
+**This corrects a conflation, and the reconstruction matters more than the
+correction.** QA C7 was amended on 2026-08-14 to assert that "expiry cleanup must
+match `delete_account_v1`'s deployed semantics", on the grounds that retention
+was "the pre-2026-08-13 rule and is now wrong". **That inference was
+unsupported.** The 2026-08-13 revision (`c4f6d0f`, `dac78af`) was scoped to
+account deletion by its own text — the bullets it removed were unqualified, the
+bullets that replaced them begin "*Deleting a Connected account*" — and it was
+justified by Apple's **account-deletion** guidance, which says nothing about
+subscription expiry. `docs/architecture.md`'s "On expiry" table was never
+touched by any commit in that revision, and is **not** superseded documentation:
+it is the surviving statement of a deliberately different rule, prefaced in its
+own words "*Owner: mixed, deliberately — which is why expiry is not uniform*".
+The same C7 cell then said the question was Phase 3's to decide, so the row
+asserted a requirement and declared the question open in one breath.
+
+### The expiry retention matrix
+
+| Data | Ordinary expiry | Explicit account deletion |
+|---|---|---|
+| Own posts, included attachments, their storage objects | **Removed** | Removed |
+| Post shares, sent (by cascade) and received | **Removed** | Removed |
+| Own received-attachment references | **Removed** | Removed |
+| Follows / social graph, both directions | **Removed** | Removed |
+| `post_comment_views` as viewer | **Removed** | Removed |
+| Sent attachments with **no** live recipient reference | **Removed** | Removed |
+| Avatar storage object | **Removed** | Removed |
+| **Comments authored on other members' surviving posts** | **RETAINED** | Removed (`author_user_id` alone) |
+| **Sent attachments while a live recipient reference remains** | **RETAINED**, row and object, reference-counted on `deleted_at IS NULL` | Removed |
+| `account_directory` row | **RETAINED**, undiscoverable | Removed |
+| `auth.users` | **RETAINED** | Removed, strictly last |
+| Comments authored by others, merely addressed to them | Retained | Retained — B-19, never add `recipient_user_id` |
+| **All local data** | **UNTOUCHED** | Erased, because the user asked |
+
+**Explicit account deletion keeps the already-verified Phase 1 semantics and is
+not weakened by this.** Deletion has two triggers expiry does not: the user asked
+for it, and Apple's guidance requires it. A lapsed member retains a one-tap route
+to delete their account without paying, which removes everything.
+
+**One implementation consequence, worth having early.** Retention of sent
+attachments requires **reference-counted preservation**, which existed as step 2
+of `delete_account_v1` and was deliberately removed on 2026-08-13 — its
+gravestone comment is still in the deployed function. Expiry must re-implement
+it in its own worker. That is an independent reason not to share the deletion
+sequence between the two paths.
+
+## Rejoining
+
+After completed expiry cleanup, **rejoining Connected means a fresh Connected
+content and social presence, not necessarily a new backend UUID.** The retained
+identity may be reused — and in practice will be, because Sign in with Apple
+returns a stable subject for the same Apple ID and development team, so a new
+identity would require deleting the auth user.
+
+**The local Journal never disappeared.** Nothing is restored or reconstructed
+because nothing was lost. A previously shared entry is shared again through the
+ordinary route — open it, edit, save — producing a new Connected post. That is
+why a dormant Connected account need not be kept alive for the musician to
+recover their own work, and it is what makes cleanup safe rather than lossy.
+
+## Quarantine
+
+- Entitlement ends → **Connected access ends**.
+- The Connected presence becomes **invisible to other members immediately**.
+- A **60-day quarantine** begins.
+- Quarantine is an **internal safety mechanism with no user-facing mode or
+  surface**. It must never become a third app mode or a state users depend upon.
+- **Resubscription during quarantine cancels pending cleanup and restores the
+  previous Connected presence whole.**
+- After completed cleanup, resubscription starts a **fresh** Connected content
+  and social presence on the retained identity.
+
+**Rationale, stated precisely because it is easy to overstate: Études chooses 60
+days as its safety/quarantine period, informed by Apple's own ≤60-day
+subscription-continuity boundary** (`recentSubscriptionStartDate` is documented
+as ignoring lapses of 60 days or less). **Apple neither requires nor recommends a
+60-day application-data retention period, and nothing in this record may imply
+that it does.**
+
+**Refund and revocation use the same 60-day quarantine**, deliberately. Apple
+documents `REFUND_REVERSED` — "reinstate content/services if revoked" — so a
+refund is not a terminal signal, and destroying content promptly on one risks
+destroying content Apple may later instruct us to restore. Revocation ends
+*access* immediately; it does not shorten the fuse.
+
+## Cleanup authority — load-bearing
+
+**No stored membership record, notification, scheduled timestamp, client state
+or local cache is sufficient authority for irreversible expiry cleanup.
+Immediately before cleanup, Études must obtain current authoritative
+subscription status from Apple. If that authority cannot be obtained, cleanup
+does not run and is retried later.**
+
+**Notifications may schedule cleanup. They never directly execute it.**
+
+This applies equally to expiry and to refund/revocation quarantine completion.
+It is the reason a replayed, spoofed or mis-ordered notification cannot destroy
+anything on its own.
+
+## Subscription semantics
+
+Entitlement is **derived** from Apple's own service formula, never transitioned
+by notification type:
+
+```
+entitled(now) = renewalDate > now
+             OR (isInBillingRetryPeriod AND gracePeriodExpiresDate > now)
+```
+
+This is identical to what `Transaction.currentEntitlements` resolves on-device —
+it includes `subscribed` and `inGracePeriod`, and excludes expired, refunded and
+revoked — so **client and server can disagree only about freshness, never about
+meaning.**
+
+| State | `status` | Entitled | Notes |
+|---|---|---|---|
+| **Voluntary cancellation** | 1 | **Yes** | Auto-renew off. **A renewal-preference change, not a billing event, and NOT Billing Grace.** Entitled to the paid-through date, then `EXPIRED / VOLUNTARY` |
+| Active / renewed | 1 | Yes | |
+| **Billing Grace** | 4 | **Yes** | `DID_FAIL_TO_RENEW` with subtype `GRACE_PERIOD`. Only a *billing failure* reaches here |
+| **Billing Retry outside Grace** | 3 | **NO** | `isInBillingRetryPeriod` alone does **not** entitle — Apple's formula requires it *combined with* an unexpired grace period. Quarantine starts |
+| Expiry | 2 | No | Subtypes `VOLUNTARY`, `BILLING_RETRY`, `PRICE_INCREASE`, `PRODUCT_NOT_FOR_SALE` |
+| Refund / revocation | 5 | No | Same 60-day quarantine |
+| Refund reversal | 1 | Yes | Cancels pending cleanup |
+| Resubscription | 1 | Yes | Cancels pending cleanup |
+
+**The `Cancel → Grace` conflation must not survive anywhere as current expected
+behaviour.** Historical prediction material may remain where it is clearly marked
+as superseded; it must not be rewritten to look as though it was always right.
+
+## Directory and attribution
+
+Recorded as contract. **None of this is implemented in U0.**
+
+- `search_account_directory` respects Connected eligibility as ultimately
+  implemented, so a **lapsed member becomes undiscoverable**.
+- **`get_account_directory_by_user_ids` must continue resolving retained authors
+  for entitled viewers.** These are two separate deployed RPCs, which is the only
+  reason undiscoverability and attribution can coexist — and it makes the
+  separation load-bearing rather than incidental.
+- **Expiry retains the directory row and `display_name`.** Clearing either would
+  break attribution for every retained comment while appearing to satisfy
+  "undiscoverable".
+- Expiry removes the avatar object and clears `avatar_key` **only after
+  successful object removal** — C-33's ordering lesson, applied to the expiry
+  path. The predicted render for a retained comment is therefore initials, not a
+  photo and not a broken image.
+
+## Existing-member rollout
+
+The approved temporary cutover compatibility design:
+
+- **U3 captures a frozen pre-enforcement identity snapshot** at deploy.
+- **Real membership state always takes precedence** over the snapshot.
+- The snapshot is a **bounded compatibility mechanism** for pre-cutover users
+  whose authoritative membership row has not yet been established.
+- **Post-cutover identities with no membership record are not entitled merely
+  because no record exists.** Absence is never entitlement.
+- **Absence of a membership record can never schedule cleanup** —
+  `pending_cleanup_at` is only ever set when a membership row's derived
+  entitlement transitions from true to false, so a user with no row has nothing
+  to transition. This is structural and holds independently of the snapshot.
+
+**It is not a backfill, and calling it one would be wrong.** `Get Notification
+History` can enumerate `originalTransactionId` values server-side, but the app
+does **not** set `appAccountToken` — `product.purchase()` is called with no
+options anywhere in the source — so nothing on Apple's side or ours maps a
+subscription to a Supabase user. Client participation is required.
+
+### The load-bearing U5 invariant
+
+**Attestation/reconciliation fires whenever `(locally entitled ∧
+hasConnectedIdentity)` holds, including at launch and on every foreground, and
+is never gated on Connected mode already being active or on a membership row
+already existing.**
+
+This is what makes a dormant pre-cutover subscriber's return self-healing within
+a single launch. It was chosen over making activation *await* attestation,
+deliberately: that would put a network round trip on a cold-launch path that is
+entirely local today, and would invert the settled split in which the client
+governs UI reversibly and the server governs the API authoritatively. The worst
+case under the chosen design is a few denied requests in the first seconds of a
+cold launch. **Not a lockout.**
+
+### U6c — removing the snapshot
+
+**U6c may remove the migration snapshot when either:**
+
+1. **every snapshot UID has acquired authoritative membership state; or**
+2. **twelve months have elapsed since U6b binding**
+
+**— and, before removal in either case, a final `auth.users.last_sign_in_at`
+safety check is performed.**
+
+**The safety check is meaningful, not ceremonial. Any snapshot UID that has
+signed in since U6b but still lacks authoritative membership state is evidence
+that U5 migration/reconciliation failed for that identity, and blocks snapshot
+removal until dispositioned.**
+
+**"Zero grandfather-dependent requests in the shadow window" must never stand in
+for U6c safety.** The shadow metric proves something about *observed traffic*
+only, and a dormant subscriber generates none. That distinction is the whole
+point: four different questions were sharing one metric.
+
+**Phase 3 is explicitly allowed to close with the bounded snapshot still
+present.** U6c is therefore a **dated, owned post-phase obligation recorded on
+B-11** rather than something forced to happen inside the phase. Forcing removal
+to fit a phase boundary would be the opposite of the discipline that says no
+obligation may be ownerless.
+
+---
+
 **PHASE 2 IS FORMALLY CLOSED — 2026-08-15.** C-4 is **Resolved**: built as units
 U1–U6 plus a bounded D1–D6 remediation, and discharged on a **genuine encrypted
 Finder backup → restore onto Device A**, scored against predictions committed
@@ -504,13 +770,39 @@ statuses to improve the numbers.** An item that is open stays open.
 SUPERSEDES THE 2026-08-14 DESCRIPTION, WHICH IS NOW WRONG IN EVERY PARTICULAR
 FOR DEVICE A.**
 
-**Device A holds NO account, NO identity and NO fixture. It sits at first-launch
-onboarding.** The Connected identity it carried through Phase 2 —
+**Device A holds NO usable Connected identity, account state or fixture. It sits
+at first-launch onboarding.** The Connected identity it carried through Phase 2 —
 `cfadb7cb-12d3-47cc-ac79-c574e5341eb1`, restored intact from the encrypted backup
 — was **deleted by the D15 destructive run on 2026-08-15**, a legitimate gate,
 not an accident. The container went with it: all 8 `Documents` files, `Scores`,
 the Scores index, the journal and the root `AttachmentPrivacy.json`. Backend
 counts dropped as predicted (`auth.users` 16 → 15).
+
+**CORRECTED 2026-08-16 — `auth.users` is 16, not 15, and the device statement and
+the backend statement are not the same statement.** D15's deletion landed exactly
+as recorded; `cfadb7cb…` is provably absent. **A subsequent Sign in with Apple on
+2026-08-15 20:08:05 UTC — after the run, ~34 minutes before the closure commit —
+minted a new backend identity `5ae3faab…`**, which still exists. It has **no
+`account_directory` row and zero Domain 3 residue**: 0 posts, follows, comments,
+attachments and storage objects.
+
+**The mechanism is explained by source, not merely consistent with a story.**
+`AuthManager:596` guards the directory publish with
+`guard !displayNameToPublish.isEmpty else { return }`, and its failure branch
+only logs, under `#if DEBUG`. A sign-in on a device with no local profile name —
+which is exactly what a factory-reset Device A had — mints `auth.users` and never
+attempts the directory upsert. **Every new member passes through that state**, so
+it is the normal first-run shape rather than an anomaly; the earlier
+`44a6018e…` instance noted on 2026-08-13 had the same shape.
+
+**The Apple credential has since been manually revoked**, so no client can
+currently authenticate to that identity — which is why Device A holds nothing
+usable while the backend identity remains. **Retained as evidence, not deleted to
+tidy the count.** It is **not** a C-36 fixture and must not be used as one: its
+credential is revoked and it has already authenticated. It is a **Phase 3
+reference case**, being the first observed instance of the "authenticated, no
+membership record" state, and Phase 3's cleanup selector must key on
+`pending_cleanup_at` alone so that identities of this shape can never be swept.
 
 **The Phase 2 fixture no longer exists and cannot be re-created cheaply.** The
 pre-Phase-2 media, the privacy map and the adopted-Score control were all
@@ -650,12 +942,18 @@ These are interaction principles rather than architectural invariants.
   have a persistent "Default to Private Posts" preference. Copy must describe
   this accurately rather than claiming "private by default" of Connected.
 - Client StoreKit governs Études vs Connected (access only). Apple's App Store
-  Server Notifications are the sole authority for membership-expiry deletion.
-  Explicit user-triggered **Erase All Études Data** remains a valid
-  client-initiated destructive action.
+  Server Notifications are the authority that **schedules** membership-expiry
+  cleanup — **they never execute it**. A live authoritative read from Apple
+  immediately before cleanup is required, and cleanup does not run without one.
+  See "Cleanup authority" under the Phase 3 section. Explicit user-triggered
+  **Erase All Études Data** remains a valid client-initiated destructive action.
 - Expiry removes Connected, not the musician. Local journal, Scores, media,
   profile name, avatar, location, instruments, activities, settings and
-  preferences all survive untouched.
+  preferences all survive untouched. **What expiry removes and retains on the
+  *backend* is a separate, deliberately distinct policy from account deletion —
+  see the Phase 3 expiry retention matrix.** `CLAUDE.md` was silent on backend
+  expiry semantics between `dac78af` (2026-08-13), which narrowed the retention
+  bullets to deletion, and the Phase 3 record above.
 - **Deleting a Connected account deletes the departing member's own backend
   UGC** — their comments on others' posts, and the Connected attachments they
   sent, rows and objects, even where recipients hold live inbox references.
@@ -695,7 +993,13 @@ before moving on. Six bounded, separately reviewable phases — not one rewrite.
    data, including the reconciliation pass for already-excluded media. Keep
    excluding staging and timer scratch.
 3. **Membership authority** — server-side entitlement state; App Store Server
-   Notifications; Billing Grace; replay protection; idempotent processing.
+   Notifications; Billing Grace **enabled Sandbox-first and only promoted to
+   production after handling is accepted**; replay protection; idempotent
+   processing. Plus the expiry lifecycle — invisible presence on lapse, a 60-day
+   quarantine, and cleanup under its own retention policy by its own worker,
+   gated on a live Apple read. Plus B-23's reproducible local backend and the
+   four carried backend verifications it unblocks. Scope frozen 2026-08-16; see
+   the Phase 3 section at the top of this file.
 4. **Shared-only architecture** — shared-only uploads; remove the accidental
    analytics mirror; purge historic unshared rows; align onboarding, settings
    and App Store privacy disclosures.

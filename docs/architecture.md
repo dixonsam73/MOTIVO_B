@@ -83,16 +83,41 @@ attachments.
 **Does not contain:** unshared sessions, private notes, attachments not
 explicitly included, the Scores library, tasks, threads, insights, timer state.
 
-**Owner:** mixed, deliberately — which is why expiry is not uniform:
+**Owner:** mixed, deliberately — which is why expiry is not uniform.
 
-| Data | On expiry |
-|---|---|
-| Own posts + included attachments | Deleted (local originals survive) |
-| Directory identity + avatar | Deleted; handle released and regenerable |
-| Social graph | Edges removed both directions |
-| Comments on others' posts | **Retained** — part of someone else's history |
-| Own received-attachment references | Deleted |
-| Attachments sent to others | **Retained** while live recipient references exist |
+**REAFFIRMED 2026-08-16 AT THE PHASE 3 ENTRANCE. This table is NOT superseded,
+and it nearly was.** It states the **expiry** rule. The 2026-08-13 revision
+(`c4f6d0f`, `dac78af`) that made a departing member's own backend UGC deletable
+was scoped to **explicit account deletion** by its own text, and justified by
+Apple's **account-deletion** guidance, which says nothing about subscription
+expiry. No commit in that revision touched this file. A later reconciliation
+(`0f5896d`, 2026-08-14) nonetheless amended QA C7 to assert that expiry "must
+match `delete_account_v1`'s deployed semantics" — an inference, not a decision,
+and one the same cell simultaneously declared open. **That inference is
+withdrawn.** Expiry and explicit account deletion are two deliberately distinct
+lifecycle policies; see the Phase 3 retention matrix in `CLAUDE.md`.
+
+| Data | On expiry | On explicit account deletion |
+|---|---|---|
+| Own posts + included attachments | Deleted (local originals survive) | Deleted |
+| Post shares, sent and received | Deleted | Deleted |
+| Own received-attachment references | Deleted | Deleted |
+| Social graph | Edges removed both directions | Removed |
+| `post_comment_views` as viewer | Deleted | Deleted |
+| Avatar object | Deleted; `avatar_key` cleared only after the object is provably gone | Deleted |
+| Directory discoverability | **Removed — the member becomes undiscoverable** | n/a |
+| **`account_directory` row** | **RETAINED, with `display_name` intact** — retained comments need an author | Deleted |
+| **`auth.users`** | **RETAINED** — deleting it would be an account deletion nobody requested | Deleted, strictly last |
+| Comments on others' posts | **Retained** — part of someone else's history | Deleted (`author_user_id` alone) |
+| Attachments sent to others | **Retained** while live recipient references exist | Deleted |
+| Comments by others, merely addressed to them | Retained | Retained (B-19) |
+| All local data | Untouched | Erased, because the user asked |
+
+**Two rows are new rather than changed**, and they were always implied by the
+others: the identity must survive expiry, because the table already retained
+comments that need an author, and because the settled rejoin model reuses it.
+"Handle released and regenerable" is therefore withdrawn for expiry — the row is
+retained and made undiscoverable instead.
 
 ---
 
@@ -102,12 +127,24 @@ explicitly included, the Scores library, tasks, threads, insights, timer state.
 
 - **Client StoreKit entitlement → access only.** Solo vs Connected UI.
   Reversible, self-correcting, cheap to get wrong.
-- **Apple's App Store Server Notifications → irreversible deletion only.**
-  Authoritative, server-to-server, immune to local cache state.
+- **Apple's App Store Server Notifications → irreversible cleanup only, and
+  only to SCHEDULE it.** Authoritative, server-to-server, immune to local cache
+  state. **Notifications never execute cleanup.** A live authoritative read from
+  Apple immediately before destruction is required; if it cannot be obtained,
+  cleanup does not run and is retried later.
 
-Apple's billing grace period absorbs card failures at the right layer. On
-genuine expiry Apple notifies the server; the server performs the Domain 3
-cleanup; the client independently drops to Solo. Neither waits on the other.
+Apple's billing grace period absorbs card failures at the right layer. **Stated
+as design intent rather than as fact: Billing Grace is a configured App Store
+Connect feature and is NOT yet enabled (C-31).** Until it is, a card failure
+produces billing retry with no grace, and Apple's own service formula treats that
+as **not entitled** — `isInBillingRetryPeriod` entitles only *combined with* an
+unexpired `gracePeriodExpiresDate`. Phase 3 enables it **Sandbox-first** and
+promotes it to production only after handling is accepted.
+
+On genuine expiry Apple notifies the server; the server schedules Domain 3
+cleanup behind a 60-day quarantine and performs it only after a live Apple read
+confirms non-entitlement; the client independently drops to Solo. Neither waits
+on the other.
 
 Membership reaches into exactly one domain. Paying or not changes what you can
 *share*, never what you *have*.

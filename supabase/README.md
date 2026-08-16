@@ -129,9 +129,31 @@ through the Storage API, which removes both.
 
 ### SQL
 
-No migrations until Phase 3, which is a deliberate deferral — migration tooling
-needs a local instance, and introducing that mid-Phase-1 would have been an
-interruption rather than progress. Until then:
+**Phase 3 U1 / B-23 introduces migrations and a local instance.** The deferral
+recorded here since Phase 1 is discharged as a decision at U0; the operating
+instructions land with U1, which is the unit that builds it.
+
+**Two things are now tracked, and confusing them defeats the point:**
+
+| | What it is | Authority for |
+|---|---|---|
+| `supabase/schema/` | A **structural snapshot** — what production *looks like*, captured after the fact | **Observed truth.** The comparison authority the baseline is measured against |
+| `supabase/migrations/` | **Committed migrations** — a definition the backend can be *rebuilt from* | **Reproducible source.** What the local instance is built from |
+
+**Local verification is NOT production verification, and the distinction is
+load-bearing rather than pedantic.** A faithful local reproduction runs the same
+software; it is not the same deployment. Storage-listing semantics, PostgREST
+error shapes and the exact response to a delete of a missing object are all
+things this project has already been caught assuming — C-33's cell says so in as
+many words. Anything verified locally is recorded as **"verified against a
+faithful local reproduction"**, never as "verified in production", and the
+residual gap is stated rather than glossed.
+
+**Production is not re-based onto the migration history.** B-23 delivers a
+faithful reproduction; production remains exactly as it is. Applying migrations
+to production is explicitly out of scope.
+
+The applied-change workflow below is unchanged and still governs production:
 
 1. Write the change and get it reviewed **as a diff**, in a commit, before it
    is applied.
