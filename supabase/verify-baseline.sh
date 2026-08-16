@@ -2,17 +2,24 @@
 #
 # B-23 fidelity gate — Phase 3 U1.
 #
-# Captures the ten structural queries from the LOCAL instance and diffs them
+# Captures the ten structural surfaces from the LOCAL instance and compares them
 # against the committed supabase/schema/ snapshot, which is observed production
 # truth and the authority in this comparison.
 #
-# ALL TEN MUST DIFF EMPTY. That is the whole gate. Anything less is not a
-# faithful baseline, and no verification run against it counts.
+# The criterion is enforced by check-baseline.py, and it is deliberately not
+# "eyeball the diff":
 #
-# This script must never be made to pass by normalising away a genuine
-# structural difference. If a difference is deterministic and semantically
-# irrelevant, report it and get the criterion changed deliberately — do not
-# redefine "empty diff" here.
+#   - every surface reproducible byte-identically MUST be byte-identical;
+#   - a catalog-serialization difference is tolerated ONLY if it is declared in
+#     baseline-exceptions.json with evidence that it is PostgreSQL
+#     normalization/history rather than a semantic difference;
+#   - each declared exception is still DETECTED and verified to be exactly the
+#     approved difference, on both the production and the local side;
+#   - a new difference, a changed difference, or a declared exception that no
+#     longer appears all FAIL the gate.
+#
+# Never make this pass by normalising a difference away. If one is genuinely
+# irreproducible, evidence it and add it to the allowlist deliberately.
 #
 # Requires: a running local stack (`supabase start`), and therefore a container
 # runtime. Does not touch production.
@@ -21,9 +28,6 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-FILES=(functions policies rls_enabled triggers constraints columns
-       function_grants table_grants column_grants storage_buckets)
-
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
@@ -31,37 +35,4 @@ echo "Capturing local structural snapshot..."
 ./supabase/capture-schema.sh --local "$TMP" > /dev/null
 
 echo
-echo "B-23 fidelity gate — local baseline vs supabase/schema/"
-echo
-
-pass=0
-fail=0
-for f in "${FILES[@]}"; do
-  if diff -q "supabase/schema/$f.json" "$TMP/$f.json" > /dev/null 2>&1; then
-    printf "  %-18s EMPTY\n" "$f"
-    pass=$((pass + 1))
-  else
-    printf "  %-18s DIFFERS\n" "$f"
-    fail=$((fail + 1))
-  fi
-done
-
-echo
-echo "  $pass of ${#FILES[@]} empty"
-
-if [ "$fail" -ne 0 ]; then
-  echo
-  echo "GATE NOT MET. Differences:"
-  for f in "${FILES[@]}"; do
-    if ! diff -q "supabase/schema/$f.json" "$TMP/$f.json" > /dev/null 2>&1; then
-      echo
-      echo "--- $f ---"
-      diff "supabase/schema/$f.json" "$TMP/$f.json" || true
-    fi
-  done
-  exit 1
-fi
-
-echo
-echo "GATE MET. The local baseline reproduces production structurally."
-echo "This is NOT production verification — see supabase/README.md."
+exec python3 ./supabase/check-baseline.py "$TMP"

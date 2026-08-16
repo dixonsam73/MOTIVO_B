@@ -1,167 +1,233 @@
 [
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "add_post_comment"
+    "proname": "add_post_comment",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "add_post_comment"
+    "proname": "add_post_comment",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "add_post_comment"
+    "proname": "add_post_comment",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "enforce_connected_attachment_recipient_update"
+    "proname": "enforce_connected_attachment_recipient_update",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "enforce_connected_attachment_recipient_update"
+    "proname": "enforce_connected_attachment_recipient_update",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "enforce_connected_attachment_recipient_update"
+    "proname": "enforce_connected_attachment_recipient_update",
+    "public_execute": true
   },
   {
     "can_execute": false,
+    "direct_execute": false,
     "grantee": "anon",
-    "proname": "follow_requests_open"
+    "proname": "follow_requests_open",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "follow_requests_open"
+    "proname": "follow_requests_open",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "follow_requests_open"
+    "proname": "follow_requests_open",
+    "public_execute": false
   },
   {
     "can_execute": false,
+    "direct_execute": false,
     "grantee": "anon",
-    "proname": "get_account_directory_by_user_ids"
+    "proname": "get_account_directory_by_user_ids",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "get_account_directory_by_user_ids"
+    "proname": "get_account_directory_by_user_ids",
+    "public_execute": false
   },
   {
     "can_execute": false,
+    "direct_execute": false,
     "grantee": "service_role",
-    "proname": "get_account_directory_by_user_ids"
+    "proname": "get_account_directory_by_user_ids",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "get_unread_private_comment_groups"
+    "proname": "get_unread_private_comment_groups",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "get_unread_private_comment_groups"
+    "proname": "get_unread_private_comment_groups",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "get_unread_private_comment_groups"
+    "proname": "get_unread_private_comment_groups",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "has_unread_private_comments"
+    "proname": "has_unread_private_comments",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "has_unread_private_comments"
+    "proname": "has_unread_private_comments",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "has_unread_private_comments"
+    "proname": "has_unread_private_comments",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "mark_post_comments_viewed"
+    "proname": "mark_post_comments_viewed",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "mark_post_comments_viewed"
+    "proname": "mark_post_comments_viewed",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "mark_post_comments_viewed"
+    "proname": "mark_post_comments_viewed",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "reply_to_commenter"
+    "proname": "reply_to_commenter",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "reply_to_commenter"
+    "proname": "reply_to_commenter",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "reply_to_commenter"
+    "proname": "reply_to_commenter",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "respond_to_commenters"
+    "proname": "respond_to_commenters",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "respond_to_commenters"
+    "proname": "respond_to_commenters",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "respond_to_commenters"
+    "proname": "respond_to_commenters",
+    "public_execute": true
   },
   {
     "can_execute": false,
+    "direct_execute": false,
     "grantee": "anon",
-    "proname": "search_account_directory"
+    "proname": "search_account_directory",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "search_account_directory"
+    "proname": "search_account_directory",
+    "public_execute": false
   },
   {
     "can_execute": false,
+    "direct_execute": false,
     "grantee": "service_role",
-    "proname": "search_account_directory"
+    "proname": "search_account_directory",
+    "public_execute": false
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "anon",
-    "proname": "whoami"
+    "proname": "whoami",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
-    "proname": "whoami"
+    "proname": "whoami",
+    "public_execute": true
   },
   {
     "can_execute": true,
+    "direct_execute": true,
     "grantee": "service_role",
-    "proname": "whoami"
+    "proname": "whoami",
+    "public_execute": true
   }
 ]

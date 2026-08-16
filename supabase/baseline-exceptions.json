@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "_comment": [
+    "Approved catalog-serialization exceptions to the B-23 fidelity gate.",
+    "",
+    "An entry here is NOT a waiver. verify-baseline.sh still detects the",
+    "difference and asserts it is EXACTLY this one, in both directions: if the",
+    "production value moves, if the local value moves, if a second difference",
+    "appears in the same file, or if this difference stops appearing, the gate",
+    "FAILS. A stale allowlist is a failure, not a pass.",
+    "",
+    "Admissible only for a difference individually demonstrated to be",
+    "PostgreSQL normalization or catalog history rather than a semantic or",
+    "schema difference. Never add a broad whitespace or parenthesis rule: that",
+    "would conceal genuine future differences, which is the opposite of what",
+    "this file is for."
+  ],
+  "exceptions": [
+    {
+      "file": "constraints",
+      "key": {
+        "table_name": "account_directory",
+        "conname": "account_id_format"
+      },
+      "field": "definition",
+      "production": "CHECK (((account_id IS NULL) OR (((char_length(account_id) >= 3) AND (char_length(account_id) <= 24)) AND (account_id ~ '^[a-z0-9_]+$'::text))))",
+      "local": "CHECK (((account_id IS NULL) OR ((char_length(account_id) >= 3) AND (char_length(account_id) <= 24) AND (account_id ~ '^[a-z0-9_]+$'::text))))",
+      "class": "catalog-serialization",
+      "approved": "2026-08-16",
+      "equivalence": "Logically identical. AND is associative; production stores a left-nested two-way AND, local a flat three-way AND. No query, constraint check or error message can distinguish them.",
+      "evidence": [
+        "Both servers are PostgreSQL 17.6 (verified with select version() on each), so this is not a major-version difference.",
+        "Feeding production's own emitted expression straight back into PostgreSQL 17.6 produces the FLAT form, so production's representation cannot be round-tripped from its own rendering.",
+        "A RIGHT-nested source expression IS preserved verbatim, which shows the parser flattens left-nesting specifically rather than normalising all nesting.",
+        "Therefore no migration SQL can produce production's catalog representation on 17.6; it is inherited catalog history, almost certainly carried through a major-version upgrade."
+      ],
+      "removal_condition": "Remove this entry if production's stored representation ever becomes reproducible from SQL — for example after a schema change that rewrites the constraint. The gate will fail the moment that happens, which is the intended prompt to revisit it."
+    }
+  ]
+}

@@ -206,9 +206,10 @@ ever.
 ./supabase/verify-baseline.sh
 ```
 
-Captures the same ten structural queries from the local instance and diffs them
-against `supabase/schema/`. **All ten must diff empty.** That is B-23's whole
-acceptance criterion.
+Captures the same ten structural surfaces from the local instance and compares
+them against `supabase/schema/` via `check-baseline.py`, which enforces the
+criterion below. **It exits non-zero on any unapproved difference**, so it is an
+executable gate rather than an instruction to inspect and excuse a diff.
 
 ```bash
 ./supabase/capture-schema.sh --local <outdir>    # the capture on its own
@@ -240,48 +241,90 @@ many words. Anything verified locally is recorded as **"verified against a
 faithful local reproduction"**, never as "verified in production", and the
 residual gap is stated rather than glossed.
 
-### KNOWN DIFFERENCE — the gate is currently 9 of 10, and B-23 is NOT resolved
+### The acceptance criterion, stated so it cannot drift into "close enough"
 
-`constraints.json` differs in exactly one row, and only in parenthesisation:
+**Faithful database reproduction and byte-identical catalog serialization are
+not the same thing**, and B-23 distinguishes them explicitly rather than
+informally.
+
+1. **Every surface that CAN be reproduced byte-identically MUST be.**
+2. A **catalog-serialization exception** is permissible only where it is
+   **individually demonstrated** to be PostgreSQL normalization or catalog
+   history rather than a semantic or schema difference.
+3. Every such exception is **declared in `baseline-exceptions.json`** with its
+   evidence, narrowly keyed to one row and one field.
+4. The tooling **still detects the difference** and verifies it is *exactly* the
+   approved one — production side, local side, and the identified row.
+5. **Anything else fails**: a new difference, a changed difference, a difference
+   in a file with no exceptions, or a declared exception that **no longer
+   appears**. A stale allowlist is a failure, not a pass.
+
+**There is no whitespace or parenthesis normalizer, deliberately.** A broad
+normalization rule would conceal genuine future differences, which is the
+opposite of what the gate is for. Nothing is rewritten to compare equal; the
+comparison is exact and the residue is checked against a narrow allowlist.
+
+### The one approved exception — `account_directory.account_id_format`
 
 ```
 production  CHECK (((account_id IS NULL) OR (((char_length(account_id) >= 3) AND (char_length(account_id) <= 24)) AND (account_id ~ '...'))))
 local       CHECK (((account_id IS NULL) OR ((char_length(account_id) >= 3) AND (char_length(account_id) <= 24) AND (account_id ~ '...'))))
 ```
 
-`account_directory.account_id_format`. Production's stored parse tree is a
-**left-nested** two-way AND; local's is a **flat three-way** AND. The two are
-logically identical — `AND` is associative — and no behaviour can distinguish
-them.
+Production stores a **left-nested** two-way `AND`; local reproduces a **flat
+three-way** `AND`. Logically identical — `AND` is associative — and no query,
+constraint check or error message can distinguish them.
 
-**It was not assumed to be irreproducible. It was tested.** Both servers are
-PostgreSQL **17.6**, so it is not a version artefact. Feeding production's own
-rendered text straight back into 17.6 produces the **flat** form, so the shape
-cannot be round-tripped; a **right**-nested source *is* preserved, which shows
-the parser flattens left-nesting specifically. **No SQL text produces
-production's shape on 17.6**, so it is almost certainly a catalog artefact
-carried through a major-version upgrade.
+**It was not assumed to be irreproducible. It was tested, and the test is the
+reason it is admissible:**
 
-**The gate has NOT been weakened and this difference has NOT been normalised
-away.** `verify-baseline.sh` still fails on it, deliberately. B-23 stays open
-until the criterion is either met or changed by an explicit decision.
+- Both servers are PostgreSQL **17.6** (`select version()` on each), so it is
+  not a major-version difference.
+- Feeding **production's own emitted expression** straight back into 17.6
+  produces the **flat** form — production's representation cannot be
+  round-tripped from its own rendering.
+- A **right**-nested source *is* preserved verbatim, showing the parser flattens
+  left-nesting specifically rather than normalising all nesting.
+- Therefore **no migration SQL produces production's representation on 17.6**.
+  It is inherited catalog history, almost certainly carried through a
+  major-version upgrade.
 
-### A gap in the gate itself, found while closing it
+It is removed from the allowlist the moment production's representation becomes
+reproducible — for example after a schema change that rewrites the constraint.
+The gate fails at that point, which is the intended prompt to revisit it.
 
-`function_grants` records `has_function_privilege(role, oid, 'EXECUTE')`, which
-answers *"can this role execute?"* — true whether the privilege is held directly
-or inherited from `PUBLIC`. Postgres grants `EXECUTE` to `PUBLIC` by default, so
-a baseline that revokes only from `anon`, `authenticated` and `service_role`
-leaves everything executable while the snapshot still reports the expected
-values for those three roles. **The baseline therefore revokes from `PUBLIC`
-first**, and that is what makes B-5's directory hardening reproduce.
+### `function_grants` — widened, because the old capture had a blind spot
 
-**The gate cannot see this on its own.** A function whose production `PUBLIC`
-grant is revoked but whose three role columns are all `true` would compare equal
-while differing underneath. Worth widening the snapshot to record the `PUBLIC`
-privilege directly — noted, not done, because changing the ten captured queries
-changes the committed snapshot and that is a deliberate act, not a side effect of
-U1.
+The previous definition captured `has_function_privilege(role, oid, 'EXECUTE')`
+alone. That answers *"can this role execute?"* — **true whether the privilege is
+held directly or inherited from `PUBLIC`.** Postgres grants `EXECUTE` to
+`PUBLIC` by default, so that single column **cannot distinguish B-5's hardened
+directory RPCs from a function nobody has touched.**
+
+`get_unread_private_comment_groups` is the proof: in production `PUBLIC` is
+revoked and all three roles hold direct grants, and the old column rendered that
+identically to the default state.
+
+Three columns now:
+
+| Column | Question |
+|---|---|
+| `can_execute` | **Effective** — direct *or* via `PUBLIC`. The old meaning, kept so "who can call this?" is still answerable in one place |
+| `direct_execute` | Is there an **explicit ACL entry** for this role? |
+| `public_execute` | Does **`PUBLIC`** hold `EXECUTE` on this function? |
+
+`aclexplode()` reads the real ACL; `proacl` is `NULL` for a function nobody has
+granted on, so `acldefault('f', proowner)` supplies the implicit default rather
+than the row reading as "no privileges". `grantee = 0` is `PUBLIC`.
+
+**Consequence for the baseline:** it must `REVOKE EXECUTE … FROM PUBLIC` on the
+four hardened functions before granting, or B-5's hardening does not reproduce.
+Revoking from the three roles alone leaves everything executable.
+
+**The production snapshot and the local capture were established
+independently** under the widened definition — production re-captured
+read-only, local rebuilt from committed migrations — so the agreement is a
+result, not an artefact of changing the question.
 
 ### B-7 / B-10 drops — expected snapshot delta, written before applying (2026-08-14)
 

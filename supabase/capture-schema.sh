@@ -81,7 +81,32 @@ q constraints "select conrelid::regclass::text as table_name, conname, pg_get_co
 
 q columns "select table_name, column_name, ordinal_position, data_type, is_nullable, column_default from information_schema.columns where table_schema='public' order by table_name, ordinal_position;"
 
-q function_grants "select p.proname, r.rolname as grantee, has_function_privilege(r.rolname, p.oid, 'EXECUTE') as can_execute from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' order by 1,2;"
+# Function EXECUTE privileges.
+#
+# WIDENED 2026-08-16 (Phase 3 U1 / B-23) because the previous definition had a
+# security-relevant blind spot, and it was found by a baseline that passed while
+# being wrong underneath.
+#
+# It captured `has_function_privilege(role, oid, 'EXECUTE')` alone, which answers
+# "can this role execute?" — true whether the privilege is held DIRECTLY or
+# inherited from PUBLIC. Postgres grants EXECUTE to PUBLIC by default, so that
+# single column cannot distinguish B-5's hardened directory RPCs from a function
+# left at the default. `get_unread_private_comment_groups` is the proof: in
+# production PUBLIC is revoked and all three roles hold direct grants, which the
+# old column rendered identically to a function nobody had touched.
+#
+# Three columns now, and each answers a different question:
+#
+#   can_execute     effective — direct OR via PUBLIC. What the old column meant,
+#                   retained so the security question "who can call this?" is
+#                   still answerable in one place.
+#   direct_execute  is there an explicit ACL entry for this role?
+#   public_execute  does PUBLIC hold EXECUTE on this function?
+#
+# aclexplode() reads the real ACL. proacl is NULL for a function nobody has
+# granted on, so acldefault('f', proowner) supplies the implicit default rather
+# than the row silently reading as "no privileges". grantee = 0 is PUBLIC.
+q function_grants "select p.proname, r.rolname as grantee, has_function_privilege(r.rolname, p.oid, 'EXECUTE') as can_execute, exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.privilege_type='EXECUTE' and a.grantee=r.oid) as direct_execute, exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where a.privilege_type='EXECUTE' and a.grantee=0) as public_execute from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select oid, rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' order by 1,2;"
 
 # Table and column privileges.
 #
