@@ -29,23 +29,40 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Count | Value | What it is |
 |---|---|---|
 | Phase-3-tagged register rows | **9** | Every row whose Phase cell contains a literal `3` |
-| Open Phase 3 obligations | **7** | Was 8 at entrance. **B-23 Resolved 2026-08-16 by U1** |
-| Backend-verification obligations | **4** | B-4, B-12, B-13, B-9's two-recipient subcase |
+| Open Phase 3 obligations | **3** | Was 8 at entrance, 7 after U1. **U2 discharged four more on 2026-08-16** |
+| Backend-verification obligations | **0** | Was 4. **All four executed by U2** |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nine rows are **C-26, B-11, C-31, B-23, B-4, B-12, B-13, B-9, C-9**. B-23 was
-new in Phase 3 and was the only count-changing addition.
+new in Phase 3 and was the only count-changing addition; the row count itself has
+not moved since.
 
 **The open-obligation arithmetic, shown rather than asserted.** Nine tagged rows,
-minus **C-9** (Resolved 2026-08-12, in the denominator only because its phase
-cell contains a `3`), minus **B-23** (Resolved 2026-08-16 by U1) = **7 open**:
-C-26, B-11, C-31, B-4, B-12, B-13 and B-9's two-recipient subcase. Note B-9's
-row is itself **Resolved** and still carries an open obligation — a Resolved row
-contributes nothing to a carried-row count and everything to an
-outstanding-verification count, which is why these two numbers are reported
-separately and never summed. **The backend-verification count stays 4**: B-23
-was their prerequisite, not a fifth member, so discharging it unblocks them
-without reducing them.
+minus:
+
+- **C-9** — Resolved 2026-08-12, in the denominator only because its phase cell
+  contains a literal `3`, and owing Phase 3 nothing;
+- **B-23** — Resolved 2026-08-16 by U1;
+- **B-4, B-12, B-13** — Resolved 2026-08-16 by U2;
+- **B-9** — its row was already Resolved, and U2 discharged the two-recipient
+  subcase that was the only thing carried;
+
+= **3 open: C-26, B-11 and C-31.** All three are the server-authority work
+itself, and none of them has begun.
+
+**The backend-verification count went 4 → 0, and that is a different statement
+from the row arithmetic.** B-23 was never a fifth member of it — it was their
+prerequisite, so discharging B-23 unblocked them without reducing the count, and
+only executing them reduced it. **B-9 is the standing reminder that the two
+counts are not the same thing:** its row is *Resolved* while still carrying an
+outstanding verification, which is exactly how its subcase went missing once
+before. Never sum these numbers.
+
+**Everything U2 verified carries its evidence level in the cell: *verified
+against a faithful local reproduction*, never *verified in production*.** That
+qualifier is part of the disposition, not a footnote, and the residual gap — a
+local stack is the same software but not the same deployment — is stated rather
+than glossed.
 
 ---
 

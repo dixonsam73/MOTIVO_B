@@ -1080,6 +1080,97 @@ both recipients lose the reference and the shared object goes.
 reproduction*, never "verified in production". B-4 and B-13 share one
 induced-failure/retry run and stay separately scored.
 
+### U2 — RESULTS, 2026-08-16. ALL FOUR OBLIGATIONS PASS.
+
+**Scored at the agreed evidence level: verified against a faithful local
+reproduction, NOT verified in production.** B-23's gate was green immediately
+before the run and again afterwards. The function under test was the **real,
+unmodified `delete_account_v1`** — `git diff` against HEAD is empty and its last
+touching commit is `0f5896d`, before U2 began.
+
+#### B-4 — PASS on all five assertions
+
+*Fixture:* A, B, C. A held 2 posts, 2 sent attachment rows, 1 received row, 1
+authored comment on B's post, 2 shares, 1 comment view, 1 avatar object, 2
+attachment objects. Every count asserted non-zero before the run.
+
+*Operation:* `u2_b4_fault_posts` installed on the local database, then A's own
+token POSTed to the function.
+
+*Observed:* `{"success":false,"step":"posts","error":"Error: U2/B-4 injected
+fault: posts delete blocked"}`, **HTTP 500**.
+
+| # | Predicted | Observed |
+|---|---|---|
+| 4.1 | HTTP 500, `success:false` | **HTTP 500, `success:false`** |
+| 4.2 | `step` is `"posts"` | **`"posts"`** |
+| 4.3 | Earlier work completed | sent rows 2→0, received 1→0, attachment objects 2→0, avatar 1→0, comment views 1→0, received shares 1→0, authored comments 1→0 |
+| 4.4 | Work at/after the failing step did not happen | posts **2**, follows **4**, directory **1**, `auth.users` **1** — all unchanged |
+| 4.5 | Protected state intact | B and C unchanged on every measure |
+
+**This is the assertion the 2026-08-11 production run could not make.** That run
+was a success case, and the old function returned success unconditionally — so a
+green result did not discriminate between the two implementations. A named
+failing step does.
+
+#### B-13 — PASS on all five assertions, scored separately
+
+*Fixture:* **the actual partial state B-4 left**, not a fresh one.
+
+| # | Predicted | Observed |
+|---|---|---|
+| 13.1 | Retry returns `{"success":true}` | **`{"success":true}`, HTTP 200** |
+| 13.2 | No false failure from completed work | none — steps 1, 3, 3b, 4 and the early step-5 deletes re-ran against empty sets and returned cleanly |
+| 13.3 | Remaining work completes | posts 2→0, follows 4→0, directory 1→0, `auth.users` 1→0 |
+| 13.4 | Protected state intact | B and C unchanged |
+| 13.5 | Third call returns 401 `Invalid session` | **`Invalid session`, HTTP 401** |
+
+**13.5 is the caveat this plan wrote down long before it could be run, and it
+behaved exactly as described.** The 401 is the *correct* answer: `auth.users` is
+gone, so the token no longer resolves to a user. Do not "fix" it by treating 401
+as success — the function derives its subject from the verified token, and
+accepting an unverifiable one would hand away its only authorisation gate.
+
+#### B-12 — PASS. 1500 objects, one prefix.
+
+| # | Predicted | Observed |
+|---|---|---|
+| 12.1 | Exactly 1500 under one prefix | **1500** under `users/<D>/bulk/`; **distinct folders under `users/<D>/` = 1**, so a single list call had to page |
+| 12.2 | `{"success":true}` | **`{"success":true}`, HTTP 200** |
+| 12.3 | Exactly 0 after, counted independently | **0**, counted in `storage.objects` rather than inferred from the function result |
+| 12.4 | Bystander survives | E's 2 attachment objects and 1 avatar object all present; `storage.objects` total 1503 → 3 |
+
+**A residue of ~500 would have been the unpaged-first-iteration bug this row
+exists for.** 1500 rather than 1001 so an off-by-one in the paging arithmetic
+would also have surfaced.
+
+#### B-9 two-recipient subcase — PASS. The subcase is now executed.
+
+*Fixture:* one asset, **one** `storage_path`, **two live recipient rows** — A→B
+and A→C — plus a third-party row B→C that must survive.
+
+| # | Predicted | Observed |
+|---|---|---|
+| 9.1 | Both A→B and A→C deleted | **both 0** |
+| 9.2 | The single shared object deleted | **0** |
+| 9.3 | No error from two rows naming one path | none — swept once by step 3, rows removed set-wise by step 3b |
+| 9.4 | Third-party B→C row and object survive | **both present** |
+| 9.5 | B and C untouched | unchanged on every measure |
+
+**The prediction deliberately did not follow B-9's original wording, and the
+difference is recorded rather than smoothed over.** The cell framed the subcase
+as "step 3b deletes the soft-deleted row while step 3 correctly preserves the
+object under B-1". That framing predates 2026-08-13, when step 2 — the
+reference-counted preservation — was **removed**. Under the deployed function
+step 3 sweeps `users/<uid>/` unconditionally and step 3b deletes every sender
+row, so both recipients lose the reference and the shared object goes. The
+observed behaviour matches the **settled post-revision** semantics, not the
+row's pre-revision description.
+
+**What this closes:** the two-recipient shape was unstageable with two real
+Apple IDs, which is why it survived Phase 1 and Phase 2. Three local GoTrue
+identities cost nothing, and that is the whole reason B-23 came first.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not

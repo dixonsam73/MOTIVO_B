@@ -31,3 +31,6 @@ supabase/**/.env
 *.pem
 *.p8
 *.p12
+# U2 run scratch: ephemeral local identity/asset UUIDs, regenerated per run.
+supabase/tests/u2/.ids
+supabase/tests/u2/.ids-b12

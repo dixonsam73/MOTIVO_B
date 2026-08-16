@@ -24,10 +24,13 @@ echo "  A=$A"; echo "  B=$B"; echo "  C=$C"
 printf 'A=%s\nB=%s\nC=%s\n' "$A" "$B" "$C" > supabase/tests/u2/.ids
 
 echo "== directory rows =="
-for pair in "$A:alpha" "$B:bravo" "$C:charlie"; do
-  u=${pair%%:*}; n=${pair##*:}
+# Names spelled out rather than derived: macOS ships bash 3.2, which has no ${x^}.
+for triple in "$A:alpha:Alpha" "$B:bravo:Bravo" "$C:charlie:Charlie"; do
+  u=$(echo "$triple" | cut -d: -f1)
+  a=$(echo "$triple" | cut -d: -f2)
+  d=$(echo "$triple" | cut -d: -f3)
   sql "insert into account_directory (user_id, account_id, display_name, lookup_enabled, follow_requests_enabled)
-       values ('$u', '$n', '${n^}', true, true);" > /dev/null
+       values ('$u', '$a', '$d', true, true);" > /dev/null
 done
 
 echo "== social graph =="
@@ -75,8 +78,8 @@ putobj attachments "users/$A/connected/$X.pdf" "shared-asset" > /dev/null
 putobj attachments "users/$A/$PA1/att1.pdf"    "post-attach"  > /dev/null
 putobj attachments "users/$B/connected/$Y.pdf" "b-to-a"       > /dev/null
 putobj attachments "users/$B/connected/$Z.pdf" "b-to-c"       > /dev/null
-putobj avatars     "users/$A/avatar.jpg"       "a-avatar"     > /dev/null
-putobj avatars     "users/$B/avatar.jpg"       "b-avatar"     > /dev/null
+putobj avatars     "users/$A/avatar.jpg"       "a-avatar" image/jpeg > /dev/null
+putobj avatars     "users/$B/avatar.jpg"       "b-avatar" image/jpeg > /dev/null
 sql "update account_directory set avatar_key='users/$A/avatar.jpg' where user_id='$A';" > /dev/null
 sql "update account_directory set avatar_key='users/$B/avatar.jpg' where user_id='$B';" > /dev/null
 

@@ -41,7 +41,7 @@ seq 1 "$COUNT" | xargs -P 16 -I{} curl -s -o /dev/null -X POST \
 echo "== protected bystander objects =="
 putobj attachments "users/$E/connected/keep1.pdf" "keep" > /dev/null
 putobj attachments "users/$E/bulk/keep2.pdf"      "keep" > /dev/null
-putobj avatars     "users/$E/avatar.jpg"          "keep" > /dev/null
+putobj avatars     "users/$E/avatar.jpg"          "keep" image/jpeg > /dev/null
 
 echo
 echo "== fixture inventory =="
