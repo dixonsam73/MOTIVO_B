@@ -986,6 +986,100 @@ Q6's three failure modes cannot be induced against Apple at all.
 | **U6c** remove | Is the migration provenance safe to delete? **Either** every snapshot UID has authoritative membership state **or** twelve months have elapsed since U6b — **and in either case** a final `auth.users.last_sign_in_at` check. **Any snapshot UID that signed in since U6b but still lacks authoritative membership state is evidence that U5 failed for that identity and blocks removal until dispositioned.** Post-phase, dated, owned on B-11 | — |
 | **G11** | Does a dormant pre-cutover payer reach Connected with the clause off? | — |
 
+### U2 — PREDICTIONS, committed 2026-08-16 BEFORE any destructive run
+
+**Written and committed before execution, in the D14/D15 style.** Nothing below
+is a result. Environment: the B-23 local reproduction, gate green at the time of
+the run; the real unmodified `delete_account_v1` served by the local edge
+runtime; production untouched.
+
+**Fault injection, named and bounded.** B-4 needs a real deletion step to fail
+after meaningful work. The three routes Phase 1 declined stay declined — no
+temporarily-broken production deploy, no QA-only injection inside the function,
+no DDL against production. The fourth route exists only now that B-23 does:
+**DDL against a disposable local database.** `supabase/tests/u2/fault-inject.sql`
+adds a `before delete on public.posts` trigger that raises. It cannot alter
+production because the function's source is untouched and the trigger is **not**
+in `supabase/migrations/` — the B-23 gate would fail on an extra trigger if it
+ever were.
+
+#### B-4 — honest `success:false`
+
+*Fixture:* three local identities. A departing, B live recipient and third
+party, C second live recipient. A owns 2 posts, 2 sent attachment rows, 1
+received row, 1 authored comment on B's post, 2 shares, 1 comment view, 1
+avatar, 2 attachment objects. Non-vacuous by construction and asserted before
+the run.
+
+*Operation:* inject the fault, then POST `/functions/v1/delete_account_v1` with
+A's own access token.
+
+| # | Prediction | Fail if |
+|---|---|---|
+| 4.1 | Response is **HTTP 500** with `success: false` | `success: true`, or a 2xx |
+| 4.2 | `step` is **`"posts"`** | any other step, or absent — the point of B-4 is that the failing step is *named* |
+| 4.3 | Work before that step **completed**: A's `connected_attachments` rows gone in both directions; A's `users/<A>/` attachment objects gone; A's avatar object gone; A's `post_comment_views` gone; `post_shares` where A is recipient gone; A's authored comment gone | any of these still present — the failure would then be too early to be meaningful |
+| 4.4 | Work at and after that step **did not happen**: A's 2 posts, A's follows, A's `account_directory` row and A's `auth.users` row all still present | any absent |
+| 4.5 | Protected state intact: B's post, B's reply addressed to A, C's comment, B→C row and its object, B's avatar, B↔C follow | any removed |
+
+#### B-13 — retry and idempotency, scored separately from B-4
+
+*Fixture:* **the actual partial state B-4 leaves behind.** Not a fresh one.
+
+*Operation:* drop the trigger, then retry the same call with the same token.
+
+| # | Prediction | Fail if |
+|---|---|---|
+| 13.1 | Retry returns **`{"success": true}`** | anything else |
+| 13.2 | Already-completed work causes **no** false failure — the re-run of steps 1, 3, 3b, 4 and the early step-5 deletes matches nothing and does not error | any step errors on an empty match |
+| 13.3 | Remaining work completes: A's posts, follows, `account_directory` and `auth.users` row all gone | any remains |
+| 13.4 | Protected state still intact — same list as 4.5 | any removed |
+| 13.5 | A **third** call returns **401 `Invalid session`** | it returns success, or 500. **401 is the CORRECT answer and not a defect**: `auth.users` is gone so the token no longer resolves to a user. Do not "fix" it by treating 401 as success — that would hand away the only authorisation gate the function has |
+
+#### B-12 — pagination past 1000
+
+*Fixture:* account D with **1500** objects under the single prefix
+`users/<D>/bulk/`, plus protected bystander E. 1500 rather than 1001 so an
+off-by-one in the paging arithmetic is caught too. Not spread across prefixes:
+that would leave every list call returning one short page, which is exactly the
+already-proven case.
+
+| # | Prediction | Fail if |
+|---|---|---|
+| 12.1 | Count under `users/<D>/` **before** is **exactly 1500**, all in one folder | fewer, or spread across folders |
+| 12.2 | Deletion returns `{"success": true}` | anything else |
+| 12.3 | Count under `users/<D>/` **after** is **exactly 0**, counted independently in `storage.objects` and not inferred from the function result | any object remains — a residue of ~500 would be the unpaged first-iteration bug this row exists for |
+| 12.4 | E's 2 attachment objects and 1 avatar object **survive** | any removed |
+
+#### B-9 — the two-recipient subcase
+
+*Fixture:* one asset `X`, **one** `storage_path`, **two live recipient rows** —
+A→B and A→C. `connected_attachments_asset_recipient_unique` is
+`UNIQUE(asset_id, recipient_user_id)` and the path CHECK derives the path from
+sender and asset alone, so this is the only shape the case can take.
+
+**The expected policy is reconstructed from the CURRENT deployed function, not
+invented here, and it is NOT what the subcase originally described.** B-9's cell
+framed it as "step 3b deletes the soft-deleted row while step 3 correctly
+preserves the object under B-1" — that framing predates 2026-08-13. Step 2, the
+reference-counted preservation, was **removed** in that revision; step 3 now
+sweeps `users/<uid>/` unconditionally and step 3b deletes **every** sender row.
+So under the settled post-revision semantics — *attachments they SENT are
+DELETED, rows and objects, even where a recipient still holds a live reference* —
+both recipients lose the reference and the shared object goes.
+
+| # | Prediction | Fail if |
+|---|---|---|
+| 9.1 | **Both** A→B and A→C rows are deleted | either survives — one surviving row would mean the sender-scoped predicate is not reaching all rows for a shared asset |
+| 9.2 | The **single shared object** `users/<A>/connected/<X>.pdf` is deleted | it remains |
+| 9.3 | No error arises from two rows naming **one** path — the object is swept once by step 3 and the rows removed by a set-based step 3b | any duplicate-removal error or partial failure |
+| 9.4 | The third-party row **B→C** and its object under `users/<B>/` survive | either removed. This is B-9's own lesson: scoping on `sender_user_id` must not reach a row whose sender is somebody else |
+| 9.5 | B's and C's accounts, directory rows and own content are untouched | any removed |
+
+**Scored at the agreed evidence level:** *verified against a faithful local
+reproduction*, never "verified in production". B-4 and B-13 share one
+induced-failure/retry run and stay separately scored.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not
