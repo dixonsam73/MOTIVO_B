@@ -1171,6 +1171,57 @@ row's pre-revision description.
 Apple IDs, which is why it survived Phase 1 and Phase 2. Three local GoTrue
 identities cost nothing, and that is the whole reason B-23 came first.
 
+### U3 — PREDICTIONS, committed 2026-08-16 BEFORE any consequential verification
+
+**Nothing below is a result.** Environment: the B-23 local reproduction, rebuilt
+from a destroyed state, gate green immediately before U3 changes. **Production is
+not touched by U3's local implementation at all.**
+
+**Test ownership is stated honestly. Several assertions belong to U5 or U7 and
+are recorded as future gates rather than manufactured U3 passes** — the writers
+they test do not exist.
+
+| # | Assertion | Pass | Owner |
+|---|---|---|---|
+| A1 | Fresh local migration applies from a destroyed environment | `stop --no-backup` → `start` → `db reset --local` exits 0 | U3 |
+| A2 | Structural delta matches prediction exactly | Per-surface counts equal the predicted delta | U3 |
+| A3 | Membership tables inaccessible to clients | Zero `table_grants`/`column_grants` rows for the five new tables with grantee `anon` or `authenticated` | U3 |
+| A4 | **Zero client-reachable membership objects** | All three helpers: `can_execute=false`, `direct_execute=false`, `public_execute=false` for `anon` and `authenticated`. **Including `ensure_membership_binding()`, which U5 grants, not U3** | U3 |
+| A5 | Unknown post-cutover identity fails closed | No membership row, not in snapshot → `connected_member()` = **false** | U3 |
+| A6 | Grandfathered pre-cutover identity resolves true | In snapshot, no membership row, control enabled → **true** | U3 |
+| A7 | **Real state overrides grandfathering** | Snapshot UID **plus** a not-entitled membership row → **false**. Invariant 8 | U3 |
+| A8 | Entitled row resolves true | `renewal_date` in the future → **true** | U3 |
+| A9 | Billing Grace derivation | Past `renewal_date` + `is_in_billing_retry` + **future** `grace_period_expires_date` → **true**; grace NULL or past → **false** | U3 |
+| A10 | NULL and unknown input fail closed | `connected_member(null)` → **false**; unknown uuid → **false** | U3 |
+| A11 | Grandfather switch works | `grandfather_enabled=false` → A6's identity flips to **false** | U3 |
+| A12 | Transaction uniqueness | Second row with the same `(environment, original_transaction_id)` → constraint violation | U3 |
+| A13 | Cascade on account deletion | Deleting an `auth.users` row removes its membership, binding and cutover rows | U3 |
+| A14 | Snapshot finite and frozen | Local snapshot is **empty** (no local identities captured); re-running the population changes nothing | U3 |
+| A15 | No policy or function depends on membership | Zero policies referencing `connected_member`; the 33 existing policies byte-identical | U3 |
+| A16 | No Apple request, no cleanup, no endpoint | `membership` empty; `pending_cleanup_at` nowhere set; function list unchanged — **U3 deploys no Edge Function** | U3 |
+| A17 | Existing Connected behaviour unchanged | All local backend counts and behaviour identical to pre-U3 | U3 |
+| A18 | Production snapshot data treated honestly | Cutover contents are **outside** B-23 structural fidelity and asserted separately | U3 |
+| A19 | Same identity, repeated `ensure_membership_binding()` → **identical UUID** | Two calls return the same token | U3 |
+| A20 | Concurrent first calls → **one row, one token** | Two simultaneous sessions; one binding row results | U3 |
+| A21 | One identity cannot obtain another's token | **The function takes no argument** — verified structurally, and by calling it as two different JWTs | U3 |
+| A22 | Membership tables not directly readable | Direct `select` as `anon`/`authenticated` denied | U3 |
+| A23 | Duplicate `binding_token` rejected | Unique constraint violation | U3 |
+| **A24** | **Binding is lifecycle-independent of membership** — **CORRECTED WORDING.** Deleting a membership row must **not** delete the account's binding, and no FK or cascade exists from `membership` to `membership_binding`. **This is only the structural half.** Ordinary expiry cleanup *retaining* both is a behavioural assertion about a worker that does not exist | Binding survives; no such FK in `constraints` | U3 structural half · **U7** behavioural |
+| A25 | **Unbound membership row impossible** | Insert with `binding_method` or `bound_at` null → **rejected**. The central rule as a constraint | U3 |
+| A26 | Legacy path needs **no fake membership row** | A binding row exists with **zero** membership rows, and `membership_state()` returns `unknown`/`grandfathered` — never a fabricated state | U3 |
+| A27 | Dormant snapshot identity acquires binding **lazily** | Identity in the snapshot with no binding row can create one on demand | U3 |
+| A28 | `membership_state()` returns exactly the four states | `entitled` / `expired` / `grandfathered` / `unknown` across staged fixtures | U3 |
+| A29 | Mismatched Apple token never produces an entitled row through the real writer | — | **U5 — not U3.** The writer does not exist |
+| A30 | Legacy claim calls `Set App Account Token` and re-reads before writing membership | — | **U5 — not U3** |
+| A31 | Orphan rebind permitted; live-binding mismatch refused | — | **U5 — not U3** |
+
+**A24's wording was corrected before running.** The earlier draft described
+deleting a membership row as "simulated ordinary expiry". **That is now wrong by
+specification**: ordinary expiry explicitly *retains* both `membership` and
+`membership_binding`. What U3 can prove is the *structural* independence — that
+no cascade ties the binding to a membership row — and the behavioural assertion
+belongs to U7's worker.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not

@@ -28,14 +28,13 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **9** | Every row whose Phase cell contains a literal `3` |
-| Open Phase 3 obligations | **3** | Was 8 at entrance, 7 after U1. **U2 discharged four more on 2026-08-16** |
-| Backend-verification obligations | **0** | Was 4. **All four executed by U2** |
+| Phase-3-tagged register rows | **10** | Every row whose Phase cell contains a literal `3`. **B-24 filed 2026-08-16** |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** |
+| Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The nine rows are **C-26, B-11, C-31, B-23, B-4, B-12, B-13, B-9, C-9**. B-23 was
-new in Phase 3 and was the only count-changing addition; the row count itself has
-not moved since.
+The ten rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9, C-9**.
+B-23 and B-24 are both new in Phase 3 and are the only count-changing additions.
 
 **The open-obligation arithmetic, shown rather than asserted.** Nine tagged rows,
 minus:
@@ -47,8 +46,10 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **3 open: C-26, B-11 and C-31.** All three are the server-authority work
-itself, and none of them has begun.
+= **4 open: C-26, B-11, C-31 and B-24.** All four are the server-authority work
+itself, and none of them has begun. **B-24 is a design defect caught before
+implementation**, so it is open in the sense that U5 has not yet built the
+corrected protocol — not in the sense that anything defective ships.
 
 **The backend-verification count went 4 → 0, and that is a different statement
 from the row arithmetic.** B-23 was never a fifth member of it — it was their
@@ -71,15 +72,29 @@ than glossed.
 **Observed directly in App Store Connect by the account holder**, not inferred.
 This is the baseline every S-step and every Group C gate starts from.
 
-| Setting | State at Phase 3 start |
-|---|---|
-| Billing Grace Period | **Not configured** — neither environment |
-| Production App Store Server Notification URL | **Unset** |
-| Sandbox App Store Server Notification URL | **Unset** |
-| In-App Purchase keys (App Store Server API) | **0 active** |
-| Account access | **Account Holder + Admin** — sufficient for every S-step |
+| Setting | State | |
+|---|---|---|
+| **Billing Grace Period** | **ENABLED — 16 days, All Renewals, Only Sandbox Environment** | **S1 done 2026-08-16** |
+| Production Billing Grace | **Untouched** | Until its later authorised step |
+| Production notification URL | **Unset** | Until its later authorised step |
+| Sandbox notification URL | **Unset** | **S2b — after U4's deploy** |
+| In-App Purchase key | **1 active**, `Etudes App Store Server API` | **S2a done 2026-08-16** |
+| Account access | **Account Holder + Admin** | Sufficient for every S-step |
 
-**Both notification URLs being unset is the safe starting point, and it is worth
+**S1 is configured, not yet relied upon.** Apple's change takes **up to 24
+hours** and applies only to *upcoming* renewals, so the propagation window must
+elapse before any grace-dependent lifecycle QA (G6b) is run or scored.
+
+**S2a's private key is stored outside the repository** at `~/.etudes-secrets/`,
+downloaded once as Apple permits only one download. The SIWA `.p8` remains
+separate and untouched — it is a different key type for a different purpose and
+cannot authenticate App Store Server API requests. **The runtime Supabase
+secrets are NOT yet installed**; that belongs with U4, which is the first unit
+that needs them. **Key ID and Issuer ID are deliberately not recorded here** —
+they are needed at runtime from Supabase secrets, and there is no technical
+reason for the repository to be a place where Apple credentials live.
+
+**Both notification URLs remain unset, which is the safe state, and it is worth
 knowing why.** Apple's rule is that if a *Production* URL is set and a Sandbox
 one is not, the App Store sends **both** environments' notifications to the
 production URL. With neither set, nothing is delivered anywhere and no
@@ -182,7 +197,36 @@ asserted a requirement and declared the question open in one breath.
 | `account_directory` row | **RETAINED**, undiscoverable | Removed |
 | `auth.users` | **RETAINED** | Removed, strictly last |
 | Comments authored by others, merely addressed to them | Retained | Retained — B-19, never add `recipient_user_id` |
+| **`membership` and `membership_binding`** | **RETAINED** | Removed by `auth.users` cascade |
 | **All local data** | **UNTOUCHED** | Erased, because the user asked |
+
+**Membership state is private lifecycle and authority state, NOT Domain 3
+content, and ordinary expiry cleanup must not remove it.** The matrix above says
+so explicitly because it was written before membership existed, and an
+implementer reading the older version could reasonably have deleted both. Three
+consequences:
+
+- **`membership` is retained** (deriving not-entitled) so the record of what
+  happened survives, and so `binding_method` still answers whether this
+  subscription was ever ownership-verified.
+- **`membership_binding` is retained**, and this one is load-bearing rather than
+  tidy. Whether `originalTransactionId` survives a lapse-and-resubscribe is
+  genuinely ambiguous — Apple does not document it, reports describe the id being
+  reused, and there is evidence of a change in 2025 producing a new one. **The
+  design does not need Apple to settle it, because the asymmetry decides:** if
+  the id is reused, Apple still reports the old token and a retained binding
+  matches instantly, whereas a deleted binding would mint a new token, mismatch,
+  and **reject the legitimate owner as a conflict**; if the id is new, the legacy
+  claim path handles it either way. Retaining is correct under both behaviours;
+  deleting is broken under one.
+- **Explicit account deletion removes both**, through the `auth.users` FK
+  cascade — no new deletion step, and `delete_account_v1` is not modified.
+- **External Sign in with Apple revocation retains both**, because it withdraws
+  authentication and not the account (C-45, invariant 5).
+
+**STANDING RULE: never make long-lived Études correctness depend on
+`originalTransactionId` surviving every lapse-and-rejoin shape.** It is a stable
+key for an ongoing subscription and nothing stronger.
 
 **Explicit account deletion keeps the already-verified Phase 1 semantics and is
 not weakened by this.** Deletion has two triggers expiry does not: the user asked
@@ -317,6 +361,56 @@ History` can enumerate `originalTransactionId` values server-side, but the app
 does **not** set `appAccountToken` — `product.purchase()` is called with no
 options anywhere in the source — so nothing on Apple's side or ours maps a
 subscription to a Supabase user. Client participation is required.
+
+## Ownership binding — settled 2026-08-16, see B-24
+
+**Proving a subscription is genuine and proving it belongs to this Études
+identity are two different problems, and only the first was solved.** Apple's
+answer to "is this subscription active?" is authoritative and says nothing about
+who owns it — no Apple surface returns the Apple Account, and none will.
+
+**Three artefacts, none interchangeable:**
+
+| Artefact | Proves |
+|---|---|
+| **Apple-signed transaction JWS**, server-verified | **Who** — possession. Obtainable only from `currentEntitlements` on a device signed in as the owning Apple Account, and signed by Apple, so it cannot be minted |
+| **Live server→Apple status read** | **Now** — current authoritative entitlement. A JWS may be stale |
+| **`appAccountToken`** | **The durable binding** to an Études identity, carried by Apple into all future renewals |
+
+**Future Connected joins (accepted):** Sign in with Apple → establish backend
+identity → establish binding → purchase with `appAccountToken` → verify the
+Apple-signed JWS → live reconciliation → verify Apple's reported token matches →
+**only then** establish membership. **Solo remains completely account-free**; only
+*joining* Connected requires authentication.
+
+**Existing subscribers migrate without repurchase.** Apple's `Set App Account
+Token` attaches a binding to an existing subscription and carries it into future
+renewals, so a legacy subscription acquires one on its first JWS-verified
+reconciliation. **The legacy branch is self-extinguishing rather than
+time-limited** — it is reachable only while Apple reports no token, and taking it
+sets one, so each subscription can traverse it exactly once, ever. No date
+governs it and no flag can be left on.
+
+**Rebinding authority — do not overstate it.** Apple *stores and returns* the
+binding; Apple does **not** enforce it against us, because our In-App Purchase
+key can call `Set App Account Token`, which overrides. The protection is our
+rule:
+
+- ordinary application logic **never** automatically overwrites a token
+  belonging to a **live** `membership_binding`;
+- a mismatch against a live binding is a **security and account-recovery event**
+  — grant nothing, change nothing, record it for explicit operator disposition;
+- a token matching **no** live binding is an **orphan**, typically left by an
+  explicit account deletion, and a JWS-verified claimant may rebind. **Without
+  this distinction a customer who deletes their account and returns would be
+  locked out of their own subscription.**
+
+**The token is an attribute of the identity, not of a subscription.** It must
+exist *before* the purchase, and one identity may hold both a Sandbox and a
+Production membership, so it lives in `membership_binding` keyed on `user_id`.
+Because it does, **`membership.binding_method` and `bound_at` are `NOT NULL`** —
+the database cannot hold an ownership-unverified membership row, which makes the
+central rule a constraint rather than something U5 must remember.
 
 ### The load-bearing U5 invariant
 
