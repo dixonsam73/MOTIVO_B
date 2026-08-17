@@ -17,7 +17,38 @@ bad()  { printf "  \033[31mFAIL\033[0m  %-6s %s\n" "$1" "$2"; FAIL=$((FAIL+1)); 
 is()   { if [ "$2" = "$3" ]; then ok "$1" "$4 = $3"; else bad "$1" "$4: expected '$3', got '$2'"; fi; }
 
 # raw psql for statements supabase db query cannot take (multi-statement, DO blocks)
-DB=supabase_db_rlwtqxumfobakvdueugm
+#
+# THE TARGET IS RESOLVED FROM THE RUNNING LOCAL STACK, NEVER HARD-CODED. It used
+# to name one project's container literally, which tied the suite to a single
+# machine's project ref and, worse, would have kept pointing at a stale
+# container if the ref ever changed. The resolution below derives the container
+# from `supabase status`'s own DB_URL, so the suite talks to whatever local
+# stack is actually running -- or refuses to run at all.
+#
+# THE LOCALHOST BOUNDARY IS PRESERVED AND WIDENED. lib.sh already refuses a
+# non-localhost API_URL; this adds the same guard on DB_URL, and then requires
+# the resolved container to be a supabase_db_* one publishing that exact port.
+# Every route into the database is therefore localhost-checked, which matters
+# because everything below is destructive by design.
+_u3_die() { echo "u3: $*" >&2; exit 1; }
+
+DB_URL=$(supabase status -o json 2>/dev/null | jq -r '.DB_URL // empty')
+[ -n "$DB_URL" ] || _u3_die "could not read DB_URL from 'supabase status -o json'"
+
+DB_HOST=$(printf '%s' "$DB_URL" | sed -E 's#^.*@([^:/]+):([0-9]+)/.*$#\1#')
+DB_PORT=$(printf '%s' "$DB_URL" | sed -E 's#^.*@([^:/]+):([0-9]+)/.*$#\2#')
+case "$DB_HOST" in
+  127.0.0.1|localhost|::1) ;;
+  *) _u3_die "refusing to run: DB_URL host '$DB_HOST' is not localhost" ;;
+esac
+[ -n "$DB_PORT" ] || _u3_die "could not parse a port from DB_URL"
+
+DB=$(docker ps --filter "publish=$DB_PORT" --format '{{.Names}}' | grep '^supabase_db_' || true)
+[ -n "$DB" ] || _u3_die "no supabase_db_* container publishes port $DB_PORT"
+[ "$(printf '%s\n' "$DB" | wc -l | tr -d ' ')" = "1" ] || _u3_die \
+  "ambiguous: more than one supabase_db_* container publishes port $DB_PORT:
+$DB"
+
 psq()  { docker exec -i "$DB" psql -U postgres -d postgres -At -q -c "$1" 2>&1; }
 psqf() { docker exec -i "$DB" psql -U postgres -d postgres -q -v ON_ERROR_STOP=1 2>&1; }
 # does a statement fail? prints "ok" if it errored (i.e. constraint held)
@@ -37,6 +68,22 @@ is A4b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pro
 # relkind='r' matters: pg_class also holds the 10 indexes on these tables, and
 # an index has relrowsecurity=false by nature. Without it this counted indexes.
 is A4c "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname like 'membership%' and not c.relrowsecurity;")" "0" "tables without RLS"
+
+# ------------------------------------------------------ privilege determinism
+# U3's final privilege state must be a property of the migration, not of
+# whichever pg_default_acl entry applies to the creating role. A3c/A3d assert
+# the service_role half that ambient defaults would otherwise supply; A3e closes
+# the PUBLIC blind spot the structural capture cannot see (it filters grantee to
+# three named roles); A3f is the whole model in one query -- no grantee other
+# than the owner appears in relacl for any of the five tables, under any default.
+is A3c "$(psq "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name like 'membership%' and grantee='service_role';")" "0" "table grants to service_role"
+is A3d "$(psq "select count(*) from information_schema.column_privileges where table_schema='public' and table_name like 'membership%' and grantee='service_role';")" "0" "column grants to service_role"
+is A3e "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(c.relacl) a where n.nspname='public' and c.relkind='r' and c.relname like 'membership%' and a.grantee=0;")" "0" "PUBLIC table privileges"
+is A3f "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace cross join lateral aclexplode(c.relacl) a where n.nspname='public' and c.relkind='r' and c.relname like 'membership%' and a.grantee <> c.relowner;")" "0" "non-owner grantees on membership tables"
+# The one deliberate exception to "no non-owner privileges anywhere", stated as
+# an assertion so the model is positively confirmed and not merely negatively.
+is A3g "$(psq "select has_function_privilege('service_role','public.membership_state(uuid)','EXECUTE')::text;")" "true" "service_role EXECUTE on membership_state"
+is A3h "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' and p.proname in ('connected_member','ensure_membership_binding') and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "EXECUTE on the other two helpers"
 
 # ------------------------------------------------------------------ fixtures
 A=$(mkuser u3a); B=$(mkuser u3b)
@@ -148,6 +195,119 @@ is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at i
 is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "5" "trigger count unchanged"
 is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"
 is A14b "$(psq "select coalesce((select cutover_at::text from public.membership_control),'null');")" "null" "cutover_at unset locally"
+
+# ================= binding runtime + runtime client denial ==================
+#
+# A19-A22 and A27 were predicted as U3-owned and had NO assertion in the first
+# 63. They were neither run nor declared deferred, which is the ownerless shape
+# this project holds itself to -- so they are executed here rather than quietly
+# reassigned to U5.
+#
+# THEY ARE RUNNABLE AT U3, and the reason is worth stating because it was the
+# original excuse for skipping them. ensure_membership_binding() is ungranted
+# until U5, but that grant governs who may CALL it through PostgREST; the
+# function's own identity handling is exercised by setting the same JWT claim
+# PostgREST itself would set. A22 then tests the ungranted state from the
+# outside, over real HTTP, which is the half a catalog query cannot prove.
+
+# Calls the function as a given identity, exactly as PostgREST would present it.
+# Each psq is a FRESH session, so a claim set here cannot leak into any other
+# assertion -- which is why the claim and the call must share one statement.
+as_identity() { psq "select set_config('request.jwt.claims','{\"sub\":\"$1\"}',false); select public.ensure_membership_binding();" | tail -1; }
+
+E=$(mkuser u3e); F=$(mkuser u3f)
+
+# A19 -- repeated calls by one identity are idempotent.
+T1=$(as_identity "$E"); T2=$(as_identity "$E")
+is A19  "$T2" "$T1" "repeated call returns the same token"
+is A19b "$(psq "select count(*) from public.membership_binding where user_id='$E';")" "1" "exactly one binding row"
+
+# A20 -- GENUINE CONCURRENCY, not a sequential proxy. Eight sessions are armed
+# and then released together by pg_sleep_until on a shared instant, so they
+# contend inside the upsert rather than politely queueing. This is the assertion
+# the `on conflict do update` form exists for: `do nothing` would let a loser
+# skip without taking a lock and then read no row at all.
+G=$(mkuser u3g)
+T0=$(psq "select (now() + interval '4 seconds')::text;")
+CDIR=$(mktemp -d)
+for i in 1 2 3 4 5 6 7 8; do
+  ( psq "select set_config('request.jwt.claims','{\"sub\":\"$G\"}',false); select pg_sleep_until('$T0'::timestamptz); select public.ensure_membership_binding();" | tail -1 > "$CDIR/$i" ) &
+done
+wait || true
+is A20  "$(cat "$CDIR"/* | wc -l | tr -d ' ')" "8" "all 8 concurrent sessions returned"
+is A20b "$(cat "$CDIR"/* | sort -u | wc -l | tr -d ' ')" "1" "one distinct token across the burst"
+is A20c "$(psq "select count(*) from public.membership_binding where user_id='$G';")" "1" "one binding row after the burst"
+is A20d "$(cat "$CDIR"/* | sort -u)" "$(psq "select binding_token from public.membership_binding where user_id='$G';")" "returned token = stored token"
+rm -rf "$CDIR"
+
+# A21 -- one identity cannot obtain another's token.
+TE=$(psq "select binding_token from public.membership_binding where user_id='$E';")
+TF=$(as_identity "$F")
+is A21  "$(psq "select pronargs from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='ensure_membership_binding';")" "0" "function takes no argument"
+is A21b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='ensure_membership_binding';")" "1" "no overload accepting a user_id"
+is A21c "$(if [ "$TF" != "$TE" ]; then echo differs; else echo SAME; fi)" "differs" "second identity gets its own token"
+is A21d "$(psq "select (binding_token='$TF')::text from public.membership_binding where user_id='$F';")" "true" "returned token belongs to the caller"
+is A21e "$(psq "select count(*) from public.membership_binding where user_id='$F' and binding_token='$TE';")" "0" "caller never receives another's token"
+is A21f "$(psq "select public.ensure_membership_binding();" | grep -c 'authentication required')" "1" "unauthenticated call refused (28000)"
+
+# A22 -- RUNTIME denial over HTTP, for both client roles.
+#
+# CATALOG GRANTS ARE NOT THE RUNTIME TEST. A3/A3b prove the privilege is absent;
+# this proves the request actually fails at the edge PostgREST serves. The two
+# CONTROLS below are what stop it passing vacuously: a denial proves nothing if
+# the credential was simply invalid, so each credential is first shown to work
+# against a surface it is entitled to reach.
+AUTHJWT=$(tokenfor u3e)
+is A22ctl1 "$(curl -s -o /dev/null -w '%{http_code}' "$API/rest/v1/" -H "apikey: $AK")" "200" "CONTROL: anon key reaches PostgREST"
+is A22ctl2 "$(curl -s -o /dev/null -w '%{http_code}' "$API/rest/v1/posts?select=id&limit=1" -H "apikey: $AK" -H "Authorization: Bearer $AUTHJWT")" "200" "CONTROL: authenticated JWT reads an entitled table"
+
+TWOXX=0; ARRAYS=0; SEEN=0
+probe() { # $1 method, $2 url, $3 bearer, $4 body
+  local body code
+  if [ "$1" = "GET" ]; then
+    body=$(curl -s -w '\n%{http_code}' "$2" -H "apikey: $AK" -H "Authorization: Bearer $3")
+  else
+    body=$(curl -s -w '\n%{http_code}' -X POST "$2" -H "apikey: $AK" -H "Authorization: Bearer $3" \
+           -H 'Content-Type: application/json' -d "$4")
+  fi
+  code=$(printf '%s' "$body" | tail -1)
+  SEEN=$((SEEN+1))
+  case "$code" in 2??) TWOXX=$((TWOXX+1));; esac
+  case "$(printf '%s' "$body" | head -1)" in '['*) ARRAYS=$((ARRAYS+1));; esac
+}
+for TBL in membership membership_binding membership_notification membership_cutover membership_control; do
+  for KEY in "$AK" "$AUTHJWT"; do probe GET "$API/rest/v1/$TBL?select=*" "$KEY" ""; done
+done
+for FN in connected_member membership_state; do
+  for KEY in "$AK" "$AUTHJWT"; do probe POST "$API/rest/v1/rpc/$FN" "$KEY" "{\"target_user_id\":\"$E\"}"; done
+done
+for KEY in "$AK" "$AUTHJWT"; do probe POST "$API/rest/v1/rpc/ensure_membership_binding" "$KEY" '{}'; done
+is A22  "$SEEN"   "16" "runtime probes attempted (5 tables + 3 RPCs, x2 roles)"
+is A22b "$TWOXX"  "0"  "successful (2xx) client responses"
+is A22c "$ARRAYS" "0"  "responses returning a JSON row array"
+
+# A27 -- a dormant snapshot identity acquires a binding lazily, and acquiring
+# one must NOT fabricate membership. Both halves of the state rule are checked:
+# grandfathered when the identity is in the snapshot, unknown when it is not.
+S=$(mkuser u3s)
+psqf <<SQL >/dev/null
+insert into public.membership_cutover (user_id) values ('$S');
+SQL
+is A27  "$(psq "select count(*) from public.membership_binding where user_id='$S';")" "0" "snapshot identity starts unbound"
+TS=$(as_identity "$S")
+is A27b "$(psq "select count(*) from public.membership_binding where user_id='$S';")" "1" "binding created on demand"
+is A27c "$(psq "select count(*) from public.membership where user_id='$S';")" "0" "no membership row fabricated"
+is A27d "$(psq "select public.membership_state('$S');")" "grandfathered" "bound snapshot identity"
+is A27e "$(psq "select public.membership_state('$E');")" "unknown" "bound NON-snapshot identity"
+
+# Fixtures removed so the cutover section below starts from the same state it
+# did before this block existed -- cascade takes the bindings and the snapshot
+# row with them.
+psqf <<SQL >/dev/null
+delete from auth.users where id in ('$E','$F','$G','$S');
+SQL
+is A27f "$(psq "select count(*) from public.membership_binding;")" "0" "binding fixtures cleaned up"
+is A27g "$(psq "select count(*) from public.membership_cutover;")" "0" "snapshot empty again before cutover section"
 
 # ============================= cutover boundary =============================
 # The corrected mechanism (supabase/sql/2026-08-16-u3-cutover-population.sql)

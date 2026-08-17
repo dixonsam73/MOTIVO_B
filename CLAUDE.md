@@ -136,6 +136,30 @@ and is done first, partly because the `.p8` downloads **once**.
 **Production Billing Grace and the production notification URL remain untouched
 until their later authorised step.** Neither is part of the sequence above.
 
+### U3's privileges are deterministic, and U4 inherits nothing
+
+**Recorded 2026-08-17, because the alternative is a defect U4 would discover as a
+runtime permission error.** A new public table inherits whatever `pg_default_acl`
+entry applies to the role that creates it, and that entry differs between
+deployments — the local stack's `postgres` entry grants `anon`, `authenticated`
+and `service_role` `Dxtm`, the stock `supabase_admin` entry grants all three
+`arwdDxtm`. U3 originally revoked from the two client roles only, which left its
+final state, and two of its ten predicted structural surfaces, as properties of
+the environment rather than of the migration.
+
+**U3 now revokes every privilege on all five membership tables from `public`,
+`anon`, `authenticated` and `service_role`, and revokes EXECUTE on all three
+helpers from the same four before granting `membership_state` back to
+`service_role`. That single grant is the entire privilege surface U3 creates**,
+and the resulting delta on `table_grants` and `column_grants` is **zero**.
+
+**So `service_role` holds no DML on any membership table, deliberately.** U3
+needs none — every read goes through a `SECURITY DEFINER` helper owned by the
+table owner. **U4 must introduce whatever server mutation surface it needs by
+explicit grant**, and will otherwise fail with `permission denied for table
+membership`. That failure is the intended one: deliberate at the point of
+writing, rather than an accidental privilege found later.
+
 ## The fundamental rule
 
 **Leaving Connected is not leaving Études.**

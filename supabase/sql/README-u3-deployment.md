@@ -50,6 +50,54 @@ select
 it, because step B compares against the value read at execution time rather than
 against any number written here.
 
+### Privilege diagnostics — EVIDENCE ONLY, added 2026-08-17
+
+```sql
+select current_user, session_user;
+
+select defaclrole::regrole::text as owner_role,
+       defaclnamespace::regnamespace::text as schema,
+       defaclobjtype as obj_type,
+       defaclacl::text as default_acl
+  from pg_default_acl
+ where defaclnamespace = 'public'::regnamespace;
+```
+
+**Record both. NEITHER IS A GO CONDITION, and neither may be used to decide what
+U3's privilege state should be.** They exist so that the applying identity and
+the ambient defaults are on the record at the moment of the change — useful when
+reading this back later, and useful if some *other* surface ever turns out to
+depend on them.
+
+**Why they are diagnostics rather than gates.** The migration now revokes every
+privilege on all five tables from `public`, `anon`, `authenticated` **and**
+`service_role`, and revokes EXECUTE on all three helpers from the same four,
+granting back exactly one privilege. The end state is therefore identical under
+every `pg_default_acl` entry, so there is nothing here for the deployment to
+branch on. That is the point of the change: **the target state is defined by our
+SQL, not discovered from the environment.**
+
+**Also record the owner** that the DDL produces, because ownership is not
+normalised by any revoke and every helper is `SECURITY DEFINER`:
+
+```sql
+select c.relname, c.relowner::regrole::text as owner
+  from pg_class c
+ where c.relnamespace = 'public'::regnamespace
+   and c.relkind = 'r' and c.relname like 'membership%'
+ union all
+select p.proname, p.proowner::regrole::text
+  from pg_proc p
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('connected_member','membership_state','ensure_membership_binding')
+ order by 1;
+```
+
+**GO condition at P2: all eight rows report the SAME owner.** A split owner
+would mean a `SECURITY DEFINER` helper runs as a different role from the tables
+it reads, which is a real difference in effective authority rather than a
+cosmetic one.
+
 **Why the NULL gate is hard.** `auth.users.created_at` is nullable with no
 default and belongs to GoTrue, not to us. A NULL satisfies **neither**
 `< cutover_at` **nor** `>= cutover_at`, so such an identity would be excluded
@@ -65,25 +113,39 @@ Measured from the local instance built from committed migrations, compared with
 the committed production snapshot. **Post-deploy recapture must match this
 exactly.**
 
+**REVISED 2026-08-17, and two surfaces moved.** The earlier prediction of `+15`
+`table_grants` and `+47` `column_grants` was measured while `service_role` still
+inherited whatever the creating role's `pg_default_acl` supplied — `Dxtm`
+locally, `arwdDxtm` under the stock `supabase_admin` entry. That made two of the
+ten surfaces a property of the deployment rather than of the migration, so P3
+could have failed on a deployment that was in fact secure. **The migration now
+revokes from `service_role` as well, so both surfaces go to zero and the whole
+delta is environment-independent.**
+
 | Surface | Before | After | Δ | What the delta is |
 |---|---|---|---|---|
 | `functions` | 11 | **14** | **+3** | `connected_member`, `membership_state`, `ensure_membership_binding` |
 | `policies` | 33 | **33** | **0** | **No policy is created or modified** |
 | `rls_enabled` | 7 | **12** | **+5** | The five new tables, all `rls_enabled = true` |
 | `triggers` | 5 | **5** | **0** | U3 adds no trigger |
-| `constraints` | 24 | **50** | **+26** | PK/FK/unique/check across the five tables. **+1 vs the first draft: `membership_control_verified_needs_cutover`** |
-| `columns` | 60 | **107** | **+47** | Columns of the five tables. **+1: `cutover_verified_at`** |
-| `function_grants` | 33 | **42** | **+9** | 3 helpers × 3 roles |
-| `table_grants` | 102 | **117** | **+15** | **`service_role` only** |
-| `column_grants` | 523 | **570** | **+47** | **`service_role` only. +1 for the new column** |
+| `constraints` | 24 | **50** | **+26** | PK/FK/unique/check across the five tables |
+| `columns` | 60 | **107** | **+47** | Columns of the five tables |
+| `function_grants` | 33 | **42** | **+9** | 3 helpers × 3 roles. **Rows, not privileges** — eight of the nine read `false/false/false` |
+| `table_grants` | 102 | **102** | **0** | **Was `+15`. Zero: no role holds any table privilege** |
+| `column_grants` | 523 | **523** | **0** | **Was `+47`. Zero, for the same reason** |
 | `storage_buckets` | 2 | **2** | **0** | Untouched |
 
-### The two rows that carry the security claim
+**Total: 90 additive differences, zero missing, zero modified** beyond the one
+approved `account_id_format` catalog-serialization exception. Every one of the 90
+names a U3 object — the four that do not contain the string `membership` are
+`connected_member` and its three grant rows.
 
-**All 15 new `table_grants` and all 47 new `column_grants` rows have grantee
-`service_role`. Zero for `anon`, zero for `authenticated`.** Anything else means
-the revokes did not take, and production's default ACLs would have published
-membership state.
+### The rows that carry the security claim
+
+**`table_grants` and `column_grants` must be byte-IDENTICAL to the pre-U3
+snapshot.** Not "service_role only" — *identical*. U3 grants no table or column
+privilege to any role, so a single new row on either surface means a revoke did
+not take and the ambient default is showing through.
 
 **Of the 9 new `function_grants` rows, exactly one has any privilege:**
 
@@ -96,6 +158,53 @@ membership state.
 All nine must read `public_execute = false`. **Effective privilege alone is not
 sufficient evidence** — that was B-23's blind spot, and the widened three-column
 capture exists for exactly this check.
+
+**The `service_role` column of the first two rows is now explicitly revoked, not
+merely never granted** (revised 2026-08-17). The stock `supabase_admin` default
+grants EXECUTE on new functions to all three roles, so "we never granted it"
+would have been an environment-dependent claim in exactly the way the table
+privileges were. All three helpers are revoked from `public, anon,
+authenticated, service_role` first; `membership_state` is then granted back to
+`service_role`, and that single line is **the entire privilege surface U3
+creates**.
+
+### P2 — the three queries, so the gate is executed rather than eyeballed
+
+```sql
+-- 1. No non-owner grantee on any of the five tables. Covers anon,
+--    authenticated, service_role AND PUBLIC (grantee 0) in one read, including
+--    the PUBLIC case the structural capture cannot see.
+select count(*) as non_owner_privileges
+  from pg_class c
+  cross join lateral aclexplode(c.relacl) a
+ where c.relnamespace = 'public'::regnamespace
+   and c.relkind = 'r' and c.relname like 'membership%'
+   and a.grantee <> c.relowner;                       -- must be 0
+
+-- 2. Helper EXECUTE, all three roles, direct and via PUBLIC.
+select p.proname, r.rolname,
+       has_function_privilege(r.rolname, p.oid, 'EXECUTE') as can_execute,
+       exists (select 1 from aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a
+                where a.privilege_type='EXECUTE' and a.grantee=0) as public_execute
+  from pg_proc p
+  cross join (select rolname from pg_roles
+               where rolname in ('anon','authenticated','service_role')) r
+ where p.pronamespace = 'public'::regnamespace
+   and p.proname in ('connected_member','membership_state','ensure_membership_binding')
+ order by 1,2;
+-- must be: membership_state/service_role can_execute = true, every other row
+-- false, and public_execute false on all nine.
+
+-- 3. RLS on all five.
+select count(*) as tables_without_rls
+  from pg_class c
+ where c.relnamespace = 'public'::regnamespace
+   and c.relkind = 'r' and c.relname like 'membership%'
+   and not c.relrowsecurity;                          -- must be 0
+```
+
+These are the same assertions the local suite runs as A3c–A3h, A4b and A4c, so a
+production P2 that disagrees with a green local run is itself the finding.
 
 ### Nothing existing may move
 
@@ -126,10 +235,10 @@ covering it.**
 
 | # | Checkpoint | GO condition | Failure means | Rollback? |
 |---|---|---|---|---|
-| **P0** | Pre-flight read | Zero `membership*` objects; **`null_created_at` = 0**; `cutover_at`/`cutover_verified_at` null; live `auth.users` count recorded | Collision, or an unclassifiable identity | Nothing done |
+| **P0** | Pre-flight read | Zero `membership*` objects; **`null_created_at` = 0**; `cutover_at`/`cutover_verified_at` null; live `auth.users` count recorded; **`current_user` and `pg_default_acl` recorded as evidence — neither is a GO condition** | Collision, or an unclassifiable identity | Nothing done |
 | **P1** | Structural DDL + revokes | All statements succeed | Stop. **Never `CASCADE`** — an unpredicted dependency means the analysis was wrong | Full `drop` |
-| **P2** | **Security verification** | Zero `anon`/`authenticated` table and column grants; all three helpers `public_execute=false`; `ensure_membership_binding` ungranted | **Live security consequence. Stop immediately** | Full `drop` |
-| **P3** | Structural delta vs §2 | All ten match; **zero modified rows** | Something unintended landed | Full `drop` |
+| **P2** | **Security verification** | **Zero table and column grants on all five tables for `anon`, `authenticated` AND `service_role`** — equivalently, no grantee other than the owner appears in `relacl`; zero PUBLIC table privileges; all three helpers `public_execute=false`; `connected_member` and `ensure_membership_binding` hold **no** EXECUTE for any of the three roles; `membership_state` holds `direct_execute=true` for `service_role` only; **all five tables and all three helpers report the same owner** | **Live security consequence. Stop immediately** | Full `drop` |
+| **P3** | Structural delta vs §2 | All ten match — including **`table_grants` and `column_grants` byte-identical**; **zero modified rows** | Something unintended landed | Full `drop` |
 | **P4** | Boundary + population (one transaction, **READ COMMITTED**) | `boundary_declared` true; `count_still_unset` true; `captured` > 0 | ROLLBACK; nothing declared | **Yes, until commit** |
 | **P5** | **COMMIT** | — | — | **No. The boundary is now irreversible** |
 | **P6** | **Convergence check** (fresh snapshot) | `missing` = 0, `null_created_at` = 0, `invalid_members` = 0 | `missing` > 0 → **one** repair, then P7. `invalid_members` > 0 → **STOP** | Repair forward |

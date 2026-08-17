@@ -13,10 +13,21 @@
 -- keeps the server's semantics identical to Transaction.currentEntitlements on
 -- device, so client and server can disagree about freshness but never meaning.
 --
--- SECURITY IS NOT OPTIONAL HERE. Production's default ACLs grant arwdDxtm on
--- new public tables to anon and authenticated, and EXECUTE on new functions to
--- them AND to PUBLIC. Every REVOKE below is load-bearing; without them this
--- migration would publish membership state to every client.
+-- SECURITY IS NOT OPTIONAL HERE, AND IT IS DETERMINED BY THE SQL BELOW RATHER
+-- THAN BY THE ENVIRONMENT. A new public table inherits whatever pg_default_acl
+-- entry applies to the role that creates it, and that entry differs between
+-- deployments: the local stack's `postgres` entry grants anon, authenticated
+-- and service_role `Dxtm`, while the stock `supabase_admin` entry grants all
+-- three `arwdDxtm`. An earlier revision of this file asserted the second shape
+-- as production fact without evidence, and predicted a structural delta
+-- measured under the first -- two statements that cannot both describe one
+-- environment.
+--
+-- The fix is not to discover which default applies. It is to stop depending on
+-- it: every privilege on these five tables is revoked from PUBLIC and from all
+-- three client/server roles, so the final state is the same under every
+-- default. U4 introduces whatever server mutation surface it needs by explicit
+-- grant, deliberately, rather than inheriting one by accident.
 
 
 -- ========================================================= ownership binding
@@ -416,24 +427,61 @@ alter table public.membership_notification enable row level security;
 alter table public.membership_cutover      enable row level security;
 alter table public.membership_control      enable row level security;
 
-revoke all on public.membership              from anon, authenticated;
-revoke all on public.membership_binding      from anon, authenticated;
-revoke all on public.membership_notification from anon, authenticated;
-revoke all on public.membership_cutover      from anon, authenticated;
-revoke all on public.membership_control      from anon, authenticated;
+-- REVOKED FROM public, anon, authenticated AND service_role -- all four, on
+-- purpose, and each for its own reason.
+--
+--   public          The structural snapshot filters grantee to the three named
+--                   roles, so a PUBLIC table grant would be INVISIBLE to the
+--                   B-23 gate. This revoke is the only thing that rules it out.
+--                   It is the table-level counterpart of the PUBLIC EXECUTE
+--                   revoke below, which exists because of the same blind spot.
+--
+--   anon,           No client may reach membership state directly. RLS with
+--   authenticated   zero policies already denies, but privileges are the outer
+--                   boundary: a policy added carelessly at U6 would be
+--                   immediately live if the grants were left in place.
+--
+--   service_role    NOT an oversight, and not merely tidiness. Ambient defaults
+--                   would otherwise leave service_role holding whatever the
+--                   creating role's pg_default_acl says -- Dxtm here, arwdDxtm
+--                   elsewhere -- which makes U3's final state a property of the
+--                   deployment rather than of this file. U3 needs no direct
+--                   table access at all: every read goes through a SECURITY
+--                   DEFINER helper owned by the table owner. So the honest
+--                   posture is zero, and U4 grants what U4 needs.
+--
+-- The resulting invariant is checkable in one query rather than by reading this
+-- comment: no grantee other than the table owner appears in relacl for any of
+-- the five tables. The acceptance suite asserts exactly that (A3f).
+revoke all on public.membership              from public, anon, authenticated, service_role;
+revoke all on public.membership_binding      from public, anon, authenticated, service_role;
+revoke all on public.membership_notification from public, anon, authenticated, service_role;
+revoke all on public.membership_cutover      from public, anon, authenticated, service_role;
+revoke all on public.membership_control      from public, anon, authenticated, service_role;
 
 -- REVOKE FROM PUBLIC FIRST. has_function_privilege() is true when EXECUTE is
 -- inherited from PUBLIC, so revoking only from the three named roles would
 -- leave every helper callable while the snapshot still read as expected for
 -- those roles. This is exactly the blind spot B-23's widened capture exists to
 -- catch.
-revoke execute on function public.connected_member(uuid)      from public, anon, authenticated;
-revoke execute on function public.membership_state(uuid)      from public, anon, authenticated;
-revoke execute on function public.ensure_membership_binding() from public, anon, authenticated;
+--
+-- SERVICE_ROLE IS REVOKED HERE TOO, for the same determinism reason as the
+-- tables above: the stock `supabase_admin` default grants EXECUTE on new
+-- functions to anon, authenticated AND service_role, while the local
+-- `postgres` default grants it to none of them. Revoking from all four makes
+-- the starting point identical under either, so the only EXECUTE any of these
+-- helpers carries afterwards is the one explicitly granted below.
+revoke execute on function public.connected_member(uuid)      from public, anon, authenticated, service_role;
+revoke execute on function public.membership_state(uuid)      from public, anon, authenticated, service_role;
+revoke execute on function public.ensure_membership_binding() from public, anon, authenticated, service_role;
 
 -- membership_state() is the one helper a server identity calls directly.
 -- connected_member() needs no grant at all: at U6 it is evaluated inside RLS
 -- policy expressions, which run as part of the query rather than as a direct
 -- call -- so it decides what clients may see while remaining unreachable BY
 -- them.
+--
+-- THIS IS THE ONLY PRIVILEGE U3 GRANTS TO ANY NON-OWNER ROLE. Everything else
+-- above is a revoke, so the complete U3 privilege surface is one line long and
+-- can be read in full here rather than assembled from defaults.
 grant execute on function public.membership_state(uuid) to service_role;

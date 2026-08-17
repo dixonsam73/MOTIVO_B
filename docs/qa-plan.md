@@ -1185,7 +1185,7 @@ they test do not exist.
 |---|---|---|---|
 | A1 | Fresh local migration applies from a destroyed environment | `stop --no-backup` → `start` → `db reset --local` exits 0 | U3 |
 | A2 | Structural delta matches prediction exactly | Per-surface counts equal the predicted delta | U3 |
-| A3 | Membership tables inaccessible to clients | Zero `table_grants`/`column_grants` rows for the five new tables with grantee `anon` or `authenticated` | U3 |
+| A3 | Membership tables inaccessible to clients | Zero `table_grants`/`column_grants` rows for the five new tables with grantee `anon` or `authenticated`. **STRENGTHENED 2026-08-17: also zero for `service_role`, zero PUBLIC table privileges, and no non-owner grantee at all in `relacl` — see A3c–A3h.** The original wording was satisfiable while `service_role` held whatever the ambient default ACL supplied | U3 |
 | A4 | **Zero client-reachable membership objects** | All three helpers: `can_execute=false`, `direct_execute=false`, `public_execute=false` for `anon` and `authenticated`. **Including `ensure_membership_binding()`, which U5 grants, not U3** | U3 |
 | A5 | Unknown post-cutover identity fails closed | No membership row, not in snapshot → `connected_member()` = **false** | U3 |
 | A6 | Grandfathered pre-cutover identity resolves true | In snapshot, no membership row, control enabled → **true** | U3 |
@@ -1215,6 +1215,41 @@ they test do not exist.
 | A30 | Legacy claim calls `Set App Account Token` and re-reads before writing membership | — | **U5 — not U3** |
 | A31 | Orphan rebind permitted; live-binding mismatch refused | — | **U5 — not U3** |
 
+### U3 — EXPLICIT DISPOSITION OF EVERY U3-OWNED PREDICTION, 2026-08-17
+
+**Added because five of them had neither a pass nor a deferral.** A19, A20, A21,
+A22 and A27 were labelled owner "U3" in the table above and appeared in neither
+the acceptance suite nor the results — not run, not declared future work, simply
+absent, while the headline read "63 of 63". A29–A31 were properly declared as
+U5 gates, which is what made the omission visible by contrast. **Every row above
+now has a disposition here, and no row is discharged by silence.**
+
+| Prediction | Disposition |
+|---|---|
+| A1, A3–A16 | **Executed**, in the suite, from a destroyed environment |
+| A2 | **Executed** as the ten-surface delta measurement below — the suite cannot assert it, because the comparison authority is the committed production snapshot rather than the local catalog |
+| A17 | **Executed structurally**: A15/A15b/A15c/A16b assert nothing existing moved, and the delta is additive-only with zero modified rows. Behavioural non-regression on production is not claimable locally and is not claimed |
+| A18 | **Not a test.** It is the honesty rule that the snapshot's *contents* sit outside B-23 structural fidelity, discharged by `README-u3-deployment.md` §3 and asserted separately at P6–P8 |
+| **A19** | **EXECUTED 2026-08-17 — PASS.** Suite assertions A19, A19b |
+| **A20** | **EXECUTED 2026-08-17 — PASS.** Suite A20–A20d, genuine concurrency |
+| **A21** | **EXECUTED 2026-08-17 — PASS.** Suite A21–A21f, structural and runtime |
+| **A22** | **EXECUTED 2026-08-17 — PASS.** Suite A22–A22c over real HTTP, with two credential controls |
+| A23–A26 | **Executed**, in the suite |
+| **A27** | **EXECUTED 2026-08-17 — PASS.** Suite A27–A27e |
+| A28 | **Executed** (A28–A28d) |
+| A29, A30, A31 | **U5 — not run, deliberately.** The writers do not exist; a U3 pass would be manufactured |
+| A24 behavioural half | **U7.** Ordinary expiry *retaining* both tables is an assertion about a worker that does not exist |
+| A32–A40 | **Executed** — added with the cutover correction |
+
+**The five were runnable at U3 all along, and the reason they looked unrunnable
+is worth keeping.** `ensure_membership_binding()` is ungranted until U5, and
+that was taken to mean its behaviour could not be exercised. But the grant
+governs who may **call it through PostgREST**; the function derives its identity
+from `auth.uid()`, so setting the same JWT claim PostgREST would set exercises
+the real code path with nothing granted and nothing weakened. A22 then tests the
+ungranted state itself from outside, over HTTP — which is the half no catalog
+query can prove. **Nothing was granted, relaxed or stubbed to make these pass.**
+
 **A24's wording was corrected before running.** The earlier draft described
 deleting a membership row as "simulated ordinary expiry". **That is now wrong by
 specification**: ordinary expiry explicitly *retains* both `membership` and
@@ -1222,7 +1257,20 @@ specification**: ordinary expiry explicitly *retains* both `membership` and
 no cascade ties the binding to a membership row — and the behavioural assertion
 belongs to U7's worker.
 
-### U3 — RESULTS, 2026-08-16. 63 of 63 U3-owned assertions pass.
+### U3 — RESULTS. 93 of 93 U3-owned assertions pass, 2026-08-17.
+
+**THE DENOMINATOR MOVED, AND IT IS NOT A RE-SCORING OF THE SAME RUN.** The
+2026-08-16 run scored **63 of 63** and that result stands as recorded below. On
+2026-08-17 an independent review of the deployment package found three defects —
+an environment-dependent privilege model (F1), five predictions with no
+disposition (F3), and stale bookkeeping (F4). Fixing the first changed the
+migration, and fixing the second added assertions, so **the suite was re-run in
+full from a destroyed environment and now scores 93 of 93**. The old denominator
+is superseded, not preserved: 63 was the honest count of the assertions that
+existed, and it is no longer the count of the assertions that should.
+
+**30 assertions added:** A3c–A3h (privilege determinism, 6), A19–A19b (2),
+A20–A20d (4), A21–A21f (6), A22ctl1/ctl2 and A22–A22c (5), A27–A27g (7).
 
 **Local implementation only. Production was not touched.** Run from a genuinely
 destroyed environment (`stop --no-backup` → `start` → `db reset --local`), so
@@ -1271,6 +1319,10 @@ on all five tables throughout.
 | Binding lifecycle | A24, A24b, A26, A26b | Binding survives a membership delete; **no FK membership→binding**; binding exists with zero membership rows |
 | Cascade | A13 | Deleting `auth.users` removes membership, binding and cutover rows |
 | Inertness | A14–A16b | Zero policies call `connected_member`; 33 existing policies unchanged; no pre-existing function references membership; nothing scheduled; 5 triggers; local snapshot empty |
+| **Privilege determinism** | **A3c–A3h** | **Zero table and column grants for `service_role`; zero PUBLIC table privileges; NO non-owner grantee in `relacl` on any of the five tables; `membership_state` EXECUTE for `service_role` present; `connected_member` and `ensure_membership_binding` EXECUTE absent for all three roles** |
+| **Binding runtime** | **A19–A21f** | **Repeated call returns the same token with one row; 8 genuinely concurrent sessions all return ONE token and produce ONE row; zero-argument signature with no overload; a second identity gets its own token and never the first's; unauthenticated call refused with 28000 and no row** |
+| **Runtime client denial** | **A22ctl1/ctl2, A22–A22c** | **Both credentials first shown to work (controls), then 16 real HTTP probes — 5 tables × 2 roles and 3 RPCs × 2 roles — return ZERO 2xx and ZERO JSON row arrays** |
+| **Lazy binding** | **A27–A27g** | **A snapshot identity starts unbound, acquires a binding on demand, and NO membership row is fabricated; `membership_state` reads `grandfathered` for the snapshot identity and `unknown` for a bound non-snapshot one** |
 
 **A29–A31 were not run and are recorded as future U5 gates**, as predicted — the
 writers they test do not exist, and a U3 pass would have been manufactured.
@@ -1306,15 +1358,56 @@ in both directions, the boundary's totality (a pre-boundary identity captured, a
 post-boundary identity excluded and not entitled), idempotent re-running that
 still cannot admit a post-cutover identity, the convergence completeness check,
 the permanent invariant, the NULL hazard demonstrated in both directions, and
-finalisation with its re-run guard. **63 of 63 now pass from a destroyed
-environment.**
+finalisation with its re-run guard. **63 of 63 passed from a destroyed
+environment on 2026-08-16** — superseded by the 93 of 93 run below, which
+includes all of these.
+
+#### Privilege determinism — the 2026-08-17 correction (review finding F1)
+
+**U3's final privilege state used to depend on which `pg_default_acl` entry
+applied to the role that created the tables, and that is not a property a
+deployment package may leave to the environment.** The local stack's `postgres`
+entry grants `anon`, `authenticated` and `service_role` `Dxtm` on a new public
+table; the stock `supabase_admin` entry grants all three `arwdDxtm`. The
+migration revoked from `anon` and `authenticated` only, so `service_role` kept
+whatever the ambient default supplied — `REFERENCES/TRIGGER/TRUNCATE` here,
+full DML elsewhere. **Two consequences, and the second is the dangerous one:**
+
+- the predicted delta of `+15` `table_grants` and `+47` `column_grants` was a
+  measurement of the *local* default rather than a prediction about production,
+  so P3 could have failed on a deployment that was in fact secure; and
+- the migration's own header asserted the `arwdDxtm` shape as production fact
+  while §2 predicted numbers derived from the other shape — **two statements
+  that cannot both describe one environment**, and neither was evidenced.
+
+**The correction is not to discover which default applies.** It is to stop
+depending on it: all five tables are now revoked from `public, anon,
+authenticated, service_role`, and all three helpers have EXECUTE revoked from
+the same four before `membership_state` is granted back to `service_role`. That
+one grant is the entire privilege surface U3 creates. **`current_user` and
+`pg_default_acl` are now read at P0 as evidence only, explicitly not as inputs
+to the desired state.**
+
+**U3 needs no direct table access** — every read is through a `SECURITY DEFINER`
+helper owned by the table owner — so zero is the honest posture rather than a
+restriction. **U4 must therefore introduce its own server mutation surface by
+explicit grant**, and will find `permission denied for table membership` if it
+assumes it inherited one. That is the intended failure: deliberate, at the
+point of writing, rather than an accidental privilege discovered later.
 
 #### B-23 gate state after local U3 — expected RED
 
-**152 differences, and every single one is "present locally, absent in
-production".** Zero modified rows; the only non-additive difference in the whole
-comparison remains the one approved `account_id_format` catalog-serialization
-exception. **That shape is the evidence that U3 is purely additive** — it changes
+**90 differences, and every single one is "present locally, absent in
+production".** Zero rows absent locally, zero modified; the only non-additive
+difference in the whole comparison remains the one approved `account_id_format`
+catalog-serialization exception. **Every one of the 90 names a U3 object** — the
+four that do not contain the string `membership` are `connected_member` and its
+three `function_grants` rows. `table_grants`, `column_grants`, `policies`,
+`triggers` and `storage_buckets` are all **IDENTICAL**.
+
+**It was 152 before the privilege correction.** The 62 that went were the
+`service_role` table and column grant rows that the ambient default had been
+supplying. **That shape is the evidence that U3 is purely additive** — it changes
 nothing that exists. The gate returns to green only after the separately
 authorised production deployment and recapture.
 
