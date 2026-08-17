@@ -102,6 +102,162 @@
     "table_name": "follows"
   },
   {
+    "conname": "membership_apple_status_check",
+    "contype": "c",
+    "definition": "CHECK (((apple_status IS NULL) OR ((apple_status >= 1) AND (apple_status <= 5))))",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_auto_renew_status_check",
+    "contype": "c",
+    "definition": "CHECK (((auto_renew_status IS NULL) OR (auto_renew_status = ANY (ARRAY[0, 1]))))",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_binding_method_check",
+    "contype": "c",
+    "definition": "CHECK ((binding_method = ANY (ARRAY['purchase'::text, 'legacy_claim'::text])))",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_cleanup_requires_end",
+    "contype": "c",
+    "definition": "CHECK (((pending_cleanup_at IS NULL) OR (entitlement_ended_at IS NOT NULL)))",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_environment_check",
+    "contype": "c",
+    "definition": "CHECK ((environment = ANY (ARRAY['Sandbox'::text, 'Production'::text])))",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id, environment)",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_transaction_unique",
+    "contype": "u",
+    "definition": "UNIQUE (environment, original_transaction_id)",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_user_fk",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "membership"
+  },
+  {
+    "conname": "membership_binding_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id)",
+    "table_name": "membership_binding"
+  },
+  {
+    "conname": "membership_binding_token_unique",
+    "contype": "u",
+    "definition": "UNIQUE (binding_token)",
+    "table_name": "membership_binding"
+  },
+  {
+    "conname": "membership_binding_user_fk",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "membership_binding"
+  },
+  {
+    "conname": "membership_control_count_nonnegative",
+    "contype": "c",
+    "definition": "CHECK (((cutover_identity_count IS NULL) OR (cutover_identity_count >= 0)))",
+    "table_name": "membership_control"
+  },
+  {
+    "conname": "membership_control_count_with_verification",
+    "contype": "c",
+    "definition": "CHECK (((cutover_verified_at IS NULL) = (cutover_identity_count IS NULL)))",
+    "table_name": "membership_control"
+  },
+  {
+    "conname": "membership_control_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (id)",
+    "table_name": "membership_control"
+  },
+  {
+    "conname": "membership_control_single_row",
+    "contype": "c",
+    "definition": "CHECK (id)",
+    "table_name": "membership_control"
+  },
+  {
+    "conname": "membership_control_verified_needs_cutover",
+    "contype": "c",
+    "definition": "CHECK (((cutover_verified_at IS NULL) OR (cutover_at IS NOT NULL)))",
+    "table_name": "membership_control"
+  },
+  {
+    "conname": "membership_cutover_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id)",
+    "table_name": "membership_cutover"
+  },
+  {
+    "conname": "membership_cutover_user_fk",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "membership_cutover"
+  },
+  {
+    "conname": "membership_notification_accepted_is_complete",
+    "contype": "c",
+    "definition": "CHECK (((outcome = 'rejected'::text) OR ((notification_uuid IS NOT NULL) AND (environment IS NOT NULL) AND (signed_date IS NOT NULL))))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_bytes_nonnegative",
+    "contype": "c",
+    "definition": "CHECK (((payload_bytes IS NULL) OR (payload_bytes >= 0)))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_environment_check",
+    "contype": "c",
+    "definition": "CHECK (((environment IS NULL) OR (environment = ANY (ARRAY['Sandbox'::text, 'Production'::text]))))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_failure_category_check",
+    "contype": "c",
+    "definition": "CHECK (((failure_category IS NULL) OR (failure_category = ANY (ARRAY['signature'::text, 'decode'::text, 'schema'::text, 'unsupported'::text, 'environment'::text]))))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_failure_only_when_rejected",
+    "contype": "c",
+    "definition": "CHECK (((failure_category IS NULL) = (outcome <> 'rejected'::text)))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_outcome_check",
+    "contype": "c",
+    "definition": "CHECK ((outcome = ANY (ARRAY['applied'::text, 'stale'::text, 'duplicate'::text, 'rejected'::text])))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (id)",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_sha256_format",
+    "contype": "c",
+    "definition": "CHECK (((payload_sha256 IS NULL) OR (payload_sha256 ~ '^[0-9a-f]{64}$'::text)))",
+    "table_name": "membership_notification"
+  },
+  {
     "conname": "post_comment_views_pkey",
     "contype": "p",
     "definition": "PRIMARY KEY (post_id, viewer_user_id)",

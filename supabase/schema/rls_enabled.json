@@ -17,6 +17,31 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "membership"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
+    "table_name": "membership_binding"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
+    "table_name": "membership_control"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
+    "table_name": "membership_cutover"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
+    "table_name": "membership_notification"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "post_comment_views"
   },
   {

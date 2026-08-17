@@ -21,6 +21,27 @@
     "public_execute": true
   },
   {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "connected_member",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "connected_member",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "connected_member",
+    "public_execute": false
+  },
+  {
     "can_execute": true,
     "direct_execute": true,
     "grantee": "anon",
@@ -40,6 +61,27 @@
     "grantee": "service_role",
     "proname": "enforce_connected_attachment_recipient_update",
     "public_execute": true
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "ensure_membership_binding",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "ensure_membership_binding",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "ensure_membership_binding",
+    "public_execute": false
   },
   {
     "can_execute": false,
@@ -145,6 +187,27 @@
     "grantee": "service_role",
     "proname": "mark_post_comments_viewed",
     "public_execute": true
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_state",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_state",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_state",
+    "public_execute": false
   },
   {
     "can_execute": true,

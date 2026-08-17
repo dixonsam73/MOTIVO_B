@@ -1,7 +1,33 @@
-# U3 production deployment — PREPARED, NOT EXECUTED
+# U3 production deployment — EXECUTED AND ACCEPTED, 2026-08-17
 
-**Nothing here has been run against production.** This is the reviewed package,
-awaiting explicit separate authorisation.
+**P0–P11 have all been run against production and all passed.** This file is now
+the record of what was executed as well as the definition of it; the observed
+values for every checkpoint are in `docs/qa-plan.md` under "U3 — PRODUCTION
+EXECUTION AND ACCEPTANCE".
+
+**Headline results.** Structural delta exactly as predicted — **+90 additive
+rows, zero modified, zero removed**. Boundary `cutover_at` =
+**2026-08-17 19:08:27.125223+00**, **16** identities captured and verified,
+`cutover_verified_at` = **2026-08-17 19:09:48.080684+00**. Convergence passed on
+the first fresh snapshot, so **the single permitted repair was never needed and
+PHASE 2b never ran** — and it is spent by completion rather than held in reserve.
+B-23 returned **GREEN** with only the standing `account_id_format` exception.
+
+**Two things this record must not be read as saying.** B-23's green gate proves
+the *schema* reproduces and proves **nothing** about the 16-row population, which
+is invisible to it by design; the population was verified by P4's coherence
+assertions, P6's convergence, P8's three-way count agreement and P11's permanent
+invariant. And `cutover_at` is **irreversible** — it is the definition of
+"pre-cutover" and must never be redeclared or altered.
+
+**Still true after deployment: U3 is inert.** No policy calls
+`connected_member()`, no client role can reach any membership object, no Edge
+Function was deployed, no Apple request is made and nothing is scheduled.
+
+**The rollback at the end of this file is retained for reference but is no longer
+a live option in the same sense:** dropping the tables now would destroy a
+verified cutover snapshot whose boundary cannot be re-established, since every
+identity created since 2026-08-17 19:08:27 is permanently post-cutover.
 
 U3 is **additive and inert**: no existing policy, function, grant or row is
 touched, and no Edge Function is deployed. Rollback is therefore `drop` in
@@ -27,8 +53,10 @@ Production is never mutated before the migration exists and is proven.
 | 10 | Commit migration + refreshed snapshot together | green |
 
 **The red state between 2 and 9 is expected and must not be "fixed" by
-weakening the gate or by refreshing the production snapshot early.** Steps 1–4
-are complete; **5 onward are not authorised.**
+weakening the gate or by refreshing the production snapshot early.** **ALL TEN
+STEPS ARE NOW COMPLETE (2026-08-17).** The gate was legitimately RED with exactly
+90 differences from step 2 until the recapture at step 8, and returned GREEN at
+step 9 with only the approved `account_id_format` exception.
 
 ---
 

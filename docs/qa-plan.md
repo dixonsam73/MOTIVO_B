@@ -1411,6 +1411,139 @@ supplying. **That shape is the evidence that U3 is purely additive** — it chan
 nothing that exists. The gate returns to green only after the separately
 authorised production deployment and recapture.
 
+### U3 — PRODUCTION EXECUTION AND ACCEPTANCE, 2026-08-17. P0–P11 all pass.
+
+**This is the production record. Everything above it is local.** Executed
+exactly as `supabase/sql/README-u3-deployment.md` defines, one authorised
+checkpoint group at a time, with a report and a stop between each.
+
+#### P0 — pre-flight, read-only
+
+| Assertion | Required | Observed |
+|---|---|---|
+| `existing_membership_tables` | 0 | **0** — and zero collisions of any kind: relations in any schema, helper names, types, constraint names, index names |
+| `null_created_at` — hard gate | 0 | **0** |
+| `auth.users` | read fresh | **16** |
+| `cutover_at` / `cutover_verified_at` | unset | both tables **absent**, so no state could exist |
+| Ownership (P2 query, run early) | zero rows | **zero rows** |
+| Baseline ownership | evidence | all 7 tables and 11 functions owned by `postgres` |
+| `current_user` / `session_user` | evidence | **`postgres` / `postgres`**, PostgreSQL 17.6 |
+| Edge Functions | unchanged | v7 / v1, ACTIVE, `verify_jwt=false` |
+| Structural drift | none | `capture-schema.sh` diff **empty** |
+
+**P0 CONFIRMED THAT F1 WAS A REAL DEFECT, NOT A HYPOTHETICAL ONE, AND THIS IS
+THE MOST IMPORTANT THING THE PRE-FLIGHT PRODUCED.** Production's governing
+`pg_default_acl` for role `postgres` — the role that applies the DDL — grants
+`arwdDxtm` on new tables **and** `X` on new functions to `anon`,
+`authenticated` **and** `service_role`. Under the pre-review migration,
+`service_role` would have silently acquired full DML on all five membership
+tables and EXECUTE on two helpers, and the predicted delta would have been wrong
+by +35/+188 instead of +15/+47, failing P3 on a deployment that was in fact
+secure. The review's determinism fix was load-bearing on this exact database.
+
+#### P1 — structural DDL
+
+Committed migration applied byte-for-byte (`sha256 4cd2e820…`, verified
+identical to HEAD before sending) via `supabase db query --linked --file`.
+**Exit 0.** 37 statements. No `CASCADE` — the only occurrences in the file are
+`on delete cascade` inside the three FK definitions. No existing object touched,
+no Edge Function deployed.
+
+#### P2 — security verification
+
+**Every condition zero or exactly as designed:** client table grants 0, client
+column grants 0, `service_role` table grants **0**, `service_role` column grants
+**0**, PUBLIC table privileges 0, non-owner grantees in `relacl` **0**, tables
+without RLS 0, policies on the new tables 0. EXECUTE matrix exactly as accepted —
+`membership_state`/`service_role` `can=true direct=true`, every other one of the
+nine `false`, `public_execute` false on all nine. **All eight new objects owned by
+`postgres`**, one distinct owner.
+
+#### P3 — structural delta
+
+| Surface | Pre-U3 | Post-U3 | Δ | Predicted |
+|---|---|---|---|---|
+| functions | 11 | 14 | +3 | +3 |
+| policies | 33 | 33 | +0 | +0 |
+| rls_enabled | 7 | 12 | +5 | +5 |
+| triggers | 5 | 5 | +0 | +0 |
+| constraints | 24 | 50 | +26 | +26 |
+| columns | 60 | 107 | +47 | +47 |
+| function_grants | 33 | 42 | +9 | +9 |
+| table_grants | 102 | 102 | +0 | +0 |
+| column_grants | 523 | 523 | +0 | +0 |
+| storage_buckets | 2 | 2 | +0 | +0 |
+
+**90 additive, 0 missing, 0 modified**, every one naming a U3 object; file-level
+diff **635 insertions, 0 deletions**. All 800 pre-existing production rows are
+present and byte-identical. **Against production's own pre-U3 baseline there are
+zero modified rows** — the `account_id_format` exception is a *local-vs-production*
+serialization artifact and correctly does not appear here.
+
+#### P4–P8 — the cutover
+
+**One mechanism adaptation, recorded rather than glossed.** The Management API
+scopes a session to a single request, so the committed file's "STOP and ROLLBACK
+unless …" could not be a human check between the assertion `select` and the
+`commit`. The GO conditions were enforced as `raise` statements **inside the same
+transaction**, so a failure would have rolled back boundary and population
+together. The mutating statements are byte-identical to the committed PHASE 1 and
+PHASE 3 — boundary read from the `cutover_at` **column**, predicate-limited
+population, `on conflict do nothing`, and PHASE 3's re-run guard intact. Strictly
+stronger than the manual gate; identical committed state.
+
+| Step | Result |
+|---|---|
+| **P4** preconditions | 16 users, `null_created_at` 0, 16 qualifying, cutover/membership/binding all empty, all three control fields NULL |
+| **P4** transaction | READ COMMITTED. `boundary_declared` true, `count_still_unset` true, `captured` **16** > 0 |
+| **P5** commit | **`cutover_at` = 2026-08-17 19:08:27.125223+00**, captured **16**, count and verified_at still NULL |
+| **P6** convergence, fresh snapshot | `missing` **0**, `null_created_at` **0**, `invalid_members` **0** |
+| **P7** repair | **NOT REQUIRED and NOT RUN.** PHASE 2b never executed |
+| **P8** finalise | materialised **16** = by_predicate **16** = recorded **16**; **`cutover_verified_at` = 2026-08-17 19:09:48.080684+00**; `cutover_at` pinned as a literal and unchanged; permanent invariant 0/0; `membership` and `membership_binding` empty |
+
+**The permitted repair is spent by completion, not held in reserve.** It belonged
+to the P6/P7 convergence procedure, which passed on its first fresh snapshot.
+**A qualifying-but-missing identity discovered later is a new anomaly for
+investigation, never authority to re-run the population** — which is what the
+cutover file's permanent-invariant section already says: *"Either is a
+stop-and-report, never a silent repair."*
+
+#### P9–P11 — acceptance
+
+**P9.** Fresh recapture, not the P3 artifact: **byte-identical to it on all ten
+files**, and all ten match the expected post-U3 state. **Zero UUIDs appear
+anywhere in `supabase/schema/`** — the 16-row population is outside structural
+capture by design.
+
+**P10. B-23 GREEN, exit 0.** Nine surfaces IDENTICAL; `constraints` carries only
+the single previously approved `account_directory.account_id_format`
+catalog-serialization exception, mechanically verified on both sides. No new
+exception, no unexpected difference.
+
+**P11.** Zero policies call `connected_member`; 33 policies and 5 triggers
+unchanged and byte-identical (neither file appears in the snapshot diff); no
+pre-existing function references membership; `membership`, `membership_binding`
+and `membership_notification` all **empty**; **zero `pending_cleanup_at`**;
+control state exactly the verified P4–P8 values; all **16** qualifying identities
+materialised with `post_cutover_in_snapshot` 0 and `qualifying_but_missing` 0;
+the full P2 security posture re-verified unchanged; `ensure_membership_binding()`
+not executable by `anon`, `authenticated` **or** `service_role`; Edge Functions
+still exactly two, v7 and v1, ACTIVE, `verify_jwt=false`. **No scheduling or HTTP
+extension is installed** (`pg_cron`, `pg_net`, `http` all absent) and no function
+references Apple or HTTP, so no Apple request, notification endpoint or cleanup
+action exists to be triggered.
+
+#### Two claims, two proofs — do not merge them
+
+**B-23's green gate proves the SCHEMA reproduces. It proves NOTHING about the
+16-row cutover population**, and citing it that way would be exactly the
+conflation the package was written to prevent. The gate reads system catalogs
+only and never touches a user table — which is what keeps production UIDs out of
+the repository. **The population was verified separately and by different
+evidence:** P4's in-transaction coherence assertions, P6's post-commit
+convergence on a fresh snapshot, P8's three-way count agreement, and P11's
+re-verification of the permanent invariant.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not

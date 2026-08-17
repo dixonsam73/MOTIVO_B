@@ -19,9 +19,60 @@ Baseline verified at migration: Debug and Release both compile clean
 **Approved and frozen 2026-08-16, before any implementation.** Phase 3 makes
 membership server-authoritative and makes **leaving Connected** a distinct
 lifecycle from **deleting an account**. This section is the durable record of
-what was decided; it is not a description of what is built. **Nothing in Phase 3
-is implemented at the time of writing** beyond U0 (this record) and U1 (the local
-backend baseline).
+what was decided; it is not a description of what is built. **Implemented so far:
+U0 (this record), U1 (the local backend baseline), U2 (the four backend
+verifications) and U3 — which is now DEPLOYED TO PRODUCTION, 2026-08-17.
+U4 onwards is not built.**
+
+## U3 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-17
+
+**The schema is deployed and the cutover boundary is declared, verified and
+irreversible. U3 remains inert: no policy reads it, no client role can reach it,
+no Edge Function was deployed, no Apple request is made and no cleanup is
+scheduled.** Executed as P0–P11 of `supabase/sql/README-u3-deployment.md`; the
+full record with every observed value is in `docs/qa-plan.md`.
+
+**The cutover facts U6b and U6c will need. No production UID is recorded here or
+anywhere in the repository, deliberately.**
+
+| Fact | Value |
+|---|---|
+| `cutover_at` | **2026-08-17 19:08:27.125223+00** |
+| `cutover_identity_count` | **16** |
+| `cutover_verified_at` | **2026-08-17 19:09:48.080684+00** |
+| `grandfather_enabled` | `true` |
+| `grandfather_expires_at` | `null` |
+| `u6b_bound_at` | `null` — U6b has not run |
+| Structural delta | **+90 additive rows, zero modified, zero removed** |
+
+**`cutover_at` must never be redeclared or altered.** It is the definition of
+"pre-cutover", and every later check — including U6c's removal rule — is stated
+relative to it.
+
+**Convergence passed on the first fresh snapshot** (`missing = 0`,
+`null_created_at = 0`, `invalid_members = 0`), so the single permitted repair was
+never needed and PHASE 2b never ran. **That repair belonged to the P6/P7
+procedure alone and is now spent by completion, not held in reserve.** The
+snapshot is verified. **Any later discovery of a qualifying-but-missing identity
+is a NEW ANOMALY requiring investigation — never authority to re-run the
+population.** The cutover file already says so in its own words: *"Either is a
+stop-and-report, never a silent repair."*
+
+**B-23's green gate does NOT prove the 16-row population, and must never be cited
+as if it did.** The gate is **structural only** — it reads system catalogs and no
+user table, so `membership_cutover`'s contents are invisible to it by design,
+which is exactly what keeps production UIDs out of the repository. **The
+population was verified separately**, by P4's in-transaction coherence
+assertions, P6's post-commit convergence on a fresh snapshot, P8's
+materialised = by_predicate = recorded agreement, and P11's re-verification of
+the permanent invariant. Two independent claims, two independent proofs.
+
+**The permanent invariant is re-runnable forever and both columns must always be
+zero** — see the tail of `supabase/sql/2026-08-16-u3-cutover-population.sql`.
+Verified zero at P8 and again at P11.
+
+**`service_role` holds NO privilege on any membership table** — see "U3's
+privileges are deterministic" below. U4 must grant what U4 needs.
 
 **Phase 3 accounting at implementation entrance — four counts, deliberately
 separate. Conflating them is how B-9's subcase went missing once already.**

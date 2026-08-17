@@ -5,9 +5,19 @@
     "security_definer": true
   },
   {
+    "definition": "CREATE OR REPLACE FUNCTION public.connected_member(target_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select coalesce(\n    (select bool_or(\n         coalesce(m.renewal_date > now(), false)\n         or coalesce(m.is_in_billing_retry\n                     and m.grace_period_expires_date > now(), false)\n       )\n       from public.membership m\n      where m.user_id = target_user_id),\n\n    (select exists (\n       select 1\n         from public.membership_cutover c\n         cross join public.membership_control k\n        where c.user_id = target_user_id\n          and k.grandfather_enabled\n          and (k.grandfather_expires_at is null\n               or now() < k.grandfather_expires_at))),\n\n    -- Absence is not entitlement. NULL input reaches here and fails closed.\n    false\n  );\n$function$\n",
+    "proname": "connected_member",
+    "security_definer": true
+  },
+  {
     "definition": "CREATE OR REPLACE FUNCTION public.enforce_connected_attachment_recipient_update()\n RETURNS trigger\n LANGUAGE plpgsql\n SET search_path TO 'public'\nAS $function$\nbegin\n    if new.id is distinct from old.id\n       or new.asset_id is distinct from old.asset_id\n       or new.sender_user_id is distinct from old.sender_user_id\n       or new.recipient_user_id is distinct from old.recipient_user_id\n       or new.storage_bucket is distinct from old.storage_bucket\n       or new.storage_path is distinct from old.storage_path\n       or new.filename is distinct from old.filename\n       or new.mime_type is distinct from old.mime_type\n       or new.byte_count is distinct from old.byte_count\n       or new.page_count is distinct from old.page_count\n       or new.created_at is distinct from old.created_at\n    then\n        raise exception\n            'Connected attachment identity and payload metadata are immutable';\n    end if;\n\n    if old.saved_to_scores_at is not null\n       and new.saved_to_scores_at is distinct from old.saved_to_scores_at\n    then\n        raise exception\n            'saved_to_scores_at cannot be changed once set';\n    end if;\n\n    if old.deleted_at is not null\n       and new.deleted_at is distinct from old.deleted_at\n    then\n        raise exception\n            'deleted_at cannot be changed once set';\n    end if;\n\n    return new;\nend;\n$function$\n",
     "proname": "enforce_connected_attachment_recipient_update",
     "security_definer": false
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.ensure_membership_binding()\n RETURNS uuid\n LANGUAGE plpgsql\n SECURITY DEFINER\n SET search_path TO ''\nAS $function$\ndeclare\n  v_uid   uuid := auth.uid();\n  v_token uuid;\nbegin\n  if v_uid is null then\n    raise exception 'authentication required'\n      using errcode = '28000';\n  end if;\n\n  -- UPSERT-RETURNING. `do nothing` would be wrong: under concurrency the loser\n  -- skips WITHOUT taking a lock, and a following SELECT can miss the winner's\n  -- as-yet-uncommitted row. `do update` locks, waits for the winner, and\n  -- RETURNS the surviving row -- so concurrent callers get the SAME token.\n  -- The assignment is a deliberate no-op; it exists only to make RETURNING fire.\n  insert into public.membership_binding (user_id)\n       values (v_uid)\n  on conflict (user_id) do update\n       set user_id = excluded.user_id\n    returning membership_binding.binding_token into v_token;\n\n  return v_token;\nend\n$function$\n",
+    "proname": "ensure_membership_binding",
+    "security_definer": true
   },
   {
     "definition": "CREATE OR REPLACE FUNCTION public.follow_requests_open(target_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  select coalesce(\n    (select ad.follow_requests_enabled\n     from public.account_directory ad\n     where ad.user_id = target_user_id),\n    true\n  );\n$function$\n",
@@ -32,6 +42,11 @@
   {
     "definition": "CREATE OR REPLACE FUNCTION public.mark_post_comments_viewed(p_post_id uuid)\n RETURNS void\n LANGUAGE sql\n SECURITY DEFINER\n SET search_path TO 'public'\nAS $function$\n  insert into public.post_comment_views (post_id, viewer_user_id, last_viewed_at)\n  values (p_post_id, auth.uid(), now())\n  on conflict (post_id, viewer_user_id)\n  do update set last_viewed_at = now();\n$function$\n",
     "proname": "mark_post_comments_viewed",
+    "security_definer": true
+  },
+  {
+    "definition": "CREATE OR REPLACE FUNCTION public.membership_state(target_user_id uuid)\n RETURNS text\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select case\n    when exists (select 1 from public.membership m\n                  where m.user_id = target_user_id)\n      then case when public.connected_member(target_user_id)\n                then 'entitled' else 'expired' end\n    when public.connected_member(target_user_id) then 'grandfathered'\n    else 'unknown'\n  end;\n$function$\n",
+    "proname": "membership_state",
     "security_definer": true
   },
   {

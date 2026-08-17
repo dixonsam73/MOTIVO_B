@@ -225,6 +225,382 @@
   },
   {
     "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "environment",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "original_transaction_id",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 3,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "product_id",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 4,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "apple_status",
+    "data_type": "smallint",
+    "is_nullable": "YES",
+    "ordinal_position": 5,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "renewal_date",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 6,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "grace_period_expires_date",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 7,
+    "table_name": "membership"
+  },
+  {
+    "column_default": "false",
+    "column_name": "is_in_billing_retry",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 8,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "auto_renew_status",
+    "data_type": "smallint",
+    "is_nullable": "YES",
+    "ordinal_position": 9,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "expiration_intent",
+    "data_type": "smallint",
+    "is_nullable": "YES",
+    "ordinal_position": 10,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "revocation_date",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 11,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "renewal_info_signed_date",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 12,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "last_notification_uuid",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "ordinal_position": 13,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "binding_method",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 14,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "bound_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 15,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "entitlement_ended_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 16,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "pending_cleanup_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 17,
+    "table_name": "membership"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 18,
+    "table_name": "membership"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 19,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership_binding"
+  },
+  {
+    "column_default": "gen_random_uuid()",
+    "column_name": "binding_token",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "membership_binding"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "created_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 3,
+    "table_name": "membership_binding"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 4,
+    "table_name": "membership_binding"
+  },
+  {
+    "column_default": "true",
+    "column_name": "id",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "cutover_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 2,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "cutover_identity_count",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "ordinal_position": 3,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "cutover_verified_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 4,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": "true",
+    "column_name": "grandfather_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 5,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "grandfather_expires_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 6,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "u6b_bound_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 7,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "notes",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 8,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "updated_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 9,
+    "table_name": "membership_control"
+  },
+  {
+    "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership_cutover"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "captured_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "membership_cutover"
+  },
+  {
+    "column_default": "gen_random_uuid()",
+    "column_name": "id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "notification_uuid",
+    "data_type": "uuid",
+    "is_nullable": "YES",
+    "ordinal_position": 2,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "environment",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 3,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "notification_type",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 4,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "subtype",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 5,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "original_transaction_id",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 6,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "signed_date",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 7,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "received_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 8,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "outcome",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 9,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "failure_category",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 10,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "request_id",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 11,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "payload_bytes",
+    "data_type": "integer",
+    "is_nullable": "YES",
+    "ordinal_position": 12,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
+    "column_name": "payload_sha256",
+    "data_type": "text",
+    "is_nullable": "YES",
+    "ordinal_position": 13,
+    "table_name": "membership_notification"
+  },
+  {
+    "column_default": null,
     "column_name": "post_id",
     "data_type": "uuid",
     "is_nullable": "NO",
