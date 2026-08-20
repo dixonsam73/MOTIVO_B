@@ -21,9 +21,16 @@ membership server-authoritative and makes **leaving Connected** a distinct
 lifecycle from **deleting an account**. This section is the durable record of
 what was decided; it is not a description of what is built. **Implemented so far:
 U0 (this record), U1 (the local backend baseline), U2 (the four backend
-verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — and U4b-U4g, which are
-IMPLEMENTED AND GREEN LOCALLY BUT NOT DEPLOYED (2026-08-20). U4h/U4i and U5
-onwards are not built.**
+verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — U4 in full, including
+U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — and U5a, a gate unit
+(2026-08-20): F1/C-52 corrected and verified, the F3b gate BUILT AND NOT RUN.
+**U5b onwards is not built**, and no Phase 3 client protocol exists.**
+
+**CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
+AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
+its own heading. It was written before the deploy and never re-read afterwards —
+**the same failure mode as C-52 four lines of reasoning apart**: a durable
+document describing a state it is not itself evidence of.
 
 ## U4 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-20
 
@@ -90,6 +97,139 @@ assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
 
+## U5a — GATE UNIT. F1 CORRECTED; F3b BUILT AND NOT RUN. 2026-08-20
+
+**U5a is a gate in U4a's sense: a re-runnable experiment plus a correction, not
+an implementation.** No SQL, no Edge Function, no client protocol, no deploy.
+U5b onwards has not begun.
+
+**THE U5 AUDIT IS ACCEPTED AND D1-D9 ARE AGREED**, with D4 decided against the
+audit's own lean — see below. Six architectural decisions are now settled and
+binding on U5's implementation:
+
+- **Establishment NEVER schedules cleanup.** `pending_cleanup_at` stays NULL on
+  every insert path, unconditionally. Scheduling is a *transition* from entitled
+  to not-entitled and an establishment has no previous state to transition from
+  — the same reasoning as "absence of a membership record can never schedule
+  cleanup", one level down. Without this rule U5, the unit explicitly free of
+  enforcement and cleanup, becomes the unit that can schedule destruction of a
+  returning member's Connected content on first contact. **The born-lapsed case
+  is therefore left explicitly open for U7 rather than silently resolved.**
+- **`ignored`/`unestablished` notifications are HISTORICAL EVIDENCE, not a
+  queue.** Establishment performs its own live authoritative read, which
+  supersedes whatever the notification carried. Do not build a consumer; do not
+  read `needs_establishment` as a work item.
+- **A separate `APPLE_ATTEST_ALLOWED_ENVIRONMENTS`**, never reuse
+  `APPLE_ASSN_ALLOWED_ENVIRONMENTS`. Same reasoning that keeps
+  `APPLE_IAP_BUNDLE_ID` separate from `APPLE_CLIENT_ID`: they hold the same value
+  today and mean different things, and coupling them means a future notification
+  change silently alters attestation.
+- **Attest `.verified` transactions only.** The server re-verifies regardless, so
+  the local filter costs nothing real.
+- **`ensure_membership_binding()` may be granted to `authenticated`** — the one
+  client-reachable membership object U5 creates, and the narrowest the design
+  admits: no argument, identity from `auth.uid()`, idempotent, at most one row
+  per `auth.users` row.
+- **F2 claim binding is MANDATORY** — see B-31.
+
+### F1 is corrected, and the correction is verified rather than asserted
+
+**C-52.** `0daecd1` (2026-08-14, a commit about B-6) silently reverted the Run
+action to Debug and re-pinned `Etudes.storekit`, undoing `67d64f0`'s deliberate
+change and contradicting two standing statements in this file for six days.
+Restored 2026-08-20. **The restored scheme is byte-identical to `67d64f0`'s
+version — same blob `013cc35`** — so it is provably back to the deliberate state
+rather than hand-edited to resemble it, and `xcodebuild -showBuildSettings`
+confirms the Run action's Release configuration resolves
+`PRODUCT_BUNDLE_IDENTIFIER = com.sdsongs.etudes` with no pinned StoreKit
+configuration. Debug and Release both compile clean.
+
+**The lesson is not "check the scheme".** It is that **a durable document
+asserting a repository fact is not evidence of that fact** — this file said the
+right thing throughout, was re-read many times, and was wrong the whole time.
+
+### F3b — the gate is BUILT AND NOT RUN, and must not be recorded otherwise
+
+**No device currently holds a sandbox entitlement**: Device A sits at
+first-launch onboarding with its Apple credential revoked, and Device B Release
+is the lapsed control that must not be spent. The instrument, the procedure and
+the six predicted outcomes are committed in `docs/qa-plan.md` **before**
+execution, in the D14/D15 style.
+
+**Sequencing finding, and it saves a sandbox cycle: F3b needs an ENTITLED device,
+not a FRESH one.** A clean first-purchase state is the expensive thing the rig
+cannot cheaply restore; an existing entitlement is free to read repeatedly. **So
+F3b rides on the G6a branch-A purchase and costs nothing extra**, and may run at
+any point while that entitlement is live.
+
+**Apple's documentation does not answer F3b** — checked against the references
+for `VerificationResult`, `jwsRepresentation`, `signedDate` and
+`currentEntitlements`. The one hint runs the other way (`jwsRepresentation` is
+"the same as its counterpart in the App Store server APIs", which reads like a
+stored artefact), which is exactly why this is a gate.
+
+### `Set App Account Token` — CONFIRMED against Apple's reference, 2026-08-20, with two corrections to the U5 audit
+
+`PUT /inApps/v1/transactions/{originalTransactionId}/appAccountToken`, both
+hosts. Confirms B-24 unchanged: Apple **replaces** an existing token on request,
+so **Apple does not enforce the binding against us and our rule is the only
+protection**. Also confirms the per-identity token model — the same token may be
+assigned to many transactions.
+
+**CORRECTION 1 — the legacy claim can be REFUSED BY APPLE for a reason the audit
+did not model.** `FamilyTransactionNotSupportedError`: a transaction whose
+`inAppOwnershipType` is `FAMILY_SHARED` **cannot ever** receive a token. Family
+Sharing is off for both products, so this should not arise — but "should not
+arise" is not "is handled". It is a **permanent** refusal, not a transient one,
+and U5 must record it as such rather than retrying forever. `AppTransactionIdNot
+SupportedError` and `TransactionIdIsNotOriginalTransactionIdError` are the same
+shape: pass the *original* transaction id, never any transaction id, even though
+`Get All Subscription Statuses` accepts either.
+
+**CORRECTION 2 — the re-read may legitimately not show the token yet, and A30
+must tolerate it.** Apple documents the update as applying to "the current
+renewal transaction and all subsequent renewals" and **not to past
+transactions**, and says nothing about read-after-write visibility. **P12 already
+taught this project that Apple-side propagation is real and looks exactly like
+misconfiguration** — two 404s with `4040007` on a notification URL that was
+correctly set, succeeding later with no change to anything. So A30's "call Set
+App Account Token, then re-read before writing membership" stands, but the
+failure branch is **write nothing and retry on the next attestation**, never
+"accept the 200 as sufficient". Attestation runs on every foreground, so a legacy
+claim completing on the second pass is invisible to the user.
+
+### D4 — DECIDED: Sandbox must NOT confer Production entitlement
+
+**Environment separation is part of the authority model.** `connected_member()`
+is environment-blind today (F4) and must not stay that way once U5 can create
+rows. The QA need is real and is met by an **explicit, expiring, operator-only
+allowlist**, not by leaving the predicate blind:
+
+- `connected_member()` counts **Production rows only**, except for identities in
+  a new `membership_sandbox_tester` table.
+- That table is a **filter widener, never a grant**: it changes which rows
+  `bool_or` can see and nothing else, so an allowlisted tester with no row, or a
+  lapsed one, is still not entitled. Invariant 8 survives intact.
+- **`expires_at` is NOT NULL and enforced in the predicate.** A forgotten entry
+  closes itself; that is the whole point, and it is what makes this safe where a
+  single deployment-wide boolean would not be.
+- **No grants to any role, no writer in any unit.** Nothing in U5, U6 or U7
+  inserts into it; assertable over `pg_get_functiondef` the same way U4 asserts
+  the absence of `INSERT INTO public.membership`. **There is therefore no
+  shippable path by which a Sandbox purchase confers Production entitlement** —
+  that is a structural property, not a policy.
+
+**Two consequences to carry into U5b rather than discover.** (i) A non-allowlisted
+identity holding **only** a Sandbox row currently derives FALSE; under the filter
+its row becomes invisible, `bool_or` returns NULL over an empty set, and it falls
+through to the **grandfather** clause. That is defensible — a Sandbox row is not
+evidence about Production entitlement in either direction — but it is a change
+and must be stated, not discovered. (ii) **28 `connected_member` assertions and 9
+`membership_state` assertions across the three suites** must be re-pointed;
+U4's acceptance suite is almost entirely `'Sandbox'` fixtures.
+
+---
+
 ## U3 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-17
 
 **The schema is deployed and the cutover boundary is declared, verified and
@@ -145,13 +285,14 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **16** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4 |
+| Phase-3-tagged register rows | **18** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed two — C-52 and B-31 — and resolved one** |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-31** — unchanged by U4; **B-31 added by U5a** |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The sixteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9, C-9**
-plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**.
+The eighteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
+C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's two:
+**C-52** (Resolved) and **B-31** (open).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -170,7 +311,10 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **4 open: C-26, B-11, C-31 and B-24.** All four are the server-authority work
+= **5 open: C-26, B-11, C-31, B-24 and B-31.** **B-31 is U5a's, and it is a
+*conditional* P1 in the C-26 sense — the deployed verifier is correct for the
+callers it has, and the gap becomes a defect only if U5 ships without the claim
+checks.** The other four are the server-authority work
 itself, and none of them has begun. **B-24 is a design defect caught before
 implementation**, so it is open in the sense that U5 has not yet built the
 corrected protocol — not in the sense that anything defective ships.
@@ -940,7 +1084,10 @@ of work:** the shared scheme's Run action is already Release, so clearing the
 StoreKit configuration in Run → Options gives a development build on real sandbox
 StoreKit with the debugger and live console attached. That is a genuine
 real-StoreKit environment and it iterates in minutes rather than in TestFlight
-processing time. **The Run action must stay on Release** — Debug carries
+processing time. **The Run action must stay on Release** — and it did NOT, from
+2026-08-14 to 2026-08-20; see C-52 and the U5a record below before trusting this
+paragraph. **Restored 2026-08-20 and verified against the build settings rather
+than against this file.** Debug carries
 `com.samueldixon.motivo.dev`, which App Store Connect does not know, so products
 return an empty array and you get C-29's signature instead of a purchase.
 
@@ -1180,7 +1327,18 @@ no further handling of the private key. The `.p8` itself lives at
 `~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
 already blocks `*.p8` and `*.pem`.
 
-**Temporary instrumentation: NONE PRESENT.** The most recent was C-3's
+**Temporary instrumentation: PRESENT — `JWSFreshnessProbe`, added 2026-08-20 by
+U5a.** One file (`MOTIVO/JWSFreshnessProbe.swift`) and two call sites in
+`MOTIVOApp.swift` (launch, foreground). It exists to score the F3b gate and
+**its standing removal condition is the moment F3b is scored**, exactly as
+`ActivationTrace` and `MembershipTrace` were removed the moment their gates
+closed. Removal is a pure deletion — nothing else references the type — plus one
+`UserDefaults` key, `u5a_jwsProbe_v1`. **It is read-only:** no network, no
+purchase, no `AppStore.sync()`, no binding, no membership establishment. **It
+never logs the JWS**, only a 12-hex digest prefix, because under U5's protocol
+the JWS *is* the ownership proof and a device log is readable over a cable.
+
+**Earlier note, still true of everything before U5a.** The most recent was C-3's
 foreground-timing probe, added and removed on 2026-08-14 within the same day.
 Its removal was verified as a *pure deletion* — `git diff` against the pre-probe
 commit is empty, so the tree is byte-identical to its state before the probe
@@ -1365,7 +1523,8 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   instead of a purchase. The shared scheme's Run action is Release. Keep it
   there.
 - **The shared scheme no longer pins a StoreKit configuration** (changed
-  2026-08-11). Running from Xcode now gets **real StoreKit against Apple's
+  2026-08-11; **silently reverted 2026-08-14 by `0daecd1`, restored 2026-08-20 by
+  U5a — C-52**, and the six-day gap is why this bullet is not self-verifying). Running from Xcode now gets **real StoreKit against Apple's
   sandbox by default**, which is the inverse of the setting that masked C-9,
   C-29, C-30 and C-38. `Etudes.storekit` is retained but **opt-in only**: attach
   it in Run → Options when synthetic behaviour is deliberately wanted, and

@@ -298,6 +298,17 @@ struct MOTIVOApp: App {
                     Task {
                         await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "launch")
                     }
+
+                    // U5a / F3b — TEMPORARY INSTRUMENTATION. Remove with
+                    // JWSFreshnessProbe.swift the moment the gate is scored.
+                    // Two reads a few seconds apart answer the within-launch
+                    // half; the across-launch half is answered by the probe's
+                    // own stored comparison, not by diffing console lines.
+                    Task {
+                        await JWSFreshnessProbe.run(reason: "launch1")
+                        try? await Task.sleep(nanoseconds: 3_000_000_000)
+                        await JWSFreshnessProbe.run(reason: "launch2")
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
@@ -309,6 +320,15 @@ struct MOTIVOApp: App {
                     // so the polled check is required rather than redundant.
                     Task {
                         await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "foreground")
+                    }
+
+                    // U5a / F3b — TEMPORARY INSTRUMENTATION. Remove with
+                    // JWSFreshnessProbe.swift. Deliberately NOT inside the
+                    // Connected-liveness Task below: that one returns early on
+                    // `canViewFeed`, and a probe that only fires in Connected
+                    // mode could not observe the state F3b is about.
+                    Task {
+                        await JWSFreshnessProbe.run(reason: "foreground")
                     }
 
                     Task {
