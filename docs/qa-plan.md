@@ -965,7 +965,7 @@ Q6's three failure modes cannot be induced against Apple at all.
 | # | Covers | Notes |
 |---|---|---|
 | G1 | B-4, B-12, B-13, B-9's two-recipient subcase | Local destructive suite on the B-23 instance. Stopping rule below |
-| G2 | C8, C9 | Ingestion in observe-only mode. Per-notification outcome (`applied`/`stale`/`duplicate`/`rejected`); replay yields `duplicate` with no state change; an unsigned payload is rejected before parsing **and answered 200**, since it will never become valid and retrying it achieves nothing |
+| G2 | C8, C9 | Ingestion in observe-only mode. **AMENDED 2026-08-20 in two places, both because the original wording asserted something no correct implementation could produce.** (i) **Status codes:** structural reject → **400** with nothing written; signature-verification failure → **5xx**; verified and durably handled → **200**, including outcomes we refused downstream. The old "answered 200" rested on the premise that a payload failing verification was never valid; **U4a falsified it** — the catastrophic case is a verifier that rejects *everything*, which is exactly what the official Apple library does on this runtime, and under 200 every legitimate notification lost that way is lost permanently while 5xx buys production's five retries across 72 hours. Sandbox never retries either way. (ii) **Replay:** `'duplicate'` is **structurally unwritable** — the partial unique index on `notification_uuid` forbids a second row (B-26) — so the assertion is now **`delivery_count` 1 → 2 with `membership` unchanged and the first delivery's `outcome` preserved**, which proves the replay was *seen and refused* rather than merely unprocessed. Per-notification outcome is `applied`/`stale`/`ignored`/`rejected`; `'duplicate'` is **returned** to the caller, never stored |
 | G3 | Missed-notification recovery | With one delivery deliberately dropped, the record still converges to Apple's answer |
 | G4 | B-11 shadow half — **U6a** | Per denied request, **which clause would have decided it**, against a prediction committed before the window opens |
 | G5 | Lapsed-member deletion **reachability only** | **NON-DESTRUCTIVE. The button is not pressed.** Control present and enabled on a lapsed Device A, confirmation sheet reaches its typed-confirmation state, grants and policies for both destructive endpoints unchanged under enforcement. **This is not the executed evidence and must not be recorded as such** |
@@ -1543,6 +1543,280 @@ the repository. **The population was verified separately and by different
 evidence:** P4's in-transaction coherence assertions, P6's post-commit
 convergence on a fresh snapshot, P8's three-way count agreement, and P11's
 re-verification of the permanent invariant.
+
+### U4a — GATE RESULT, 2026-08-19. Route resolved. Two design defects found.
+
+**U4a is the empirical gate B-28 required, and it ran before any U4 implementation
+existed.** Its question was narrow: *can the Supabase Edge Runtime verify an
+App Store Server Notifications V2 payload — ES256 JWS carrying an x5c
+certificate chain — against a pinned Apple Root CA G3?* **Nothing was deployed,
+no production object was read or written, no secret was installed and App Store
+Connect was not touched.**
+
+**Where it ran, because that is the whole point of the gate.** Inside
+`public.ecr.aws/supabase/edge-runtime:v1.74.3` (reporting
+`supabase-edge-runtime-1.74.3 (compatible with Deno v2.1.4)`, V8 11.6.189.12) —
+**not** a host `deno`, which does not exist on this machine. Every result was
+obtained twice: once with the probe as the **main service**, and once inside a
+**user worker** spawned via `EdgeRuntime.userWorkers.create`, which is the shape
+`supabase functions serve` uses. **The two agreed exactly**, so nothing here
+rests on a privilege the shipping context would not have.
+
+**The fixture was built to Apple's real shape rather than to a convenient one**,
+and that mattered twice. Apple's actual chain is **P-384 root and P-384
+intermediate, both `ecdsa-with-SHA384`**, carrying a **P-256 leaf** whose own
+certificate is SHA-384-signed while the JWS over it is ES256/SHA-256 — read
+directly off the genuine `AppleRootCA-G3.cer` (583 bytes, sha256
+`63343abf…9179`) and `AppleWWDRCAG6.cer` (794 bytes, sha256 `bdd4ed6e…ca30`),
+both fetched from Apple's public certificate authority page. **An all-P-256 test
+chain would have proved nothing about the link that actually carries Apple's
+trust.** The synthetic chain mirrors that shape and, on a second pass, also
+carries Apple's marker OIDs — `1.2.840.113635.100.6.2.1` on the intermediate and
+`1.2.840.113635.100.6.11.1` on the leaf. **Adding them changed a result and is
+why the first Route C reading was not reportable:** without them the official
+library rejected the good fixture *correctly*, which is indistinguishable from
+rejecting it *wrongly* unless the OIDs are present.
+
+| Route | Verdict |
+|---|---|
+| `node:crypto` `X509Certificate` | **DEAD.** The class exists and a capability probe reports `hasX509: true`, but **`X509Certificate.prototype.verify` and `.toString` both throw `ERR_NOT_IMPLEMENTED`**. Capability presence is not capability |
+| `@apple/app-store-server-library@1.6.0` | **IMPORTS CLEANLY, REJECTS EVERYTHING — including the payload it should accept.** `VerificationException`, `status = 1 (VERIFICATION_FAILURE)`, `cause: Error [ERR_NOT_IMPLEMENTED]: Not implemented: crypto.X509Certificate.prototype.toString` |
+| `@peculiar/x509@1.12.3` + Web Crypto | **PROVEN. Adopted.** Full battery below |
+| Web Crypto alone | Floor confirmed — P-256/SHA-256 and P-384/SHA-384 sign+verify both `true`. Cannot parse X.509 or walk a chain, so it is a component and not a route |
+
+**The Apple library's failure mode is worse than its failure, and this is the
+finding rather than the benchmark.** It returns **the same status for its own
+runtime incapacity as for a genuine forgery.** Deployed on this runtime it would
+have rejected 100% of real Apple traffic while filling the audit table with rows
+that read exactly like an attack — and the ingestion endpoint would have looked
+like it was working, because rejecting hostile input is what it is supposed to
+do. It fails **closed**, so nothing could have been forged past it; every
+legitimate notification would simply have been lost. **A green endpoint and a
+dead verifier are the same observation from outside.** The same trap as C-38's
+"stayed Solo", where the healthy and broken paths produced one indistinguishable
+symptom.
+
+#### Route B — the full battery, identical in main worker and user worker
+
+| Assertion | Result |
+|---|---|
+| Good payload verifies, outer JWS | **PASS** — `SUBSCRIBED`, uuid `3f1c0e2a…0e77`, `environment: Sandbox` |
+| Both **nested** JWS verified independently | **PASS** — `signedTransactionInfo` and `signedRenewalInfo` each verified in their own right, not trusted because the envelope was |
+| Tampered payload | rejected — `JWS signature invalid` |
+| `alg: none` | rejected — `alg is not ES256: none` |
+| `x5c` absent | rejected — `x5c missing or too short` |
+| Chain of length 1 | rejected — `x5c missing or too short` |
+| Chain reordered | rejected — `leaf lacks Apple OID` |
+| Root substituted in `x5c[2]` | rejected — `JWS signature invalid`. **Weaker than its name suggests, and worth knowing why: `x5c` lives in the protected header, so substituting the root changes the signing input and invalidates the signature before any pinning logic runs.** The pinning check below is the one that carries the property |
+| **Pinning** — good payload verified against the real Apple anchor | rejected — `intermediate not signed by pinned anchor`. **This is the assertion that proves `x5c[2]` is ignored and our embedded anchor decides** |
+| Tampered **nested** `signedTransactionInfo` under a correctly re-signed envelope | rejected — `JWS signature invalid` |
+| Expired leaf (verified at a date past `notAfter`) | rejected — `cert not valid at 2028-01-01T…` |
+
+#### The real Apple link, proven rather than simulated
+
+| | |
+|---|---|
+| `Apple Worldwide Developer Relations Certification Authority G6` verified against `Apple Root CA - G3` | **`true`** — both P-384, `ecdsa-with-SHA384` |
+| The same G6 certificate verified against an unrelated root | **`false`** |
+| Apple Root CA G3 self-signature | `true`; `notAfter` 2039-04-30 |
+| G6 carries `1.2.840.113635.100.6.2.1` | `true` |
+| Module import cost | **43 ms** |
+| Mean full verification, 20 iterations | **4.51 ms** |
+
+**What this gate did NOT prove, stated rather than glossed. No genuine
+Apple-signed ASSN payload was verified, because none can be legitimately
+obtained without a deployed endpoint.** The **root→intermediate** link is proven
+against Apple's own certificates; the **intermediate→leaf** link and the JWS
+signature itself are proven only against a faithful synthetic chain. **The first
+genuine Apple-signed payload this project can obtain is Apple's own test
+notification at U4i**, and that is where the remaining half of B-28 discharges.
+A synthetic chain proves the algorithm; it never proves Apple's chain.
+
+**One filesystem fact that decides an implementation detail.** A user worker
+cannot read files mounted beside its source — its code is relocated to
+`/var/tmp/sb-compile-edge-runtime/` and `Deno.readTextFile` on the original path
+fails with `NotFound`. **The pinned Apple root must therefore be an embedded
+constant in source, never a file read at runtime**, which is what the design
+wanted anyway and is now a requirement rather than a preference.
+
+### U4a — transaction-boundary proof, 2026-08-19
+
+**Run because the proposed U4 write surface assumed something nobody had
+checked.** Three observations against the B-23 instance through PostgREST as
+`service_role`:
+
+| # | Observation | Result |
+|---|---|---|
+| T1 | Two successive `rpc/u4a_txid` calls, each returning `pg_current_xact_id()` | **20888** and **20889** — **two transactions.** Two `.rpc()` calls can never be atomic |
+| T2 | One RPC that inserts, then raises | **No row.** One RPC is one transaction and rolls back cleanly |
+| T3 | Two RPCs: the first inserts, the second raises | **The first row is committed.** No cross-call atomicity |
+
+**Residue: none, and it was verified rather than assumed.** The four probe
+functions and one probe table were created in `public`, dropped, confirmed
+absent from `pg_proc` and `pg_class`, and **`verify-baseline.sh` re-run GREEN**
+with only the standing `account_id_format` exception. `git status` clean
+throughout.
+
+**Consequence — recorded on B-30.** One entry point per path, one transaction per
+entry point, with the canonical writer internal and granted to no role.
+
+### G2 AMENDMENT — AGREED 2026-08-20, and implemented in U4d
+
+**G2 currently requires that an unsigned payload be "rejected before parsing
+**and answered 200**, since it will never become valid and retrying it achieves
+nothing". U4a falsified the premise that generated that wording.** The reasoning
+assumed the only reason a payload fails verification is that it was never valid.
+**B-28 produced the other reason:** a runtime in which the verifier rejects
+*everything*, legitimate traffic included, while reporting it identically. Under
+`200`, every notification lost to such a defect is lost permanently. Under
+`5xx`, production retries five times across 72 hours and a fix inside that window
+recovers them; **sandbox never retries either way, so the choice costs nothing
+there.** Proposed: structural rejects `400` with no write, signature failures
+`5xx` with a bounded aggregate counter, and `200` for anything durably recorded.
+
+**ACCEPTED 2026-08-20 and now live in `appstore_notifications_v1`.** The G2 row
+above carries the amended wording, and `e2e.sh` asserts all three codes against
+the real function: E2–E5 return 400 with **zero** rows and **zero** counters
+written, E8/E9 return 503 with the bounded counter incremented exactly twice in
+a single row, and E14/E21/E23/E25/E27/E31 return 200 for every verified payload
+including the ones refused downstream.
+
+
+### U4 — PREDICTIONS AND RESULTS, 2026-08-20. 207 of 207 local assertions pass.
+
+**U4b–U4g are complete and green. U4h and U4i have NOT been run: nothing is
+deployed, no production secret is installed, App Store Connect is untouched and
+production has been neither queried nor mutated.** The production package is
+`supabase/sql/README-u4-deployment.md`.
+
+**Everything below is "verified against a faithful local reproduction", never
+"verified in production"** — and the verified-notification path is verified
+against a faithful **copy** of the function whose trust anchor is a test CA. See
+the honest limits at the end.
+
+| Suite | Assertions | Result |
+|---|---|---|
+| `supabase/tests/u4a/run.sh` — route gate, real edge runtime | 25 | **25 pass** |
+| `supabase/tests/u4/modules.ts` — verifier, derivation, Apple API failure modes | 48 | **48 pass** |
+| `supabase/tests/u4/acceptance.sh` — SQL | 94 | **94 pass** |
+| `supabase/tests/u4/e2e.sh` — real function, real database | 40 | **40 pass** |
+| `supabase/tests/u3/acceptance.sh` — U3 regression under U4 | 93 | **93 pass** |
+
+#### What the four load-bearing findings look like when exercised
+
+| Finding | Assertion | Result |
+|---|---|---|
+| **B-25 Limb A** | `renewalDate` absent, `expiresDate` present → **still writable** | U4b-8/9 pass. Writing NULL instead would have derived "expired" and scheduled cleanup on a live subscription |
+| **B-25 Limb B** | No `renewalInfo.signedDate` → **no write, no schedule, reconcile instead** | U4b-10/12, A51–A51e, E27–E30. **`pending_cleanup_at` stays null** — ambiguous state schedules nothing |
+| **B-26** | Replay → `delivery_count` 1→2, first outcome preserved, `membership` unchanged | A48–A48e, E18–E20 |
+| **B-27** | An unmapped notification is `ignored`/`unmapped`, **not** `rejected` | A50/A50b, E21/E22. Apple's own TEST notification is `ignored`/`not_applicable` (E23/E24) |
+| **B-29** | Tier 1 writes **nothing**; Tier 2 writes one bounded counter row | E6/E7 zero rows and zero counters; E12/E13 two increments in **one** row; A56–A56g twelve rejects → one row, sample capped at 8 |
+| **B-30** | One entry point, one transaction; the canonical writer is unreachable | A45b, A46e — `service_role` cannot call `membership_apply_state_v1` at all |
+| **B-24** | No path maps `original_transaction_id` → `user_id`; the writer refuses without a live binding | A50e (structural, over `pg_get_functiondef`), A55 |
+
+#### The ownership correction, agreed and applied 2026-08-20
+
+**An earlier revision let ingestion CREATE the initial `membership` row**, taking
+`binding_method = 'purchase'` on the reasoning that `Set App Account Token` has
+not shipped, so any token Apple reports must have been attached at purchase.
+**The reasoning was sound and the design was still wrong.** `binding_method` and
+`bound_at` record *how ownership was proved*, and a value inferred from what has
+not been built yet is provenance invented rather than established — a rule that
+happens to hold during one unit's window is not a rule the code enforces.
+
+**`membership_apply_state_v1` is now UPDATE-ONLY, and U4 contains no `INSERT INTO
+public.membership` at all.** A notification that maps to a live binding and
+carries complete Apple state but finds no authoritative row is recorded
+`ignored` / **`unestablished`** and flagged `needs_establishment` for U5.
+
+| Assertion | |
+|---|---|
+| A47 / A47b / A47c | A mapped, complete notification is `ignored`/`unestablished` and creates **no** row |
+| A47d | ...and returns `needs_establishment: true` |
+| **A47f** | **Structural: zero U4 functions contain an `insert into public.membership`** — over `pg_get_functiondef`, so it cannot drift |
+| A47g–A47j | With a **U5 stand-in** row present, the same shape of notification is `applied`, and `binding_method` is untouched |
+| A54 / A54a | Reconciliation likewise refuses, with the same reason |
+| E14–E14e | The **real function** over HTTP: 200, `ignored`/`unestablished`, `needs_establishment`, and **zero membership rows** |
+| E15–E17b | With the stand-in row, refresh works and `binding_method` is untouched |
+
+**The U5 stand-in is a FIXTURE and is labelled as one in both suites.** U5 does
+not exist, so the authoritative row is inserted directly by the harness; nothing
+in U4 can produce it.
+
+#### The granted-function audit, 2026-08-20
+
+**Four functions carry `service_role` EXECUTE and the audit found none of them
+removable**, but two were tightened. `membership_due_for_reconciliation_v1` now
+returns **three** columns instead of five — `renewal_info_signed_date` and
+`pending_cleanup_at` were never read by the caller, and staleness ordering
+happens inside the function, so a scheduling column was leaving the database on a
+path with no use for it (A58, A58b). `membership_record_reject_v1` now validates
+its own inputs: a malformed digest is dropped rather than stored and an unknown
+category is normalised rather than aborting the request (A56h–A56j).
+
+**`membership_record_reject_v1` could technically fold into the ingest entry
+point and deliberately does not.** Folding it would put the function that can
+write `membership` and `membership_notification` on the code path an
+unauthenticated caller reaches by sending garbage. Kept separate, the Tier-2
+path can touch nothing but the bounded aggregate whatever goes wrong upstream.
+That separation is a security property, not tidiness.
+
+#### Quarantine arithmetic, from the real writer
+
+`pending_cleanup_at − entitlement_ended_at = interval '60 days'` **exactly**
+(A52c), the end instant is taken from Apple's own dates rather than our clock
+(A52d), a later still-expired notification does **not** slide it forward (A52f),
+and re-entitlement through grace **clears both** (A53c/A53d). Billing retry
+*alone* does not entitle (A53f); retry with an unexpired grace period does
+(A53b).
+
+#### Two harness defects found by running, not by review
+
+Both are recorded because each produced a failure that looked like a defect in
+the implementation.
+
+1. **A frozen fixture epoch.** The generator used a hard-coded `NOW`, which had
+   aged a year past the real clock, so every fixture derived as EXPIRED, a
+   correct writer scheduled quarantine, and an entitlement assertion failed.
+   Fixtures now encode offsets from the real clock.
+2. **A silently-uncreated fixture.** `e2e.sh` inserted a `membership_binding`
+   and discarded the result. `binding_token` is UNIQUE, an earlier suite in the
+   same run already held it, the insert failed silently, the notification was
+   correctly reported **unmapped**, and three assertions failed. The suite now
+   clears the conflict deliberately and **asserts the fixture exists (E0) before
+   anything depends on it** — an empty fixture is not a pass, and it must not be
+   a silent skip either.
+
+A third, smaller one: `tampered_nested_tx` reused the good notification's UUID,
+so ingestion correctly **deduplicated** it and the assertion scored the previous
+row. A negative fixture that is silently deduplicated tests nothing.
+
+#### Two U3 assertions were widened, and both are strictly stronger
+
+Neither was relaxed to make U4 pass. **A1** counted tables matching
+`membership%` and expected 5, so a correct U4 adding a sixth failed a U3
+assertion about U3's own objects; it now **names** the five. **A15c** asserted
+that no function outside U3's three references membership — its real intent
+being that no *pre-existing product function* was modified to consult it, the
+hazard being something like `search_account_directory` quietly acquiring an
+entitlement check. It now excludes the whole Phase 3 namespace and still catches
+that hazard. U3 re-runs **93 of 93**, its original count.
+
+#### The honest limits
+
+- **No genuine Apple-signed payload has ever been verified by this code.** The
+  **root→intermediate** link is proven against Apple's own certificates; the
+  intermediate→leaf link and the JWS signature are proven only against a
+  faithful synthetic chain. **B-28 discharges at U4i and nowhere earlier.**
+- **The mapped path cannot occur in production during the U4 window.** No Apple
+  subscription carries an `appAccountToken` until U5 sets one, so the
+  applied/stale/ordering behaviour is exercised locally and nowhere else.
+- **Reconciliation has never spoken to Apple.** Its client is exercised against
+  an injected `fetch`; the first real call is U4i's test notification.
+- **The verified-path E2E runs against a copy** whose trust anchor is a test CA.
+  The alternative — an environment variable relaxing the anchor — is a
+  production-reachable switch on the one control that makes an unauthenticated
+  endpoint safe, and was refused.
 
 ### Local verification stopping rule — agreed before running
 

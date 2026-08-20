@@ -212,13 +212,19 @@
   {
     "conname": "membership_notification_accepted_is_complete",
     "contype": "c",
-    "definition": "CHECK (((outcome = 'rejected'::text) OR ((notification_uuid IS NOT NULL) AND (environment IS NOT NULL) AND (signed_date IS NOT NULL))))",
+    "definition": "CHECK (((outcome = 'rejected'::text) OR ((notification_uuid IS NOT NULL) AND (signed_date IS NOT NULL) AND ((environment IS NOT NULL) OR (outcome = 'ignored'::text)))))",
     "table_name": "membership_notification"
   },
   {
     "conname": "membership_notification_bytes_nonnegative",
     "contype": "c",
     "definition": "CHECK (((payload_bytes IS NULL) OR (payload_bytes >= 0)))",
+    "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_delivery_count_positive",
+    "contype": "c",
+    "definition": "CHECK ((delivery_count >= 1))",
     "table_name": "membership_notification"
   },
   {
@@ -230,19 +236,19 @@
   {
     "conname": "membership_notification_failure_category_check",
     "contype": "c",
-    "definition": "CHECK (((failure_category IS NULL) OR (failure_category = ANY (ARRAY['signature'::text, 'decode'::text, 'schema'::text, 'unsupported'::text, 'environment'::text]))))",
+    "definition": "CHECK (((failure_category IS NULL) OR (failure_category = ANY (ARRAY['signature'::text, 'decode'::text, 'schema'::text, 'unsupported'::text, 'environment'::text, 'unmapped'::text, 'not_applicable'::text, 'incomplete'::text, 'unestablished'::text]))))",
     "table_name": "membership_notification"
   },
   {
-    "conname": "membership_notification_failure_only_when_rejected",
+    "conname": "membership_notification_failure_only_when_categorised",
     "contype": "c",
-    "definition": "CHECK (((failure_category IS NULL) = (outcome <> 'rejected'::text)))",
+    "definition": "CHECK (((failure_category IS NULL) = (outcome <> ALL (ARRAY['rejected'::text, 'ignored'::text]))))",
     "table_name": "membership_notification"
   },
   {
     "conname": "membership_notification_outcome_check",
     "contype": "c",
-    "definition": "CHECK ((outcome = ANY (ARRAY['applied'::text, 'stale'::text, 'duplicate'::text, 'rejected'::text])))",
+    "definition": "CHECK ((outcome = ANY (ARRAY['applied'::text, 'stale'::text, 'duplicate'::text, 'ignored'::text, 'rejected'::text])))",
     "table_name": "membership_notification"
   },
   {
@@ -256,6 +262,36 @@
     "contype": "c",
     "definition": "CHECK (((payload_sha256 IS NULL) OR (payload_sha256 ~ '^[0-9a-f]{64}$'::text)))",
     "table_name": "membership_notification"
+  },
+  {
+    "conname": "membership_notification_reject_stat_bucket_aligned",
+    "contype": "c",
+    "definition": "CHECK ((hour_bucket = date_trunc('hour'::text, hour_bucket)))",
+    "table_name": "membership_notification_reject_stat"
+  },
+  {
+    "conname": "membership_notification_reject_stat_category_check",
+    "contype": "c",
+    "definition": "CHECK ((failure_category = ANY (ARRAY['signature'::text, 'decode'::text, 'schema'::text, 'unsupported'::text, 'environment'::text, 'oversize'::text])))",
+    "table_name": "membership_notification_reject_stat"
+  },
+  {
+    "conname": "membership_notification_reject_stat_count_positive",
+    "contype": "c",
+    "definition": "CHECK ((reject_count >= 0))",
+    "table_name": "membership_notification_reject_stat"
+  },
+  {
+    "conname": "membership_notification_reject_stat_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (hour_bucket, failure_category)",
+    "table_name": "membership_notification_reject_stat"
+  },
+  {
+    "conname": "membership_notification_reject_stat_sample_bounded",
+    "contype": "c",
+    "definition": "CHECK ((cardinality(sample_sha256) <= 8))",
+    "table_name": "membership_notification_reject_stat"
   },
   {
     "conname": "post_comment_views_pkey",

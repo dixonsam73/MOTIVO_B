@@ -57,7 +57,12 @@ refuses() { local out; out=$(psq "$1"); case "$out" in *ERROR*) echo "refused";;
 echo "== U3 acceptance =="
 
 # ---------------------------------------------------------------- structure
-is A1  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name like 'membership%';")" "5" "new tables"
+# TIGHTENED 2026-08-20, and it is strictly stronger rather than relaxed. This
+# used to count tables matching 'membership%' and expect 5, which made a correct
+# U4 -- adding membership_notification_reject_stat -- fail a U3 assertion about
+# U3's own objects. Naming the five says what was always meant, and would still
+# catch one of them going missing.
+is A1  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name in ('membership','membership_binding','membership_notification','membership_cutover','membership_control');")" "5" "U3's five tables"
 is A1b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('connected_member','membership_state','ensure_membership_binding');")" "3" "new helpers"
 
 # ------------------------------------------------------- client reachability
@@ -190,7 +195,13 @@ is A13 "$(psq "select (select count(*) from public.membership where user_id='$A'
 # ---------------------------------------------------------------- inertness
 is A15 "$(psq "select count(*) from pg_policies where qual ilike '%connected_member%' or with_check ilike '%connected_member%';")" "0" "policies calling connected_member"
 is A15b "$(psq "select count(*) from pg_policies where schemaname in ('public','storage');")" "33" "existing policy count"
-is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','membership_state','ensure_membership_binding');")" "0" "pre-existing functions referencing membership"
+# WIDENED 2026-08-20, and the intent is unchanged. This asserts that no
+# PRE-EXISTING product function was modified to consult membership -- the real
+# hazard being something like search_account_directory quietly acquiring an
+# entitlement check. It used to name U3's three helpers as the exemption, which
+# made U4's own seven functions look like a violation of a U3 property. Excluding
+# the whole Phase 3 namespace says what was meant and still catches the hazard.
+is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','ensure_membership_binding') and p.proname not like 'membership%';")" "0" "pre-existing functions referencing membership"
 is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at is not null;")" "0" "cleanup scheduled"
 is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "5" "trigger count unchanged"
 is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"

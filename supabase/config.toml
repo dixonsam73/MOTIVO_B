@@ -8,9 +8,15 @@
 # B-17 and supabase/README.md exist to prevent.
 #
 # Deliberately minimal. The CLI merges defaults for everything it does not
-# find here, and nothing in this project runs a local instance: there is no
-# `supabase start`, no `db reset`, and no migrations until Phase 3. Sections
-# for db, auth, storage and studio would be configuration nobody applies.
+# find here, so sections for db, auth, storage and studio would be
+# configuration nobody applies.
+#
+# CORRECTED 2026-08-20. This header used to say "nothing in this project runs a
+# local instance: there is no `supabase start`, no `db reset`, and no migrations
+# until Phase 3." All three became false at U1: there is a local stack, `db
+# reset --local` is the routine way to rebuild it, and `supabase/migrations/`
+# is now the reproducible source B-23 required. Left uncorrected it would have
+# read as licence to ignore the migration history.
 
 project_id = "rlwtqxumfobakvdueugm"
 
@@ -32,4 +38,31 @@ verify_jwt = false
 # derives the subject from the verified token, never from the request body,
 # so the account being deleted is always the caller's own. Confirmed as the
 # deployed state (`supabase functions list` reports verify_jwt: false).
+verify_jwt = false
+
+[functions.appstore_notifications_v1]
+# App Store Server Notifications V2 ingestion.
+#
+# verify_jwt = false IS A DIFFERENT STATEMENT HERE FROM THE TWO BLOCKS ABOVE,
+# and reading it as the same one is the mistake this comment exists to prevent.
+# Those two set it false and then perform their OWN auth.getUser(token), which
+# is stricter than the gateway. THIS FUNCTION HAS NO TOKEN TO CHECK: Apple sends
+# no Supabase JWT and never will, so the endpoint is genuinely unauthenticated
+# and the Apple JWS signature — x5c chain verified against a pinned, embedded
+# Apple Root CA G3 — is the entire authorisation story.
+#
+# verify_jwt = true is not an option: it would reject every notification Apple
+# sends. The compensating controls are B-29's three tiers, so that an
+# unauthenticated caller cannot obtain an unbounded durable write.
+verify_jwt = false
+
+[functions.appstore_reconcile_v1]
+# Authoritative App Store Server API reads.
+#
+# verify_jwt = false and then an explicit constant-time comparison against the
+# service role key. NOTE WHAT verify_jwt = true WOULD NOT HAVE GIVEN US: any
+# valid user JWT satisfies the gateway, and every authenticated Apple user can
+# obtain one — so the gateway check would have been strictly weaker than the one
+# performed inside. Same authorisation story as the other three functions:
+# derived from what the caller proves, never from the request body.
 verify_jwt = false

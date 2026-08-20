@@ -42,6 +42,11 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "membership_notification_reject_stat"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "post_comment_views"
   },
   {

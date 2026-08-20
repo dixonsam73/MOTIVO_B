@@ -49,7 +49,35 @@ it and confirm the diff is empty:
 supabase functions download delete_account_v1 && git diff --stat supabase/functions
 ```
 
-A non-empty diff means production drifted; resolve that before making changes.
+**THAT CHECK AS WRITTEN CANNOT PASS AT CLI 2.113.0, AND THE CORRECTION MATTERS
+MORE THAN THE OBSERVATION — recorded 2026-08-20 during U4h's P1.**
+`supabase functions download` returns the **transpiled** function, not the
+source: TypeScript annotations are stripped (`readonly step: string` becomes a
+plain assignment, `(req) =>` becomes `(req)=>`) and multi-line call chains are
+rejoined onto one line. **Comments and string literals ARE preserved.** So
+`git diff` is never empty for a TypeScript function, and a naive reading of a
+non-empty diff as "production drifted" would be wrong every time.
+
+**The working form of the check, which is what P1 actually ran:**
+
+1. Copy the tree file aside, download, then `git checkout --` to restore it.
+   The download **overwrites the tree**, and leaving transpiled JS in place
+   would be far worse than the drift it was looking for.
+2. Compare **comment text** and **string literals** directly — both survive.
+3. Compare executable token counts **with comments stripped and whitespace
+   collapsed**. Line-based grep is not sufficient: `admin.storage\n.from(x)\n.list(...)`
+   in the tree is one line in the transpiled output, and counting the literal
+   `storage.from` made three identical call sites look like one. That produced a
+   false "executable difference" during P1 and was resolved by looking at the
+   call sites rather than by explaining the count.
+4. **Use an unmodified function as the control.** `revoke_apple_identity_v1` has
+   never been redeployed since v1, so every difference it shows is transpilation
+   by definition. At P1 it showed **zero** token differences and byte-identical
+   comments — which is what licenses reading the same shape of difference in
+   `delete_account_v1` as transpilation rather than drift.
+
+A difference that survives all four steps means production drifted; resolve that
+before making changes.
 
 **KNOWN, DELIBERATE DIVERGENCE AS OF 2026-08-14 — `delete_account_v1`, COMMENTS
 ONLY.** The download check above will report a non-empty diff for this function,
@@ -428,6 +456,89 @@ and the snapshot cannot detect it. A device read-path check is therefore part of
 the acceptance, not an optional extra: owner reading their own post's
 attachments, and an approved follower reading another member's — the second
 being the one a naive `auth.uid()` binding would have broken.
+
+## U4 — ingestion and reconciliation (Phase 3)
+
+**Implemented and green locally, 2026-08-20. NOT DEPLOYED.** The production
+package is `supabase/sql/README-u4-deployment.md`; run it only under explicit
+authorisation.
+
+### Two new Edge Functions, and one of them is a different kind of thing
+
+`appstore_notifications_v1` is **the first genuinely unauthenticated endpoint in
+this project.** `delete_account_v1` and `revoke_apple_identity_v1` also set
+`verify_jwt = false`, but each then performs its own `auth.getUser(token)` and is
+stricter than the gateway would have been. **Apple sends no Supabase JWT and
+never will**, so the Apple JWS signature — an x5c chain verified against a
+pinned, embedded Apple Root CA G3 — is the entire authorisation story. Do not
+read the older `config.toml` comments as covering it; that file now says so
+explicitly.
+
+`appstore_reconcile_v1` requires the service role key, compared in constant time.
+Note what `verify_jwt = true` would **not** have given us: any valid user JWT
+satisfies the gateway, and every authenticated Apple user can obtain one.
+
+### The dependency, and why it is pinned this hard
+
+`@peculiar/x509@1.12.3`, exactly pinned in `supabase/functions/deno.json` with a
+committed `deno.lock` carrying sha512 integrity for all 19 resolved packages.
+**It sits in the verification path of an unauthenticated endpoint**, which is why
+it is pinned to an exact version with integrity rather than to a range.
+
+Regenerate the lock — there is no `deno` on this machine — with:
+
+```bash
+docker run --rm -v "$PWD/supabase/functions:/w" -w /w --entrypoint deno \
+  denoland/deno:2.1.4 cache --node-modules-dir=false \
+  _shared/appstore/jws.ts _shared/appstore/derive.ts _shared/appstore/api.ts
+```
+
+**Two routes were tried first and both are dead**, which is recorded in B-28 and
+re-proved on every run of `supabase/tests/u4a/run.sh`: `node:crypto`'s
+`X509Certificate.verify` throws `ERR_NOT_IMPLEMENTED`, and
+`@apple/app-store-server-library@1.6.0` rejects payloads it should accept while
+reporting its own runtime incapacity with **the same status as a genuine
+forgery**.
+
+### The trust anchor is embedded in source, and there is no switch
+
+A user worker's code is relocated to `/var/tmp/sb-compile-edge-runtime/`, so
+`Deno.readTextFile` against a path beside the source fails. The anchor is
+therefore a constant in `_shared/appstore/apple_root_ca_g3.ts` — which is also
+the safe design: **no environment variable can relax the one control that makes
+the endpoint safe.** The local E2E suite substitutes the anchor in a *copy*,
+never in the source.
+
+### U4 does not establish membership, and the executable surface is four functions
+
+`membership_apply_state_v1` is **UPDATE-only**; there is no `INSERT INTO
+public.membership` anywhere in U4. Ownership establishment — and therefore
+`binding_method` and `bound_at`, which record *how ownership was proved* — is
+U5's alone. A notification that maps to a live binding but finds no authoritative
+row is recorded `ignored`/`unestablished` for U5 to pick up.
+
+Four functions carry `service_role` EXECUTE: `membership_ingest_notification_v1`,
+`membership_due_for_reconciliation_v1`, `membership_apply_reconciliation_v1` and
+`membership_record_reject_v1`. The canonical writer, the B-24 binding resolver
+and the audit recorder are granted to **nobody**. **`membership_record_reject_v1`
+is kept separate from the ingest entry point deliberately** — folding it in would
+put the function that can write `membership` on the path an unauthenticated
+caller reaches by sending garbage.
+
+### Runtime secrets
+
+Five, named in the deployment package. **`APPLE_IAP_BUNDLE_ID` is deliberately
+separate from `APPLE_CLIENT_ID`** even though they hold the same value: they mean
+different things, and coupling them means a future SIWA change silently breaks
+IAP authentication. **`APPLE_API_BASE_URL_SANDBOX` / `_PRODUCTION` must remain
+unset in production** — they exist for local stubs and for Q5/Q6.
+
+### Local suites
+
+```bash
+./supabase/tests/u4a/run.sh                       # the verification route gate
+supabase db reset --local && ./supabase/tests/u4/run.sh
+```
 
 ### Never
 

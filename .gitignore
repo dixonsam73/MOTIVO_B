@@ -34,3 +34,9 @@ supabase/**/.env
 # U2 run scratch: ephemeral local identity/asset UUIDs, regenerated per run.
 supabase/tests/u2/.ids
 supabase/tests/u2/.ids-b12
+
+# U4 / U4a local test working directories — generated fixtures and throwaway
+# test CA keys. Nothing here is committed: the harness regenerates it, and a
+# committed private key is a committed private key whatever it protects.
+supabase/tests/u4a/.work/
+supabase/tests/u4/.work/

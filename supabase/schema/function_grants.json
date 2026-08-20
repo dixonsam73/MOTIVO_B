@@ -192,6 +192,153 @@
     "can_execute": false,
     "direct_execute": false,
     "grantee": "anon",
+    "proname": "membership_apply_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_apply_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_apply_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_apply_state_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_apply_state_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "membership_apply_state_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_due_for_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_due_for_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_due_for_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_ingest_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_ingest_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_ingest_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_record_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_record_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "membership_record_notification_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_record_reject_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_record_reject_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_record_reject_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_resolve_binding_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_resolve_binding_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "membership_resolve_binding_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
     "proname": "membership_state",
     "public_execute": false
   },

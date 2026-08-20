@@ -21,8 +21,69 @@ membership server-authoritative and makes **leaving Connected** a distinct
 lifecycle from **deleting an account**. This section is the durable record of
 what was decided; it is not a description of what is built. **Implemented so far:
 U0 (this record), U1 (the local backend baseline), U2 (the four backend
-verifications) and U3 — which is now DEPLOYED TO PRODUCTION, 2026-08-17.
-U4 onwards is not built.**
+verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — and U4b-U4g, which are
+IMPLEMENTED AND GREEN LOCALLY BUT NOT DEPLOYED (2026-08-20). U4h/U4i and U5
+onwards are not built.**
+
+## U4b-U4g are built and locally green; U4h/U4i are NOT run
+
+**Nothing is deployed. No production secret is installed. App Store Connect is
+untouched. Production has been neither queried nor mutated.** The reviewed
+production package is `supabase/sql/README-u4-deployment.md`; the evidence is in
+`docs/qa-plan.md` under "U4 — PREDICTIONS AND RESULTS".
+
+**207 local assertions pass** (25 route gate + 48 module + 94 SQL + 40
+end-to-end), with U3's own suite re-running **93 of 93** underneath U4.
+
+**The U4a gate settled the verification route empirically, and two obvious
+choices were dead.** `node:crypto`'s `X509Certificate.verify` throws
+`ERR_NOT_IMPLEMENTED` in the Supabase Edge Runtime, and
+`@apple/app-store-server-library@1.6.0` **rejects payloads it should accept while
+reporting its own runtime incapacity with the same status as a genuine forgery**
+— deployed, it would have rejected 100% of real Apple traffic while the audit
+table filled with rows that read exactly like an attack. The adopted route is
+`@peculiar/x509@1.12.3`, exactly pinned with committed integrity metadata. **A
+green endpoint and a dead verifier are the same observation from outside**, which
+is why the gate is re-runnable rather than a recorded result.
+
+**U4 CANNOT ESTABLISH MEMBERSHIP, AND THAT IS PERMANENT.** Corrected 2026-08-20:
+the first revision let ingestion CREATE the initial `membership` row, inferring
+`binding_method = 'purchase'` from the fact that `Set App Account Token` has not
+shipped. **The reasoning was sound and the design was still wrong** — those
+columns record *how ownership was proved*, and a value inferred from what has not
+been built yet is provenance invented rather than established. The canonical
+writer is now UPDATE-ONLY and there is **no `INSERT INTO public.membership`
+anywhere in U4**, asserted structurally as well as behaviourally. A mapped,
+complete notification with no authoritative row is recorded
+`ignored`/`unestablished` and flagged for U5. **Ownership establishment is U5's
+alone.**
+
+**`service_role` still holds ZERO privilege on all six membership tables** — the
+whole U4 privilege delta is four EXECUTE grants, the canonical writer is granted
+to nobody, and the four were audited on 2026-08-20 and found minimal.
+
+**Keep the two zero-row statements apart.** *Permanent:* U4 never originates a
+membership row. *ACCEPTANCE-WINDOW PREDICTION, U4 before U5:* nothing maps at
+all, because no Apple subscription carries an `appAccountToken` and no binding
+exists to match. The second becomes false the moment U5 ships, by design;
+reading it later as an invariant would make U5 look like a regression.
+
+**Six findings were filed and five are implemented-not-deployed: B-25** (derived
+entitlement failed *into* scheduled cleanup when Apple omitted a field — every
+renewal-info field is optional), **B-26** (`'duplicate'` was structurally
+unwritable, so QA G2 asserted something no correct implementation could
+produce), **B-27** (the outcome vocabulary conflated hostile traffic with the
+highest-volume routine category), **B-29** (an unauthenticated durable write
+primitive, now bounded to hours x categories), **B-30** (two RPC calls are two
+transactions, proven at 20888/20889). **B-28 remains only PARTIALLY discharged:
+no genuine Apple-signed payload has ever been verified by this code, and Apple's
+own test notification at U4i is where it closes.**
+
+**QA G2 was amended and the reasoning outlives it:** structural reject 400,
+signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200"
+assumed a failing payload was never valid; the catastrophic case is a verifier
+that rejects everything, and 5xx buys production's five retries over 72 hours to
+fix it. Sandbox never retries either way.
 
 ## U3 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-17
 
