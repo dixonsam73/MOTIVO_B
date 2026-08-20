@@ -119,16 +119,39 @@ enum JWSFreshnessProbe {
             // membership.original_transaction_id without a mental conversion.
             let originalID = String(tx.originalID)
 
+            // THE RENEWAL CONFOUND, AND WHY THIS FIELD DECIDES THE GATE.
+            //
+            // `originalID` is stable across the whole subscription, so on its
+            // own it CANNOT tell a re-signature apart from a renewal — and the
+            // development sandbox honours the tester's accelerated renewal
+            // rate, so a Monthly cycle can complete inside this gate's own
+            // ten-minute step. A renewal legitimately produces a new
+            // transaction with a new signature, which would read as
+            // `RESIGNED` and would have been scored as "StoreKit re-signs on
+            // read". That is a wrong answer arrived at honestly, and it would
+            // have selected a freshness window the design cannot support.
+            //
+            // `Transaction.id` changes on renewal and does not change on a
+            // re-signature, so it separates the two. A step whose `txID` moved
+            // is a RENEWAL and is not evidence about freshness at all.
+            let txID = String(tx.id)
+            let expires = tx.expirationDate.map { iso.string(from: $0) } ?? "-"
+
             let previous = load(for: originalID)
             let verdict: String
             if let previous {
                 let sameBytes = previous.digest == short
                 let sameDate = abs(previous.signedDate.timeIntervalSince(signedDate)) < 0.5
-                switch (sameBytes, sameDate) {
-                case (true, true):   verdict = "UNCHANGED"
-                case (false, false): verdict = "RESIGNED"
-                case (false, true):  verdict = "ANOMALY_bytesChangedDateSame"
-                case (true, false):  verdict = "ANOMALY_dateChangedBytesSame"
+                if previous.txID != txID {
+                    // Checked FIRST. Everything below assumes one transaction.
+                    verdict = "RENEWED_notEvidence"
+                } else {
+                    switch (sameBytes, sameDate) {
+                    case (true, true):   verdict = "UNCHANGED"
+                    case (false, false): verdict = "RESIGNED"
+                    case (false, true):  verdict = "ANOMALY_bytesChangedDateSame"
+                    case (true, false):  verdict = "ANOMALY_dateChangedBytesSame"
+                    }
                 }
             } else {
                 verdict = "FIRST"
@@ -140,6 +163,8 @@ enum JWSFreshnessProbe {
                 verified=\(verified, privacy: .public) \
                 product=\(tx.productID, privacy: .public) \
                 originalID=\(originalID, privacy: .public) \
+                txID=\(txID, privacy: .public) \
+                expires=\(expires, privacy: .public) \
                 now=\(iso.string(from: now), privacy: .public) \
                 signedDate=\(iso.string(from: signedDate), privacy: .public) \
                 ageSeconds=\(ageSeconds, privacy: .public) \
@@ -148,7 +173,7 @@ enum JWSFreshnessProbe {
                 vsPrevious=\(verdict, privacy: .public)
                 """)
 
-            save(originalID: originalID, digest: short, signedDate: signedDate)
+            save(originalID: originalID, txID: txID, digest: short, signedDate: signedDate)
         }
 
         if seen == 0 {
@@ -166,6 +191,7 @@ enum JWSFreshnessProbe {
     // MARK: - Cross-launch scratch
 
     private struct Snapshot {
+        let txID: String
         let digest: String
         let signedDate: Date
     }
@@ -174,13 +200,17 @@ enum JWSFreshnessProbe {
         guard let all = UserDefaults.standard.dictionary(forKey: stateKey),
               let row = all[originalID] as? [String: Any],
               let digest = row["digest"] as? String,
+              let txID = row["txID"] as? String,
               let signed = row["signedDate"] as? Double else { return nil }
-        return Snapshot(digest: digest, signedDate: Date(timeIntervalSince1970: signed))
+        return Snapshot(txID: txID, digest: digest,
+                        signedDate: Date(timeIntervalSince1970: signed))
     }
 
-    private static func save(originalID: String, digest: String, signedDate: Date) {
+    private static func save(originalID: String, txID: String,
+                             digest: String, signedDate: Date) {
         var all = UserDefaults.standard.dictionary(forKey: stateKey) ?? [:]
-        all[originalID] = ["digest": digest, "signedDate": signedDate.timeIntervalSince1970]
+        all[originalID] = ["txID": txID, "digest": digest,
+                           "signedDate": signedDate.timeIntervalSince1970]
         UserDefaults.standard.set(all, forKey: stateKey)
     }
 }

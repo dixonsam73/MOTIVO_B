@@ -103,9 +103,9 @@ fix it. Sandbox never retries either way.
 an implementation.** No SQL, no Edge Function, no client protocol, no deploy.
 U5b onwards has not begun.
 
-**THE U5 AUDIT IS ACCEPTED AND D1-D9 ARE AGREED**, with D4 decided against the
-audit's own lean — see below. Six architectural decisions are now settled and
-binding on U5's implementation:
+**THE U5 AUDIT IS ACCEPTED AND D1-D9 ARE AGREED**, with **D4 decided against the
+audit's own proposal and the proposal rejected outright** — see below. Eight
+architectural decisions are now settled and binding on U5's implementation:
 
 - **Establishment NEVER schedules cleanup.** `pending_cleanup_at` stays NULL on
   every insert path, unconditionally. Scheduling is a *transition* from entitled
@@ -131,6 +131,23 @@ binding on U5's implementation:
   admits: no argument, identity from `auth.uid()`, idempotent, at most one row
   per `auth.users` row.
 - **F2 claim binding is MANDATORY** — see B-31.
+- **Sign in with Apple BEFORE purchase, for every new Connected join** (D2,
+  confirmed 2026-08-20). Forced rather than chosen: the binding token must exist
+  before `product.purchase()` can carry it. **This inverts the shipping flow** —
+  `MembershipSelectionView` currently purchases and *then* presents the sign-in
+  sheet — so it is a product-visible change, not a refactor. **Solo remains
+  entirely account-free**; only *joining* Connected requires authentication.
+- **`Set App Account Token` handling has four parts and all four are settled**
+  (2026-08-20). (i) **Terminal, non-retryable handling** for Apple's permanent
+  refusals — `FamilyTransactionNotSupportedError`,
+  `AppTransactionIdNotSupportedError`,
+  `TransactionIdIsNotOriginalTransactionIdError`. (ii) **A successful call is NOT
+  sufficient evidence on its own.** (iii) **Re-read Apple, and establish only
+  once the token is actually observed on the subscription.** (iv) **A re-read
+  that does not yet show the token is PROPAGATION, not failure** — write nothing
+  and retry on a later attestation. Attestation runs every foreground, so a
+  legacy claim completing on a second pass is invisible to the user, and P12
+  already proved Apple-side propagation looks exactly like misconfiguration.
 
 ### F1 is corrected, and the correction is verified rather than asserted
 
@@ -198,35 +215,130 @@ failure branch is **write nothing and retry on the next attestation**, never
 "accept the 200 as sufficient". Attestation runs on every foreground, so a legacy
 claim completing on the second pass is invisible to the user.
 
-### D4 — DECIDED: Sandbox must NOT confer Production entitlement
+### D4 — DECIDED, AND THE FIRST PROPOSAL WAS REJECTED. 2026-08-20
 
-**Environment separation is part of the authority model.** `connected_member()`
-is environment-blind today (F4) and must not stay that way once U5 can create
-rows. The QA need is real and is met by an **explicit, expiring, operator-only
-allowlist**, not by leaving the predicate blind:
+**Production `connected_member()` means PRODUCTION ENTITLEMENT ONLY. A Sandbox
+membership row must never make the production membership predicate return true,
+and there is no exception mechanism inside the predicate.**
 
-- `connected_member()` counts **Production rows only**, except for identities in
-  a new `membership_sandbox_tester` table.
-- That table is a **filter widener, never a grant**: it changes which rows
-  `bool_or` can see and nothing else, so an allowlisted tester with no row, or a
-  lapsed one, is still not entitled. Invariant 8 survives intact.
-- **`expires_at` is NOT NULL and enforced in the predicate.** A forgotten entry
-  closes itself; that is the whole point, and it is what makes this safe where a
-  single deployment-wide boolean would not be.
-- **No grants to any role, no writer in any unit.** Nothing in U5, U6 or U7
-  inserts into it; assertable over `pg_get_functiondef` the same way U4 asserts
-  the absence of `INSERT INTO public.membership`. **There is therefore no
-  shippable path by which a Sandbox purchase confers Production entitlement** —
-  that is a structural property, not a policy.
+**U5a first proposed a `membership_sandbox_tester` allowlist that widened the
+predicate per identity, with an expiry. IT WAS REJECTED AND THE REJECTION IS
+RIGHT.** Even bounded and self-closing, it put a *shippable exception* inside the
+one function that defines paid access — and the whole of B-24's lesson is that an
+authority predicate must not contain a branch whose safety rests on operational
+discipline. The QA need is real; **solving it inside the entitlement predicate
+was the wrong place**, and the correct answer turned out to need no mechanism at
+all (see below).
 
-**Two consequences to carry into U5b rather than discover.** (i) A non-allowlisted
-identity holding **only** a Sandbox row currently derives FALSE; under the filter
-its row becomes invisible, `bool_or` returns NULL over an empty set, and it falls
-through to the **grandfather** clause. That is defensible — a Sandbox row is not
-evidence about Production entitlement in either direction — but it is a change
-and must be stated, not discovered. (ii) **28 `connected_member` assertions and 9
-`membership_state` assertions across the three suites** must be re-pointed;
-U4's acceptance suite is almost entirely `'Sandbox'` fixtures.
+### The exact semantics — the environment test moves INTO `bool_or`, not into `WHERE`
+
+**The naive fix is wrong and it is worth seeing why**, because it fails in the
+direction that matters. Adding `and m.environment = 'Production'` to the WHERE
+clause empties the row set for a Sandbox-only identity, `bool_or` over an empty
+set is NULL, and the predicate **falls through to the grandfather clause** — so a
+pre-cutover tester with a live Sandbox subscription would be granted Production
+entitlement *by the compatibility clause*. That is the exact inversion of
+invariant 8.
+
+**The row set that decides EXISTENCE must stay wider than the row set that can
+decide TRUE:**
+
+```sql
+(select bool_or(
+     m.environment = 'Production'
+     and (coalesce(m.renewal_date > now(), false)
+          or coalesce(m.is_in_billing_retry
+                      and m.grace_period_expires_date > now(), false))
+   )
+   from public.membership m
+  where m.user_id = target_user_id)   -- NO environment filter here
+```
+
+- **Sandbox-only identity** → set non-empty, per-row expression FALSE → `bool_or`
+  FALSE → **does NOT fall through** → false. Authoritative state wins over
+  grandfathering, which is decision 2.
+- **Production entitled** → true. **Production lapsed** → false, no fall-through.
+- **No rows at all** → NULL → grandfather clause, unchanged.
+
+**U3's coalesce lesson survives and is strengthened.** `environment` is
+`NOT NULL`, and `false AND anything` is FALSE in SQL, so the row expression is
+**strictly two-valued in every case** — `bool_or` is NULL if and only if there
+are no rows, which is precisely the distinction the clause ordering depends on.
+
+### `membership_state()` needs a FIFTH value, and it is load-bearing
+
+Under the above, a Sandbox-only identity would report `'expired'` — which is
+false. It has not expired; it has no Production membership at all. **U6a's shadow
+window reads this function to report which clause would have decided a denial**,
+so conflating "Sandbox-only tester" with "Production subscription lapsed" would
+corrupt exactly the metric B-11's stage-2 gate depends on. The `exists` test
+gains an `environment = 'Production'` filter and a new branch returns
+**`'sandbox_only'`**. `'grandfathered'` becomes unreachable for any identity
+holding any row, which is correct.
+
+### Blast radius on the suites — FOUR assertions, not the thirty-seven first stated
+
+**Corrected 2026-08-20.** The earlier figure counted *references* to
+`connected_member` and `membership_state`, not assertions whose result changes.
+Measured by reading the fixtures:
+
+- **U3 acceptance: zero affected.** Every one of its `membership` fixtures is
+  `'Production'`; its only two `'Sandbox'` literals are a
+  `membership_notification` duplicate-key fixture that never reaches the
+  predicate.
+- **U4 acceptance: three flip** — A47i, A53b, A54d — all because the U5 stand-in
+  row is inserted as `'Sandbox'`. Fixed by making that fixture `'Production'`.
+- **U4 e2e: one, and it cannot simply be re-pointed.** E17 asserts entitlement at
+  the end of a chain that is Sandbox end to end — the notification must be
+  Sandbox to pass `APPLE_ASSN_ALLOWED_ENVIRONMENTS`, and ingestion applies state
+  to the row *of the notification's own environment*, so no Sandbox notification
+  can ever produce entitlement under the new semantics. **That is correct
+  behaviour, not a test problem.** E17 should assert the resulting ROW rather
+  than the predicate — which is what `e2e.sh` is for by its own description
+  ("wiring: the right row, the right status code, the right absence of a write"),
+  entitlement derivation being `acceptance.sh`'s job. E17 was testing the wrong
+  thing in the wrong suite.
+- **A28's wording** moves from "exactly the four states" to five.
+
+### Sandbox QA needs NO entitlement mechanism at U5, and that is the whole answer
+
+**U5's claims are about ownership establishment and binding. Not one of them
+reads `connected_member()`.** S-1 (a real sandbox JWS passes the pinned anchor),
+S-2 (Set App Account Token accepted and reflected), S-3 (the token survives into
+a real renewal, so ingestion goes `unmapped` -> `applied`), and A29/A30/A31 are
+all assertions about **rows** in `membership` and `membership_binding` and about
+what the attest endpoint did. **The row is the evidence.** `connected_member()`
+returning false for a Sandbox row is not an obstacle to U5 QA; it is irrelevant
+to it.
+
+**And the client is unaffected in the U5 window**, because `AppMode` resolves
+from **local StoreKit** entitlement via `ProductionAppModeActivation.resolve`,
+and no policy consults membership. A sandbox tester on Device A therefore reaches
+the full Connected experience during U5 with **no mechanism at all**.
+
+**So the minimum explicit QA mechanism now is: make `membership_state()` honest
+(`'sandbox_only'`), and read the row.** Zero new tables, zero new grants, zero
+exceptions in the entitlement predicate.
+
+### The enforcement-path mechanism is DEFERRED TO U6b — and U6a is not the boundary
+
+**Owned on B-11.** The need appears only when enforcement becomes *binding*, and
+that is U6b, not U6a: **U6a is a shadow window by construction** — it records
+which clause would have decided a denial and denies nothing, so a sandbox tester
+is not blocked there either.
+
+Deferring is not procrastination, it is the B-24 lesson applied: designing an
+exception now means designing it against an enforcement surface that does not
+exist, which is exactly how the original U5 activation design came to prove
+authenticity while proving nothing about ownership. **At U6b the real options can
+be weighed against the real surface** — a separate QA project, a Production
+subscription bought for the purpose, or an explicit tester carve-out *outside*
+the predicate — and U6b's gate already requires G11 passed and zero
+grandfather-only decisions, so the tester population is enumerable by then.
+
+**One thing U6a must carry from this decision:** a sandbox tester's would-be
+denials must not be counted as evidence about real users in the shadow report.
+`'sandbox_only'` is what makes that separable.
 
 ---
 

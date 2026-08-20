@@ -1041,34 +1041,114 @@ condition** — deleted the moment the gate is scored, as `ActivationTrace` and
   configuration and is signed by Xcode's local test certificate, not Apple's —
   so its freshness behaviour says **nothing** about Apple's. That is the F1 trap,
   caught in the evidence rather than in the tester's memory of Run → Options.
+- **It emits `txID=` and `expires=`, and this is what makes the gate sound.**
+  `originalID` alone cannot tell a re-signature from a sandbox **renewal**, and
+  the accelerated renewal rate can fire inside the gate's own ten-minute step —
+  so without this the commonest way to get a false P1 would have been invisible.
+  See "THE RENEWAL CONFOUND" below.
 
-### Fixture — and it costs nothing extra if sequenced correctly
+### Fixture — what it costs, and what it must not cost
 
 **F3b needs an ENTITLED device, not a FRESH one.** A clean first-purchase state
 is the expensive thing the sandbox rig cannot cheaply restore; an entitlement
-that already exists is free to read repeatedly. **So F3b must ride on the G6a
-branch-A purchase rather than spending a sandbox cycle of its own**, and may be
-run at any point while that entitlement is live.
+that already exists is free to read repeatedly. **So F3b rides on the G6a
+branch-A purchase and spends no sandbox cycle of its own** — run it immediately
+after that purchase, before G6a's cancellation step.
 
-**AT THE TIME OF WRITING NO DEVICE HOLDS A SANDBOX ENTITLEMENT.** Device A sits
-at first-launch onboarding with its Apple credential revoked; Device B Release is
-the lapsed control and must not be spent. **The gate is therefore BUILT AND NOT
-RUN, and must not be recorded as anything else.**
+| Fixture | Impact |
+|---|---|
+| Sandbox tester's clean first-purchase state | **CONSUMED** — but shared with G6a branch A, so the marginal cost is zero if sequenced as above |
+| **C-36 / QA B7 fresh-first-join account** | **NOT CONSUMED — see below. This is the one that must not be spent by accident** |
+| Device B Release (lapsed control) | Untouched. Not used at any step |
+| Any backend row | **NONE CREATED.** No sign-in occurs, so no `auth.users`, no `membership`, no `membership_binding`, no directory row |
 
-### Procedure
+**Why C-36 is safe, stated precisely, because the two fixtures look adjacent and
+are not.** They are different scarce resources on different Apple accounts:
 
-Release build, StoreKit configuration **None**, Device A signed into the sandbox
-tester, entitlement live. Read the lines with Xcode's console attached, or
-`sudo log collect --device-name "<device>"` then `log show`.
+- **F3b spends** a *sandbox tester's* first-purchase state. The sandbox tester
+  lives in **Settings -> App Store -> Sandbox Account** and is used only for
+  purchases.
+- **C-36 needs** a *primary Apple ID that has never joined Études Connected*.
+  Sign in with Apple uses the device's **primary Apple Account**, not the sandbox
+  tester.
 
-| Step | Action | Line to capture |
+**They never touch, provided the run does not sign in** — and it has no reason
+to, because `Transaction.currentEntitlements` is pure StoreKit and the probe
+makes no network call at all. The current shipping flow makes this easy: purchase
+happens **before** sign-in, and the sign-in sheet presented afterwards is simply
+dismissed. **This is the last window in which that is true** — D2 inverts the
+flow at U5f, after which joining requires signing in first, and a future F3b-like
+run would have to be planned around it.
+
+**Device A's primary Apple ID is in any case ALREADY SPENT for C-36 purposes** —
+identity `5ae3faab...` was minted on it 2026-08-15 and its credential has since
+been revoked, and the rig notes already record that it "is **not** a C-36 fixture
+and must not be used as one". So F3b cannot make C-36 worse than it already is.
+**The no-sign-in instruction is cheap insurance for the day a genuinely fresh
+Apple ID is provisioned on that device**, not a live risk today.
+
+### THE RENEWAL CONFOUND — read this before scoring anything
+
+**The development sandbox honours the tester's accelerated renewal rate, so a
+Monthly cycle can complete in about thirty minutes — inside this gate's own
+ten-minute step.** A renewal legitimately produces a **new transaction** with a
+new signature and a later `signedDate`, which reads exactly like a re-signature
+and would be scored as P1. That is a wrong answer arrived at honestly, and it
+would select a freshness window the design cannot support.
+
+**Two independent defences, and use both:**
+
+1. **Set the sandbox tester's renewal rate to the SLOWEST available** before
+   starting, so the window is unlikely to be crossed at all.
+2. **The probe emits `txID=`.** `Transaction.id` changes on renewal and does not
+   change on a re-signature, so the two are separable in the evidence rather than
+   in the tester's recollection. Any step whose `txID` moved is reported as
+   **`vsPrevious=RENEWED_notEvidence`** and **is not evidence about freshness**.
+   Re-run that step.
+
+`expires=` is emitted alongside for the same reason: it makes an approaching
+renewal boundary visible before it is crossed.
+
+### The exact Device-A procedure
+
+**Preconditions — all four, verified before step 1:**
+
+| # | Precondition | How to confirm |
 |---|---|---|
-| 1 | Cold launch (force-quit first) | `reason=launch1` |
-| 2 | Same launch, ~3s later | `reason=launch2` |
-| 3 | Background, then foreground | `reason=foreground` |
-| 4 | **Force-quit**, cold launch | `reason=launch1` |
-| 5 | Repeat step 4 after ≥ 10 minutes | `reason=launch1` |
-| 6 | Profile → Restore Purchases (`AppStore.sync()`), then foreground | `reason=foreground` |
+| 1 | Release build from a clean tree at `e157b1c` or later, installed on **Device A** via Xcode Run | The scheme's Run action is Release again (C-52) |
+| 2 | **Run -> Options -> StoreKit Configuration reads `None`** | Confirm visually. The shared scheme no longer pins one, but a per-user Run -> Options selection is the same setting and must be seen to be clear. **The probe's `env=` line is the backstop, not the check** |
+| 3 | Settings -> App Store -> Sandbox Account is the dedicated sandbox tester, **renewal rate at its slowest** | Settings, before launching |
+| 4 | **DO NOT SIGN IN WITH APPLE AT ANY POINT** | See the C-36 note above |
+
+**Steps. Each captures one or more log lines; nothing is scored until the end.**
+
+| Step | Action | Expected line(s) |
+|---|---|---|
+| 1 | Profile -> Connected -> Continue -> Membership -> purchase **Monthly**. Apple's sheet must read **"Sandbox"**. When the sign-in sheet appears afterwards, **dismiss it** | — |
+| 2 | Force-quit. Cold launch | `reason=launch1`, then `reason=launch2` ~3s later |
+| 3 | Home (background), wait ~30s, foreground | `reason=foreground` |
+| 4 | Force-quit. Cold launch | `reason=launch1` |
+| 5 | Wait **>= 10 minutes without launching**. Cold launch | `reason=launch1` |
+| 6 | Profile -> Restore Purchases (`AppStore.sync()`), then background and foreground | `reason=foreground` |
+
+**Reading the evidence.** With Xcode attached the lines appear live in the
+console (`Logger` + `privacy: .public`). Detached, use
+`sudo log collect --device-name "<device>"` then:
+
+```
+log show --predicate 'subsystem == "com.sdsongs.etudes" AND category == "u5a"'
+```
+
+**Scoring order — check these three before looking at the result at all:**
+
+1. **`env=` must read `Sandbox` on every line.** `Xcode` anywhere -> **VOID**,
+   precondition 2 failed, re-run.
+2. **`txID=` must be constant across steps 2-5.** Any step where it moved is
+   `RENEWED_notEvidence` and is re-run, not scored.
+3. **`entitlements=0 NOFIXTURE` anywhere -> NOT A RESULT.** The purchase did not
+   take; fix that first.
+
+Only then read `vsPrevious=` and `ageSeconds=` against the six predictions below.
 
 ### Predicted outcomes, and what each one decides
 
@@ -1320,7 +1400,7 @@ they test do not exist.
 | A25 | **Unbound membership row impossible** | Insert with `binding_method` or `bound_at` null → **rejected**. The central rule as a constraint | U3 |
 | A26 | Legacy path needs **no fake membership row** | A binding row exists with **zero** membership rows, and `membership_state()` returns `unknown`/`grandfathered` — never a fabricated state | U3 |
 | A27 | Dormant snapshot identity acquires binding **lazily** | Identity in the snapshot with no binding row can create one on demand | U3 |
-| A28 | `membership_state()` returns exactly the four states | `entitled` / `expired` / `grandfathered` / `unknown` across staged fixtures | U3 |
+| A28 | `membership_state()` returns exactly the four states | `entitled` / `expired` / `grandfathered` / `unknown` across staged fixtures. **SUPERSEDED AT U5b, 2026-08-20 — it becomes FIVE.** D4's environment separation adds `sandbox_only`, without which a Sandbox-only identity reports `expired` — which is false, and would corrupt U6a's shadow report by making a tester indistinguishable from a member whose Production subscription lapsed. **The U3 result stands as recorded**; this is a forward note, not a retraction | U3 |
 | A29 | Mismatched Apple token never produces an entitled row through the real writer | — | **U5 — not U3.** The writer does not exist |
 | A30 | Legacy claim calls `Set App Account Token` and re-reads before writing membership | — | **U5 — not U3** |
 | A31 | Orphan rebind permitted; live-binding mismatch refused | — | **U5 — not U3** |
