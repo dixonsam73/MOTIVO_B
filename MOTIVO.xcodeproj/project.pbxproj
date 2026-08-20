@@ -45,6 +45,7 @@
 			membershipExceptions = (
 				debug_upload_test.m4a,
 				debug_upload_test.mp4,
+				Etudes.storekit,
 				Info.plist,
 			);
 			target = 1CA2DFBA2E704AF800F23C97 /* MOTIVO */;

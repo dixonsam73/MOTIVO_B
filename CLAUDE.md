@@ -182,6 +182,32 @@ configuration. Debug and Release both compile clean.
 asserting a repository fact is not evidence of that fact** — this file said the
 right thing throughout, was re-read many times, and was wrong the whole time.
 
+### C-53 — `Etudes.storekit` no longer ships. Resolved 2026-08-20
+
+**F1's fix was necessary and not sufficient, and this is the second route.**
+Unpinning the scheme stopped Xcode *attaching* the configuration; the `MOTIVO`
+synchronized root group was *compiling it into the app* the whole time, because
+its `membershipExceptions` list named only `debug_upload_test.m4a`,
+`debug_upload_test.mp4` and `Info.plist`. Someone had already met this mechanism
+and excepted two debug media files; the StoreKit configuration was missed.
+
+**One line, and the evidence is a measured delta rather than a rebuild and an
+assurance:** the Release bundle inventory was captured **before** the change (15
+items, file present) and after (14 items), and the diff is **exactly the removal
+of `Etudes.storekit`**. Nothing else in the bundle moved. No Swift file changed;
+no source loads that file at runtime; the product identifiers are untouched; the
+exception is scoped to the app target so both test targets are unaffected.
+
+**The file is retained on disk and is now genuinely opt-in** — which is what this
+document has claimed since 2026-08-11 and what was not actually true until now.
+
+**THE CAUSAL CLAIM REMAINS UNPROVEN AND UNMADE.** This fix does not establish
+that the bundled file caused the Xcode-labelled purchase sheet, and TestFlight
+build 131 is evidence against that simple story. **Do not let "C-53 resolved" be
+read as "the Xcode-sheet question is answered."** What is resolved is that a
+StoreKit configuration file carrying internal identifiers no longer ships inside
+an App Store binary, which was defect enough on its own.
+
 ### F3b — EXECUTED ON DEVICE A, 2026-08-20. RESULT: **P2**. D3 is decided
 
 **`Transaction.currentEntitlements` returns a STORED HISTORICAL representation,
@@ -431,14 +457,14 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **19** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved one** |
-| Open Phase 3 obligations | **6** | C-26, C-31, B-11, **B-24**, **B-31**, **C-53** — unchanged by U4; **B-31 and C-53 added by U5a** |
+| Phase-3-tagged register rows | **19** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two** |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-31** — unchanged by U4; **B-31 added by U5a**, which also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (open) and **C-53** (open).
+**C-52** (Resolved), **B-31** (open) and **C-53** (Resolved).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -457,7 +483,7 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **6 open: C-26, B-11, C-31, B-24, B-31 and C-53.** **B-31 is U5a's, and it is a
+= **5 open: C-26, B-11, C-31, B-24 and B-31.** **B-31 is U5a's, and it is a
 *conditional* P1 in the C-26 sense — the deployed verifier is correct for the
 callers it has, and the gap becomes a defect only if U5 ships without the claim
 checks.** The other four are the server-authority work
