@@ -25,11 +25,13 @@ verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — and U4b-U4g, which 
 IMPLEMENTED AND GREEN LOCALLY BUT NOT DEPLOYED (2026-08-20). U4h/U4i and U5
 onwards are not built.**
 
-## U4b-U4g are built and locally green; U4h/U4i are NOT run
+## U4 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-20
 
-**Nothing is deployed. No production secret is installed. App Store Connect is
-untouched. Production has been neither queried nor mutated.** The reviewed
-production package is `supabase/sql/README-u4-deployment.md`; the evidence is in
+**P0-P13 all executed and passed.** The schema and both Edge Functions are live,
+the Sandbox notification URL is configured, B-23 returned GREEN after recapture,
+and Apple's own test notification verified end to end. **U4 remains observe-only:
+no policy consults membership, nothing is scheduled and nothing is deleted.** The
+record is `supabase/sql/README-u4-deployment.md`; the evidence is in
 `docs/qa-plan.md` under "U4 — PREDICTIONS AND RESULTS".
 
 **207 local assertions pass** (25 route gate + 48 module + 94 SQL + 40
@@ -75,9 +77,12 @@ unwritable, so QA G2 asserted something no correct implementation could
 produce), **B-27** (the outcome vocabulary conflated hostile traffic with the
 highest-volume routine category), **B-29** (an unauthenticated durable write
 primitive, now bounded to hours x categories), **B-30** (two RPC calls are two
-transactions, proven at 20888/20889). **B-28 remains only PARTIALLY discharged:
-no genuine Apple-signed payload has ever been verified by this code, and Apple's
-own test notification at U4i is where it closes.**
+transactions, proven at 20888/20889). **B-28 IS NOW RESOLVED — U4i, 2026-08-20.** Apple's own
+test notification verified through the deployed path and landed in
+`membership_notification` as `TEST`/`ignored`/`not_applicable`, with the Tier-2
+reject aggregate still **empty**. **Where the row landed is the proof, not that
+one did:** a dead verifier would have put it in the reject aggregate while the
+endpoint still looked healthy from outside.
 
 **QA G2 was amended and the reasoning outlives it:** structural reject 400,
 signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200"

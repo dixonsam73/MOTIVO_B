@@ -1818,6 +1818,52 @@ that hazard. U3 re-runs **93 of 93**, its original count.
   production-reachable switch on the one control that makes an unauthenticated
   endpoint safe, and was refused.
 
+### U4i — APPLE TEST NOTIFICATION, 2026-08-20. PASS. B-28 DISCHARGED.
+
+**The first genuine Apple-signed payload this project has ever verified**, and
+the last thing B-28 was held open for.
+
+| | |
+|---|---|
+| Request accepted | 2026-08-20 **17:48:27Z**, `testNotificationToken` returned |
+| Apple's own view | `firstSendAttemptResult` = **SUCCESS**, attempt 1, `attemptDate` 1787248109170 |
+| Our audit row | `received_at` **17:48:30.644874Z** — three seconds later |
+| Shape | **`TEST` / `ignored` / `not_applicable` / `delivery_count = 1`** — matches the committed prediction exactly |
+| Environment / size | `Sandbox`, 4777 bytes, uuid + signed_date present, digest well-formed |
+| Tier-2 reject aggregate | **EMPTY. Zero signature failures, ever** |
+| `membership` | **0 rows** — acceptance-window prediction holds |
+| Policies consulting membership | **0** — still observe-only |
+
+**WHERE THE ROW LANDED IS THE PROOF, NOT THAT ONE DID.** It is in
+`membership_notification` as a verified notification and **not** in
+`membership_notification_reject_stat`. Had the verifier been dead — the exact
+failure U4a found in `@apple/app-store-server-library`, which rejects everything
+while reporting its own incapacity with the same status as a forgery — this
+payload would have landed in the reject aggregate with
+`failure_category = 'signature'`, and the endpoint would still have answered
+healthily from outside. **A green endpoint and a dead verifier are the same
+observation from outside; this is the observation that tells them apart.**
+
+#### P12 failed twice first, and the cause was propagation
+
+Two attempts shortly after the App Store Connect change returned **404,
+errorCode 4040007 — `ServerNotificationURLNotFoundError`**. A single later retry
+succeeded **with no change to App Store Connect and none to production**.
+
+**The discriminator is why waiting was the right response rather than a guess.**
+During the failure, `mode=notification_history` returned **HTTP 200** on the same
+host with the same secrets in the same deployed function. That proved the five
+secrets, the ES256 JWT, the Issuer ID, the Key ID, the `.p8` encoding, the `bid`
+claim and the sandbox base URL were all correct and that Apple resolved the app —
+leaving Apple's own record of the URL as the only remaining variable, which is
+exactly the thing that propagates. **Without that control the same 404 would have
+been indistinguishable from a malformed key or a wrong Issuer ID**, and the
+reasonable next move would have been to start changing configuration that was
+already correct.
+
+**A failed Apple read wrote nothing**, verified in production after both failed
+attempts: all three tables still zero.
+
 ### Local verification stopping rule — agreed before running
 
 1. **B-23's fidelity gate green at the time of the run**, or the run is not

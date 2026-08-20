@@ -1,32 +1,47 @@
-# U4 production deployment — P0-P10 EXECUTED, 2026-08-20
+# U4 production deployment — P0-P13 EXECUTED AND ACCEPTED, 2026-08-20
 
 **P0-P10 HAVE BEEN RUN AGAINST PRODUCTION AND ALL PASSED, 2026-08-20.** The
 schema is deployed, both Edge Functions are ACTIVE, and the B-23 gate returned
 GREEN after recapture.
 
-**P11 was performed in App Store Connect and P12 IS BLOCKED: Apple reports that
-no Sandbox Server Notification URL exists for this app.** Two attempts to
-`POST /inApps/v1/notifications/test` both returned **404, errorCode 4040007 —
-`ServerNotificationURLNotFoundError`**, documented by Apple as *"No App Store
-Server Notification URL found for provided app. Check that a URL is configured
-in App Store Connect for this environment."*
+**P11, P12 AND P13 ARE COMPLETE, 2026-08-20. U4h AND U4i ARE DONE.**
 
-**THE CREDENTIAL PATH IS PROVEN GOOD, AND THAT IS WHAT THE DISCRIMINATOR
-ESTABLISHES.** On the same host, with the same secrets, in the same deployed
-function, `mode=notification_history` returned **HTTP 200** with
-`apple_notification_count = 0`. So the five secrets, the ES256 JWT, the Issuer
-ID, the Key ID, the `.p8` encoding, the `bid` claim and the sandbox base URL are
-ALL correct, and Apple resolves the app. **The one thing failing is specifically
-the absence of a sandbox notification URL on Apple's side** — and the zero
-history count independently corroborates it: Apple has sent nothing, which is
-what "nowhere to send it" looks like.
+**P12 initially failed and the cause was propagation, not misconfiguration.** Two
+attempts shortly after the App Store Connect change returned **404, errorCode
+4040007 — `ServerNotificationURLNotFoundError`**. A later single retry at
+**17:48:27Z succeeded with no change to App Store Connect and none to
+production.**
 
-**A failed Apple read wrote nothing**, verified in production after both
-attempts: `membership`, `membership_notification` and
-`membership_notification_reject_stat` all still **0**.
+**The discriminator run during the failure is worth keeping**, because it is what
+made waiting the right response rather than a guess: on the same host, with the
+same secrets, in the same deployed function, `mode=notification_history` returned
+**HTTP 200**. That proved the five secrets, the ES256 JWT, the Issuer ID, the Key
+ID, the `.p8` encoding, the `bid` claim and the sandbox base URL were ALL correct
+and that Apple resolved the app — so the only remaining variable was Apple's own
+record of the URL, which is exactly what propagates.
 
-**P12 and P13 remain open, and B-28 is therefore STILL ONLY PARTIALLY
-DISCHARGED.** No genuine Apple-signed payload has reached the endpoint.
+**P13 — Apple's view and ours agree, and both were checked.**
+
+| | |
+|---|---|
+| Apple `firstSendAttemptResult` | **SUCCESS**, attempt 1, `attemptDate` 1787248109170 |
+| Our audit row `received_at` | **2026-08-20 17:48:30.644874+00** — three seconds after the request |
+| Shape | **`TEST` / `ignored` / `not_applicable` / `delivery_count = 1`** — matches the prediction exactly |
+| Environment | `Sandbox` |
+| Payload | 4777 bytes, `notification_uuid` and `signed_date` present, `payload_sha256` well-formed |
+| `membership_notification_reject_stat` | **EMPTY — zero signature failures, ever** |
+| `membership` | **0 rows** — the acceptance-window prediction holds |
+| Policies consulting membership | **0** — still observe-only |
+
+**B-28 IS DISCHARGED. A GENUINE APPLE-SIGNED PAYLOAD PASSED x5c CHAIN
+VERIFICATION AGAINST THE PINNED APPLE ROOT CA G3 THROUGH THE DEPLOYED PATH.** The
+proof is not that a row appeared but **WHERE it appeared**: in
+`membership_notification` as a verified notification, and NOT in the Tier-2
+reject aggregate. Had the verifier been dead — the exact failure mode U4a found
+in the official Apple library, which rejects everything while reporting it
+identically to an attack — this payload would have landed in
+`membership_notification_reject_stat` with `failure_category = 'signature'` and
+the endpoint would still have looked healthy from outside.
 
 **Two results that differ from what this file predicted, both recorded rather
 than smoothed over.**
