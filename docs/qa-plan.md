@@ -1168,6 +1168,114 @@ and the answer selects a replay control.
 sets the floor for how tight a window can be without failing legitimate users on
 a cold launch.
 
+### U5a — F3b RESULT. EXECUTED ON DEVICE A, 2026-08-20. **P2.**
+
+**Scored against the predictions above, which were committed before the run.**
+
+**The three preconditions were checked before the result was read, in the
+prescribed order, and all three passed** — this matters, because two of them
+exist to void a run rather than to score it:
+
+| Guard | Observed | Verdict |
+|---|---|---|
+| `env=` on every line | **`Sandbox`** | Not P5. Real Apple, not Xcode's test signer |
+| `txID=` constant across steps | **`2000001224581513` throughout** | **Not a renewal.** The confound did not fire |
+| Fixture present | `verified=true`, one entitlement | Not P6 |
+
+**The observation.** Across repeated reads, a foreground, multiple cold launches
+and more than ten minutes:
+
+```
+originalID = 2000001220187383
+txID       = 2000001224581513      (unchanged)
+signedDate = 2026-08-20T19:57:24.974Z   (unchanged)
+jwsSha256  = efa41398b7b3          (unchanged)
+expires    = 2026-08-20T20:57:18.000Z
+vsPrevious = UNCHANGED             (throughout)
+final ageSeconds = 706-709
+```
+
+**RESULT: P2.** `Transaction.currentEntitlements` returns a **stored historical
+representation**, not a freshly signed one. `signedDate` is fixed at
+approximately the purchase instant — 19:57:24, some six seconds after the
+transaction's implied purchase time of 19:57:18 — and did not move; `ageSeconds`
+grows monotonically with wall-clock time and nothing else.
+
+**The cold launches are what make this conclusive.** The process was destroyed
+and rebuilt repeatedly and StoreKit still served **byte-identical** bytes, which
+rules out in-process caching and establishes a persisted representation rather
+than a per-read signature.
+
+**Honest limits, stated rather than glossed.** This proves stability across cold
+launches for ~12 minutes inside a single subscription period. It does **not**
+prove behaviour across a renewal (`txID` changes there, which is expected and is
+a different question), nor over days. **Step 6 (`AppStore.sync()`) was not
+separately reported, and it does not matter:** P3 was written to collapse into
+P2 precisely because a control that only works after a password-prompting sync is
+unusable on an attestation path. **The gate is robust to that gap by design.**
+
+**The tester deviated from the procedure in one respect and it was safe.** The
+renewal rate was set to "Monthly every hour" rather than the slowest available;
+the period ran 19:57:18 to 20:57:18 and the last observation was ~48 minutes
+clear of the boundary. `txID` constant is the proof that the deviation cost
+nothing — which is exactly what that field was added for.
+
+### D3 — DECIDED FROM THE EVIDENCE: no freshness window, no one-time consumption
+
+**A freshness window is not merely weak here, it would BREAK the design's most
+important scenario.** Because `signedDate` is fixed at purchase, any window tight
+enough to constrain an attacker rejects every legitimate attestation after the
+subscription's first minutes — and attestation fires on every launch and
+foreground for the life of the subscription. Worse, **a dormant pre-cutover
+subscriber's return (G11) presents a JWS signed months or years earlier.** A
+freshness window would refuse the single case U5 exists to make self-healing.
+
+**One-time consumption by digest is also rejected**, for a different reason: the
+legitimate client presents the *same* JWS on every attestation, so consumption
+would refuse the owner's second call. Scoped narrowly enough to be coherent —
+consumed only on the establishment path — it adds nothing that
+`membership_transaction_unique` and the live-binding conflict rule do not already
+provide.
+
+**The residual is accepted explicitly, and it is narrow and statable:** an
+attacker who obtains a **legacy, token-less** subscriber's transaction JWS
+*before that subscriber ever attests* can bind that subscription to their own
+identity. Four structural properties bound it, three already in the schema:
+
+1. **`membership_transaction_unique (environment, original_transaction_id)`** — one
+   Apple subscription entitles at most one Études identity, enforced by the
+   database, so a replay cannot mint a second entitled identity.
+2. **The live-binding conflict rule** — once the owner has bound, any other
+   claimant is refused and recorded. The window closes permanently.
+3. **The self-extinguishing legacy branch** — reachable only while Apple reports
+   no token, and taking it sets one.
+4. **D2/U5f sets `appAccountToken` at purchase**, so after U5f every new
+   subscription carries a token from birth and the exposed population is the
+   pre-U5f cohort: finite, enumerable and shrinking.
+
+The legitimate owner's failure mode is a **refusal that is recorded for operator
+disposition** — an account-recovery event, which B-24 already requires — not a
+silent loss.
+
+**Two consequences that strengthen the design rather than patch it.**
+
+**(i) The JWS is required ONLY on the establishment path.** After establishment,
+refresh runs server-side through `membership_apply_reconciliation_v1` on the
+*stored* `original_transaction_id`, with no client artefact at all. That reduces
+how often the bearer artefact travels, which is the best available mitigation.
+
+**(ii) P2 VALIDATES THE THREE-ARTEFACT SPLIT rather than complicating it.** A
+permanently-stale artefact is exactly why the JWS may answer **who** and must
+never answer **now**. Had the gate returned P1 it would have been tempting to let
+a fresh JWS stand in for the live Apple read; P2 forecloses that, and B-24's
+separation is confirmed by measurement instead of by argument.
+
+**(iii) The no-persist, no-log rule is now LOAD-BEARING rather than cautious.**
+Under P1 a leaked JWS would have expired in minutes. Under P2 it is valid for the
+life of the transaction, so a leak is permanent. **U5 must never log, store or
+echo a transaction JWS anywhere** — the probe already respected this, and the
+reason is now stronger than when it was written.
+
 ### What this gate does NOT establish
 
 It says nothing about whether a JWS can be *exfiltrated*, nothing about U5's

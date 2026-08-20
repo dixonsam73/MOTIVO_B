@@ -104,7 +104,7 @@ an implementation.** No SQL, no Edge Function, no client protocol, no deploy.
 U5b onwards has not begun.
 
 **THE U5 AUDIT IS ACCEPTED AND D1-D9 ARE AGREED**, with **D4 decided against the
-audit's own proposal and the proposal rejected outright** — see below. Eight
+audit's own proposal and the proposal rejected outright** — see below. Twelve
 architectural decisions are now settled and binding on U5's implementation:
 
 - **Establishment NEVER schedules cleanup.** `pending_cleanup_at` stays NULL on
@@ -131,6 +131,23 @@ architectural decisions are now settled and binding on U5's implementation:
   admits: no argument, identity from `auth.uid()`, idempotent, at most one row
   per `auth.users` row.
 - **F2 claim binding is MANDATORY** — see B-31.
+- **`membership_state()` gains a fifth value, named `sandbox_only`** (agreed
+  2026-08-20). Not cosmetic: without it a Sandbox-only identity reports
+  `'expired'`, which is false and makes a tester indistinguishable from a member
+  whose Production subscription lapsed — corrupting the metric U6a's shadow reads.
+- **The Production/Sandbox predicate semantics land in U5b, not U6** (agreed
+  2026-08-20). Nothing reads `connected_member()` until U6, so it *could* wait —
+  but U5 creates the first membership rows, and shipping a predicate that would
+  mis-derive them leaves U6 a landmine. The suites are being touched for U5
+  anyway, so the four affected assertions are re-pointed in the same pass.
+- **E17 is rewritten to assert the Sandbox ROW rather than Production
+  entitlement** (agreed 2026-08-20). It cannot be re-pointed: ingestion applies
+  state to the row of the notification's own environment, so no Sandbox
+  notification can ever produce entitlement under the new semantics. Asserting
+  the row is what `e2e.sh` is for by its own description — entitlement derivation
+  belongs to `acceptance.sh`.
+- **D3, decided from the F3b measurement: no freshness window and no one-time
+  consumption on the transaction JWS.** See the F3b section below.
 - **Sign in with Apple BEFORE purchase, for every new Connected join** (D2,
   confirmed 2026-08-20). Forced rather than chosen: the binding token must exist
   before `product.purchase()` can carry it. **This inverts the shipping flow** —
@@ -165,25 +182,42 @@ configuration. Debug and Release both compile clean.
 asserting a repository fact is not evidence of that fact** — this file said the
 right thing throughout, was re-read many times, and was wrong the whole time.
 
-### F3b — the gate is BUILT AND NOT RUN, and must not be recorded otherwise
+### F3b — EXECUTED ON DEVICE A, 2026-08-20. RESULT: **P2**. D3 is decided
 
-**No device currently holds a sandbox entitlement**: Device A sits at
-first-launch onboarding with its Apple credential revoked, and Device B Release
-is the lapsed control that must not be spent. The instrument, the procedure and
-the six predicted outcomes are committed in `docs/qa-plan.md` **before**
-execution, in the D14/D15 style.
+**`Transaction.currentEntitlements` returns a STORED HISTORICAL representation,
+not a freshly signed one.** `signedDate` is fixed at approximately the purchase
+instant and does not move; identical `jwsSha256` across repeated reads, a
+foreground and multiple cold launches over more than ten minutes, with `txID`
+constant throughout so no renewal confounded it, and `env=Sandbox` so it is real
+Apple rather than Xcode's test signer. Full scoring in `docs/qa-plan.md`.
 
-**Sequencing finding, and it saves a sandbox cycle: F3b needs an ENTITLED device,
-not a FRESH one.** A clean first-purchase state is the expensive thing the rig
-cannot cheaply restore; an existing entitlement is free to read repeatedly. **So
-F3b rides on the G6a branch-A purchase and costs nothing extra**, and may run at
-any point while that entitlement is live.
+**D3: NO freshness window, and NO one-time consumption.** A window is not merely
+weak, it would **break G11** — a dormant pre-cutover subscriber returns holding a
+JWS signed months or years earlier, and that is the exact case U5 exists to make
+self-healing. One-time consumption fails differently: the legitimate client
+presents the *same* JWS on every attestation, so consuming it would refuse the
+owner's second call, and scoped narrowly enough to be coherent it adds nothing
+`membership_transaction_unique` and the conflict rule do not already give.
 
-**Apple's documentation does not answer F3b** — checked against the references
-for `VerificationResult`, `jwsRepresentation`, `signedDate` and
-`currentEntitlements`. The one hint runs the other way (`jwsRepresentation` is
-"the same as its counterpart in the App Store server APIs", which reads like a
-stored artefact), which is exactly why this is a gate.
+**The residual is accepted explicitly and is narrow:** an attacker holding a
+*legacy, token-less* subscriber's JWS *before that subscriber ever attests* can
+bind it. Bounded by the transaction uniqueness constraint, the live-binding
+conflict rule, the self-extinguishing legacy branch, and D2/U5f setting a token
+at purchase so the exposed cohort is finite and shrinking. The owner's failure
+mode is a **recorded refusal for operator disposition**, not silent loss.
+
+**THE EVIDENCE VALIDATES THE THREE-ARTEFACT SPLIT RATHER THAN COMPLICATING IT.**
+A permanently-stale artefact is precisely why the JWS may answer **who** and must
+never answer **now**. Had the gate returned P1 it would have been tempting to let
+a fresh JWS stand in for the live Apple read; P2 forecloses that, so B-24's
+separation is now confirmed by measurement instead of by argument.
+
+**Two rules tighten as a direct consequence.** The JWS is required **only on the
+establishment path** — refresh afterwards runs server-side on the stored
+`original_transaction_id` with no client artefact at all. And **U5 must never
+log, store or echo a transaction JWS**: under P1 a leak would have expired in
+minutes, under P2 it is valid for the life of the transaction, so the no-persist
+rule is load-bearing rather than cautious.
 
 ### `Set App Account Token` — CONFIRMED against Apple's reference, 2026-08-20, with two corrections to the U5 audit
 
@@ -397,14 +431,14 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **18** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed two — C-52 and B-31 — and resolved one** |
-| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-31** — unchanged by U4; **B-31 added by U5a** |
+| Phase-3-tagged register rows | **19** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved one** |
+| Open Phase 3 obligations | **6** | C-26, C-31, B-11, **B-24**, **B-31**, **C-53** — unchanged by U4; **B-31 and C-53 added by U5a** |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The eighteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
-C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's two:
-**C-52** (Resolved) and **B-31** (open).
+The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
+C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
+**C-52** (Resolved), **B-31** (open) and **C-53** (open).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -423,7 +457,7 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **5 open: C-26, B-11, C-31, B-24 and B-31.** **B-31 is U5a's, and it is a
+= **6 open: C-26, B-11, C-31, B-24, B-31 and C-53.** **B-31 is U5a's, and it is a
 *conditional* P1 in the C-26 sense — the deployed verifier is correct for the
 callers it has, and the gap becomes a defect only if U5 ships without the claim
 checks.** The other four are the server-authority work
@@ -1439,16 +1473,16 @@ no further handling of the private key. The `.p8` itself lives at
 `~/.etudes-secrets/` (dir `700`, file `600`), outside the repo; `.gitignore`
 already blocks `*.p8` and `*.pem`.
 
-**Temporary instrumentation: PRESENT — `JWSFreshnessProbe`, added 2026-08-20 by
-U5a.** One file (`MOTIVO/JWSFreshnessProbe.swift`) and two call sites in
-`MOTIVOApp.swift` (launch, foreground). It exists to score the F3b gate and
-**its standing removal condition is the moment F3b is scored**, exactly as
-`ActivationTrace` and `MembershipTrace` were removed the moment their gates
-closed. Removal is a pure deletion — nothing else references the type — plus one
-`UserDefaults` key, `u5a_jwsProbe_v1`. **It is read-only:** no network, no
-purchase, no `AppStore.sync()`, no binding, no membership establishment. **It
-never logs the JWS**, only a 12-hex digest prefix, because under U5's protocol
-the JWS *is* the ownership proof and a device log is readable over a cable.
+**Temporary instrumentation: NONE PRESENT.** `JWSFreshnessProbe` and its two
+call sites were deleted on 2026-08-20 **the moment F3b was scored**, as its
+standing condition required and as `ActivationTrace` and `MembershipTrace` were
+before it. **Removal verified as a PURE DELETION rather than asserted:**
+`MOTIVOApp.swift` is byte-identical to its state at `e157b1c^`, before the probe
+existed, and both configurations compile clean. It earned its keep — `txID` was
+added to it late, and that field is the only reason the P2 result can be
+distinguished from a sandbox renewal. One inert `UserDefaults` key,
+`u5a_jwsProbe_v1`, remains on Device A; it is disposable-fixture scratch and no
+shipping code reads it.
 
 **Earlier note, still true of everything before U5a.** The most recent was C-3's
 foreground-timing probe, added and removed on 2026-08-14 within the same day.
