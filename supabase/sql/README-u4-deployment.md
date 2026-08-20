@@ -2,9 +2,31 @@
 
 **P0-P10 HAVE BEEN RUN AGAINST PRODUCTION AND ALL PASSED, 2026-08-20.** The
 schema is deployed, both Edge Functions are ACTIVE, and the B-23 gate returned
-GREEN after recapture. **P11-P13 are NOT done: the Sandbox notification URL is
-still unset, so Apple delivers nothing to the endpoint and no notification has
-ever reached it.**
+GREEN after recapture.
+
+**P11 was performed in App Store Connect and P12 IS BLOCKED: Apple reports that
+no Sandbox Server Notification URL exists for this app.** Two attempts to
+`POST /inApps/v1/notifications/test` both returned **404, errorCode 4040007 —
+`ServerNotificationURLNotFoundError`**, documented by Apple as *"No App Store
+Server Notification URL found for provided app. Check that a URL is configured
+in App Store Connect for this environment."*
+
+**THE CREDENTIAL PATH IS PROVEN GOOD, AND THAT IS WHAT THE DISCRIMINATOR
+ESTABLISHES.** On the same host, with the same secrets, in the same deployed
+function, `mode=notification_history` returned **HTTP 200** with
+`apple_notification_count = 0`. So the five secrets, the ES256 JWT, the Issuer
+ID, the Key ID, the `.p8` encoding, the `bid` claim and the sandbox base URL are
+ALL correct, and Apple resolves the app. **The one thing failing is specifically
+the absence of a sandbox notification URL on Apple's side** — and the zero
+history count independently corroborates it: Apple has sent nothing, which is
+what "nowhere to send it" looks like.
+
+**A failed Apple read wrote nothing**, verified in production after both
+attempts: `membership`, `membership_notification` and
+`membership_notification_reject_stat` all still **0**.
+
+**P12 and P13 remain open, and B-28 is therefore STILL ONLY PARTIALLY
+DISCHARGED.** No genuine Apple-signed payload has reached the endpoint.
 
 **Two results that differ from what this file predicted, both recorded rather
 than smoothed over.**
