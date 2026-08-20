@@ -145,13 +145,20 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **10** | Every row whose Phase cell contains a literal `3`. **B-24 filed 2026-08-16** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** |
+| Phase-3-tagged register rows | **16** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six** |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The ten rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9, C-9**.
-B-23 and B-24 are both new in Phase 3 and are the only count-changing additions.
+The sixteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9, C-9**
+plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**.
+
+**THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
+distinction this table exists to preserve.** U4 added six rows and closed all six
+in the same unit — five deployed and verified in production, and **B-28
+discharged by Apple's own test notification** — so the arithmetic is 6 resolved
+by U4, 6 previously resolved (B-23, B-4, B-12, B-13, B-9, C-9), 4 open. **Do not
+read "U4 is done" as reducing the open obligations: it never touched them.**
 
 **The open-obligation arithmetic, shown rather than asserted.** Nine tagged rows,
 minus:
@@ -194,7 +201,7 @@ This is the baseline every S-step and every Group C gate starts from.
 | **Billing Grace Period** | **ENABLED — 16 days, All Renewals, Only Sandbox Environment** | **S1 done 2026-08-16** |
 | Production Billing Grace | **Untouched** | Until its later authorised step |
 | Production notification URL | **Unset** | Until its later authorised step |
-| Sandbox notification URL | **Unset** | **S2b — after U4's deploy** |
+| Sandbox notification URL | **SET — the deployed `appstore_notifications_v1` endpoint** | **S2b DONE 2026-08-20.** Apple's own test notification verified through it |
 | In-App Purchase key | **1 active**, `Etudes App Store Server API` | **S2a done 2026-08-16** |
 | Account access | **Account Holder + Admin** | Sufficient for every S-step |
 
