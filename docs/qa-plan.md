@@ -1297,7 +1297,7 @@ U5f.
 | Debug build | **SUCCEEDED**, 0 errors |
 | Release build | **SUCCEEDED**, 0 errors |
 | `client-structural.sh` | **26 of 26** |
-| Unit tests (7 written) | **NOT RUN — see C-54.** Not evidence yet |
+| Unit tests | **7 of 7 EXECUTE AND PASS**, once C-54 was fixed the same day — see below |
 | Server surfaces touched | **NONE** — `git diff` over `supabase/functions/`, `supabase/migrations/` and `config.toml` is **empty**, so the B-23 delta and every SQL/function suite are structurally unaffected. **They were not re-run for show** |
 
 ### The absences are the assertions
@@ -1328,7 +1328,7 @@ keeps its `isConnected` guard (`C5e-18`) so no existing caller moves.
 `ensureValidSession`. A liveness helper that can revoke a session is the wrong
 shape for a path intended to run on every foreground.
 
-### C-54 — the unit tests are written and NOT RUN, and that is not a soft pass
+### C-54 — RESOLVED the same day. The tests run, and the defect had two layers
 
 `TEST_HOST` points at `MOTIVO.app/MOTIVO`; the product has been `Etudes.app/
 Etudes` throughout. **Any `xcodebuild test` fails before compiling a line.**
@@ -1340,10 +1340,32 @@ dependency scan. **The fix is one setting in two configurations and was
 deliberately not applied while Xcode was open on the project**, this session
 having twice watched Xcode overwrite on-disk project edits.
 
-**So U5e's client evidence is: two clean builds and 26 structural assertions.**
-The seven unit tests are committed, cover the pure pieces — body shape, outcome
-mapping, unknown-200-is-not-success, token decoding, endpoint construction — and
-**become evidence only once C-54 is fixed.**
+**FIXED 2026-08-23 once Xcode was closed, and the fix uncovered a SECOND stale
+reference the first had been hiding.** With `TEST_HOST` corrected the build got
+*further* and failed on `@testable import MOTIVO` — the app's Swift module is
+**`Etudes`** (`PRODUCT_MODULE_NAME`), so the generated template's import had been
+wrong since the rename too. **Neither had ever been reached, for the same
+reason: the target could not be built at all.** One further adjustment was needed
+— both services are `@MainActor`, so the tests are annotated `@MainActor` rather
+than relaxing the shipping types' concurrency surface, which a test-host fix has
+no business changing.
+
+**All seven now execute and pass, run normally with no override**, named
+individually in the log:
+
+```
+attestationBodyIsJwsOnly · attestationBodyHasNoIdentityFields · outcomeMapping
+unknownOutcomeIsNotSuccess · bindingTokenDecodes · bindingTokenRefusesJunk
+endpointConstruction                                     ** TEST SUCCEEDED **
+```
+
+**The project delta is measured rather than asserted: 4 lines, every one of them
+`TEST_HOST`, zero references to the UI-test target or `USES_XCTRUNNER`**;
+`plutil -lint` passes; Debug and Release build clean; the structural suite still
+passes 26 of 26.
+
+**So U5e's client evidence is now: two clean builds, 26 structural assertions and
+7 passing unit tests.**
 
 ### The standing Phase 3 exit assertion was re-checked, not assumed
 

@@ -12,13 +12,23 @@
 //  protocol, and genuine Sandbox for Apple. A test here that faked StoreKit would
 //  assert the fake.
 //
+//  THE TESTS ARE @MainActor because both services are, so their static members
+//  are main-actor-isolated. Annotating the tests keeps the shipping types'
+//  concurrency surface untouched — the pure helpers could reasonably be
+//  `nonisolated`, but that is a design change and not what this unit is for.
+//
 
 import Foundation
 import Testing
-@testable import MOTIVO
+// The app's Swift module is `Etudes` (PRODUCT_MODULE_NAME), not `MOTIVO`. The
+// generated template said `MOTIVO` and has been wrong since the product rename —
+// the SECOND half of C-54, and invisible for the same reason as the first: the
+// target could never be built, so neither stale reference was ever reached.
+@testable import Etudes
 
 // MARK: - The attestation request body
 
+@MainActor
 @Test("the request body carries the JWS and NOTHING else")
 func attestationBodyIsJwsOnly() throws {
     let jws = "header.payload.signature"
@@ -35,6 +45,7 @@ func attestationBodyIsJwsOnly() throws {
     #expect(object["jws"] as? String == jws)
 }
 
+@MainActor
 @Test("no client-supplied identity or Apple key can be smuggled into the body")
 func attestationBodyHasNoIdentityFields() throws {
     let data = try #require(MembershipAttestationService.requestBody(jws: "a.b.c"))
@@ -49,6 +60,7 @@ func attestationBodyHasNoIdentityFields() throws {
 
 // MARK: - Outcome mapping
 
+@MainActor
 @Test("every server outcome maps to exactly one client outcome")
 func outcomeMapping() {
     func parse(_ status: Int, _ body: String) -> MembershipAttestationService.Outcome {
@@ -75,6 +87,7 @@ func outcomeMapping() {
     )
 }
 
+@MainActor
 @Test("an UNRECOGNISED 200 is never read as success")
 func unknownOutcomeIsNotSuccess() {
     // Guessing that an unknown outcome means "established" is how a client starts
@@ -95,6 +108,7 @@ func unknownOutcomeIsNotSuccess() {
 
 // MARK: - Binding token decoding
 
+@MainActor
 @Test("a well-formed binding token decodes in both PostgREST shapes")
 func bindingTokenDecodes() {
     let uuid = "aaaaaaaa-0000-4000-8000-000000000001"
@@ -110,6 +124,7 @@ func bindingTokenDecodes() {
     )
 }
 
+@MainActor
 @Test("anything that is not a UUID is REFUSED, never coerced")
 func bindingTokenRefusesJunk() {
     // A malformed token would travel into Product.PurchaseOption.appAccountToken
@@ -124,6 +139,7 @@ func bindingTokenRefusesJunk() {
 
 // MARK: - Endpoint construction
 
+@MainActor
 @Test("the attest endpoint resolves for both hosted and local shapes")
 func endpointConstruction() throws {
     let hosted = MembershipAttestationService.endpointURL(

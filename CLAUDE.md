@@ -147,14 +147,18 @@ deliberately **does not sign anybody out** on an unconfigured backend: a livenes
 helper that can revoke a session is the wrong shape for a path that runs on every
 foreground.
 
-### C-54 — the unit test target has never been runnable
+### C-54 — RESOLVED 2026-08-23. The seven tests now execute and pass
 
-`TEST_HOST` still points at `MOTIVO.app/MOTIVO` while the product has been
-`Etudes.app/Etudes` throughout. **"Unit test suite is an empty template"
-understated it**: the suite could not have been executed even if somebody had
-written tests. **The seven tests written at U5e are COMMITTED AND NOT RUN**, and
-are not evidence until C-54 is fixed — one setting in two configurations,
-deliberately not applied while Xcode was open on the project.
+**It had TWO stale references and only the first was visible.** `TEST_HOST`
+named `MOTIVO.app/MOTIVO`; once corrected, the build got *further* and failed on
+`@testable import MOTIVO`, because the app's Swift module is **`Etudes`**.
+**Neither had ever been reached, for the same reason — the target could not be
+built at all, so its second defect hid behind its first.**
+
+All seven U5e tests now run **normally, with no command-line override**, and are
+named individually in the log. The project delta is **4 lines, all `TEST_HOST`**,
+with zero UI-test references. **U5e's tests are evidence now**, where the U5e
+record correctly said they were not.
 
 ---
 
@@ -692,13 +696,13 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Count | Value | What it is |
 |---|---|---|
 | Phase-3-tagged register rows | **20** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** |
-| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **C-54** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and is open**; U5a also filed and resolved C-52 and C-53 |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (open).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -717,10 +721,9 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **5 open: C-26, B-11, C-31, B-24 and C-54.** **B-31 was resolved by U5d**, on
-both halves of the condition its cell named. **C-54 is U5e's and is a P3 tooling
-defect, not server-authority work** — it is counted because its Phase cell says
-3. The other four are the server-authority work
+= **4 open: C-26, B-11, C-31 and B-24.** **B-31 was resolved by U5d** and
+**C-54 by the correction that followed U5e**. All four remaining are the
+server-authority work
 itself, and none of them has begun. **B-24 is a design defect caught before
 implementation**, so it is open in the sense that U5 has not yet built the
 corrected protocol — not in the sense that anything defective ships.
@@ -1974,7 +1977,12 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   testers actually install. Cut a build at the next clean checkpoint and run QA
   Group B against it.
 - 193 `#if DEBUG` blocks. Always verify Release as well as Debug.
-- Unit test suite is an empty template. "Green build" means compile-clean, not
-  test-verified.
+- **The unit test target RUNS, since 2026-08-23 (C-54), and holds 7 passing
+  tests.** This bullet used to read "an empty template ... compile-clean, not
+  test-verified", and that **described a symptom without its cause**: the target
+  could not be executed at all, because `TEST_HOST` and `@testable import` both
+  still named the pre-rename product. Nobody noticed because nobody ran it.
+  `xcodebuild test -only-testing:MOTIVOTests` now works with no override.
+  Coverage is deliberately narrow — the PURE membership-client pieces only.
 - Build: `xcodebuild -project MOTIVO.xcodeproj -scheme MOTIVO -configuration
   {Debug|Release} -destination 'generic/platform=iOS Simulator' build`
