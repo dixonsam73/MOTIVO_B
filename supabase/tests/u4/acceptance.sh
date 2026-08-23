@@ -106,17 +106,14 @@ is A47e "$(psq "select public.connected_member('$A');")" "f" "identity is NOT en
 # THE STRUCTURAL FORM OF THE SAME RULE: no INSERT into membership exists in U4.
 is A47f "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and p.proname <> 'membership_establish_v1' and pg_get_functiondef(p.oid) ~* 'insert +into +public\.membership *(as|\()';")" "0" "no U4 function inserts into membership (U5b's establishment writer excluded BY NAME)"
 
-# ---- U5 STAND-IN. U5 does not exist, so the authoritative row is created here
-# directly, under explicit acknowledgement that this is a FIXTURE and not a code
-# path. Everything below tests REFRESH of an established row, which is all U4
-# claims to do.
-psqf <<SQL >/dev/null
-insert into public.membership (user_id, environment, original_transaction_id, product_id,
-       renewal_date, renewal_info_signed_date, binding_method, bound_at)
-values ('$A','Production','2000000999999999','com.sdsongs.etudes.connected.monthly',
-        now() + interval '1 day', now() - interval '1 day', 'purchase', now());
-SQL
-is A47g "$(psq "select count(*) from public.membership where user_id='$A';")" "1" "U5 stand-in row exists"
+# ---- THE U5 STAND-IN IS RETIRED, 2026-08-23. It was a raw INSERT labelled as a
+# FIXTURE because U5 did not exist. It does now, so the row below is created by
+# the REAL establishment writer -- which makes everything after it a stronger
+# statement than it was: U4 refreshing a row that U5 actually established, rather
+# than one the test manufactured. No labelled stand-in remains in this suite.
+psq "select public.membership_establish_v1('$A','Production','2000000999999999','$TOK'::uuid,'$TOK'::uuid, jsonb_build_object('product_id','com.sdsongs.etudes.connected.monthly','renewal_date',(now() + interval '1 day')::text,'is_in_billing_retry',false,'renewal_info_signed_date',(now() - interval '1 day')::text));" >/dev/null
+is A47g "$(psq "select count(*) from public.membership where user_id='$A';")" "1" "row created by the REAL U5 establishment writer"
+is A47g2 "$(psq "select binding_method from public.membership where user_id='$A';")" "purchase" "...with provenance derived, not asserted"
 is A47h "$(ingest "$(ev b0000000-0000-4000-8000-00000000000f DID_RENEW "\"$TOK\"" '0 seconds' '30 days')")" "applied" "an ESTABLISHED row is refreshed"
 is A47i "$(psq "select public.connected_member('$A');")" "t" "...and the identity is entitled"
 is A47j "$(psq "select binding_method from public.membership where user_id='$A';")" "purchase" "binding_method untouched by ingestion"

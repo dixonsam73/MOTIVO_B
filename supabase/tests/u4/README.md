@@ -45,17 +45,24 @@ proven against a faithful *copy*, never against Apple.
 - Everything verified here is **"verified against a faithful local
   reproduction"**, never "verified in production".
 
-## The U5 stand-in, and why it is a fixture rather than a code path
+## The U5 stand-in is RETIRED, 2026-08-23
 
-**U4 cannot create a `membership` row** — `membership_apply_state_v1` is
-UPDATE-only and there is no `INSERT INTO public.membership` anywhere in the
-migration. So both `acceptance.sh` and `e2e.sh` first assert the *refusal*
-(mapped, complete, and still `ignored`/`unestablished` with zero rows), then
-insert an authoritative row **directly**, labelled as standing in for U5's
-establishment protocol, and go on to test refresh — which is all U4 claims to do.
+**It used to be here and it is worth knowing why it went.** U4 cannot create a
+`membership` row — `membership_apply_state_v1` is UPDATE-only and there is no
+`INSERT INTO public.membership` anywhere in the U4 migration — so both suites
+first asserted the *refusal* (mapped, complete, and still `ignored`/
+`unestablished` with zero rows), then inserted an authoritative row **directly**,
+labelled as standing in for U5's establishment protocol.
 
-`A47f` asserts the same rule structurally, over `pg_get_functiondef`, so it
-cannot drift back into the code without failing.
+**U5b's `membership_establish_v1` exists now, so both suites call it instead.**
+That makes everything after it a stronger statement than it was: U4 refreshing a
+row that the real establishment writer created, with provenance *derived* rather
+than hand-supplied, instead of one the test manufactured. **No labelled stand-in
+remains in either suite.**
+
+`A47f` still asserts the same rule structurally over `pg_get_functiondef` — no U4
+function inserts into membership — with U5b's writer excluded **by name**, so it
+would still fail if U4's canonical writer ever gained an INSERT.
 
 ## What is NOT covered
 

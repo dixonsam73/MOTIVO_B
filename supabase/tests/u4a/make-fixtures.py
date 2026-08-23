@@ -286,6 +286,10 @@ def main() -> int:
         # Signed by a chain rooted somewhere else entirely.
         "attest_evil_root": jws(tx(), chain=[x5c[0], x5c[1],
                                              base64.b64encode(d['evil']).decode()]),
+        # A bare renewal-info JWS, for the stub Apple status response: the live
+        # read needs BOTH nested payloads to derive orderable authoritative state.
+        "attest_ri": jws(ri()),
+        "attest_ri_lapsed": jws(ri(renewalDate=NOW - MONTH)),
         # A P-256 signing key in PKCS8, base64 of the PEM text — exactly the shape
         # APPLE_IAP_P8_B64 carries. Present so the U5c battery can assert the
         # Set App Account Token REQUEST SHAPE (method, path, host, body) against

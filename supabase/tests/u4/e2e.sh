@@ -128,10 +128,11 @@ is E14c "$(body | python3 -c "import json,sys;print(json.load(sys.stdin)['result
 is E14d "$(body | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['needs_establishment'])")" "True" "...and flagged for U5"
 is E14e "$(psq "select count(*) from public.membership;")" "0" "THE REAL FUNCTION CREATED NO MEMBERSHIP ROW"
 
-# ---- U5 stand-in. U5 does not exist, so the authoritative row is inserted here
-# directly, as a FIXTURE and not a code path. Everything below tests REFRESH.
-psq "insert into public.membership (user_id, environment, original_transaction_id, product_id, renewal_date, renewal_info_signed_date, binding_method, bound_at) values ('$A','Sandbox','2000000999999999','com.sdsongs.etudes.connected.monthly', now() - interval '1 day', now() - interval '2 days', 'purchase', now());" >/dev/null
-is E15  "$(psq "select count(*) from public.membership where user_id='$A';")" "1" "U5 stand-in row exists"
+# ---- THE U5 STAND-IN IS RETIRED, 2026-08-23. Created by the REAL establishment
+# writer now that U5b exists, so what follows tests U4 refreshing a genuinely
+# established row rather than a manufactured one.
+psq "select public.membership_establish_v1('$A','Sandbox','2000000999999999','$TOKEN'::uuid,'$TOKEN'::uuid, jsonb_build_object('product_id','com.sdsongs.etudes.connected.monthly','renewal_date',(now() - interval '1 day')::text,'is_in_billing_retry',false,'renewal_info_signed_date',(now() - interval '2 days')::text));" >/dev/null
+is E15  "$(psq "select count(*) from public.membership where user_id='$A';")" "1" "row created by the REAL U5 establishment writer"
 is E15b "$(post "$(fixture fallback_expires_date)")" "200" "notification against an ESTABLISHED row -> 200"
 is E15c "$(body | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['outcome'])")" "applied" "outcome applied"
 is E16  "$(psq "select (renewal_info_signed_date > now() - interval '1 day')::text from public.membership where user_id='$A';")" "true" "row refreshed"

@@ -52,6 +52,7 @@
 
 import { JwsError, verifyAppleJWS } from "./jws.ts";
 import { type AppleEnvironment, lastTransactionsOf } from "./api.ts";
+import { deriveFromReconciliation, type MembershipState } from "./derive.ts";
 
 /** Maps onto what U5d will record. Every value is a refusal reason. */
 export type AttestFailure =
@@ -279,26 +280,66 @@ export interface TokenObservation {
  * our own authenticated HTTPS call would be the obvious mistake, and it is the
  * one the U4 battery already has a fixture for.
  */
+export interface AuthoritativeRead extends TokenObservation {
+  /** Apple's current state, or null when the entry is unusable for derivation. */
+  state: MembershipState | null;
+  /** Why state is null, when it is. Diagnostics, never authority. */
+  reason: string | null;
+}
+
+/**
+ * THE LIVE AUTHORITATIVE READ, verification included.
+ *
+ * WHY THIS LIVES HERE RATHER THAN IN THE ENDPOINT, and it is a security property
+ * rather than tidiness: with the read and its nested-JWS verification behind this
+ * function, **the attest endpoint never calls verifyAppleJWS at all**. That turns
+ * B-31's requirement -- that client input goes through the claim boundary and
+ * never through the bare verifier -- into a one-line structural assertion over
+ * the endpoint source, instead of a reviewer's judgement about which variable
+ * reached which call.
+ *
+ * EVERY NESTED JWS IS VERIFIED IN ITS OWN RIGHT. They arrive over our own
+ * authenticated HTTPS call to Apple, and trusting them for that reason is the
+ * obvious mistake -- the transport authenticates the host, not the payload.
+ */
+export async function readAuthoritativeState(
+  api: { getAllSubscriptionStatuses(e: AppleEnvironment, id: string): Promise<unknown> },
+  environment: AppleEnvironment,
+  originalTransactionId: string,
+  anchorDer?: Uint8Array,
+): Promise<AuthoritativeRead> {
+  const verify = (j: string) =>
+    anchorDer ? verifyAppleJWS(j, new Date(), anchorDer) : verifyAppleJWS(j);
+
+  const response = await api.getAllSubscriptionStatuses(environment, originalTransactionId);
+  for (const entry of lastTransactionsOf(response)) {
+    if (String(entry.originalTransactionId ?? "") !== originalTransactionId) continue;
+
+    const tx = typeof entry.signedTransactionInfo === "string"
+      ? await verify(entry.signedTransactionInfo) : null;
+    const ri = typeof entry.signedRenewalInfo === "string"
+      ? await verify(entry.signedRenewalInfo) : null;
+
+    const raw = tx?.appAccountToken;
+    const token = typeof raw === "string" && UUID_RE.test(raw) ? raw.toLowerCase() : null;
+
+    const derived = deriveFromReconciliation({ transaction: tx, renewal: ri, status: entry.status });
+    return derived.state === null
+      ? { found: true, token, state: null, reason: derived.reason }
+      : { found: true, token, state: derived.state, reason: null };
+  }
+  return { found: false, token: null, state: null, reason: "no matching lastTransactions entry" };
+}
+
+/** The token-only view of the same read — used for the post-PUT re-read. */
 export async function observeAppAccountToken(
   api: { getAllSubscriptionStatuses(e: AppleEnvironment, id: string): Promise<unknown> },
   environment: AppleEnvironment,
   originalTransactionId: string,
   anchorDer?: Uint8Array,
 ): Promise<TokenObservation> {
-  const response = await api.getAllSubscriptionStatuses(environment, originalTransactionId);
-  for (const entry of lastTransactionsOf(response)) {
-    if (String(entry.originalTransactionId ?? "") !== originalTransactionId) continue;
-    if (typeof entry.signedTransactionInfo !== "string") return { found: true, token: null };
-    const tx = anchorDer
-      ? await verifyAppleJWS(entry.signedTransactionInfo, new Date(), anchorDer)
-      : await verifyAppleJWS(entry.signedTransactionInfo);
-    const raw = tx.appAccountToken;
-    return {
-      found: true,
-      token: typeof raw === "string" && UUID_RE.test(raw) ? raw.toLowerCase() : null,
-    };
-  }
-  return { found: false, token: null };
+  const r = await readAuthoritativeState(api, environment, originalTransactionId, anchorDer);
+  return { found: r.found, token: r.token };
 }
 
 export type BindingObservation =

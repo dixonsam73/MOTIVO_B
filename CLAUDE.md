@@ -24,10 +24,11 @@ U0 (this record), U1 (the local backend baseline), U2 (the four backend
 verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — U4 in full, including
 U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
 (2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
-**U5b (2026-08-23): the SQL foundation** and **U5c (2026-08-23):
-`_shared/appstore` attestation support** — both **LOCAL ONLY AND NOT DEPLOYED**,
-406 assertions green. **U5d onwards is not built**, and no Phase 3 client
-protocol exists.**
+**U5b, U5c and U5d (2026-08-23): the SQL foundation, the attestation
+support and `membership_attest_v1` itself** — all **LOCAL ONLY AND NOT
+DEPLOYED**, 469 assertions green. **The server half of B-24's protocol is
+complete and unproven against Apple; NO CLIENT WORK EXISTS** (U5e/U5f), so
+nothing can call it yet.**
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -99,6 +100,62 @@ signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200
 assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
+
+## U5d — `membership_attest_v1`. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
+
+**B-24's protocol, end to end:** authenticated identity -> claim-checked client
+JWS -> live Apple read -> token comparison -> atomic establishment. One Edge
+Function and one `config.toml` entry; **no SQL**, so the B-23 delta is unchanged
+at 20 — exactly U5b's. **469 assertions green.**
+
+**Authorisation is `verify_jwt = false` plus our own `auth.getUser`**, stricter
+than the gateway: the identity comes from the verified session, never the body,
+and the body carries exactly one field. Not to be confused with
+`appstore_notifications_v1`, which is genuinely unauthenticated because Apple
+sends no JWT.
+
+**The endpoint never calls `verifyAppleJWS`** — client input goes through
+`verifyAttestationJWS`, Apple's responses through `readAuthoritativeState`, both
+in `_shared`. **That was a deliberate design choice to make B-31's requirement a
+one-line structural assertion** rather than a reviewer's judgement about which
+variable reached which call.
+
+### A30's LOCAL half is discharged, and it is an ORDERING proof
+
+Observed outbound log for the legacy claim: **`GET, PUT, GET, GET`** — read,
+Set App Account Token, independent re-read, authoritative re-read before
+establishing. Asserted three ways, including that the call *immediately* after
+the PUT is a read. **A correct row reached in the wrong order FAILS**, which is
+the only way to test a rule whose violation produces an identical row. **The
+genuine-Apple half remains outstanding.**
+
+**The conflict path never issues the PUT at all** (E5d-36). Apple would happily
+let us overwrite another identity's token; that is precisely why our rule has to
+be the protection, and the endpoint never even asks.
+
+**Propagation returns `pending` with `wrote:false` and no row**, and a later
+attestation completes it **without a second PUT**.
+
+### Three structural assertions failed on a CORRECT file, for the second time
+
+They searched raw source text, and the endpoint's own header says "THIS FUNCTION
+NEVER CALLS verifyAppleJWS" — **the file explaining the rule defeated the check
+for the rule.** `U5c-34` had the identical shape one unit earlier. **A
+source-text assertion must target code, and a well-commented file is exactly the
+one most likely to defeat it.**
+
+### A cross-suite state leak the sequence caught
+
+Two assertions counted `public.membership` **globally**; they passed standalone
+and failed after `acceptance.sh` left six rows. **A suite that only ever runs
+alone can carry an assertion that is silently order-dependent.**
+
+### The labelled U5 stand-ins are retired from both U4 suites
+
+They now call the real `membership_establish_v1`, so U4 refreshes a row the real
+writer established rather than one the test manufactured.
+
+---
 
 ## U5c — ATTESTATION SUPPORT. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
 
@@ -578,13 +635,13 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Count | Value | What it is |
 |---|---|---|
 | Phase-3-tagged register rows | **19** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two** |
-| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-31** — unchanged by U4; **B-31 added by U5a**, which also filed and resolved C-52 and C-53 |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (open) and **C-53** (Resolved).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -603,10 +660,10 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **5 open: C-26, B-11, C-31, B-24 and B-31.** **B-31 is U5a's, and it is a
-*conditional* P1 in the C-26 sense — the deployed verifier is correct for the
-callers it has, and the gap becomes a defect only if U5 ships without the claim
-checks.** The other four are the server-authority work
+= **4 open: C-26, B-11, C-31 and B-24.** **B-31 was resolved by U5d**, on both
+halves of the condition its cell named: the claim boundary exists AND the
+shipping endpoint provably uses it. All four remaining are the server-authority
+work
 itself, and none of them has begun. **B-24 is a design defect caught before
 implementation**, so it is open in the sense that U5 has not yet built the
 corrected protocol — not in the sense that anything defective ships.

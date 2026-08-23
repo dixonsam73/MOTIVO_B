@@ -11,6 +11,9 @@
 #               injected. No database, no network.
 #   acceptance  U5b — the SQL: environment separation, the establishment
 #               writer, the two grants, and F11.
+#   e2e         U5d — wiring: the real endpoint, the real database, and a
+#               programmable Apple whose CALL LOG is how A30's ordering is
+#               proven. A correct row in the wrong order fails here.
 #
 # Everything verified here is "verified against a faithful local reproduction",
 # never "verified in production", and the module battery runs against a faithful
@@ -58,6 +61,9 @@ cleanup
 
 echo
 "$HERE/acceptance.sh" || RC=1
+
+echo
+"$HERE/e2e.sh" || RC=1
 
 echo
 [ "$RC" -eq 0 ] && echo "U5 LOCAL SUITE: ALL GREEN" || echo "U5 LOCAL SUITE: FAILURES ABOVE"

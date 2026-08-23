@@ -66,3 +66,16 @@ verify_jwt = false
 # performed inside. Same authorisation story as the other three functions:
 # derived from what the caller proves, never from the request body.
 verify_jwt = false
+
+[functions.membership_attest_v1]
+# B-24's ownership attestation endpoint.
+#
+# verify_jwt = false and then our OWN auth.getUser(token), which is STRICTER than
+# the gateway rather than weaker: the Etudes identity is derived from the verified
+# session and never from the request body, so there is no user_id to tamper with.
+# Same authorisation story as delete_account_v1 and revoke_apple_identity_v1.
+#
+# Note this is NOT appstore_notifications_v1's story. That endpoint is genuinely
+# unauthenticated because Apple sends no Supabase JWT. This one requires a real
+# authenticated Etudes session and refuses without one.
+verify_jwt = false

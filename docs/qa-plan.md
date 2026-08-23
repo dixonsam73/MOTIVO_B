@@ -1284,6 +1284,115 @@ one API's freshness behaviour, and its result feeds exactly one decision.
 
 ---
 
+## U5d — RESULTS. 469 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
+
+**`membership_attest_v1` implements B-24's protocol end to end.** One Edge
+Function, one `config.toml` entry, one `_shared` helper moved. **No SQL** — the
+B-23 delta is **unchanged at 20 problems**, exactly the U5b schema delta, which
+is how "U5d added no schema surface" is checked rather than asserted.
+
+| Suite | Result |
+|---|---|
+| U3 acceptance | **97 of 97** |
+| U4 modules / acceptance / e2e | **48 / 96 / 43** |
+| U5c modules | **68 of 68** |
+| U5b acceptance | **55 of 55** |
+| **U5d e2e** | **62 of 62**, new |
+| **Total** | **469** |
+
+### A30 — THE LOCAL HALF IS DISCHARGED, AND IT IS AN ORDERING PROOF
+
+**A30 is not "the row ends up correct".** An implementation that establishes on
+the strength of the PUT's own 200 reaches an **identical final row** and is
+wrong, because Apple documents no read-after-write guarantee and P12 already
+proved Apple-side propagation is real and indistinguishable from
+misconfiguration. So the harness records every outbound request and asserts the
+**sequence**.
+
+**Observed call log for the legacy claim (`E5d-A30c`):**
+
+```
+GET:2000000999999999 , PUT:2000000999999999 , GET:2000000999999999 , GET:2000000999999999
+```
+
+read → **PUT** → independent re-read → authoritative re-read before establishing.
+
+- `E5d-A30e` — at least one Apple **read** happened *after* the PUT.
+- `E5d-A30f` — the call *immediately* after the PUT is a **read**, not a write.
+- `E5d-A30b` — the row was reached via the claim path (`claimed: true`).
+- `E5d-A30d` — provenance derived as `legacy_claim`, not asserted by the caller.
+
+**A correct row in the wrong order fails here.** The genuine-Apple half of A30
+remains outstanding and discharges only against Apple (S-2/S-3).
+
+### Every branch of the U5 matrix, proven end to end
+
+| Path | Outcome | Assertions |
+|---|---|---|
+| New purchase (Apple already has our token) | `established`, provenance `purchase`, **no PUT issued** | E5d-13/14/17 |
+| Legacy claim (Apple has no token) | `established`, `legacy_claim`, correct ordering | E5d-A30a–f |
+| Orphan rebind (token matches no live binding) | `established` via one PUT | E5d-31/32/33 |
+| **Live-binding conflict** | `conflict`, no row, **NO PUT — we never overwrite a live binding** | E5d-34/35/**36**/37 |
+| **Propagation delay** | `pending`, `wrote:false`, `retry:true`, **no row** | E5d-24–28 |
+| …completed by a later attestation | `established`, **without a second PUT** | E5d-29/30 |
+| Terminal Apple refusal (Family Sharing, 4000185) | `terminal_refusal`, no row, **no re-read after a permanent refusal** | E5d-38–41 |
+| Retryable Apple failure (PUT 5xx, status 5xx, empty) | `502`, `wrote:false`, no row | E5d-42–48 |
+| Idempotent refresh | `already_established`, **provenance immutable** | E5d-21/22/23 |
+
+**E5d-36 is the one to keep.** Apple would happily let us overwrite another
+identity's token — that is exactly why our rule has to be the protection, and
+this assertion proves the endpoint never even asks.
+
+### The trust boundary, asserted structurally
+
+| # | Assertion |
+|---|---|
+| `E5d-STRUCT1` | the endpoint imports **and** calls `verifyAttestationJWS` |
+| `E5d-STRUCT2` | **the endpoint never calls `verifyAppleJWS`** — B-31's structural half |
+| `E5d-STRUCT3` | no identity, environment or transaction id is ever read from the body |
+| `E5d-STRUCT4` | the client JWS is never logged |
+| `E5d-STRUCT5` | exactly one establishment call site |
+| `E5d-STRUCT6` | the endpoint holds no SQL of its own |
+| `E5d-STRUCT7` | U5d widened no table privilege |
+| `E5d-11` | **a refused claim never reached Apple at all** |
+
+`STRUCT2` is only a one-line check because the live-read verification moved into
+`_shared/appstore/readAuthoritativeState`. **That was a design decision taken to
+make the assertion possible**: with the endpoint holding no verifier call of its
+own, "client input goes through the claim boundary" stops being a reviewer's
+judgement about which variable reached which call.
+
+### THREE STRUCTURAL ASSERTIONS FAILED ON A CORRECT FILE, AND THE REASON REPEATED
+
+`STRUCT1`, `STRUCT2` and `STRUCT5` first searched the raw source text — and the
+endpoint's own header says *"THIS FUNCTION NEVER CALLS verifyAppleJWS"*. **The
+file explaining the rule defeated the check for the rule.** They now strip
+comments first.
+
+**This is the second time in two units** — `U5c-34` had the identical shape. The
+generalisation is worth more than either fix: **a source-text assertion must
+target code, and a well-commented file is exactly the one most likely to defeat
+it.**
+
+### A cross-suite state leak, caught by running the suites in sequence
+
+`E5d-4` and `E5d-12` asserted `count(*) from public.membership = 0` **globally**.
+They passed standalone and failed at 60/62 when `acceptance.sh` ran first and
+left six rows behind. Scoped to the identities under test — which is what "this
+request wrote nothing" actually means. **A suite that only ever runs alone can
+carry an assertion that is silently order-dependent.**
+
+### The labelled U5 stand-ins are retired
+
+Both U4 suites created their authoritative row with a raw INSERT labelled a
+FIXTURE, because U5 did not exist. **They now call the real
+`membership_establish_v1`**, so what follows is U4 refreshing a row the real
+writer established, with provenance *derived*, rather than one the test
+manufactured. `A47f` still asserts structurally that no U4 function inserts, with
+U5b's writer excluded by name.
+
+---
+
 ## U5c — RESULTS. 406 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
 
 **U5c is `_shared/appstore` only: two modules, no SQL, no Edge Function, no
