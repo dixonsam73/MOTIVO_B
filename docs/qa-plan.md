@@ -1292,8 +1292,8 @@ over `supabase/functions/`, `migrations/` and `config.toml` is **empty**.
 | Verification | Result |
 |---|---|
 | Debug / Release builds | **both SUCCEEDED**, 0 errors |
-| Unit tests | **12 of 12**, run normally |
-| `client-structural.sh` | **47 of 47** |
+| Unit tests | **15 of 15**, run normally |
+| `client-structural.sh` | **53 of 53** |
 | Server/schema surface | **unchanged** |
 
 ### The new sequence
@@ -1303,11 +1303,28 @@ Explore Connected -> SIWA / backend identity -> ensure_membership_binding()
    -> purchase with .appAccountToken(bindingToken) -> .verified -> attestation
 ```
 
-**The subscription is now bound AT PURCHASE**, so a new member never traverses
-the legacy-claim path. That path remains for the pre-U5f population and for the
-case where the token could not be fetched — deliberately, because refusing a
-purchase over a transient binding hiccup would turn a recoverable delay into a
-lost sale, and the server binds it on a later attestation anyway.
+**The binding token is a HARD PREREQUISITE of the purchase, and the type system
+enforces it**: `purchase(_:appAccountToken:)` takes a non-optional `UUID`, so an
+unbound call does not compile.
+
+**CORRECTED 2026-08-23, AND THE ORIGINAL REASONING WAS WRONG IN TWO WAYS.** The
+first revision fell back to an unbound purchase when the token could not be
+fetched, arguing that refusing "would turn a recoverable binding hiccup into a
+lost sale". It **overstated the cost** — StoreKit is never reached, so no money
+moves and nothing is lost but a second tap — and it **understated the
+consequence**: a subscription created after U5f without a token lands in the
+legacy-claim path, **whose entire safety argument is that its population is
+finite and shrinking**. The residual risk F3 accepts is bounded precisely because
+the token-less cohort predates this flow. A fallback that mints new legacy
+subscriptions makes that cohort unbounded and permanent, quietly dismantling the
+reason the risk was acceptable in the first place.
+
+**The legacy-claim and orphan-rebind paths are unchanged and still serve genuinely
+pre-U5 subscriptions.** They are not a fallback for new purchases.
+
+When the token cannot be fetched, the member sees a calm retryable notice —
+*"Setup unavailable … Nothing has been charged — please check your connection and
+try again"* — and **zero StoreKit purchase attempts are made**.
 
 **An already-authenticated member sees no extra step**: Continue checks
 `hasConnectedIdentity` and goes straight to the paywall.
@@ -1362,6 +1379,18 @@ failed, error, unavailable, problem, try again, retry, cancel, refund, lost* —
 **F10 expressed as an executable assertion rather than a style note.** The
 unresolvable cases assert *"purchase is safe"* and the absence of *"try again"*,
 because the member cannot fix those alone.
+
+### The gate is proven three ways, not asserted
+
+| | |
+|---|---|
+| **Type** | `purchase()` takes a non-optional `UUID` — an unbound call **does not compile** (`C5f-13a`/`C5f-13b`) |
+| **Unit** | `missingBindingTokenBlocksPurchase` — a nil token yields `.blockedNoBindingToken` |
+| **Structural** | `C5f-13f` parses the view and asserts the readiness guard **precedes** the only `membershipStore.purchase` call site |
+
+`bindingUnavailableNoticeIsCalm` asserts the copy says *"nothing has been
+charged"* and *"try again"*, and contains none of *purchase failed, payment,
+refund, declined, error* — it is a transient setup state, not a failed purchase.
 
 ### Genuine-Sandbox scenarios unlocked by this unit
 

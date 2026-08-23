@@ -110,10 +110,21 @@ fix it. Sandbox never retries either way.
 
 **The sequence is now** Explore Connected -> SIWA -> `ensure_membership_binding()`
 -> purchase with `.appAccountToken(bindingToken)` -> `.verified` -> attestation.
-**New subscriptions are bound AT PURCHASE**, so a new member never traverses the
-legacy-claim path; that path survives for the pre-U5f population and as the
-fallback when a token could not be fetched. **An already-authenticated member
-sees no extra step.** Solo remains entirely account-free.
+**THE BINDING TOKEN IS A HARD PREREQUISITE OF THE PURCHASE**, enforced by the
+type: `purchase(_:appAccountToken:)` takes a non-optional `UUID`, so an unbound
+call does not compile. **An already-authenticated member sees no extra step.**
+Solo remains entirely account-free.
+
+**Corrected 2026-08-23. The first revision allowed an unbound purchase when the
+token could not be fetched, and the reasoning — "refusing would turn a
+recoverable hiccup into a lost sale" — was wrong twice over.** It overstated the
+cost: StoreKit is never reached, so no money moves and nothing is lost but a
+second tap. And it understated the consequence: **the legacy-claim path's whole
+safety argument is that its population is FINITE AND SHRINKING**, which is why
+F3's residual risk is acceptable. Minting new members into it makes that
+population unbounded and permanent. **The legacy path serves subscriptions that
+PREDATE bound purchase; it is not a fallback for new ones**, and it is otherwise
+unchanged.
 
 ### The trigger invariant, and the assertion that protects it
 

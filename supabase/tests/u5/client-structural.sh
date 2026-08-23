@@ -145,7 +145,31 @@ for m in re.finditer(r"guard appModeManager\.canViewFeed else \{ return \}(.*?)\
 print(bad)')" "0" "NO attestation trigger sits behind a canViewFeed guard"
 
 # ============================ U5f — SIWA before purchase
-is C5f-13 "$(code MOTIVO/MembershipSelectionView.swift 'appAccountToken: bindingToken')" "1" "the purchase carries the SERVER-ISSUED token"
+is C5f-13 "$(code MOTIVO/MembershipSelectionView.swift 'appAccountToken: token')" "1" "the purchase carries the SERVER-ISSUED token"
+
+# ============ CORRECTION 2026-08-23: a NEW purchase REQUIRES the token
+#
+# The legacy-claim path is for subscriptions that PREDATE bound purchase. Its
+# safety argument is that the token-less population is finite and SHRINKING, so a
+# fallback that mints new members into it would make that population unbounded
+# and permanent — quietly dismantling the reason the residual risk was acceptable.
+#
+# THE STRONGEST ASSERTION IS THE TYPE, not a grep: purchase() takes a non-optional
+# UUID, so an unbound call does not compile.
+is C5f-13a "$(code MOTIVO/ConnectedMembershipStore.swift 'appAccountToken: UUID\?')" "0" "purchase() does NOT accept a nil token"
+is C5f-13b "$(code MOTIVO/ConnectedMembershipStore.swift 'appAccountToken: UUID')" "1" "...it REQUIRES one — enforced by the type system"
+is C5f-13c "$(code MOTIVO/ConnectedMembershipStore.swift 'options: \[\]|options: options')" "0" "no code path reaches StoreKit with empty options"
+is C5f-13d "$(code MOTIVO/MembershipSelectionView.swift 'purchaseReadiness')" "2" "the gate is consulted before every purchase"
+is C5f-13e "$(code MOTIVO/MembershipSelectionView.swift 'return .blockedNoBindingToken')" "1" "...and blocks explicitly when the token is absent"
+# The gate must RETURN before the store is touched: assert the only
+# membershipStore.purchase call site is preceded by the readiness guard.
+is C5f-13f "$(python3 -c '
+import re
+t=open("MOTIVO/MembershipSelectionView.swift").read()
+t=re.sub(r"^\s*//.*$","",t,flags=re.M)
+i=t.find("membershipStore.purchase(")
+g=t.find("purchaseReadiness(bindingToken:")
+print("guarded" if (g!=-1 and i!=-1 and g<i) else "UNGUARDED")')" "guarded" "the readiness guard precedes the only purchase call site"
 is C5f-14 "$(code MOTIVO/MembershipSelectionView.swift 'bindingToken *= *UUID\(')" "0" "...and the binding token is NEVER minted on device"
 is C5f-14b "$(code MOTIVO/MembershipSelectionView.swift 'MembershipBindingService.ensureBindingToken')" "1" "...it comes from the server, through one call site"
 is C5f-15 "$(code MOTIVO/ConnectedMembershipStore.swift '\.appAccountToken\(')" "1" "StoreKit receives it as a PurchaseOption"

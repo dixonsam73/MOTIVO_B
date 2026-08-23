@@ -274,11 +274,9 @@ struct MembershipSelectionView: View {
 
     /// Obtains this identity's server-issued binding token.
     ///
-    /// A failure here is deliberately NOT surfaced and NOT blocking. The purchase
-    /// proceeds without a token and the server's legacy-claim path binds the
-    /// subscription on a later attestation -- so a transient network problem
-    /// costs a slightly longer route to the same state, not a lost sale and not
-    /// an error the member can do anything about.
+    /// Fetched when the screen appears so the token is in hand before the member
+    /// taps Subscribe -- keeping a network round trip off the purchase path,
+    /// which is exactly C-13's hazard.
     private func loadBindingToken() async {
         guard auth.hasConnectedIdentity else { return }
         if case .success(let token) = await MembershipBindingService.ensureBindingToken(
@@ -288,17 +286,51 @@ struct MembershipSelectionView: View {
         }
     }
 
+    /// **THE GATE. A NEW PURCHASE WITHOUT A BINDING TOKEN IS NOT PERMITTED.**
+    ///
+    /// Pure and static so "no token means no StoreKit call" is a unit-testable
+    /// fact rather than a claim about control flow.
+    ///
+    /// Corrected 2026-08-23: an earlier revision purchased anyway and let the
+    /// server's legacy-claim path bind it later. **The legacy path exists for
+    /// subscriptions that PREDATE bound purchase, not as a fallback for new
+    /// ones** — its safety argument is that the token-less population is finite
+    /// and shrinking, and minting new members into it makes that population
+    /// unbounded and permanent.
+    ///
+    /// Blocking costs a second tap. **No purchase is initiated, so no money
+    /// moves**, which is why the earlier "lost sale" framing was wrong.
+    static func purchaseReadiness(bindingToken: UUID?) -> PurchaseReadiness {
+        guard let bindingToken else { return .blockedNoBindingToken }
+        return .ready(bindingToken)
+    }
+
+    /// Calm, retryable, and explicit that nothing was charged — because nothing
+    /// was: StoreKit is never reached in this state.
+    static func bindingUnavailableNotice() -> MembershipNotice {
+        MembershipNotice(
+            title: "Setup unavailable",
+            message: "We couldn't finish preparing your membership. Nothing has been charged — please check your connection and try again."
+        )
+    }
+
     private func purchaseSelectedProduct() {
         guard let selectedProduct else { return }
 
         Task {
-            // Last chance to bind at source: if the token was not in hand yet,
-            // try once more before falling back to the legacy path.
+            // One retry, in case the on-appear fetch lost a race with the session.
             if bindingToken == nil { await loadBindingToken() }
+
+            guard case .ready(let token) = Self.purchaseReadiness(bindingToken: bindingToken) else {
+                // RETURNS BEFORE STOREKIT. No purchase is attempted, no money
+                // moves, and the member can simply tap again.
+                notice = Self.bindingUnavailableNotice()
+                return
+            }
 
             let outcome = await membershipStore.purchase(
                 selectedProduct,
-                appAccountToken: bindingToken
+                appAccountToken: token
             )
 
             switch outcome {
@@ -422,6 +454,14 @@ extension MembershipSelectionView {
             return nil
         }
     }
+}
+
+/// Whether a NEW Connected purchase may be initiated at all.
+enum PurchaseReadiness: Equatable {
+    case ready(UUID)
+    /// The server-issued binding token is absent. **StoreKit must not be
+    /// called.** Recoverable: the member retries and nothing has been charged.
+    case blockedNoBindingToken
 }
 
 struct MembershipNotice: Identifiable {

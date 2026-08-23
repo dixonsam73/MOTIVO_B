@@ -219,3 +219,50 @@ func nonTerminalClaimRefusalIsSilent() {
         ) == nil
     )
 }
+
+// MARK: - U5f correction · a new purchase REQUIRES the binding token
+//
+// The legacy-claim path exists for subscriptions that PREDATE bound purchase.
+// It is not a fallback for new ones: its safety argument is that the token-less
+// population is finite and shrinking, and minting new members into it would make
+// that population unbounded and permanent.
+
+@MainActor
+@Test("NO binding token means NO StoreKit purchase attempt")
+func missingBindingTokenBlocksPurchase() {
+    #expect(
+        MembershipSelectionView.purchaseReadiness(bindingToken: nil)
+            == .blockedNoBindingToken
+    )
+}
+
+@MainActor
+@Test("a server-issued token unblocks the purchase, and is passed through unchanged")
+func bindingTokenUnblocksPurchase() throws {
+    let token = try #require(UUID(uuidString: "aaaaaaaa-0000-4000-8000-000000000001"))
+    #expect(MembershipSelectionView.purchaseReadiness(bindingToken: token) == .ready(token))
+
+    // The token that reaches StoreKit must be exactly the one the server issued —
+    // not re-derived, not regenerated.
+    guard case .ready(let carried) = MembershipSelectionView.purchaseReadiness(bindingToken: token) else {
+        Issue.record("expected .ready"); return
+    }
+    #expect(carried == token)
+}
+
+@MainActor
+@Test("the blocked state is calm, retryable, and says nothing was charged")
+func bindingUnavailableNoticeIsCalm() {
+    let notice = MembershipSelectionView.bindingUnavailableNotice()
+    let text = (notice.title + " " + notice.message).lowercased()
+
+    // No purchase was initiated, so the member must be told plainly that no
+    // money moved — and invited to retry, because a retry genuinely fixes it.
+    #expect(text.contains("nothing has been charged"))
+    #expect(text.contains("try again"))
+
+    // It is a transient setup problem, not a failed purchase or a lost payment.
+    for forbidden in ["purchase failed", "payment", "refund", "declined", "error"] {
+        #expect(!text.contains(forbidden), "must not say '\(forbidden)'")
+    }
+}
