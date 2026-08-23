@@ -8,6 +8,7 @@ import {
 } from "../_shared/appstore/api.ts";
 import { verifyAppleJWS } from "../_shared/appstore/jws.ts";
 import { deriveFromReconciliation } from "../_shared/appstore/derive.ts";
+import { readNotificationHistory } from "../_shared/appstore/history.ts";
 
 // appstore_reconcile_v1
 //
@@ -136,10 +137,20 @@ Deno.serve(async (req) => {
         window,
         body.paginationToken ? String(body.paginationToken) : undefined,
       );
-      const seen = (page as Record<string, unknown>)?.notificationHistory;
-      const uuids: string[] = Array.isArray(seen)
-        ? seen.map((h) => String((h as Record<string, unknown>)?.notificationUUID ?? "")).filter(Boolean)
-        : [];
+
+      // B-32. THE UUID COMES FROM THE VERIFIED PAYLOAD, NOT FROM A FIELD THAT
+      // DOES NOT EXIST. `NotificationHistoryResponseItem` carries only
+      // `sendAttempts`, `signedPayload` and `firstSendAttemptResult`; reading
+      // `item.notificationUUID` yielded undefined for every item and reported a
+      // confident zero whatever Apple sent. The same pinned-anchor verifier the
+      // notification path uses is passed in, so an item Apple did not sign can
+      // never masquerade as Apple's history — which matters because G3 is scored
+      // against exactly this comparison.
+      const history = await readNotificationHistory(page, (j) => verifyAppleJWS(j));
+      const uuids = history.items
+        .map((i) => i.notification_uuid)
+        .filter((u): u is string => typeof u === "string" && u.length > 0);
+
       // READ-ONLY, AND DELIBERATELY SO. This reports which notifications Apple
       // believes it sent; it does not replay them, because replaying a payload
       // we never verified would be exactly the bare-transaction bypass B-24
@@ -149,7 +160,16 @@ Deno.serve(async (req) => {
         ok: true,
         apple_notification_count: uuids.length,
         apple_notification_uuids: uuids,
-        note: "compare against membership_notification.notification_uuid; close gaps with mode=reconcile",
+        // Never silently dropped: a non-zero value means this page's evidence is
+        // incomplete, and a zero count with unverifiable > 0 is NOT "Apple sent
+        // nothing".
+        unverifiable_items: history.unverifiable,
+        // Surfaced so a multi-page history can actually be followed. Without
+        // these a partial page looked exactly like a complete one.
+        has_more: history.has_more,
+        pagination_token: history.pagination_token,
+        items: history.items,
+        note: "compare apple_notification_uuids against membership_notification.notification_uuid; close gaps with mode=reconcile",
       });
     } catch (e) { return failure(e); }
   }

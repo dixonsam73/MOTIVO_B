@@ -5,9 +5,10 @@ discipline. Nothing in this file is a result. Every number is a prediction that
 post-deploy verification must match exactly; a disagreement stops the deploy
 rather than being repaired forward.
 
-**Local evidence at the time of writing — 522 assertions green:** U3 97 · U4
-48 + 96 + 43 · U5 68 (U5c modules) + 53 (U5e/U5f client structural) + 55 (U5b
-acceptance) + 62 (U5d e2e). Client: 15 unit tests, Debug and Release clean.
+**Local evidence — 547 assertions green (updated 2026-08-23 with B-32's 25):**
+U3 97 · U4 73 + 96 + 43 · U5 68 (U5c modules) + 53 (U5e/U5f client structural) +
+55 (U5b acceptance) + 62 (U5d e2e). Client: 15 unit tests, Debug and Release
+clean. **B-23 delta unchanged at 20**, so B-32 added no schema surface.
 
 ---
 
@@ -222,6 +223,14 @@ convenient:** U5's establishment performs its own live authoritative Apple read
 and never consults notification history, so a blind diagnostic cannot mislead it.
 **It does block G3**, which is U4-owned and already outstanding.
 
+**CORRECTED LOCALLY 2026-08-23, and folded into this deploy** rather than carried
+through it. 25 deterministic assertions (U4b-49..73) cover the real uuid, the
+uuid SET across multiple items, hostile validly-*shaped* but not validly-*signed*
+payloads, a mixed page proving contamination runs in neither direction, and the
+`0 items / 0 unverifiable` pair the old code could never express. **B-32 is NOT
+production-resolved and G3 is NOT closed** until **P6b** reconciles a real Apple
+history against `membership_notification`.
+
 ### CONSEQUENCE FOR DEVICE QA — F3b's SUBSCRIPTION HAS EXPIRED
 
 The `EXPIRED`/`VOLUNTARY` row is not merely bookkeeping. **Device A's Sandbox
@@ -273,8 +282,9 @@ select count(*) as membership_scheduled
 | **P2** | `supabase secrets set APPLE_ATTEST_ALLOWED_ENVIRONMENTS=Sandbox` | Either | **BEFORE the function deploy.** Never rely on the code default. **This is known to re-version unrelated functions** — P5 accounts for it |
 | **P3** | **Apply the U5b migration atomically** | **ACCOUNT HOLDER ONLY** | §3.1. **NOT `supabase db push`** — see §0 |
 | **P4** | Verify §1's delta and §5's queries | **Account holder** | Any disagreement stops the deploy |
-| **P5** | `supabase functions deploy membership_attest_v1 appstore_reconcile_v1` | Either | **Both, deliberately** — see §4 |
-| **P6** | Download-diff **all five** functions | Either | Deploy is not scoped to what you name |
+| **P5** | `supabase functions deploy membership_attest_v1 appstore_reconcile_v1` | Either | **Both, deliberately** — see §4. `appstore_reconcile_v1` carries **two** changes: U5c's `api.ts` and **B-32's corrected `notification_history`** |
+| **P6** | Download-diff **all five** functions | Either | Deploy is not scoped to what you name. **`appstore_reconcile_v1` MUST show the B-32 delta** — if its diff looks like transpilation alone, the corrected source did not ship |
+| **P6b** | **Re-run the B-32 cross-check that failed at pre-flight** | Either | `mode=notification_history`, Sandbox, 2026-08-19..24. **Expect ~14 uuids reconciling against `membership_notification`, `unverifiable_items: 0`.** A second `0` means the fix did not deploy. **This is the step that closes B-32 and unblocks G3** |
 | **P7** | `supabase functions list` — `verify_jwt:false` on `membership_attest_v1` | Either | `config.toml` pins it; confirm deployed state agrees |
 | **P8** | `./supabase/capture-schema.sh` then `./supabase/verify-baseline.sh` | Either | **Must return GREEN**, only the `account_id_format` exception |
 | **P9** | Commit migration + refreshed snapshot + results together | Either | |
@@ -302,7 +312,25 @@ grants — no `CONCURRENTLY`, no `VACUUM`, nothing that forbids a transaction bl
 
 ---
 
-## 4. WHY `appstore_reconcile_v1` IS REDEPLOYED, AND `appstore_notifications_v1` IS NOT
+## 4. WHY `appstore_reconcile_v1` IS REDEPLOYED — NOW TWO REASONS
+
+**Reason 2, added 2026-08-23: it carries the B-32 correction.** Its
+`notification_history` mode reported `apple_notification_count: 0`
+unconditionally — it read a `notificationUUID` field that
+`NotificationHistoryResponseItem` does not have. The fix reads the UUID from the
+**verified** signed payload via the new `_shared/appstore/history.ts`, counts
+unverifiable items instead of dropping them, and surfaces `hasMore` /
+`paginationToken`.
+
+**This is folded into the redeploy this package already required, deliberately.**
+Deploying a knowingly-broken diagnostic and correcting it afterwards would mean
+two production mutations where one will do, and would leave G3 unscoreable across
+the whole Sandbox window in between.
+
+**Files in this function's deploy:** `appstore_reconcile_v1/index.ts`,
+`_shared/appstore/api.ts` (U5c), **`_shared/appstore/history.ts` (NEW, B-32)`**.
+
+### The original reason, unchanged
 
 U5c **modified `_shared/appstore/api.ts`** (adding `setAppAccountToken`, the
 `allowEmptyBody` parameter, the PUT method and the error taxonomy). Import graph:

@@ -11,6 +11,7 @@
 // is entitled", which under U7 becomes a deletion.
 
 import { verifyAppleJWS } from "./_shared/appstore/jws.ts";
+import { readNotificationHistory } from "./_shared/appstore/history.ts";
 import {
   deriveFromNotification,
   deriveFromReconciliation,
@@ -190,6 +191,94 @@ Deno.serve(async () => {
   })) as typeof fetch);
   const statuses = await okApi.getAllSubscriptionStatuses("Sandbox", "T1");
   is("U4b-48", lastTransactionsOf(statuses).length, 1, "a 200 parses into one lastTransaction");
+
+  // ============================================ B-32 · Notification History
+  //
+  // THE OLD IMPLEMENTATION COULD NOT HAVE FAILED THESE — IT COULD NOT HAVE
+  // PASSED THEM EITHER. It read `item.notificationUUID`, which
+  // NotificationHistoryResponseItem does not have, so it reported a confident
+  // zero for any input at all. These assertions exist so that behaviour is
+  // structurally impossible to reintroduce.
+  const verify = (j: unknown) => verifyAppleJWS(j, new Date(), TEST_ROOT);
+  const page = (items: unknown[], extra: Record<string, unknown> = {}) =>
+    ({ notificationHistory: items, ...extra });
+
+  // (1) A legitimate item yields its REAL uuid, recovered from the verified payload.
+  const one = await readNotificationHistory(page([{ signedPayload: F.good }]), verify);
+  is("U4b-49", one.items.length, 1, "one legitimate history item is read");
+  is("U4b-50", one.items[0].notification_uuid, "3f1c0e2a-77ac-4f1d-9f36-9a5b2c1d0e77",
+     "...and its uuid comes from the VERIFIED payload");
+  is("U4b-51", one.unverifiable, 0, "...with nothing unverifiable");
+  is("U4b-52", one.items[0].notification_type, "SUBSCRIBED", "type recovered too");
+  is("U4b-53", one.items[0].environment, "Sandbox", "environment recovered");
+
+  // (4) The structurally-impossible zero is gone: a valid fixture CANNOT report 0.
+  is("U4b-54", one.items.filter((i) => i.notification_uuid !== null).length > 0, true,
+     "a valid fixture can no longer produce a count of zero");
+
+  // (2) Multiple items produce the correct count AND the correct uuid SET.
+  const many = await readNotificationHistory(
+    page([
+      { signedPayload: F.good, sendAttempts: [{}, {}] },
+      { signedPayload: F.fallback_expires_date },
+      { signedPayload: F.test_notification },
+    ]), verify);
+  is("U4b-55", many.items.length, 3, "three items read");
+  is("U4b-56",
+     many.items.map((i) => i.notification_uuid).filter(Boolean).sort().join(","),
+     [
+       "3f1c0e2a-77ac-4f1d-9f36-9a5b2c1d0e77",
+       "ef1c0e2a-77ac-4f1d-9f36-9a5b2c1d0e77",
+       "bf1c0e2a-77ac-4f1d-9f36-9a5b2c1d0e77",
+     ].sort().join(","),
+     "the uuid SET is correct, not merely the count");
+  is("U4b-57", many.unverifiable, 0, "all three verified");
+  is("U4b-58", many.items[0].send_attempts, 2, "Apple's own delivery-attempt count is carried");
+
+  // (3) Hostile: validly-SHAPED but not validly SIGNED. It must NOT masquerade
+  // as Apple's history, and it must NOT vanish silently either.
+  const tampered = await readNotificationHistory(
+    page([{ signedPayload: F.tampered_payload }]), verify);
+  is("U4b-59", tampered.items.length, 0, "a tampered payload yields NO history item");
+  is("U4b-60", tampered.unverifiable, 1, "...and is COUNTED, never silently dropped");
+
+  const foreign = await readNotificationHistory(
+    page([{ signedPayload: F.substituted_root }]), verify);
+  is("U4b-61", foreign.items.length, 0, "a chain rooted elsewhere yields no item");
+  is("U4b-62", foreign.unverifiable, 1, "...and is counted");
+
+  // A mixture must not let the bad one contaminate the good one, in EITHER
+  // direction: the genuine item is still reported, the forgery still is not.
+  const mixed = await readNotificationHistory(
+    page([{ signedPayload: F.good }, { signedPayload: F.tampered_payload }]), verify);
+  is("U4b-63", mixed.items.length, 1, "the genuine item survives a poisoned page");
+  is("U4b-64", mixed.unverifiable, 1, "...and the forgery is still refused");
+  is("U4b-65", mixed.items[0].notification_uuid, "3f1c0e2a-77ac-4f1d-9f36-9a5b2c1d0e77",
+     "...and it is the RIGHT item");
+
+  // Missing or malformed payloads are counted, not ignored.
+  const junk = await readNotificationHistory(
+    page([{ sendAttempts: [] }, { signedPayload: "" }, { signedPayload: F.not_a_jws }]), verify);
+  is("U4b-66", junk.items.length, 0, "items with no usable payload yield nothing");
+  is("U4b-67", junk.unverifiable, 3, "...and all three are counted");
+
+  // An genuinely EMPTY history is distinguishable from a broken read: zero items
+  // AND zero unverifiable. That pair is what the old code could never express.
+  const empty = await readNotificationHistory(page([]), verify);
+  is("U4b-68", `${empty.items.length}/${empty.unverifiable}`, "0/0",
+     "an empty history reads as 0/0 — distinguishable from a failed parse");
+
+  // Pagination is surfaced, so a partial page cannot look like a complete one.
+  const paged = await readNotificationHistory(
+    page([{ signedPayload: F.good }], { hasMore: true, paginationToken: "TOKEN123" }), verify);
+  is("U4b-69", paged.has_more, true, "hasMore is surfaced");
+  is("U4b-70", paged.pagination_token, "TOKEN123", "...and so is the token");
+  is("U4b-71", (await readNotificationHistory(page([]), verify)).pagination_token, null,
+     "absent token reads as null");
+
+  // Not an array / not an object at all.
+  is("U4b-72", (await readNotificationHistory({}, verify)).items.length, 0, "missing history array -> 0 items");
+  is("U4b-73", (await readNotificationHistory(null, verify)).unverifiable, 0, "a null response is not invented into items");
 
   return new Response(JSON.stringify({ pass, fail, lines }, null, 1), {
     status: fail === 0 ? 200 : 500,
