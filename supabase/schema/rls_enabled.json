@@ -27,6 +27,11 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "membership_control"
   },
   {

@@ -168,6 +168,36 @@
     "table_name": "membership_binding"
   },
   {
+    "conname": "membership_binding_conflict_count_positive",
+    "contype": "c",
+    "definition": "CHECK ((observed_count >= 1))",
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "conname": "membership_binding_conflict_environment_check",
+    "contype": "c",
+    "definition": "CHECK ((environment = ANY (ARRAY['Sandbox'::text, 'Production'::text])))",
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "conname": "membership_binding_conflict_kind_check",
+    "contype": "c",
+    "definition": "CHECK ((conflict_kind = ANY (ARRAY['live_binding_mismatch'::text, 'transaction_owned_by_other_identity'::text])))",
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "conname": "membership_binding_conflict_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id, environment, original_transaction_id)",
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "conname": "membership_binding_conflict_user_fk",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "membership_binding_conflict"
+  },
+  {
     "conname": "membership_control_count_nonnegative",
     "contype": "c",
     "definition": "CHECK (((cutover_identity_count IS NULL) OR (cutover_identity_count >= 0)))",

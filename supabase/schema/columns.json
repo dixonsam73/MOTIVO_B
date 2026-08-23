@@ -408,6 +408,62 @@
     "table_name": "membership_binding"
   },
   {
+    "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": null,
+    "column_name": "environment",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": null,
+    "column_name": "original_transaction_id",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 3,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": null,
+    "column_name": "conflict_kind",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 4,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": "1",
+    "column_name": "observed_count",
+    "data_type": "bigint",
+    "is_nullable": "NO",
+    "ordinal_position": 5,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "first_seen_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 6,
+    "table_name": "membership_binding_conflict"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "last_seen_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 7,
+    "table_name": "membership_binding_conflict"
+  },
+  {
     "column_default": "true",
     "column_name": "id",
     "data_type": "boolean",

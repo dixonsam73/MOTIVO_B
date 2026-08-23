@@ -280,6 +280,46 @@ writer established rather than one the test manufactured.
 
 ---
 
+## U5 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-23
+
+**P0-P8 and P6b all executed and passed.** The U5b schema, `membership_attest_v1`
+and the corrected `appstore_reconcile_v1` are deployed; B-23 returned **GATE MET**
+with only the standing `account_id_format` exception. **Every predicted number
+matched production exactly and nothing was repaired forward.** The record is
+`supabase/sql/README-u5-deployment.md` §8.
+
+**U5 REMAINS ENFORCEMENT-FREE AND CLEANUP-FREE, PROVEN RATHER THAN STATED:**
+zero policies consult membership (33 unchanged), zero rows carry
+`pending_cleanup_at`, `service_role` holds **no** table privilege on any
+membership table, and **exactly one function** inserts into `public.membership`.
+
+**The client-reachable surface is one argument-less function.**
+`ensure_membership_binding()` is executable by `authenticated` **only** — anon,
+`service_role` and PUBLIC all false. `membership_establish_v1` is `service_role`
+only. **U4's canonical writer stays internal.** No client parameter can supply
+ownership provenance.
+
+**B-31 VERIFIED IN THE DEPLOYED BUNDLE**, not merely the tree: the downloaded
+`membership_attest_v1` contains five `verifyAttestationJWS` references and
+**zero** `verifyAppleJWS(` calls.
+
+**B-32 RESOLVED ON REAL EVIDENCE.** The same Apple Notification History call that
+returned a structural `0` at pre-flight now returns **14 with
+`unverifiable_items: 0`**, and Apple's uuid set and ours are **identical** — zero
+lost, zero unexplained. **G3's instrument works now**; G3 itself stays open,
+because its deliberate-drop recovery half has not been run.
+
+**THE UNSCOPED RE-VERSIONING IS CAUSALLY ATTRIBUTED AT LAST, AND IT IS NOT THE
+DEPLOY.** `supabase secrets set` moved all four functions' versions with **every
+SHA unchanged**; the subsequent `functions deploy` moved **only the two named**.
+U4 named this as a hypothesis; this run separated the two actions and settled it.
+
+**`membership` HOLDS ZERO ROWS AND THAT IS CORRECT** — no client build carrying
+U5e/U5f exists on any device, so nothing has attested. **The U4-era "zero rows"
+prediction stops being an invariant the moment a device attests, by design.**
+
+---
+
 ## U5c — ATTESTATION SUPPORT. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
 
 **Two modules and nothing else** — `_shared/appstore/attest.ts` new, `api.ts`
@@ -758,13 +798,13 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Count | Value | What it is |
 |---|---|---|
 | Phase-3-tagged register rows | **21** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** |
-| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-32** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved) and U5g's **B-32** (open).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved) and U5g's **B-32** (Resolved).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -783,7 +823,7 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **5 open: C-26, B-11, C-31, B-24 and B-32.** **B-32 is U5g's** — the notification-history diagnostic reports zero unconditionally, which blocks G3 but not U5. **B-31 was resolved by U5d** and
+= **4 open: C-26, B-11, C-31 and B-24.** **B-32 was filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by U5d** and
 **C-54 by the correction that followed U5e**. All four remaining are the
 server-authority work
 itself, and none of them has begun. **B-24 is a design defect caught before

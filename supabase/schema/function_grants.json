@@ -70,8 +70,8 @@
     "public_execute": false
   },
   {
-    "can_execute": false,
-    "direct_execute": false,
+    "can_execute": true,
+    "direct_execute": true,
     "grantee": "authenticated",
     "proname": "ensure_membership_binding",
     "public_execute": false
@@ -249,6 +249,27 @@
     "direct_execute": true,
     "grantee": "service_role",
     "proname": "membership_due_for_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_establish_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_establish_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "service_role",
+    "proname": "membership_establish_v1",
     "public_execute": false
   },
   {

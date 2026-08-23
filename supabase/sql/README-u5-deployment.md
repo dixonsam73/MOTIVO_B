@@ -1,9 +1,9 @@
-# U5 production deployment — PREDICTION AND PACKAGE. NOT YET EXECUTED.
+# U5 production deployment — EXECUTED AND ACCEPTED, 2026-08-23
 
-**Committed BEFORE any production mutation**, in the U3/U4 prediction-first
-discipline. Nothing in this file is a result. Every number is a prediction that
-post-deploy verification must match exactly; a disagreement stops the deploy
-rather than being repaired forward.
+**The prediction below was committed BEFORE any production mutation**, in the
+U3/U4 discipline, and is left unedited. **P0-P8 AND P6b HAVE NOW RUN AND ALL
+PASSED — see §8.** Every predicted number matched production exactly; nothing was
+repaired forward.
 
 **Local evidence — 547 assertions green (updated 2026-08-23 with B-32's 25):**
 U3 97 · U4 73 + 96 + 43 · U5 68 (U5c modules) + 53 (U5e/U5f client structural) +
@@ -481,3 +481,107 @@ verifiable locally** — that is the whole reason they are listed.
 **`membership` will hold rows for the first time in this project's history.** That
 is the intended outcome of U5 and the point at which the U4-era prediction "zero
 rows" stops being true by design. It must not be read later as a regression.
+
+
+---
+
+## 8. EXECUTED RESULTS — 2026-08-23
+
+**Every prediction in §1 matched production exactly.** Measured by capturing
+production and diffing against the committed pre-U5 snapshot:
+
+| Surface | Predicted | Observed |
+|---|---|---|
+| `columns` | +7 | **+7** |
+| `constraints` | +5 | **+5** |
+| `function_grants` | +3 new, 1 modified | **added 4, removed 1** |
+| `functions` | +1 new, 2 modified | **added 3, removed 2** |
+| `rls_enabled` | +1 | **+1** |
+| `table_grants`, `column_grants`, `policies`, `triggers`, `storage_buckets` | 0 | **0** |
+
+Itemised: **new** `membership_establish_v1`; **replaced** `connected_member` and
+`membership_state`; the modified grant is `ensure_membership_binding`/
+`authenticated` flipping `can_execute` **false → true**, exactly as predicted.
+
+### P4 — every safety property PROVEN in production, not stated
+
+| Property | Result |
+|---|---|
+| Non-owner privilege on any membership table | **0** |
+| `ensure_membership_binding` | **`authenticated` ONLY** — anon, service_role and PUBLIC all false |
+| `membership_establish_v1` | **`service_role` only** |
+| U4's canonical writer `membership_apply_state_v1` | **all false — still internal** |
+| `membership_resolve_binding_v1`, `membership_record_notification_v1` | **all false** |
+| `connected_member` | **all false** — evaluated inside policies, never called |
+| Client-suppliable provenance parameter | **0** |
+| Functions inserting into `membership` | **exactly one: `membership_establish_v1`** |
+| Rows with `pending_cleanup_at` | **0** — establishment schedules nothing |
+| Policies enforcing membership / total | **0 / 33** |
+| `membership_state` contains `sandbox_only` | **true** |
+
+### P5-P7 — deployment
+
+| Function | Before | After | Bundle |
+|---|---|---|---|
+| `membership_attest_v1` | — | **NEW v1**, `verify_jwt=false` | sha `98e06419…` |
+| `appstore_reconcile_v1` | v2 | **v3** | **SHA CHANGED** — the corrected source shipped |
+| `appstore_notifications_v1` | v2 | v2 | unchanged |
+| `delete_account_v1` | v9 | v9 | unchanged |
+| `revoke_apple_identity_v1` | v3 | v3 | unchanged |
+
+**THE UNSCOPED RE-VERSIONING IS NOW CAUSALLY ATTRIBUTED, AND IT IS NOT THE
+FUNCTION DEPLOY.** U4 recorded that a deploy re-versioned neighbours and named
+`secrets set` as the leading hypothesis. This run separates them cleanly: between
+the pre-flight capture and the pre-deploy capture the **only** action was P2's
+`supabase secrets set`, and **all four functions moved v8→v9, v2→v3, v1→v2, v1→v2
+with every SHA UNCHANGED**. The subsequent `functions deploy` then moved **only
+the two named**. So the secret set re-versions everything and changes nothing;
+the deploy is correctly scoped. **A version number remains no evidence that code
+changed** — the SHAs are what carry that.
+
+**Download-diff (P6), transpilation-aware, tree restored afterwards
+(`git status` clean):** the deployed `appstore_reconcile_v1` contains
+`readNotificationHistory`, `unverifiable_items` and `pagination_token`, and
+**zero** occurrences of the old bare `.notificationUUID` read. The deployed
+`membership_attest_v1` contains **5** `verifyAttestationJWS` references and
+**ZERO** `verifyAppleJWS(` calls — **B-31's structural boundary verified in the
+DEPLOYED bundle**, not merely in the tree.
+
+### P8 — B-23 GATE MET
+
+Nine of ten surfaces **IDENTICAL**; the only difference is the standing,
+mechanically-verified `account_id_format` catalog-serialization exception.
+
+### P6b — THE APPLE CROSS-CHECK THAT FAILED AT PRE-FLIGHT NOW PASSES
+
+```
+apple_notification_count : 14
+unverifiable_items       : 0
+has_more                 : false
+```
+
+**Set reconciliation against `membership_notification`, not merely counts:**
+
+| | |
+|---|---|
+| Apple's uuids | **14** |
+| Our uuids | **14** |
+| In Apple but **not** ours (lost notifications) | **0** |
+| In ours but **not** Apple (unexplained rows) | **0** |
+| **Sets identical** | **TRUE** |
+
+**This closes B-32 on real evidence.** The same call returned a structural `0`
+before the fix, against the same window and the same fourteen rows.
+
+**One small observation, recorded rather than smoothed:** Apple returned a
+`paginationToken` even with `hasMore: false`. Harmless — the token is
+informational and the corrected code keys continuation on `hasMore` — but a
+future reader should not treat a present token as proof of more pages.
+
+### Post-deploy production state
+
+`membership` **0** · `membership_binding` **0** · `membership_binding_conflict`
+**0** · `membership_notification` **14** · `reject_stat` **0**.
+
+**U5 is deployed and nothing has attested yet**, which is correct: no client
+build carrying U5e/U5f exists on any device.
