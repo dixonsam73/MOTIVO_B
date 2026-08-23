@@ -1284,6 +1284,123 @@ one API's freshness behaviour, and its result feeds exactly one decision.
 
 ---
 
+## U5b — RESULTS. 338 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
+
+**U5b is the SQL foundation for ownership establishment.** One table, one
+function, two grants, two helpers replaced. No Edge Function, no Apple request,
+no policy, nothing scheduled, nothing deleted. `_shared/appstore` is U5c; the
+attest endpoint is U5d.
+
+| Suite | Result |
+|---|---|
+| U3 acceptance | **97 of 97** (was 93; +4 from the U5b re-pointing below) |
+| U4 modules | **48 of 48**, unchanged |
+| U4 acceptance | **95 of 95** (was 94; +1) |
+| U4 e2e | **43 of 43** (was 40; +3 from E17's rewrite) |
+| **U5b acceptance** | **55 of 55**, new |
+| **Total** | **338** |
+
+### THE BLAST RADIUS WAS UNDER-PREDICTED, AND THE MISS IS INSTRUCTIVE
+
+**Predicted: 4 assertions. Actual: 11.** The prediction named A47i, A53b, A54d
+and E17 — and those four were exactly right. What it missed were **seven
+assertions that pin the privilege surface and the object counts**, which any unit
+adding a table, a grant and a function necessarily moves:
+
+| Missed | Suite | Why it moved |
+|---|---|---|
+| A4, A3h | U3 | assert **zero** client-reachable membership objects; U5b grants `ensure_membership_binding` to `authenticated` |
+| A22b | U3 | the same thing observed over real HTTP — the authenticated RPC now returns 200 |
+| A41 | U4 | membership table count 6 -> 7 |
+| A45 | U4 | `service_role` EXECUTE set gains `membership_establish_v1` |
+| A45e | U4 | asserted `ensure_membership_binding` **still ungranted (U5)** — it was written expecting to change |
+| A47f | U4 | "no U4 function inserts into membership", scoped by the `membership%` prefix, which U5b's writer also matches |
+
+**None is a defect and none was weakened to pass.** Every one is a deliberate
+state change detected by an assertion doing its job — the U3 and U4 cells had
+*said* U5 would make this grant. **The lesson is that "which assertions change
+their result" is not the same question as "which assertions mention the thing I
+am changing", and the first is the one that needs measuring.**
+
+**Three were made STRICTER rather than merely re-pointed:**
+
+- **A4** no longer asserts "zero"; it asserts **exactly one, and precisely which
+  one** (`A4u5`: `ensure_membership_binding` reachable by `authenticated` **alone**).
+- **A22** splits the binding RPC out of the aggregate — folding it in would let
+  "one 2xx somewhere" pass for either role. `A22d` pins anon still refused,
+  `A22e`/`A22f` pin that authenticated receives **its own** token over real HTTP,
+  which is the half no catalog query can prove.
+- **A47f** excludes U5b's writer **by name**, not by weakening the pattern, so it
+  still fails if U4's canonical writer ever gains an INSERT.
+
+### E17 was testing the wrong thing in the wrong suite, and the rewrite is stronger
+
+E17 asserted Production entitlement at the end of a chain that is **Sandbox end
+to end** — the notification must be Sandbox to pass
+`APPLE_ASSN_ALLOWED_ENVIRONMENTS`, and ingestion applies state to the row of the
+notification's own environment, so under D4 no Sandbox notification can ever
+produce entitlement. **That is correct behaviour, not a test problem.**
+
+It now asserts the **row**, which is what `e2e.sh` is for by its own description.
+And it gained force in the process: the fixture carries a **future
+`expiresDate`**, so the row looks entitled on its face and must still confer
+nothing (`E17d`), with `membership_state` reporting `sandbox_only` rather than
+`expired` (`E17e`). **That is D4 observed end to end through the real function
+rather than argued in SQL.**
+
+### The assertion most worth keeping — A60
+
+A **Sandbox-only identity that is in the cutover snapshot** must derive `false`.
+Under the obvious fix — `and m.environment = 'Production'` in the WHERE clause —
+the row set empties, `bool_or` over an empty set is NULL, and the predicate falls
+through to the **grandfather** clause, granting Production entitlement to a
+sandbox tester *by the compatibility clause*. **The natural implementation fails
+in exactly the direction that matters**, which is why the environment test lives
+inside `bool_or` instead. `A60c` is its purest form: the same row with every
+derivation input NULL, where U3's coalesce lesson has to hold again.
+
+### F11 is asserted behaviourally AND structurally
+
+`A63c`/`A63d` on a live subscription and `A63h` on a **born-lapsed** one — the
+dangerous case, where a deadline computed from Apple's own dates could already be
+in the past. `A67` adds the structural half: **exactly one function in the whole
+schema inserts into `public.membership`, and it is the establishment writer.**
+
+### PREDICTED B-23 DELTA — measured, not estimated
+
+The gate compares local against **production**, so with U5b applied locally and
+not deployed it correctly reports **GATE NOT MET — 20 problems**, every one of
+them a U5b object. That is the expected pre-deploy state; it returns GREEN after
+deploy and recapture, exactly as U4 did.
+
+| Surface | Delta | Detail |
+|---|---|---|
+| `columns` | **+7** | `membership_binding_conflict` |
+| `constraints` | **+5** | its pkey, FK, and three CHECKs |
+| `rls_enabled` | **+1** | RLS on the new table |
+| `functions` | **+1 new, 2 MODIFIED** | `membership_establish_v1`; `connected_member` and `membership_state` replaced |
+| `function_grants` | **+3 new, 1 MODIFIED** | 3 rows for `membership_establish_v1`; `ensure_membership_binding`/`authenticated` flips `can_execute` false -> true |
+| `table_grants` | **0** | IDENTICAL |
+| `column_grants` | **0** | IDENTICAL |
+| `policies` | **0** | IDENTICAL — U5b enforces nothing |
+| `triggers`, `storage_buckets` | **0** | IDENTICAL |
+
+**U5b IS NOT PURELY ADDITIVE, and the deployment package must say so.** Like U4
+— which modified four CHECK constraints — it **modifies** two function
+definitions and one grant row. U3 could be described as "additive and inert";
+U5b cannot, and the rollback differs accordingly.
+
+**The `account_id_format` constraint pair in the raw diff is NOT U5b's.** It is
+the single declared standing exception in `baseline-exceptions.json`, a
+PostgreSQL parenthesisation normalisation, and the gate detects and approves it
+as such. Counting it as part of U5b's delta would overstate the change by one.
+
+**Zero table privilege, zero column privilege, zero policy change** — U3's A3f
+invariant survives U5b, and the whole client-reachable surface U5 creates is one
+argument-less function.
+
+---
+
 ### U2 — PREDICTIONS, committed 2026-08-16 BEFORE any destructive run
 
 **Written and committed before execution, in the D14/D15 style.** Nothing below

@@ -68,7 +68,13 @@ is A1b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pro
 # ------------------------------------------------------- client reachability
 is A3  "$(psq "select count(*) from information_schema.role_table_grants where table_schema='public' and table_name like 'membership%' and grantee in ('anon','authenticated');")" "0" "table grants to clients"
 is A3b "$(psq "select count(*) from information_schema.column_privileges where table_schema='public' and table_name like 'membership%' and grantee in ('anon','authenticated');")" "0" "column grants to clients"
-is A4  "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select oid,rolname from pg_roles where rolname in ('anon','authenticated')) r where n.nspname='public' and p.proname in ('connected_member','membership_state','ensure_membership_binding') and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "client EXECUTE (effective)"
+# AMENDED FOR U5b, 2026-08-23. U3 asserted ZERO client-reachable membership
+# objects and that was true AT U3 -- its own cell said "including
+# ensure_membership_binding(), which U5 grants, not U3". U5b makes that grant, so
+# the assertion is re-pointed rather than deleted, and it is now STRICTER than
+# the original: not "zero", but "exactly one, and precisely which one".
+is A4  "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select oid,rolname from pg_roles where rolname in ('anon','authenticated')) r where n.nspname='public' and p.proname in ('connected_member','membership_state') and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "client EXECUTE on the two authority helpers"
+is A4u5 "$(psq "select string_agg(r.rolname,',' order by r.rolname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' and p.proname='ensure_membership_binding' and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "authenticated" "ensure_membership_binding reachable by authenticated ALONE (U5b)"
 is A4b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('connected_member','membership_state','ensure_membership_binding') and exists (select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.privilege_type='EXECUTE' and a.grantee=0);")" "0" "PUBLIC EXECUTE"
 # relkind='r' matters: pg_class also holds the 10 indexes on these tables, and
 # an index has relrowsecurity=false by nature. Without it this counted indexes.
@@ -88,7 +94,11 @@ is A3f "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.re
 # The one deliberate exception to "no non-owner privileges anywhere", stated as
 # an assertion so the model is positively confirmed and not merely negatively.
 is A3g "$(psq "select has_function_privilege('service_role','public.membership_state(uuid)','EXECUTE')::text;")" "true" "service_role EXECUTE on membership_state"
-is A3h "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' and p.proname in ('connected_member','ensure_membership_binding') and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "EXECUTE on the other two helpers"
+# AMENDED FOR U5b, 2026-08-23 -- see A4. connected_member() carries EXECUTE for
+# nobody, still, and that half is unchanged: at U6 it is evaluated inside policy
+# expressions rather than called, so it decides what clients may see while
+# remaining unreachable BY them.
+is A3h "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' and p.proname='connected_member' and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "EXECUTE on connected_member: nobody"
 
 # ------------------------------------------------------------------ fixtures
 A=$(mkuser u3a); B=$(mkuser u3b)
@@ -292,10 +302,25 @@ done
 for FN in connected_member membership_state; do
   for KEY in "$AK" "$AUTHJWT"; do probe POST "$API/rest/v1/rpc/$FN" "$KEY" "{\"target_user_id\":\"$E\"}"; done
 done
-for KEY in "$AK" "$AUTHJWT"; do probe POST "$API/rest/v1/rpc/ensure_membership_binding" "$KEY" '{}'; done
-is A22  "$SEEN"   "16" "runtime probes attempted (5 tables + 3 RPCs, x2 roles)"
+is A22  "$SEEN"   "14" "runtime probes attempted (5 tables + 2 RPCs, x2 roles)"
 is A22b "$TWOXX"  "0"  "successful (2xx) client responses"
 is A22c "$ARRAYS" "0"  "responses returning a JSON row array"
+
+# ensure_membership_binding IS SCORED SEPARATELY FROM U5b ONWARDS, and it must
+# be: folding it into the aggregate above would let "one 2xx somewhere" pass for
+# either role. Anon must still be refused; authenticated must now SUCCEED, which
+# is the half no catalog query can prove -- the grant working through PostgREST
+# over real HTTP.
+ANON_CODE=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$API/rest/v1/rpc/ensure_membership_binding" -H "apikey: $AK" -H "Authorization: Bearer $AK" -H 'Content-Type: application/json' -d '{}')
+AUTH_BODY=$(curl -s -X POST "$API/rest/v1/rpc/ensure_membership_binding" -H "apikey: $AK" -H "Authorization: Bearer $AUTHJWT" -H 'Content-Type: application/json' -d '{}')
+# Computed BEFORE the assertion, not inside $( ): a `case` pattern's own closing
+# paren terminates a command substitution, which silently turned this assertion
+# into a literal string on its first run.
+ANON_VERDICT=refused
+case "$ANON_CODE" in 2??) ANON_VERDICT=2xx;; esac
+is A22d "$ANON_VERDICT" "refused" "anon STILL refused over HTTP (U5b)"
+is A22e "$(printf '%s' "$AUTH_BODY" | tr -d '\"' | grep -cE '^[0-9a-f]{8}-')" "1" "authenticated receives a uuid token over HTTP (U5b)"
+is A22f "$(psq "select (binding_token::text = '$(printf '%s' "$AUTH_BODY" | tr -d '\"')')::text from public.membership_binding where user_id='$E';")" "true" "...and it is the CALLER'S OWN stored token"
 
 # A27 -- a dormant snapshot identity acquires a binding lazily, and acquiring
 # one must NOT fabricate membership. Both halves of the state rule are checked:

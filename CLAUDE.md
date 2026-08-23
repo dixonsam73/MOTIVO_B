@@ -22,9 +22,11 @@ lifecycle from **deleting an account**. This section is the durable record of
 what was decided; it is not a description of what is built. **Implemented so far:
 U0 (this record), U1 (the local backend baseline), U2 (the four backend
 verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — U4 in full, including
-U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — and U5a, a gate unit
-(2026-08-20): F1/C-52 corrected and verified, the F3b gate BUILT AND NOT RUN.
-**U5b onwards is not built**, and no Phase 3 client protocol exists.**
+U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
+(2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
+and **U5b (2026-08-23): the SQL foundation, LOCAL ONLY AND NOT DEPLOYED**, 338
+assertions green. **U5c onwards is not built**, and no Phase 3 client protocol
+exists.**
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -97,7 +99,68 @@ assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
 
-## U5a — GATE UNIT. F1 CORRECTED; F3b BUILT AND NOT RUN. 2026-08-20
+## U5b — SQL FOUNDATION. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
+
+**Unit lettering settled, because the record had drifted into two meanings.**
+U5a's subdivision called U5b the `_shared/appstore` work while D4's agreed text
+said the predicate semantics "land in U5b". Resolved 2026-08-23: **U5b is the SQL
+foundation, U5c is `_shared/appstore`, U5d is the attest Edge Function.**
+
+**What U5b contains:** `connected_member()` and `membership_state()` replaced
+with D4's semantics; `membership_establish_v1`, the only INSERT into
+`public.membership` anywhere; `membership_binding_conflict`, bounded; and **two
+grants, which are the entire privilege delta** — `ensure_membership_binding()` to
+`authenticated` (the grant U3 created the function for and deliberately withheld)
+and `membership_establish_v1` to `service_role`.
+
+**What it does not contain, and this boundary is enforced rather than promised:
+it CANNOT perform a legacy claim or an orphan rebind.** Both need Apple's
+Set App Account Token plus an independent re-read, an HTTPS round trip that must
+never sit inside a transaction (B-30). Both paths return `requires_claim`.
+
+**A30 IS NOT DISCHARGED BY U5b AND MUST NOT BE RECORDED AS IF IT WERE.** What is
+asserted is the SQL-side precondition only — that establishment REFUSES on a
+token Apple has not confirmed as ours, so the claim path cannot be
+short-circuited in the database. The assertions are labelled `A30pre*` so the
+distinction survives a skim. **A29 and A31 ARE discharged in full**, because both
+are decisions the database makes on its own evidence.
+
+**338 assertions green** — U3 97, U4 48+95+43, U5b 55.
+
+### The blast radius was under-predicted, 4 against an actual 11
+
+The four named — A47i, A53b, A54d, E17 — were exactly right. **Seven were
+missed**, all of them assertions pinning the *privilege surface* and *object
+counts*: U3's A4, A3h and A22b, and U4's A41, A45, A45e and A47f. None is a
+defect and none was weakened to pass; A45e had literally been written as
+"ensure_membership_binding still ungranted **(U5)**", anticipating this change.
+**The lesson: "which assertions change their RESULT" is a different question from
+"which assertions mention the thing I am changing", and only the first one
+matters.** Three were made stricter rather than merely re-pointed — A4 now pins
+*exactly which* object is client-reachable, A22 splits the binding RPC out of an
+aggregate that could have passed on either role's success, and A47f excludes
+U5b's writer by name so it still fails if U4's writer ever gains an INSERT.
+
+### PREDICTED B-23 DELTA, and U5b IS NOT PURELY ADDITIVE
+
+Measured against the committed production snapshot: **columns +7, constraints
++5, rls_enabled +1, functions +1 new and 2 MODIFIED, function_grants +3 new and
+1 MODIFIED.** `table_grants`, `column_grants`, `policies`, `triggers` and
+`storage_buckets` all **IDENTICAL** — so U3's A3f invariant survives, no policy
+consults membership, and the entire client-reachable surface U5 creates is one
+argument-less function.
+
+**Like U4, and unlike U3, this modifies deployed objects rather than only adding
+to them** — two function definitions and one grant row — so the deployment
+package's rollback cannot be "drop what was added". The gate correctly reports
+**GATE NOT MET, 20 problems** pre-deploy, every one a U5b object; it returns
+GREEN after deploy and recapture, as U4's did. **The `account_id_format`
+constraint pair in the raw diff is NOT U5b's**: it is the single declared
+standing exception, and counting it would overstate the delta by one.
+
+---
+
+## U5a — GATE UNIT. F1 CORRECTED; F3b EXECUTED AND SCORED P2. 2026-08-20
 
 **U5a is a gate in U4a's sense: a re-runnable experiment plus a correction, not
 an implementation.** No SQL, no Edge Function, no client protocol, no deploy.

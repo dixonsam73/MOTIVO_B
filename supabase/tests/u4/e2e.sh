@@ -135,7 +135,24 @@ is E15  "$(psq "select count(*) from public.membership where user_id='$A';")" "1
 is E15b "$(post "$(fixture fallback_expires_date)")" "200" "notification against an ESTABLISHED row -> 200"
 is E15c "$(body | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['outcome'])")" "applied" "outcome applied"
 is E16  "$(psq "select (renewal_info_signed_date > now() - interval '1 day')::text from public.membership where user_id='$A';")" "true" "row refreshed"
-is E17  "$(psq "select public.connected_member('$A');")" "t" "identity entitled"
+# E17 REWRITTEN FOR U5b, 2026-08-23, AND IT WAS TESTING THE WRONG THING IN THE
+# WRONG SUITE. It asserted Production entitlement at the end of a chain that is
+# SANDBOX END TO END -- the notification must be Sandbox to pass
+# APPLE_ASSN_ALLOWED_ENVIRONMENTS, and ingestion applies state to the row of the
+# notification's OWN environment, so under D4 no Sandbox notification can ever
+# produce entitlement. That is correct behaviour, not a test problem. e2e.sh is
+# for wiring by its own description -- "the right row, the right status code, the
+# right absence of a write" -- and entitlement derivation belongs to
+# acceptance.sh.
+#
+# So it now asserts the ROW, and in doing so it became a STRONGER assertion than
+# it was: this fixture carries a FUTURE expiresDate, so the row looks entitled on
+# its face and must still confer nothing. That is D4 observed end to end through
+# the real deployed function rather than argued in SQL.
+is E17  "$(psq "select environment from public.membership where user_id='$A';")" "Sandbox" "state applied to the notification's OWN environment"
+is E17c "$(psq "select (renewal_date > now())::text from public.membership where user_id='$A';")" "true" "...carrying Apple's future paid-through date"
+is E17d "$(psq "select public.connected_member('$A');")" "f" "D4: a live-looking SANDBOX row confers NO Production entitlement"
+is E17e "$(psq "select public.membership_state('$A');")" "sandbox_only" "...and reports sandbox_only, never expired"
 is E17b "$(psq "select binding_method from public.membership where user_id='$A';")" "purchase" "binding_method untouched by ingestion"
 is E18 "$(post "$(fixture fallback_expires_date)")" "200" "replay -> 200"
 is E19 "$(body | python3 -c "import json,sys;print(json.load(sys.stdin)['result']['outcome'])")" "duplicate" "replay outcome duplicate"
