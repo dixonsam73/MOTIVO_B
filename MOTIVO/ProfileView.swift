@@ -307,6 +307,20 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      @State private var showConnectedIntroduction: Bool = false
      @State private var showMembershipSelection: Bool = false
      @State private var showConnectedSignInSheet: Bool = false
+
+     /// U5f — WHY THE SIGN-IN SHEET NOW NEEDS AN INTENT.
+     ///
+     /// Sign in with Apple is presented from two places that want opposite things
+     /// afterwards. A RETURNING member signing in is finished, and the stack
+     /// unwinds. A member JOINING must be carried ON to the paywall, because
+     /// under B-24 authentication is now a PREREQUISITE of purchase rather than
+     /// something that follows it — the binding token has to exist before
+     /// `product.purchase()` can carry it.
+     ///
+     /// One mechanism, not two: the same sheet, the same `AuthManager`, the same
+     /// credential. Only what happens on completion differs.
+     private enum ConnectedSignInIntent { case returning, join }
+     @State private var connectedSignInIntent: ConnectedSignInIntent = .returning
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
  
@@ -353,15 +367,45 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                 }
                 .navigationDestination(isPresented: $showConnectedIntroduction) {
                     ConnectedIntroductionView(
-                        onSignIn: { showConnectedSignInSheet = true },
-                        onContinue: { showMembershipSelection = true }
+                        onSignIn: {
+                            connectedSignInIntent = .returning
+                            showConnectedSignInSheet = true
+                        },
+                        onContinue: {
+                            // B-24 / D2: SIWA BEFORE PURCHASE for every new join.
+                            // Forced rather than chosen — the binding token must
+                            // exist before StoreKit can carry it into the
+                            // transaction, and a purchase made without one lands
+                            // in the legacy-claim path instead of being bound at
+                            // source. An already-authenticated member skips
+                            // straight through, so a returning member who taps
+                            // Continue sees no extra step.
+                            if auth.hasConnectedIdentity {
+                                showMembershipSelection = true
+                            } else {
+                                connectedSignInIntent = .join
+                                showConnectedSignInSheet = true
+                            }
+                        }
                     )
                 }
                 .navigationDestination(isPresented: $showMembershipSelection) {
                     MembershipSelectionView(
                         onAuthenticationRequired: {
+                            // DEFENSIVE ONLY since U5f. Authentication now happens
+                            // before this screen is reachable, so this fires only
+                            // if the identity disappeared underneath us.
+                            connectedSignInIntent = .join
                             showMembershipSelection = false
                             showConnectedSignInSheet = true
+                        },
+                        onJoinComplete: {
+                            // The purchase completed. Unwind to Profile and let
+                            // AppMode activation resolve from local StoreKit
+                            // exactly as it always has -- attestation informs the
+                            // SERVER and never decides the client's UI.
+                            showMembershipSelection = false
+                            showConnectedIntroduction = false
                         }
                     )
                 }
@@ -1825,9 +1869,22 @@ private func initials(from string: String) -> String {
                     return
                 }
 
-                // Purchase/onboarding flow:
-                // Successful authentication after Membership Selection should unwind
-                // the onboarding navigation stack as well as dismiss the SIWA sheet.
+                // U5f — THE ORDER INVERTED, SO THIS BRANCHED.
+                //
+                // Authentication used to be the LAST step of joining, so any
+                // success here unwound the whole stack. Under B-24 it is the
+                // FIRST step, and unwinding a joining member would drop them out
+                // of the flow they just authenticated in order to continue.
+                if connectedSignInIntent == .join {
+                    showConnectedSignInSheet = false
+                    showMembershipSelection = true
+                    return
+                }
+
+                // Returning member: signing in IS the whole errand. Unwind, as
+                // before. Entitlement resolves from local StoreKit and the server
+                // learns of it through attestation, neither of which needs this
+                // screen to stay open.
                 if showConnectedSignInSheet || showMembershipSelection || showConnectedIntroduction {
                     showConnectedSignInSheet = false
                     showMembershipSelection = false

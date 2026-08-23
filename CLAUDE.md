@@ -26,10 +26,11 @@ U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
 (2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
 **U5b, U5c and U5d (2026-08-23): the SQL foundation, the attestation
 support and `membership_attest_v1` itself** — all **LOCAL ONLY AND NOT
-DEPLOYED** — and **U5e (2026-08-23): client plumbing and F6**, which adds two
-services and wires NO triggers. **The server half of B-24's protocol is complete
-and unproven against Apple; the purchase/join flow is UNCHANGED** — SIWA-before-
-purchase is U5f, which has not begun.**
+DEPLOYED** — **U5e (2026-08-23): client plumbing and F6**, and **U5f
+(2026-08-23): the new join flow and attestation orchestration** — the first
+product-visible U5 unit. **NOTHING IS DEPLOYED and nothing has met Apple.** The
+whole protocol exists locally, client and server, and is unproven end to end.
+**U5g — deployment and genuine Sandbox QA — has not begun.**
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -101,6 +102,56 @@ signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200
 assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
+
+## U5f — NEW JOIN FLOW AND ATTESTATION ORCHESTRATION. 2026-08-23
+
+**The first product-visible U5 unit.** No server surface changed. 12 unit tests,
+47 structural assertions, both builds clean.
+
+**The sequence is now** Explore Connected -> SIWA -> `ensure_membership_binding()`
+-> purchase with `.appAccountToken(bindingToken)` -> `.verified` -> attestation.
+**New subscriptions are bound AT PURCHASE**, so a new member never traverses the
+legacy-claim path; that path survives for the pre-U5f population and as the
+fallback when a token could not be fetched. **An already-authenticated member
+sees no extra step.** Solo remains entirely account-free.
+
+### The trigger invariant, and the assertion that protects it
+
+Six triggers — launch, foreground, entitlement resolving, identity arriving,
+purchase, restore — all routed through one coordinator so the invariant lives in
+one place: `locally entitled ∧ hasConnectedIdentity ∧ BackendConfig.isConfigured`,
+**and nothing else**.
+
+**`C5f-12` parses `MOTIVOApp.swift` and asserts no `attestIfNeeded` call sits
+behind a `canViewFeed` guard.** This is the most load-bearing client assertion in
+Phase 3: gate attestation on Connected already being active and **the member the
+mechanism exists to rescue can never reach it** — the dormant pre-cutover
+subscriber is in Solo *precisely because* the server does not know them yet.
+G11 would fail silently and forever.
+
+**Duplicate suppression is single-flight plus a 30-second cooldown, IN MEMORY
+ONLY.** Persisting it would make the client authoritative over server membership
+— invariant 3 — and would defeat G11, whose recovery depends on a cold launch
+attesting again. A previous success is never permanent authority.
+
+### F10 — a verified purchase is a completed purchase
+
+`ConnectedMembershipStore` used to return **`.failed`** when a `.verified`
+transaction's entitlement had not surfaced by the time the refresh returned.
+**Apple had taken the money and the app said "Purchase unavailable"**, inviting a
+second purchase. That branch is gone and its error case is kept as a gravestone
+with no caller.
+
+After a successful purchase the member is told **nothing** in the common case.
+Only two situations earn a word: **propagation** ("Finishing setup — this
+completes on its own, no action needed") and **unresolvable** conflict or
+terminal refusal ("Your purchase is safe. Please contact support"). A unit test
+asserts the pending copy contains none of *fail, error, unavailable, try again,
+retry, refund, lost* — **F10 as an executable assertion rather than a style
+note** — and that the unresolvable cases never say "try again", because the
+member cannot fix them alone.
+
+---
 
 ## U5e — CLIENT PLUMBING AND F6. NO TRIGGERS WIRED. 2026-08-23
 

@@ -76,6 +76,8 @@ struct MOTIVOApp: App {
     @StateObject private var appleRevocationNotice = AppleRevocationNotice.shared
     @StateObject private var appModeManager: AppModeManager
     @StateObject private var connectedMembershipStore: ConnectedMembershipStore
+    /// U5f — owns the attestation invariant and the duplicate suppression.
+    @StateObject private var attestation = MembershipAttestationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
@@ -263,6 +265,7 @@ struct MOTIVOApp: App {
                 .environmentObject(appRoute)
                 .environmentObject(appModeManager)
                 .environmentObject(connectedMembershipStore)
+                .environmentObject(attestation)
                 .onAppear {
                     connectedMembershipStore.start()
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
@@ -298,6 +301,31 @@ struct MOTIVOApp: App {
                     Task {
                         await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "launch")
                     }
+
+                    // U5f — ATTESTATION AT LAUNCH.
+                    //
+                    // Deliberately its own Task, and deliberately NOT inside the
+                    // Connected-liveness block above, which returns early on
+                    // `canViewFeed`. The invariant is
+                    // `(locally entitled AND hasConnectedIdentity)` and nothing
+                    // more: a dormant pre-cutover subscriber sits in Solo
+                    // precisely BECAUSE the server does not know them yet, so a
+                    // mode gate here would exclude the member the whole mechanism
+                    // exists to rescue (G11).
+                    //
+                    // Entitlement resolves asynchronously, so this launch call
+                    // usually finds it unknown and returns immediately; the
+                    // membershipState trigger below is what actually fires on a
+                    // cold launch. It is kept because the entitlement may already
+                    // be resolved on a warm re-appear, and the coordinator
+                    // collapses the duplicate either way.
+                    Task {
+                        await attestation.attestIfNeeded(
+                            auth: auth,
+                            isLocallyEntitled: connectedMembershipStore.isEntitled,
+                            reason: "launch"
+                        )
+                    }
                 }
                 .onChange(of: scenePhase) { _, phase in
                     guard phase == .active else { return }
@@ -309,6 +337,19 @@ struct MOTIVOApp: App {
                     // so the polled check is required rather than redundant.
                     Task {
                         await AppleCredentialStateMonitor.shared.check(auth: auth, reason: "foreground")
+                    }
+
+                    // U5f — ATTESTATION ON EVERY FOREGROUND, outside the
+                    // Connected-liveness Task below for the same reason as at
+                    // launch. This is also what makes a legacy claim's second
+                    // pass invisible to the member: a propagation delay resolves
+                    // here without anybody being told to do anything.
+                    Task {
+                        await attestation.attestIfNeeded(
+                            auth: auth,
+                            isLocallyEntitled: connectedMembershipStore.isEntitled,
+                            reason: "foreground"
+                        )
                     }
 
                     Task {
@@ -353,10 +394,28 @@ struct MOTIVOApp: App {
                             BackendFeedStore.shared.resetForSignOut()
                             FollowStore.shared.resetForSignOut()
                         }
+
+                        // U5f — the next attestation concerns a DIFFERENT identity
+                        // and must not be throttled by this one's cooldown, nor
+                        // inherit its recorded outcome. Deliberately NOT gated on
+                        // `isConnected`: an identity can be withdrawn while the
+                        // visible experience is already Solo.
+                        attestation.reset()
                     }
                 }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
+
+                    // U5f — the identity half of the invariant just became true.
+                    // Covers the member who was already entitled and has only now
+                    // signed in, which is the ordinary shape of a new join.
+                    Task {
+                        await attestation.attestIfNeeded(
+                            auth: auth,
+                            isLocallyEntitled: connectedMembershipStore.isEntitled,
+                            reason: "identityAvailable"
+                        )
+                    }
 
                     // M7B: backend identity publication is the sign-in transition where the
                     // Connected runtime becomes available. Run the pending avatar promotion only
@@ -384,6 +443,17 @@ struct MOTIVOApp: App {
 
         case .entitled:
             appModeManager.applyActivation(auth: auth, isEntitled: true)
+
+            // U5f — the entitlement half of the invariant just became true. On a
+            // cold launch this is the trigger that actually fires, because
+            // StoreKit resolves after onAppear has run.
+            Task {
+                await attestation.attestIfNeeded(
+                    auth: auth,
+                    isLocallyEntitled: true,
+                    reason: "entitlementResolved"
+                )
+            }
 
         case .notEntitled:
             appModeManager.applyActivation(auth: auth, isEntitled: false)

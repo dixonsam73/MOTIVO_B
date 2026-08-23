@@ -1284,6 +1284,101 @@ one API's freshness behaviour, and its result feeds exactly one decision.
 
 ---
 
+## U5f — THE NEW JOIN FLOW AND ATTESTATION ORCHESTRATION. 2026-08-23
+
+**The first product-visible U5 unit.** No server surface changed — `git diff`
+over `supabase/functions/`, `migrations/` and `config.toml` is **empty**.
+
+| Verification | Result |
+|---|---|
+| Debug / Release builds | **both SUCCEEDED**, 0 errors |
+| Unit tests | **12 of 12**, run normally |
+| `client-structural.sh` | **47 of 47** |
+| Server/schema surface | **unchanged** |
+
+### The new sequence
+
+```
+Explore Connected -> SIWA / backend identity -> ensure_membership_binding()
+   -> purchase with .appAccountToken(bindingToken) -> .verified -> attestation
+```
+
+**The subscription is now bound AT PURCHASE**, so a new member never traverses
+the legacy-claim path. That path remains for the pre-U5f population and for the
+case where the token could not be fetched — deliberately, because refusing a
+purchase over a transient binding hiccup would turn a recoverable delay into a
+lost sale, and the server binds it on a later attestation anyway.
+
+**An already-authenticated member sees no extra step**: Continue checks
+`hasConnectedIdentity` and goes straight to the paywall.
+
+### Attestation triggers — six, one gate
+
+All six route through `MembershipAttestationCoordinator`, so the invariant is
+enforced in exactly one place:
+
+| Trigger | Forced past cooldown |
+|---|---|
+| launch | no |
+| foreground | no |
+| local entitlement resolves to entitled | no |
+| backend identity becomes available | no |
+| immediately after a verified purchase | **yes** |
+| Restore Purchases / `AppStore.sync()` | **yes** |
+
+**`C5f-12` is the assertion that matters most.** It parses `MOTIVOApp.swift` and
+asserts that **no `attestIfNeeded` call sits behind a `canViewFeed` guard**. Gate
+attestation on Connected already being active and the member the mechanism exists
+to rescue — the dormant pre-cutover subscriber, in Solo *because* the server does
+not know them yet — can never reach it. **G11 would fail silently and forever.**
+
+**Duplicate suppression is single-flight plus a 30s cooldown, IN MEMORY ONLY**
+(`C5f-6`). A persisted "already attested" flag would become client-held authority
+over server membership, which invariant 3 forbids, and would defeat G11 outright:
+the dormant returner's recovery depends on a cold launch attesting again. State
+resets every launch, deliberately, and a previous success is never permanent
+authority.
+
+### F10 — a verified purchase is a completed purchase
+
+Two changes. In `ConnectedMembershipStore`, a `.verified` transaction whose
+entitlement had not yet surfaced used to return **`.failed`** — Apple had taken
+the money and the app said "Purchase unavailable", inviting a second purchase.
+That branch is gone; the error case is kept as a **gravestone** with no caller
+(`C5f-19`).
+
+In the paywall, `postPurchaseNotice` maps the attestation outcome to what the
+member is told, and **the common case is silence**:
+
+| Outcome | Told |
+|---|---|
+| established / alreadyEstablished | **nothing** |
+| appleUnavailable / transport / serverError / non-terminal refusal | **nothing** — the next foreground retries |
+| **pending** (propagation) | *"Finishing setup — this completes on its own, no action needed."* |
+| conflict / terminal refusal | *"Your purchase is safe. Please contact support."* |
+
+`pendingIsCalmAndNotAFailure` asserts the pending copy contains none of *fail,
+failed, error, unavailable, problem, try again, retry, cancel, refund, lost* —
+**F10 expressed as an executable assertion rather than a style note.** The
+unresolvable cases assert *"purchase is safe"* and the absence of *"try again"*,
+because the member cannot fix those alone.
+
+### Genuine-Sandbox scenarios unlocked by this unit
+
+Everything below needs deployment first, and none of it is runnable locally:
+
+- **S-1** — a real `currentEntitlements` JWS passes the **pinned** Apple anchor.
+- **S-2** — Set App Account Token accepted by Apple and reflected in a later read.
+- **B-24's new-purchase path end to end** — bound at source, so ingestion should
+  go straight to `applied` rather than `unmapped`.
+- **S-3** — the token survives into a real renewal notification. **The single
+  assertion that proves the whole protocol**, and it needs a renewal cycle.
+- **G11 client half** — delete only the membership row, disable the clause, cold
+  launch, and observe the request issued **unconditionally**.
+- **F10 on device** — a real purchase where attestation is momentarily pending.
+
+---
+
 ## U5e — CLIENT PLUMBING AND F6. 2026-08-23. NO TRIGGERS WIRED
 
 **Two services, one session helper, zero user-visible change.** The purchase and

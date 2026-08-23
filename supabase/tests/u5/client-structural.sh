@@ -109,9 +109,57 @@ is C5e-21 "$(code $ATT 'hasConnectedIdentity')" "1" "attestation requires an exi
 is C5e-22 "$(code $BIND 'hasConnectedIdentity')" "1" "binding requires an existing identity, never creates one"
 is C5e-23 "$(code $ATT 'signIn|SignInWithApple|ASAuthorization')" "0" "neither service can initiate authentication"
 
-# ============================ U5e wires no triggers (that is U5f/U5g)
-is C5e-24 "$(code MOTIVO/MOTIVOApp.swift 'MembershipAttestationService|MembershipBindingService')" "0" "no launch/foreground trigger is wired yet"
-is C5e-25 "$(code MOTIVO/MembershipSelectionView.swift 'appAccountToken')" "0" "the purchase flow is UNCHANGED — SIWA-before-purchase is U5f"
+# ============================ U5f — the trigger invariant
+#
+# THE MOST LOAD-BEARING ASSERTIONS IN THIS FILE. If attestation is ever gated on
+# Connected already being active, the member the whole mechanism exists to
+# rescue -- the dormant pre-cutover subscriber sitting in Solo BECAUSE the server
+# does not know them yet -- can never reach it. G11 fails silently and forever.
+COORD=MOTIVO/MembershipAttestationCoordinator.swift
+is C5f-1 "$(code $COORD 'canViewFeed|AppMode|BackendEnvironment|\.connected')" "0" "the coordinator has NO app-mode dependency"
+is C5f-2 "$(code $COORD 'isLocallyEntitled')" "4" "entitlement is a PARAMETER, never read from a store"
+is C5f-3 "$(code $COORD 'hasConnectedIdentity')" "1" "identity is required"
+is C5f-4 "$(code $COORD 'BackendConfig.isConfigured')" "1" "configuration is required"
+is C5f-5 "$(code $COORD 'membership_|membershipRow|hasMembership')" "0" "NEVER gated on a server membership row existing"
+
+# The coordination must not become persistent client authority over membership.
+is C5f-6 "$(code $COORD 'UserDefaults|Keychain|FileManager')" "0" "duplicate suppression is IN MEMORY ONLY"
+is C5f-7 "$(code $COORD 'jws|JWS')" "0" "the coordinator never touches the JWS at all"
+
+# Every trigger routes through the coordinator, so the invariant is enforced once.
+is C5f-8 "$(code MOTIVO/MOTIVOApp.swift 'attestation.attestIfNeeded')" "4" "four app-level triggers: launch, foreground, entitlement, identity"
+is C5f-9 "$(code MOTIVO/MembershipSelectionView.swift 'attestation.attestIfNeeded')" "2" "two user-initiated triggers: purchase and restore"
+is C5f-10 "$(code MOTIVO/MOTIVOApp.swift 'MembershipAttestationService\.')" "0" "no trigger bypasses the coordinator"
+is C5f-11 "$(code MOTIVO/MembershipSelectionView.swift 'MembershipAttestationService\.attest')" "0" "...including the purchase path"
+
+# The triggers must sit OUTSIDE the Connected-liveness block, which returns early
+# on canViewFeed. Asserted by proximity: no attestIfNeeded call may appear after
+# a canViewFeed guard within the same Task.
+is C5f-12 "$(python3 -c '
+import re
+t=open("MOTIVO/MOTIVOApp.swift").read()
+t=re.sub(r"^\s*//.*$","",t,flags=re.M)
+bad=0
+for m in re.finditer(r"guard appModeManager\.canViewFeed else \{ return \}(.*?)\n                    \}", t, flags=re.S):
+    if "attestIfNeeded" in m.group(1): bad+=1
+print(bad)')" "0" "NO attestation trigger sits behind a canViewFeed guard"
+
+# ============================ U5f — SIWA before purchase
+is C5f-13 "$(code MOTIVO/MembershipSelectionView.swift 'appAccountToken: bindingToken')" "1" "the purchase carries the SERVER-ISSUED token"
+is C5f-14 "$(code MOTIVO/MembershipSelectionView.swift 'bindingToken *= *UUID\(')" "0" "...and the binding token is NEVER minted on device"
+is C5f-14b "$(code MOTIVO/MembershipSelectionView.swift 'MembershipBindingService.ensureBindingToken')" "1" "...it comes from the server, through one call site"
+is C5f-15 "$(code MOTIVO/ConnectedMembershipStore.swift '\.appAccountToken\(')" "1" "StoreKit receives it as a PurchaseOption"
+is C5f-16 "$(code MOTIVO/ProfileView.swift 'connectedSignInIntent')" "5" "the sign-in sheet carries a join/returning intent"
+is C5f-17 "$(code MOTIVO/ProfileView.swift 'connectedSignInIntent = .join')" "2" "Continue routes through SIWA when identity is absent"
+
+# Only .verified transactions may attest — D8, asserted at the source.
+is C5f-18 "$(code MOTIVO/MembershipAttestationService.swift 'case .verified')" "1" "only .verified entitlements are collected"
+is C5f-19 "$(code MOTIVO/ConnectedMembershipStore.swift 'MembershipStoreError\.entitlementMissingAfterVerifiedPurchase')" "0" "F10: NOTHING constructs the old failure any more"
+is C5f-19b "$(code MOTIVO/ConnectedMembershipStore.swift 'entitlementMissingAfterVerifiedPurchase')" "2" "...only its declaration and its description remain"
+
+# ============================ Solo is still account-free
+is C5f-20 "$(code MOTIVO/ProfileView.swift 'connectedPromoSection')" "2" "Connected remains behind an explicit entry point"
+is C5f-21 "$(code $COORD 'signIn|ASAuthorization')" "0" "attestation can never initiate authentication"
 
 echo
 echo "  $PASS passed, $FAIL failed"

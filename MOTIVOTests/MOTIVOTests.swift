@@ -152,3 +152,70 @@ func endpointConstruction() throws {
     )
     #expect(local.absoluteString == "http://127.0.0.1:54321/functions/v1/membership_attest_v1")
 }
+
+// MARK: - U5f · F10, the post-purchase notice
+//
+// THE PURCHASE SUCCEEDED IN EVERY CASE BELOW. These assert what the member is
+// TOLD, and the most important assertion is the one that expects silence.
+
+@MainActor
+@Test("a successful purchase and establishment says NOTHING")
+func establishedIsSilent() {
+    // An alert here would be noise on the happy path.
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .established) == nil)
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .alreadyEstablished) == nil)
+}
+
+@MainActor
+@Test("F10: propagation delay is NEVER presented as a failure")
+func pendingIsCalmAndNotAFailure() throws {
+    let notice = try #require(MembershipSelectionView.postPurchaseNotice(for: .pending))
+    let text = (notice.title + " " + notice.message).lowercased()
+
+    // The load-bearing assertion of F10. Apple took the money and the binding is
+    // propagating; language implying loss, error or a required retry would be
+    // both wrong and alarming.
+    for forbidden in ["fail", "failed", "error", "unavailable", "problem",
+                      "try again", "retry", "cancel", "refund", "lost"] {
+        #expect(!text.contains(forbidden), "must not say '\(forbidden)' for a propagation delay")
+    }
+    // And it must tell them there is nothing to do.
+    #expect(text.contains("no action needed") || text.contains("on its own"))
+}
+
+@MainActor
+@Test("transient server or Apple trouble is silent, because the next foreground retries")
+func transientIsSilent() {
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .appleUnavailable) == nil)
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .transport("offline")) == nil)
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .serverError(status: 500)) == nil)
+    #expect(MembershipSelectionView.postPurchaseNotice(for: nil) == nil)
+    #expect(MembershipSelectionView.postPurchaseNotice(for: .ineligible(.noVerifiedTransaction)) == nil)
+}
+
+@MainActor
+@Test("conflict and terminal refusal are surfaced, and reassure that the purchase is safe")
+func unresolvableIsSurfacedCalmly() throws {
+    for outcome in [MembershipAttestationService.Outcome.conflict,
+                    .terminalRefusal(reason: "family_transaction_not_supported"),
+                    .claimRefused(category: "foreign_app", terminal: true)] {
+        let notice = try #require(MembershipSelectionView.postPurchaseNotice(for: outcome))
+        let text = (notice.title + " " + notice.message).lowercased()
+        // The member cannot fix these alone, so they must not be told to retry —
+        // and must be told their money is not at risk.
+        #expect(text.contains("purchase is safe"))
+        #expect(!text.contains("try again"))
+    }
+}
+
+@MainActor
+@Test("a NON-terminal claim refusal is not surfaced")
+func nonTerminalClaimRefusalIsSilent() {
+    // e.g. an environment this deployment does not attest. Nothing the member
+    // can act on, and it resolves without them.
+    #expect(
+        MembershipSelectionView.postPurchaseNotice(
+            for: .claimRefused(category: "environment", terminal: false)
+        ) == nil
+    )
+}

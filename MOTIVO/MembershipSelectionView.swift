@@ -10,12 +10,20 @@ import StoreKit
 
 struct MembershipSelectionView: View {
     @EnvironmentObject private var membershipStore: ConnectedMembershipStore
+    @EnvironmentObject private var auth: AuthManager
+    @EnvironmentObject private var attestation: MembershipAttestationCoordinator
     @Environment(\.colorScheme) private var colorScheme
 
     let onAuthenticationRequired: () -> Void
+    let onJoinComplete: () -> Void
 
     @State private var selectedProductID: String?
     @State private var notice: MembershipNotice?
+
+    /// Fetched when this screen appears, so the purchase can carry it. **Never
+    /// generated here** — it is the server's to issue (B-24), and a client-minted
+    /// value would be a token nobody recorded.
+    @State private var bindingToken: UUID?
 
     var body: some View {
         ScrollView {
@@ -43,9 +51,16 @@ struct MembershipSelectionView: View {
 
             if membershipStore.isEntitled {
                 DispatchQueue.main.async {
-                    onAuthenticationRequired()
+                    onJoinComplete()
                 }
+                return
             }
+
+            // Fetch the binding token now, so it is in hand before the member
+            // taps Subscribe. Doing it here rather than inside the purchase
+            // keeps a network round trip off the purchase path -- C-13's hazard
+            // is exactly a purchase that stalls behind something else.
+            Task { await loadBindingToken() }
         }
         .onChange(of: membershipStore.products.map(\.id)) { _, _ in
             selectDefaultProductIfNeeded()
@@ -257,16 +272,51 @@ struct MembershipSelectionView: View {
             ?? membershipStore.annualProduct?.id
     }
 
+    /// Obtains this identity's server-issued binding token.
+    ///
+    /// A failure here is deliberately NOT surfaced and NOT blocking. The purchase
+    /// proceeds without a token and the server's legacy-claim path binds the
+    /// subscription on a later attestation -- so a transient network problem
+    /// costs a slightly longer route to the same state, not a lost sale and not
+    /// an error the member can do anything about.
+    private func loadBindingToken() async {
+        guard auth.hasConnectedIdentity else { return }
+        if case .success(let token) = await MembershipBindingService.ensureBindingToken(
+            auth: auth, reason: "membershipSelection"
+        ) {
+            bindingToken = token
+        }
+    }
+
     private func purchaseSelectedProduct() {
         guard let selectedProduct else { return }
 
         Task {
-            let outcome = await membershipStore.purchase(selectedProduct)
+            // Last chance to bind at source: if the token was not in hand yet,
+            // try once more before falling back to the legacy path.
+            if bindingToken == nil { await loadBindingToken() }
+
+            let outcome = await membershipStore.purchase(
+                selectedProduct,
+                appAccountToken: bindingToken
+            )
 
             switch outcome {
             case .verified:
+                // F10. THE PURCHASE SUCCEEDED. Attestation tells the SERVER about
+                // it, and whatever the server says, the purchase is not undone
+                // and must never be reported as having failed.
+                await attestation.attestIfNeeded(
+                    auth: auth,
+                    isLocallyEntitled: membershipStore.isEntitled,
+                    reason: "purchase",
+                    force: true
+                )
+                if let pending = Self.postPurchaseNotice(for: attestation.lastOutcome) {
+                    notice = pending
+                }
                 await MainActor.run {
-                    onAuthenticationRequired()
+                    onJoinComplete()
                 }
 
             case .unverified:
@@ -303,8 +353,17 @@ struct MembershipSelectionView: View {
                     message: error.localizedDescription
                 )
             } else if membershipStore.isEntitled {
+                // A restore is user-initiated, so it forces attestation past the
+                // cooldown: this is exactly the returning member the server may
+                // not know about yet.
+                await attestation.attestIfNeeded(
+                    auth: auth,
+                    isLocallyEntitled: true,
+                    reason: "restorePurchases",
+                    force: true
+                )
                 await MainActor.run {
-                    onAuthenticationRequired()
+                    onJoinComplete()
                 }
             } else {
                 notice = MembershipNotice(
@@ -316,7 +375,56 @@ struct MembershipSelectionView: View {
     }
 }
 
-private struct MembershipNotice: Identifiable {
+extension MembershipSelectionView {
+    /// F10 — WHAT THE MEMBER IS TOLD AFTER A **SUCCESSFUL** PURCHASE.
+    ///
+    /// Pure and static so the mapping is unit-testable without StoreKit, a
+    /// network or a view.
+    ///
+    /// **`nil` MEANS SAY NOTHING, AND IT IS THE COMMON CASE.** The purchase
+    /// worked and membership was established; interrupting that with an alert
+    /// would be noise. Only two situations earn a word, and neither is phrased
+    /// as a failure:
+    ///
+    ///   - **pending** — Apple accepted the binding and has not surfaced it yet.
+    ///     This finishes by itself on a later attestation, which runs on every
+    ///     foreground. **It is propagation, not an error**, so it gets a calm
+    ///     sentence and no action to take. Inventing destructive or alarming
+    ///     semantics for a delay is exactly what this row exists to prevent.
+    ///   - **conflict / terminal refusal** — the subscription is bound to a
+    ///     different Etudes account, or Apple will never bind it. The member
+    ///     cannot fix this alone and must not be told to try again.
+    ///
+    /// Everything else -- transport failures, Apple briefly unavailable -- is
+    /// silent: the next foreground retries, and the member has nothing to do.
+    static func postPurchaseNotice(
+        for outcome: MembershipAttestationService.Outcome?
+    ) -> MembershipNotice? {
+        switch outcome {
+        case .pending:
+            return MembershipNotice(
+                title: "Finishing setup",
+                message: "Your membership is being confirmed. This completes on its own — no action needed."
+            )
+        case .conflict:
+            return MembershipNotice(
+                title: "Membership already in use",
+                message: "This subscription is already linked to a different Études account. Your purchase is safe. Please contact support so we can sort it out."
+            )
+        case .terminalRefusal, .claimRefused(_, terminal: true):
+            return MembershipNotice(
+                title: "We couldn't link this subscription",
+                message: "Your purchase is safe. Please contact support so we can link it to your Études account."
+            )
+        default:
+            // Includes established, alreadyEstablished, appleUnavailable,
+            // transport, ineligible and nil. Nothing to say and nothing to do.
+            return nil
+        }
+    }
+}
+
+struct MembershipNotice: Identifiable {
     let id = UUID()
     let title: String
     let message: String
