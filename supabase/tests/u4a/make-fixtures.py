@@ -113,6 +113,12 @@ def main() -> int:
        "-CAcreateserial", "-sha384", "-days", "400", "-extfile", "leaf.ext", "-out", "leaf.pem")
 
     # An unrelated root, for the substituted-anchor negatives.
+    # PKCS8 form of the P-256 leaf key, for the U5c App Store Server API request
+    # assertions. SEC1 ("EC PRIVATE KEY") is what ecparam emits and is NOT what
+    # crypto.subtle.importKey("pkcs8", ...) accepts.
+    sh("openssl", "pkcs8", "-topk8", "-nocrypt", "-in", "leaf.key", "-out", "leaf.p8")
+    p8_b64 = base64.b64encode((WORK / "leaf.p8").read_bytes()).decode()
+
     sh("openssl", "ecparam", "-name", "secp384r1", "-genkey", "-noout", "-out", "evil.key")
     sh("openssl", "req", "-x509", "-new", "-key", "evil.key", "-sha384", "-days", "3650",
        "-subj", "/C=GB/O=Not Apple/CN=Unrelated Root", "-out", "evil.pem")
@@ -253,6 +259,39 @@ def main() -> int:
         "tampered_nested_tx": tampered_nested_tx,
         "not_a_jws": "this-is-not-a-jws",
         "two_parts": f"{gp[0]}.{gp[1]}",
+        # ---- U5c: BARE TRANSACTION JWSs for the attestation path.
+        #
+        # These are what a CLIENT presents, not what Apple pushes: a single
+        # JWSTransaction, no notification envelope. Every one below is VALIDLY
+        # SIGNED by the test CA -- that is the whole point. The hostile cases are
+        # hostile precisely because "Apple signed it" is true of them, which is
+        # what B-31 exists to stop being sufficient.
+        "attest_ok": jws(tx()),
+        "attest_ok_annual": jws(tx(productId="com.sdsongs.etudes.connected.annual",
+                                   originalTransactionId="2000000888888888")),
+        # The legacy population: genuine, ours, and carrying NO token yet.
+        "attest_no_token": jws(tx(appAccountToken=None)),
+        # Somebody else's token on our product -- the conflict/orphan input.
+        "attest_other_token": jws(tx(appAccountToken="bbbbbbbb-0000-4000-8000-000000000009")),
+        # ---- hostile: validly Apple-signed, and still must be refused
+        "attest_foreign_app": jws(tx(bundleId="com.example.someotherapp")),
+        "attest_foreign_product": jws(tx(productId="com.sdsongs.etudes.consumable.tipjar")),
+        "attest_env_production": jws(tx(environment="Production")),
+        "attest_env_xcode": jws(tx(environment="Xcode")),
+        "attest_family_shared": jws(tx(inAppOwnershipType="FAMILY_SHARED")),
+        "attest_no_original_id": jws(tx(originalTransactionId=None)),
+        # A STALE transaction: signedDate a year old, everything else valid. Under
+        # F3b's P2 this MUST still be accepted -- it is G11's dormant returner.
+        "attest_stale_year": jws(tx(signedDate=NOW - 365 * 24 * 3600 * 1000)),
+        # Signed by a chain rooted somewhere else entirely.
+        "attest_evil_root": jws(tx(), chain=[x5c[0], x5c[1],
+                                             base64.b64encode(d['evil']).decode()]),
+        # A P-256 signing key in PKCS8, base64 of the PEM text — exactly the shape
+        # APPLE_IAP_P8_B64 carries. Present so the U5c battery can assert the
+        # Set App Account Token REQUEST SHAPE (method, path, host, body) against
+        # the real signing path, rather than skipping it or stubbing the signer.
+        # Reuses the leaf key; it signs nothing that is ever trusted as Apple.
+        "p8_b64": p8_b64,
         # ---- anchors
         "test_root_der_b64": base64.b64encode(d["root"]).decode(),
         "apple_root_der_b64": anchor_b64_from_source(),

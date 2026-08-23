@@ -1284,6 +1284,107 @@ one API's freshness behaviour, and its result feeds exactly one decision.
 
 ---
 
+## U5c — RESULTS. 406 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
+
+**U5c is `_shared/appstore` only: two modules, no SQL, no Edge Function, no
+client change.** The B-23 delta is **unchanged at 20 problems** — identical to
+U5b's — which is the check that U5c added no schema surface at all.
+
+| Suite | Result |
+|---|---|
+| U3 acceptance | **97 of 97** |
+| U4 modules / acceptance / e2e | **48 / 95 / 43** — U4's verifier behaviour preserved |
+| U5c modules | **68 of 68**, new |
+| U5b acceptance | **55 of 55** |
+| **Total** | **406** |
+
+### THE HOSTILE FIXTURES ARE ALL VALIDLY APPLE-SIGNED, AND THAT IS THE POINT
+
+Every `attest_*` fixture passes signature verification against the test CA. **If
+a claim check regresses, the payload does not start failing somewhere else — it
+starts being ACCEPTED.** A suite that only fed this code malformed input would
+have proved nothing about B-31, because B-31 is precisely the observation that
+"Apple signed it" is true of a stranger's subscription too.
+
+| Fixture | Must be | Assertion |
+|---|---|---|
+| another app's genuine subscription | `foreign_app`, **terminal** | U5c-12, U5c-20 |
+| our app, an unrelated product | `foreign_product`, **terminal** | U5c-13, U5c-21 |
+| `FAMILY_SHARED` | `family_shared`, **terminal** | U5c-16, U5c-22 |
+| Production while only Sandbox attestable | `environment`, **not** terminal | U5c-14, U5c-23 |
+| `Xcode` environment | `environment`, even when Production is allowed | U5c-15, U5c-25 |
+| a **year-old** JWS | **ACCEPTED** | U5c-9 |
+
+**U5c-9 is the F3b consequence made executable.** A JWS signed a year ago must
+verify, because that is G11's dormant pre-cutover subscriber. A freshness window
+would have refused exactly the member U5 exists to rescue, and this assertion is
+what stops one being reintroduced later by someone who did not read P2.
+
+### A DEFECT WAS INTRODUCED AND CAUGHT BY THE BATTERY, NOT BY REVIEW
+
+**Apple's Set App Account Token answers 200 with an EMPTY BODY.** `request()`
+enforces "a 200 whose body we cannot read is NOT an authoritative answer" — which
+is exactly right for every read endpoint, and **wrong for a write endpoint that
+returns nothing**. As first written, every *successful* token assignment would
+have thrown `malformed`, so the legacy claim path would have failed 100% of the
+time while Apple was accepting every call — and the failure would have looked
+like an Apple problem rather than ours.
+
+It surfaced as `U5c-36..40` reporting SKIP with an unparseable-body error, which
+is only visible because the battery asserts the **request shape** against the
+real signing path instead of stubbing the signer. The fix is an explicit
+`allowEmptyBody` on the one endpoint that needs it; the general rule is
+untouched, because the general rule is right.
+
+**The lesson generalises: a safety rule inherited from read paths can be a defect
+on a write path, and "it threw" is not the same as "it failed".**
+
+### TWO ASSERTIONS WERE WRONG AND THE WAY THEY WERE WRONG IS KEPT
+
+`U5c-18` originally fed a chain whose **third** certificate was swapped for a
+hostile root and expected a refusal. **`verifyChain` ignores `x5c[2]` entirely** —
+it verifies the intermediate against OUR anchor, which *is* the pinning property
+— so accepting it is correct and the assertion was testing a mechanism that
+deliberately does not exist. It now asserts that the substituted root is ignored,
+and pinning is asserted the only way that means anything: **the same payload that
+passes under the test anchor FAILS under the real Apple Root CA G3** (`U5c-18b`).
+
+`U5c-34` searched the source text for `APPLE_ASSN_ALLOWED_ENVIRONMENTS` and
+failed on a **correct** file — `attest.ts` names that variable in its own
+explanation of why it must never read it. It now targets the `get(...)` call.
+
+### The claim/trust boundary, asserted rather than described
+
+- **Signature first**, delegated to the unchanged `verifyAppleJWS`. Nothing in a
+  payload means anything until Apple has vouched for it.
+- Then **bundleId**, **environment**, **product**, **Family Sharing**, and
+  **originalTransactionId** — cheapest and most decisive first.
+- **Revocation is deliberately NOT checked**: the JWS answers *who*, never *now*.
+  That is B-24's split, and F3b's P2 is why it must be.
+- **`APPLE_ATTEST_ALLOWED_ENVIRONMENTS` is separate from the ASSN variable**,
+  asserted behaviourally (U5c-32: setting the ASSN variable widens nothing) and
+  structurally (U5c-34).
+- **The JWS is never returned, logged or echoed** — U5c-26/27 on the result,
+  U5c-28 on the error message, with U5c-29 confirming the error still names the
+  Apple-signed claim so a refusal is diagnosable.
+
+### The re-read is a code path now, not a discipline
+
+`setAppAccountToken` returns `void`, so a 200 **cannot** be mistaken for
+confirmation (U5c-36). `observeAppAccountToken` performs a fresh authoritative
+read and verifies the nested JWS in its own right against the pinned anchor
+(U5c-64). `interpretObservation` names four outcomes, and the third is the one
+that had to be impossible to collapse:
+
+| Observation | Outcome | U5d must |
+|---|---|---|
+| our token | `ours` | establish |
+| entry found, **no token yet** | **`propagating`** | **write nothing, retry later — NOT failure** |
+| somebody else's token | `foreign` | refuse and record (B-24) |
+| no entry at all | `unavailable` | retry — never read as "not bound" |
+
+---
+
 ## U5b — RESULTS. 338 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
 
 **U5b is the SQL foundation for ownership establishment.** One table, one

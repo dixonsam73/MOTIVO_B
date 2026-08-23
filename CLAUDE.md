@@ -24,9 +24,10 @@ U0 (this record), U1 (the local backend baseline), U2 (the four backend
 verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — U4 in full, including
 U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
 (2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
-and **U5b (2026-08-23): the SQL foundation, LOCAL ONLY AND NOT DEPLOYED**, 338
-assertions green. **U5c onwards is not built**, and no Phase 3 client protocol
-exists.**
+**U5b (2026-08-23): the SQL foundation** and **U5c (2026-08-23):
+`_shared/appstore` attestation support** — both **LOCAL ONLY AND NOT DEPLOYED**,
+406 assertions green. **U5d onwards is not built**, and no Phase 3 client
+protocol exists.**
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -98,6 +99,62 @@ signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200
 assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
+
+## U5c — ATTESTATION SUPPORT. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
+
+**Two modules and nothing else** — `_shared/appstore/attest.ts` new, `api.ts`
+extended. No SQL, no Edge Function, no client change; the B-23 delta is
+**unchanged at 20 problems**, identical to U5b's, which is how "U5c added no
+schema surface" is checked rather than asserted. **406 assertions green.**
+
+### B-31 closed in implementation — the claim boundary exists
+
+`verifyAppleJWS` is **untouched** and still answers exactly one question, "did
+Apple sign these bytes", because U4's notification path depends on that and
+nothing else. The client-supplied path gets its own entry point,
+`verifyAttestationJWS`, which enforces bundleId, environment, product, Family
+Sharing and `originalTransactionId` **after** signature verification.
+
+**Every hostile fixture is VALIDLY APPLE-SIGNED.** That is what makes the suite
+meaningful: if a claim check regresses, a stranger's genuine subscription does
+not start failing elsewhere — it starts being **accepted**.
+
+**Revocation is deliberately NOT checked.** The JWS answers *who*, never *now*;
+that is B-24's split and F3b's P2 is why it has to be.
+
+**No freshness window, and `U5c-9` is what stops one being reintroduced:** a
+year-old JWS must verify, because that is G11's dormant pre-cutover subscriber.
+
+### A defect was introduced and caught by the battery rather than by review
+
+**Apple's Set App Account Token answers 200 with an EMPTY BODY**, and `request()`
+enforces "a 200 we cannot parse is not an answer" — right for every read
+endpoint, **wrong for a write endpoint that returns nothing**. As first written,
+every *successful* token assignment would have thrown `malformed`: the legacy
+claim would have failed 100% of the time while Apple accepted every call, and it
+would have looked like an Apple problem. Fixed with an explicit `allowEmptyBody`
+on the one endpoint that needs it; the general rule is untouched because the
+general rule is right. **A safety rule inherited from read paths can be a defect
+on a write path, and "it threw" is not the same as "it failed".**
+
+### The re-read is a code path now, not a rule somebody remembers
+
+`setAppAccountToken` returns **void**, so a 200 cannot be mistaken for
+confirmation. `observeAppAccountToken` does a fresh authoritative read and
+verifies the nested JWS in its own right against the pinned anchor.
+`interpretObservation` names four outcomes, and **`propagating` — found, but our
+token not visible yet — is explicitly NOT failure**: write nothing, retry on a
+later attestation. P12 already proved Apple-side propagation is real and
+indistinguishable from misconfiguration while it lasts.
+
+**Apple's five terminal error codes were READ FROM APPLE'S REFERENCE on
+2026-08-23, not inferred from their names:** `4000006`, `4000048`, `4000183`,
+`4000185` (Family Sharing), `4000187` (not the original transaction id), and
+`4040005`. Terminal means record and stop; anything unrecognised is **retryable**,
+because failing closed would permanently refuse a legitimate owner over an Apple
+error we have not met yet.
+
+---
 
 ## U5b — SQL FOUNDATION. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
 
