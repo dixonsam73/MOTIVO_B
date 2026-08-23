@@ -26,9 +26,10 @@ U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
 (2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
 **U5b, U5c and U5d (2026-08-23): the SQL foundation, the attestation
 support and `membership_attest_v1` itself** — all **LOCAL ONLY AND NOT
-DEPLOYED**, 469 assertions green. **The server half of B-24's protocol is
-complete and unproven against Apple; NO CLIENT WORK EXISTS** (U5e/U5f), so
-nothing can call it yet.**
+DEPLOYED** — and **U5e (2026-08-23): client plumbing and F6**, which adds two
+services and wires NO triggers. **The server half of B-24's protocol is complete
+and unproven against Apple; the purchase/join flow is UNCHANGED** — SIWA-before-
+purchase is U5f, which has not begun.**
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -100,6 +101,62 @@ signature failure **5xx**, verified-and-durably-handled 200. The old "answer 200
 assumed a failing payload was never valid; the catastrophic case is a verifier
 that rejects everything, and 5xx buys production's five retries over 72 hours to
 fix it. Sandbox never retries either way.
+
+## U5e — CLIENT PLUMBING AND F6. NO TRIGGERS WIRED. 2026-08-23
+
+**Two services and one correctly-named session helper. The user-visible flow is
+untouched** — asserted, not promised: `C5e-25` pins that
+`MembershipSelectionView` still knows nothing about `appAccountToken`, and
+`C5e-24` that `MOTIVOApp` wires no attestation trigger. **SIWA-before-purchase
+remains U5f.**
+
+- **`MembershipBindingService`** — asks the server for this identity's
+  `appAccountToken` and hands it back. **There is no `UUID()` in the file**
+  (`C5e-11`): a client-minted token would be a value the server never issued, and
+  binding a real Apple subscription to one puts a fabricated identifier at the
+  centre of the ownership protocol.
+- **`MembershipAttestationService`** — collects a `.verified` JWS, POSTs **only**
+  the JWS, and reports what the server decided. **It decides nothing about
+  product mode**: `AppMode`, `canViewFeed` and `isConnected` appear nowhere in
+  either service (`C5e-13`), and `isLocallyEntitled` is a PARAMETER so the
+  service cannot reach into entitlement state and reacquire a mode dependency.
+- **An unrecognised 200 is `serverError`, never success.** Guessing that an
+  unknown outcome means "established" is how a client starts believing it is a
+  member on evidence nobody produced.
+
+**The JWS is treated as what F3b proved it is.** Under P2 it stays valid for the
+life of the transaction, so a leak is permanent rather than expiring in minutes.
+The service holds **no mutable state at all** (`C5e-7`), never logs, never
+persists, never caches, and builds exactly one request body carrying exactly one
+key (`C5e-8`/`C5e-9`).
+
+### F6 — resolved by naming, not by reuse
+
+`ensureValidSession` is gated on `BackendEnvironment.shared.isConnected`, which
+is right for feed refresh and **wrong for attestation**, whose invariant is
+`(locally entitled ∧ hasConnectedIdentity)` and which must run while the visible
+experience is Solo. **The behaviour already existed and only under a misleading
+name** — `ensureValidSessionForConnectedAccountCleanup` is mode-independent but
+names a *caller's motive*, which is exactly the defect C-25 was filed for.
+
+So that body is now **`ensureValidBackendSession(reason:)`**, and the cleanup
+function is a **thin alias** over it — provably identical rather than similar,
+which keeps C-44/C-45's reasoning findable by its own name. `ensureValidSession`
+keeps its guard, so no existing caller changes (`C5e-18`). The new helper
+deliberately **does not sign anybody out** on an unconfigured backend: a liveness
+helper that can revoke a session is the wrong shape for a path that runs on every
+foreground.
+
+### C-54 — the unit test target has never been runnable
+
+`TEST_HOST` still points at `MOTIVO.app/MOTIVO` while the product has been
+`Etudes.app/Etudes` throughout. **"Unit test suite is an empty template"
+understated it**: the suite could not have been executed even if somebody had
+written tests. **The seven tests written at U5e are COMMITTED AND NOT RUN**, and
+are not evidence until C-54 is fixed — one setting in two configurations,
+deliberately not applied while Xcode was open on the project.
+
+---
 
 ## U5d — `membership_attest_v1`. LOCAL ONLY, NOT DEPLOYED. 2026-08-23
 
@@ -634,14 +691,14 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **19** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **20** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **C-54** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and is open**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (open).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -660,10 +717,10 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **4 open: C-26, B-11, C-31 and B-24.** **B-31 was resolved by U5d**, on both
-halves of the condition its cell named: the claim boundary exists AND the
-shipping endpoint provably uses it. All four remaining are the server-authority
-work
+= **5 open: C-26, B-11, C-31, B-24 and C-54.** **B-31 was resolved by U5d**, on
+both halves of the condition its cell named. **C-54 is U5e's and is a P3 tooling
+defect, not server-authority work** — it is counted because its Phase cell says
+3. The other four are the server-authority work
 itself, and none of them has begun. **B-24 is a design defect caught before
 implementation**, so it is open in the sense that U5 has not yet built the
 corrected protocol — not in the sense that anything defective ships.

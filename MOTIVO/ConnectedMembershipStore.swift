@@ -47,7 +47,13 @@ final class ConnectedMembershipStore: ObservableObject {
         }
     }
 
-    private enum ProductID {
+    /// Visibility widened at U5e (was `private`) so the attestation service can
+    /// filter entitlements against the SAME list rather than keeping a second
+    /// copy of the product identifiers. Two copies of this list would drift, and
+    /// the server enforces its own hardcoded set anyway — a client that disagreed
+    /// would simply be refused, which is a confusing way to discover a typo.
+    /// No behaviour change: the values and every existing use are untouched.
+    enum ProductID {
         static let monthly = "com.sdsongs.etudes.connected.monthly"
         static let annual = "com.sdsongs.etudes.connected.annual"
 

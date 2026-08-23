@@ -11,6 +11,9 @@
 #               injected. No database, no network.
 #   acceptance  U5b — the SQL: environment separation, the establishment
 #               writer, the two grants, and F11.
+#   client-structural
+#               U5e — properties of the CLIENT source that no unit test can
+#               reach: the absences. Needs no database and no container.
 #   e2e         U5d — wiring: the real endpoint, the real database, and a
 #               programmable Apple whose CALL LOG is how A30's ordering is
 #               proven. A correct row in the wrong order fails here.
@@ -58,6 +61,9 @@ print()
 print("  %d passed, %d failed" % (d["pass"], d["fail"]))
 sys.exit(1 if d["fail"] else 0)' || RC=1
 cleanup
+
+echo
+"$HERE/client-structural.sh" || RC=1
 
 echo
 "$HERE/acceptance.sh" || RC=1

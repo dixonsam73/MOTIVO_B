@@ -816,9 +816,30 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
     }
 
 
-    /// Ensures the authenticated Supabase session is valid for a Connected account lifecycle operation,
-    /// even after the visible app experience has already returned to local Études.
-    func ensureValidSessionForConnectedAccountCleanup(reason: String) async -> Bool {
+    /// Refreshes the stored Connected session **independently of the current app
+    /// mode**, and does nothing else.
+    ///
+    /// F6 — WHY THIS EXISTS UNDER THIS NAME.
+    ///
+    /// `ensureValidSession` is gated on `BackendEnvironment.shared.isConnected`
+    /// and returns early in Solo. That is right for its callers — feed refresh,
+    /// queue flush — and **wrong for membership attestation**, whose settled
+    /// invariant is `(locally entitled ∧ hasConnectedIdentity)` and which must
+    /// therefore be able to run while the visible experience is Solo.
+    ///
+    /// **The behaviour was already available and only under a misleading name.**
+    /// `ensureValidSessionForConnectedAccountCleanup` is mode-independent, but it
+    /// names a *caller's motive* rather than what the function does — which is
+    /// precisely the defect C-25 was filed for, and reusing it for attestation
+    /// would have re-committed it. This is that body, named for its behaviour;
+    /// the cleanup function is now a thin alias over it, so the two are provably
+    /// identical rather than similar.
+    ///
+    /// **IT IS NOT AUTHORITY AND IT DESTROYS NOTHING.** An unconfigured backend
+    /// returns `false` here; it deliberately does **not** sign the user out, which
+    /// `ensureValidSession` does. A liveness helper that can revoke a session is
+    /// the wrong shape for a path that runs on every foreground.
+    func ensureValidBackendSession(reason: String) async -> Bool {
         guard !LocalFactoryReset.isInProgress else {
             #if DEBUG
             NSLog("[Auth] %@ skipped (factory reset in progress) reason=%@", #function, reason)
@@ -832,14 +853,14 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
 
         guard !self.isSigningIn else {
             #if DEBUG
-            NSLog("[Auth] connected cleanup refresh skipped: sign-in in flight. reason=%@", reason)
+            NSLog("[Auth] backend session refresh skipped: sign-in in flight. reason=%@", reason)
             #endif
             return false
         }
 
         guard BackendConfig.isConfigured else {
             #if DEBUG
-            NSLog("[Auth] connected cleanup refresh skipped: BackendConfig not configured. reason=%@", reason)
+            NSLog("[Auth] backend session refresh skipped: BackendConfig not configured. reason=%@", reason)
             #endif
             return false
         }
@@ -856,6 +877,18 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         let ok = await task.value
         sessionRefreshInFlight = nil
         return ok
+    }
+
+    /// Ensures the authenticated Supabase session is valid for a Connected account lifecycle operation,
+    /// even after the visible app experience has already returned to local Études.
+    ///
+    /// **A THIN ALIAS SINCE U5e, and deliberately not deleted.** Its call sites are
+    /// the account-deletion and revocation paths, whose reasoning in
+    /// `AccountDeletionTransaction` and C-44/C-45 refers to it by this name.
+    /// Delegating rather than renaming keeps that reasoning findable and makes the
+    /// behaviour provably unchanged.
+    func ensureValidSessionForConnectedAccountCleanup(reason: String) async -> Bool {
+        await ensureValidBackendSession(reason: reason)
     }
 
     /// Clears Connected authentication and backend identity, and nothing else.

@@ -1284,6 +1284,78 @@ one API's freshness behaviour, and its result feeds exactly one decision.
 
 ---
 
+## U5e — CLIENT PLUMBING AND F6. 2026-08-23. NO TRIGGERS WIRED
+
+**Two services, one session helper, zero user-visible change.** The purchase and
+join flow is untouched and that is **asserted rather than promised**: `C5e-25`
+pins that `MembershipSelectionView` still knows nothing about `appAccountToken`,
+`C5e-24` that `MOTIVOApp` wires no attestation trigger. SIWA-before-purchase is
+U5f.
+
+| Verification | Result |
+|---|---|
+| Debug build | **SUCCEEDED**, 0 errors |
+| Release build | **SUCCEEDED**, 0 errors |
+| `client-structural.sh` | **26 of 26** |
+| Unit tests (7 written) | **NOT RUN — see C-54.** Not evidence yet |
+| Server surfaces touched | **NONE** — `git diff` over `supabase/functions/`, `supabase/migrations/` and `config.toml` is **empty**, so the B-23 delta and every SQL/function suite are structurally unaffected. **They were not re-run for show** |
+
+### The absences are the assertions
+
+A client that *says* it never logs a bearer artefact is worth little. `C5e-1..7`
+assert that `MembershipAttestationService` contains no `print`, no `NSLog`, no
+`Logger`, no `UserDefaults`, no `Keychain.set`, no file write — **and no mutable
+state at all**, so there is nowhere for the JWS to be cached even accidentally.
+`C5e-8`/`C5e-9` assert exactly one request body, built as `["jws": jws]`.
+
+`C5e-11` asserts **no `UUID()` anywhere in the binding service**. The token is
+the server's to issue; a client-minted one would be a value nobody recorded, and
+it would travel into Apple's own records where it is not cheaply correctable.
+
+### F6, and why it was a naming problem
+
+The mode-independent behaviour **already existed** — as
+`ensureValidSessionForConnectedAccountCleanup`, which names a *caller's motive*
+rather than what it does. That is precisely the defect **C-25** was filed for, so
+reusing it for attestation would have re-committed it.
+
+It is now `ensureValidBackendSession(reason:)`, with the cleanup function a thin
+alias so the two are **provably identical rather than similar** (`C5e-19`), and
+C-44/C-45's reasoning stays findable by the name it uses. `ensureValidSession`
+keeps its `isConnected` guard (`C5e-18`) so no existing caller moves.
+
+**The new helper does not sign anybody out** on an unconfigured backend, unlike
+`ensureValidSession`. A liveness helper that can revoke a session is the wrong
+shape for a path intended to run on every foreground.
+
+### C-54 — the unit tests are written and NOT RUN, and that is not a soft pass
+
+`TEST_HOST` points at `MOTIVO.app/MOTIVO`; the product has been `Etudes.app/
+Etudes` throughout. **Any `xcodebuild test` fails before compiling a line.**
+
+Two workarounds were tried and both are genuinely blocked. A project-wide
+`TEST_HOST=` override makes `MOTIVOUITests` fail — it sets `USES_XCTRUNNER` and
+the two are mutually exclusive. A target-scoped build fails in the SPM C targets'
+dependency scan. **The fix is one setting in two configurations and was
+deliberately not applied while Xcode was open on the project**, this session
+having twice watched Xcode overwrite on-disk project edits.
+
+**So U5e's client evidence is: two clean builds and 26 structural assertions.**
+The seven unit tests are committed, cover the pure pieces — body shape, outcome
+mapping, unknown-200-is-not-success, token decoding, endpoint construction — and
+**become evidence only once C-54 is fixed.**
+
+### The standing Phase 3 exit assertion was re-checked, not assumed
+
+`C5e-20` — `LocalFactoryReset.perform` still has **exactly two callers**. It
+first reported three; the third was a **doc comment** in
+`AccountDeletionTransaction.swift`. The invariant held and the assertion was
+wrong. **Third occurrence of that shape in this phase**, after `U5c-34` and
+`E5d-STRUCT1/2/5`: a source-text check must target code, and the files that best
+explain a rule are exactly the ones that defeat a naive search for it.
+
+---
+
 ## U5d — RESULTS. 469 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
 
 **`membership_attest_v1` implements B-24's protocol end to end.** One Edge
