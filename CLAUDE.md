@@ -757,14 +757,14 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **20** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **21** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-24**, **B-32** — unchanged by U4. **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved) and U5g's **B-32** (open).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -783,7 +783,7 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **4 open: C-26, B-11, C-31 and B-24.** **B-31 was resolved by U5d** and
+= **5 open: C-26, B-11, C-31, B-24 and B-32.** **B-32 is U5g's** — the notification-history diagnostic reports zero unconditionally, which blocks G3 but not U5. **B-31 was resolved by U5d** and
 **C-54 by the correction that followed U5e**. All four remaining are the
 server-authority work
 itself, and none of them has begun. **B-24 is a design defect caught before
@@ -1769,6 +1769,16 @@ credential remains on Device A.
 is still outstanding — nobody holds it, and it was never revoked, because the run
 that would have cleared it used a different, later grant. It is **pre-existing
 operational test residue, not created by Phase 2**, and it remains outstanding.
+
+**DEVICE A'S SANDBOX SUBSCRIPTION FROM F3b HAS EXPIRED — established 2026-08-23
+from production notification rows, not assumed.** The purchase at 2026-08-20
+19:57 produced `SUBSCRIBED`/`RESUBSCRIBE`, then **11 hourly `DID_RENEW`**, then
+`EXPIRED`/`VOLUNTARY` — consistent with Apple's documented sandbox cap of up to
+12 renewals before auto-renewal turns off. **So the F3b entitlement CANNOT be
+reused for S-1, S-2, B-24n, G11 or F10**; every one of those needs a live
+entitlement and the fixture is spent. The tester also reported `RESUBSCRIBE`
+rather than `INITIAL_BUY`, so it can no longer produce a clean first-purchase
+observation either.
 
 **Device B Release is UNTOUCHED by Phase 2** — still the established / lapsed
 control fixture. No Phase 2 commit touched it and no Phase 2 run spent it.

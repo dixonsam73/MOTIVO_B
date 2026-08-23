@@ -124,7 +124,11 @@ select
        and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership')
                                                               as policies_enforcing,
   (select count(*) from pg_policies where schemaname in ('public','storage')) as total_policies,
-  (select count(*) from pg_trigger where not tgisinternal)     as triggers_total,
+  (select count(*) from pg_trigger t
+     join pg_class c on c.oid = t.tgrelid
+     join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname in ('public','storage') and not t.tgisinternal)
+                                                              as triggers_in_scope,
   (select has_function_privilege('authenticated',
             'public.ensure_membership_binding()','EXECUTE'))   as binding_already_granted;
 ```
@@ -138,10 +142,105 @@ select
 | `binding_rows` | **0** | as above — nothing has been able to mint one |
 | `policies_enforcing` | **0** | enforcement exists — STOP, U6 has not begun |
 | `total_policies` | **33** | the policy surface moved — STOP |
-| `notification_rows` | **1** | U4i's Apple TEST notification. A different value is a finding: >1 means unexplained traffic, 0 means U4i's evidence has gone |
+| `notification_rows` | **accounted for, NOT a fixed number** | See "the two gates corrected" below. A static count was wrong by construction |
 | `reject_stat_rows` | **0** | any signature failure since U4 is a finding |
 | `cutover_rows` | **16** | the frozen snapshot. Any other value contradicts U3's verified population |
-| `triggers_total` | **5** | unchanged since U3 |
+| `triggers_in_scope` | **5** | public+storage only, matching `capture-schema.sh`. Triggers in `auth`, `realtime`, `vault`, `cron` and `net` are platform-managed and outside B-23's captured surface **by design** |
+
+### THE TWO GATES ABOVE WERE BOTH DEFECTIVE, AND BOTH DEFECTS WERE MINE
+
+**Executed 2026-08-23. Production was correct on both counts; the package was
+not.** Recorded here rather than silently amended, because the second one is a
+mistake worth not repeating.
+
+**`triggers_total` — wrong query.** The expectation of 5 came from
+`supabase/schema/triggers.json`, which `capture-schema.sh` scopes to
+`('public','storage')`. The gate I wrote counted `pg_trigger` across **every
+schema**. The two measured different things, so 6-vs-5 was never a valid
+comparison. Production's sixth is **`realtime.tr_check_filters` on
+`realtime.subscription`** — Supabase platform-managed, in a schema B-23
+deliberately does not capture. **Not drift.** The public/storage set is exactly
+the expected five.
+
+**`notification_rows = 1` — wrong KIND of gate, which is the more instructive
+error.** U4 is live and receiving genuine Apple Sandbox traffic, so a fixed count
+was guaranteed to go stale the moment Device A bought a subscription at F3b. **A
+pre-flight gate on a table that legitimately grows must assert that every row is
+ACCOUNTED FOR, never that a particular number of them exist.** The replacement:
+
+```sql
+-- Every row must be an ignored Sandbox notification for a known subscription.
+select count(*) filter (where outcome <> 'ignored')            as non_ignored,          -- 0
+       count(*) filter (where environment is distinct from 'Sandbox'
+                          and notification_type <> 'TEST')     as non_sandbox,          -- 0
+       count(distinct original_transaction_id)                 as distinct_subscriptions,
+       coalesce(max(delivery_count), 1)                        as max_delivery_count,   -- 1
+       count(*)                                                as total
+  from public.membership_notification;
+```
+
+**Gates: `non_ignored = 0`, `non_sandbox = 0`, `max_delivery_count = 1`, and every
+distinct `original_transaction_id` explicable by known device QA.** `total` is
+recorded, never gated.
+
+**EXECUTED RESULT, 2026-08-23 — all gates pass.** 14 rows, and they reconcile to
+exactly one subscription lifecycle plus U4i's keystone:
+
+| Rows | Shape |
+|---|---|
+| 1 | `TEST` / `ignored` / `not_applicable` — U4i, 2026-08-20 17:48:30 |
+| 1 | `SUBSCRIBED` / **`RESUBSCRIBE`** / `ignored` / `unmapped` |
+| 11 | `DID_RENEW` / `ignored` / `unmapped` |
+| 1 | `EXPIRED` / `VOLUNTARY` / `ignored` / `unmapped` |
+
+All Sandbox, all `original_transaction_id = 2000001220187383` — **F3b's own
+recorded value** — `max_delivery_count = 1`, `non_ignored = 0`,
+`distinct_subscriptions = 1`, `reject_stat_rows = 0`.
+
+**`unmapped` on all thirteen is the load-bearing part**, not incidental: it is
+U4's acceptance-window prediction holding exactly. No Apple subscription carries
+an `appAccountToken` until U5 ships, so nothing can map, and `membership_rows = 0`
+follows. An `applied` row would have meant something bound a subscription while
+U5 did not exist.
+
+**MY PREDICTED COMPOSITION WAS WRONG WHILE THE TOTAL WAS RIGHT, AND THAT IS THE
+WARNING.** I predicted 1 TEST + 1 initial + **12 renewals** = 14. The truth is 1
+TEST + 1 initial + **11 renewals + 1 EXPIRED** = 14. **A matching total reached by
+wrong reasoning is exactly the kind of agreement that should not be trusted**, and
+it is only the row-level breakdown that settled it.
+
+### THE INDEPENDENT APPLE CROSS-CHECK COULD NOT BE COMPLETED — B-32
+
+`appstore_reconcile_v1 mode=notification_history` returned
+`apple_notification_count: 0` for a window that provably contains Apple's own TEST
+notification. **The zero is a defect in our tooling, not an answer from Apple:**
+the mode reads a `notificationUUID` field that `NotificationHistoryResponseItem`
+does not have, so it reports zero whatever Apple sent. Filed as **B-32**.
+
+**This does not block U5 deployment, and the reason is structural rather than
+convenient:** U5's establishment performs its own live authoritative Apple read
+and never consults notification history, so a blind diagnostic cannot mislead it.
+**It does block G3**, which is U4-owned and already outstanding.
+
+### CONSEQUENCE FOR DEVICE QA — F3b's SUBSCRIPTION HAS EXPIRED
+
+The `EXPIRED`/`VOLUNTARY` row is not merely bookkeeping. **Device A's Sandbox
+subscription from F3b ended around 2026-08-21**, after 1 purchase + 11 hourly
+renewals — consistent with Apple's documented sandbox cap of up to 12 renewals
+before auto-renewal turns off.
+
+**So it CANNOT be reused for S-1, S-2, B-24n, G11 or F10.** Every one of those
+needs a live entitlement, and the fixture is spent. §7's plan must assume a fresh
+Sandbox purchase, and the first purchase after U5 ships will be **bound at source**
+— which conveniently makes it B-24n's evidence, but means **S-2's legacy claim now
+needs a deliberately token-less subscription**, i.e. one purchased *before* U5f's
+client reaches the device.
+
+**Also observed and worth recording:** the initial notification was
+`SUBSCRIBED`/**`RESUBSCRIBE`**, not `INITIAL_BUY`, so the sandbox tester had
+subscribed before. Consistent with the rig's history and unremarkable in itself,
+but it means this tester can no longer produce a clean first-purchase
+observation.
 
 **Also confirm, from `supabase functions list` (already captured 2026-08-23):**
 
