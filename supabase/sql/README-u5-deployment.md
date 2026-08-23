@@ -1,0 +1,356 @@
+# U5 production deployment — PREDICTION AND PACKAGE. NOT YET EXECUTED.
+
+**Committed BEFORE any production mutation**, in the U3/U4 prediction-first
+discipline. Nothing in this file is a result. Every number is a prediction that
+post-deploy verification must match exactly; a disagreement stops the deploy
+rather than being repaired forward.
+
+**Local evidence at the time of writing — 522 assertions green:** U3 97 · U4
+48 + 96 + 43 · U5 68 (U5c modules) + 53 (U5e/U5f client structural) + 55 (U5b
+acceptance) + 62 (U5d e2e). Client: 15 unit tests, Debug and Release clean.
+
+---
+
+## 0. BLOCKER FOUND AT PRE-FLIGHT — `supabase db push` IS NOT THE MECHANISM
+
+**Discovered 2026-08-23 by a genuine dry run, before any mutation.**
+
+```
+$ supabase db push --dry-run
+Would push these migrations:
+ • 20260816000000_baseline_production_reproduction.sql
+ • 20260816120000_u3_membership_schema.sql
+ • 20260820120000_u4_ingestion.sql
+ • 20260823120000_u5b_establishment.sql
+```
+
+**IT WOULD REPLAY ALL FOUR, INCLUDING THE BASELINE REPRODUCTION AND THE
+ALREADY-DEPLOYED U3 AND U4.** Production's `supabase_migrations.schema_migrations`
+records none of them, because U3 and U4 were applied directly by the account
+holder rather than through `db push` — and the baseline migration exists only to
+rebuild a LOCAL reproduction and must never touch production at all.
+
+**Consequences if it were run:** at best it fails partway on objects that already
+exist, leaving the migration history half-written; at worst the baseline
+reproduction executes against a live database. Neither is acceptable and neither
+is recoverable by re-running.
+
+**This is exactly the "do not silently improvise a production SQL mechanism"
+case.** The U5b migration must be applied the same way U3 and U4 were: as one
+atomic transaction executed by the account holder. §3 gives that procedure
+verbatim.
+
+**A second consequence, and it is the reason this is a finding rather than a
+note:** the same command would have been the obvious thing to reach for at U6 or
+U7 by someone who had not read this. `supabase/README.md` now carries a standing
+warning.
+
+### What this environment can and cannot do
+
+| | |
+|---|---|
+| Management API — `functions list`, `functions deploy`, `secrets set` | **Available** |
+| Production **SQL**, read or write | **NOT available.** No `psql`, no arbitrary-SQL CLI path, and `db push` is unusable per above |
+
+**So the read-only DB pre-flight in §2 CANNOT be executed from here either**, and
+its hard gates are unverified. They must be run by the account holder and their
+output compared against §2 before anything in §3 proceeds.
+
+---
+
+## 1. PREDICTED B-23 DELTA — measured, not estimated
+
+Measured by building the local instance from committed migrations and running the
+gate against the committed production snapshot. **20 problems, every one a U5b
+object.** Identical to the figure measured at U5b, which is how "U5c, U5d, U5e
+and U5f added no schema surface" is checked rather than asserted.
+
+| Surface | Delta | Detail |
+|---|---|---|
+| `columns` | **+7** | `membership_binding_conflict` |
+| `constraints` | **+5** | pkey, user FK, and three CHECKs |
+| `rls_enabled` | **+1** | RLS on the new table |
+| `functions` | **+1 new, 2 MODIFIED** | `membership_establish_v1` new; `connected_member` and `membership_state` **replaced** |
+| `function_grants` | **+3 new, 1 MODIFIED** | three rows for `membership_establish_v1`; `ensure_membership_binding`/`authenticated` flips `can_execute` false → **true** |
+| `table_grants` | **0** | IDENTICAL |
+| `column_grants` | **0** | IDENTICAL |
+| `policies` | **0** | IDENTICAL — **U5 enforces nothing** |
+| `triggers`, `storage_buckets` | **0** | IDENTICAL |
+
+**U5 IS NOT PURELY ADDITIVE.** Like U4 — which modified four CHECK constraints —
+it **modifies deployed objects**: two function definitions and one grant row. The
+rollback in §6 is correspondingly not "drop what was added".
+
+**The `account_id_format` constraint pair in the raw diff is NOT U5's.** It is the
+single declared standing exception in `baseline-exceptions.json`, a PostgreSQL
+parenthesisation normalisation, detected and approved by the gate. Counting it
+would overstate the delta by one.
+
+### Privilege delta — the whole of it is two grants
+
+```sql
+grant execute on function public.ensure_membership_binding()  to authenticated;
+grant execute on function public.membership_establish_v1(...) to service_role;
+```
+
+`ensure_membership_binding()` becomes **the only client-reachable membership
+object in the system**, and it is the narrowest shape the design admits: no
+argument, identity from `auth.uid()`, idempotent, at most one row per
+`auth.users` row. **No table or column privilege is granted to any role.** U3's
+A3f invariant — no grantee other than the owner in `relacl` for any membership
+table — survives U5 unchanged.
+
+---
+
+## 2. PRE-FLIGHT — READ-ONLY, and every gate is a STOP
+
+Run by the account holder. **Any unexpected value is stop-and-report, not
+something to normalise.**
+
+```sql
+select
+  (select count(*) from public.membership)                    as membership_rows,
+  (select count(*) from public.membership_binding)            as binding_rows,
+  (select count(*) from public.membership_notification)       as notification_rows,
+  (select count(*) from public.membership_notification_reject_stat) as reject_stat_rows,
+  (select count(*) from public.membership_cutover)            as cutover_rows,
+  (select count(*) from information_schema.tables
+     where table_schema='public'
+       and table_name='membership_binding_conflict')          as u5_already_applied,
+  (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+     where n.nspname='public' and p.proname='membership_establish_v1') as u5_fn_present,
+  (select count(*) from pg_policies
+     where schemaname in ('public','storage')
+       and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership')
+                                                              as policies_enforcing,
+  (select count(*) from pg_policies where schemaname in ('public','storage')) as total_policies,
+  (select count(*) from pg_trigger where not tgisinternal)     as triggers_total,
+  (select has_function_privilege('authenticated',
+            'public.ensure_membership_binding()','EXECUTE'))   as binding_already_granted;
+```
+
+| Gate | Required | If not |
+|---|---|---|
+| `u5_already_applied` | **0** | U5 is already applied — STOP |
+| `u5_fn_present` | **0** | as above |
+| `binding_already_granted` | **false** | the grant exists already — STOP |
+| `membership_rows` | **0** | **STOP AND REPORT.** U4 cannot create rows and U5 does not exist yet, so a row means something unmodelled has written. Only genuine Apple traffic *plus* a matching notification row could explain it, and that combination still needs explaining before deploying |
+| `binding_rows` | **0** | as above — nothing has been able to mint one |
+| `policies_enforcing` | **0** | enforcement exists — STOP, U6 has not begun |
+| `total_policies` | **33** | the policy surface moved — STOP |
+| `notification_rows` | **1** | U4i's Apple TEST notification. A different value is a finding: >1 means unexplained traffic, 0 means U4i's evidence has gone |
+| `reject_stat_rows` | **0** | any signature failure since U4 is a finding |
+| `cutover_rows` | **16** | the frozen snapshot. Any other value contradicts U3's verified population |
+| `triggers_total` | **5** | unchanged since U3 |
+
+**Also confirm, from `supabase functions list` (already captured 2026-08-23):**
+
+| Function | Expected | Observed at package time |
+|---|---|---|
+| `delete_account_v1` | v8, `verify_jwt:false`, sha `78b7f902…` | **matches** |
+| `revoke_apple_identity_v1` | v2, `verify_jwt:false`, sha `e9b34aa8…` | **matches** |
+| `appstore_notifications_v1` | v1, `verify_jwt:false`, sha `0a10cf63…` | **matches** |
+| `appstore_reconcile_v1` | v1, `verify_jwt:false`, sha `6de05502…` | **matches** |
+
+**And confirm no worker/scheduler exists** — U7 has not begun:
+
+```sql
+select count(*) as scheduled_jobs
+  from pg_class where relname in ('job','job_run_details');   -- pg_cron: expect 0
+select count(*) as membership_scheduled
+  from public.membership where pending_cleanup_at is not null; -- must be 0
+```
+
+---
+
+## 3. DEPLOYMENT ORDER — and the two account-holder steps
+
+**The order encodes real constraints and must not be reordered around a blocker.**
+
+| # | Step | Who | Notes |
+|---|---|---|---|
+| **P0** | Pre-flight §2 | **Account holder** | Every gate. Any surprise stops the deploy |
+| **P1** | Download-diff all four live functions | Either | Corrected transpilation-aware method in `supabase/README.md`. `revoke_apple_identity_v1` is the control |
+| **P2** | `supabase secrets set APPLE_ATTEST_ALLOWED_ENVIRONMENTS=Sandbox` | Either | **BEFORE the function deploy.** Never rely on the code default. **This is known to re-version unrelated functions** — P5 accounts for it |
+| **P3** | **Apply the U5b migration atomically** | **ACCOUNT HOLDER ONLY** | §3.1. **NOT `supabase db push`** — see §0 |
+| **P4** | Verify §1's delta and §5's queries | **Account holder** | Any disagreement stops the deploy |
+| **P5** | `supabase functions deploy membership_attest_v1 appstore_reconcile_v1` | Either | **Both, deliberately** — see §4 |
+| **P6** | Download-diff **all five** functions | Either | Deploy is not scoped to what you name |
+| **P7** | `supabase functions list` — `verify_jwt:false` on `membership_attest_v1` | Either | `config.toml` pins it; confirm deployed state agrees |
+| **P8** | `./supabase/capture-schema.sh` then `./supabase/verify-baseline.sh` | Either | **Must return GREEN**, only the `account_id_format` exception |
+| **P9** | Commit migration + refreshed snapshot + results together | Either | |
+| **P10** | **STOP.** No device action | — | Genuine Sandbox QA needs the account holder present |
+
+### 3.1 The migration, as ONE atomic transaction
+
+Run in the Supabase SQL editor (or `psql`) by the account holder. The file is
+`supabase/migrations/20260823120000_u5b_establishment.sql`, applied **verbatim**,
+wrapped so that a partial application is impossible:
+
+```sql
+BEGIN;
+-- paste the ENTIRE contents of
+--   supabase/migrations/20260823120000_u5b_establishment.sql
+-- unmodified, then:
+COMMIT;
+```
+
+**Do not `CASCADE` anything. Do not edit the file to make a statement succeed.**
+A statement that fails means the analysis was wrong; `ROLLBACK` and report.
+
+**The migration is safe to wrap in one transaction** because it is pure DDL plus
+grants — no `CONCURRENTLY`, no `VACUUM`, nothing that forbids a transaction block.
+
+---
+
+## 4. WHY `appstore_reconcile_v1` IS REDEPLOYED, AND `appstore_notifications_v1` IS NOT
+
+U5c **modified `_shared/appstore/api.ts`** (adding `setAppAccountToken`, the
+`allowEmptyBody` parameter, the PUT method and the error taxonomy). Import graph:
+
+| Function | Imports | Bundle changes? |
+|---|---|---|
+| `appstore_reconcile_v1` | `api.ts`, `derive.ts`, `jws.ts` | **YES — api.ts changed** |
+| `appstore_notifications_v1` | `derive.ts`, `jws.ts` only | **No** |
+| `membership_attest_v1` | `api.ts`, `attest.ts` | new |
+
+**So a deployed U4 function's bundle changes as a side effect of U5c**, and
+leaving it stale would create exactly the repo-vs-production divergence
+`supabase/README.md` exists to prevent. It is redeployed deliberately.
+
+**Its behaviour is unchanged and that is the reason this is safe:** every `api.ts`
+change is additive with a default — `allowEmptyBody` defaults to `false`, so
+`request()` behaves identically for every existing caller, and `setAppAccountToken`
+has no caller in that function. U4's 48 module and 43 e2e assertions cover the
+unchanged paths and are green.
+
+---
+
+## 5. POST-DEPLOY VERIFICATION — prove, do not state
+
+```sql
+-- 1. No non-owner grantee on ANY membership table. Covers anon, authenticated,
+--    service_role AND PUBLIC in one read.  MUST BE 0.
+select count(*) as non_owner_table_privileges
+  from pg_class c cross join lateral aclexplode(c.relacl) a
+ where c.relnamespace='public'::regnamespace and c.relkind='r'
+   and c.relname like 'membership%' and a.grantee <> c.relowner;
+
+-- 2. EXACTLY the intended executable surface.
+select p.proname,
+       has_function_privilege('anon',          p.oid,'EXECUTE') as anon,
+       has_function_privilege('authenticated', p.oid,'EXECUTE') as authenticated,
+       has_function_privilege('service_role',  p.oid,'EXECUTE') as service_role,
+       exists (select 1 from aclexplode(p.proacl) a
+                where a.privilege_type='EXECUTE' and a.grantee=0) as public_execute
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+ where n.nspname='public' and p.proname like 'membership%' or p.proname='connected_member'
+ order by 1;
+-- REQUIRED:
+--   ensure_membership_binding   authenticated=true, anon=false, service_role=false
+--   membership_establish_v1     service_role=true,  anon=false, authenticated=false
+--   membership_apply_state_v1   ALL false  (U4's canonical writer stays internal)
+--   membership_resolve_binding_v1 ALL false
+--   membership_record_notification_v1 ALL false
+--   connected_member            ALL false
+--   public_execute              false on EVERY row
+
+-- 3. Ownership provenance cannot be supplied by a client parameter.
+select count(*) as provenance_parameters
+  from information_schema.parameters
+ where specific_schema='public'
+   and specific_name like 'membership_establish_v1%'
+   and parameter_name ilike '%binding_method%';        -- MUST BE 0
+
+-- 4. Establishment cannot schedule cleanup.
+select count(*) as scheduled_rows
+  from public.membership where pending_cleanup_at is not null;   -- MUST BE 0
+
+-- 5. Exactly ONE function inserts into public.membership, and it is the
+--    establishment writer.
+select p.proname
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+ where n.nspname='public' and p.prokind='f'
+   and pg_get_functiondef(p.oid) ~* 'insert into public\.membership *\(';
+-- MUST return exactly: membership_establish_v1
+
+-- 6. Still no enforcement, still no cleanup.
+select (select count(*) from pg_policies
+         where schemaname in ('public','storage')
+           and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership')
+       as policies_enforcing,                                   -- MUST BE 0
+       (select count(*) from pg_policies
+         where schemaname in ('public','storage')) as total_policies;  -- MUST BE 33
+
+-- 7. Sandbox does not confer Production entitlement, and sandbox_only is honest.
+--    Run against a scratch identity ONLY if one exists; otherwise this is
+--    covered by the 55 local acceptance assertions and is not re-proved here.
+```
+
+**`membership_state()` must report five values, not four** — `entitled`,
+`expired`, `sandbox_only`, `grandfathered`, `unknown`. Verify the definition
+contains `sandbox_only`:
+
+```sql
+select pg_get_functiondef(p.oid) ~ 'sandbox_only' as has_fifth_state
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+ where n.nspname='public' and p.proname='membership_state';   -- MUST BE true
+```
+
+---
+
+## 6. ROLLBACK — not "drop what was added"
+
+U5 **modifies** two function definitions and one grant, so a full rollback must
+**restore** them, not merely drop the new objects.
+
+```sql
+BEGIN;
+
+-- 1. Drop what U5 added.
+drop function if exists public.membership_establish_v1(uuid, text, text, uuid, uuid, jsonb);
+drop table    if exists public.membership_binding_conflict;
+
+-- 2. Restore the grant U5 changed.
+revoke execute on function public.ensure_membership_binding() from authenticated;
+
+-- 3. Restore the two MODIFIED functions to their U3 definitions, by pasting the
+--    `create function public.connected_member` and `create function
+--    public.membership_state` blocks from
+--    supabase/migrations/20260816120000_u3_membership_schema.sql
+--    as CREATE OR REPLACE. Their ACLs are preserved across a replace, so no
+--    re-grant is needed.
+
+COMMIT;
+```
+
+**Then redeploy the previous `appstore_reconcile_v1`** from the commit preceding
+U5c, and delete `membership_attest_v1`. **The client needs no rollback**: U5e/U5f
+call an endpoint that would simply return 404, and the attestation coordinator
+treats that as `serverError` — no membership is claimed, no mode changes, and
+nothing local is touched.
+
+**The secret may be left in place.** It is inert without the function.
+
+---
+
+## 7. EXPLICIT PREDICTIONS FOR THE FIRST GENUINE SANDBOX RUN
+
+Committed now so the run is scored rather than interpreted. **None of these is
+verifiable locally** — that is the whole reason they are listed.
+
+| # | Prediction |
+|---|---|
+| **S-1** | A real `currentEntitlements` JWS from Device A passes the **pinned Apple Root CA G3**. Local evidence used a test CA, so a dead verifier and a green endpoint are indistinguishable until this runs |
+| **S-1b** | The claim boundary accepts it: `bundleId`, product, and `Sandbox` environment all match |
+| **B-24n** | The **new-purchase** path returns `established` with `binding_method = 'purchase'`, and Apple reports our token on the very first read — **no `PUT` is issued**, because the token was bound at source |
+| **S-2** | For a **pre-U5f** subscription, `Set App Account Token` is accepted by Apple and the independent re-read observes our token. Outbound order must be `GET, PUT, GET` |
+| **S-2b** | If the re-read does not yet show it, the outcome is **`pending`** with no membership row — propagation, not failure |
+| **S-3** | The token survives into a **real renewal notification**, so `appstore_notifications_v1` records `applied` rather than `ignored`/`unmapped`. **The single assertion that proves the whole protocol**, and it needs a renewal cycle |
+| **G11** | With the membership row deleted and the grandfather clause disabled, a **cold launch** issues the attestation request unconditionally and Connected is reached without a second launch or a re-purchase |
+| **F10** | A genuine purchase whose attestation is momentarily pending shows *"Finishing setup"* and **never** "Purchase unavailable" |
+| **D4** | The resulting row is `environment = 'Sandbox'`, `connected_member()` returns **false**, and `membership_state()` returns **`sandbox_only`** — a Sandbox subscription confers no Production entitlement |
+
+**`membership` will hold rows for the first time in this project's history.** That
+is the intended outcome of U5 and the point at which the U4-era prediction "zero
+rows" stops being true by design. It must not be read later as a regression.

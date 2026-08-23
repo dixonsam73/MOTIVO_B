@@ -40,6 +40,38 @@ Edit here, deploy from here:
 supabase functions deploy delete_account_v1
 ```
 
+**NEVER RUN `supabase db push` AGAINST PRODUCTION. IT WOULD REPLAY EVERY
+MIGRATION, INCLUDING THE LOCAL BASELINE REPRODUCTION.**
+
+Discovered 2026-08-23 by a dry run at U5g's pre-flight, before any mutation:
+
+```
+$ supabase db push --dry-run
+Would push these migrations:
+ • 20260816000000_baseline_production_reproduction.sql   <-- LOCAL-ONLY
+ • 20260816120000_u3_membership_schema.sql               <-- ALREADY DEPLOYED
+ • 20260820120000_u4_ingestion.sql                       <-- ALREADY DEPLOYED
+ • 20260823120000_u5b_establishment.sql                  <-- the only new one
+```
+
+Production's `supabase_migrations.schema_migrations` records **none** of them,
+because U3 and U4 were applied directly by the account holder as atomic
+transactions, and the baseline migration exists **only** to rebuild a local
+reproduction — it must never touch production at all.
+
+At best `db push` fails partway on objects that already exist, leaving the
+migration history half-written. At worst the baseline reproduction executes
+against the live database. Neither is recoverable by re-running.
+
+**The mechanism is unchanged and is the one U3 and U4 used:** the account holder
+applies the single new migration file verbatim, wrapped in `BEGIN; … COMMIT;`,
+in the SQL editor or `psql`. `supabase/sql/README-u5-deployment.md` §3.1 is the
+worked example.
+
+**This is recorded here rather than only in the U5 package because `db push` is
+the obvious command to reach for**, and the next person to deploy — at U6 or U7 —
+will not necessarily have read a unit-specific file first.
+
 Never edit a function in the dashboard. If one is ever edited there, the repo
 is silently stale and the next deploy from Git will overwrite the change
 without either version being reviewed. Before editing a function, re-download
