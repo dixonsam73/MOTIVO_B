@@ -1502,6 +1502,89 @@ explain a rule are exactly the ones that defeat a naive search for it.
 
 ---
 
+## B-24n AND F10 — PREDICTIONS, COMMITTED BEFORE THE RUN. 2026-08-25
+
+**Written and committed before the device is touched.** B-24n is the half of
+B-24 that no evidence in this project has ever reached: **a purchase BOUND AT
+SOURCE**. S-2 and S-3 proved the *legacy claim* — token absent, PUT issued, token
+observed, then carried into renewals. B-24n proves the ordinary path a real new
+member takes, where Apple is handed the token by StoreKit and we never ask it to
+set one.
+
+### Fixture state going in — verified, not assumed
+
+`membership_rows = 0`, `binding_rows = 1`. **The binding row was deliberately NOT
+deleted**: the token is an attribute of the IDENTITY, not of a subscription, so
+the new purchase must carry the SAME token the legacy claim used. Deleting it
+would mint a new one and quietly change what is being tested.
+
+The fresh Sandbox tester has no purchase history, so this should be a genuine
+**`INITIAL_BUY`** — the clean first-purchase observation the spent F3b fixture
+could no longer produce.
+
+### B-24n predictions
+
+| # | Prediction | Falsified by |
+|---|---|---|
+| 1 | Purchase carries `.appAccountToken(binding)` | Cannot fail — enforced by the type |
+| 2 | `binding_method = **'purchase'**` | `'legacy_claim'` |
+| 3 | `original_transaction_id` is a **NEW** value ≠ `2000001220187383` | The old id reappearing |
+| 4 | `pending_cleanup_at` **NULL**, `entitlement_ended_at` **NULL** | Either non-null — F11 breached |
+| 5 | `apple_status = 1`, `auto_renew_status = 1`, `environment = 'Sandbox'` | Anything else |
+| 6 | `connected_member()` **false**, `membership_state()` **`sandbox_only`** | `true`, or `'expired'` — D4 breached |
+| 7 | `membership_rows = 1`, `binding_rows = **1** (UNCHANGED)` | A second binding row |
+| 8 | `membership_binding_conflict` stays **empty** | Any row |
+
+**PREDICTION 2 IS THE WHOLE UNIT, AND IT IS AN ORDERING PROOF LIKE S-2's.**
+Provenance is *derived*, never supplied — `membership_establish_v1` sets
+`'purchase'` only when the client's JWS token is not distinct from our stored
+binding. So `'purchase'` in the row is evidence that **the client's own
+Apple-signed JWS already carried our token**, which means the legacy branch was
+never entered and **no PUT was issued at all**. The row evidences the absence of
+a call, which is the only way to test it from outside.
+
+### PREDICTION 9 — the notification, and the trap in it
+
+**The `SUBSCRIBED`/`INITIAL_BUY` notification must NOT be `unmapped`.**
+
+Two outcomes are both passes, and which one lands is a RACE with no correct
+answer:
+
+- **`applied`** — attestation established the row before Apple's notification
+  arrived;
+- **`ignored`/`unestablished`** — the notification won, so the binding resolved
+  but there was no row to update yet. U4's writer is UPDATE-ONLY and **must not**
+  originate one.
+
+**`ignored`/`unmapped` FALSIFIES B-24n.** That is the category all 14
+pre-binding notifications landed in, and it means Apple did not carry our token
+into the purchase. The distinction between `unmapped` and `unestablished` is
+exactly the assertion: the first says *no binding matched*, the second says *the
+binding matched and there was simply nothing to update yet*.
+
+**Do not "fix" an `unestablished` by re-attesting and calling it `applied`.**
+Record which one landed; a later notification will be `applied` either way.
+
+### F10 predictions — the member is told nothing
+
+| # | Prediction | Falsified by |
+|---|---|---|
+| 10 | No failure copy at any point | "Purchase unavailable", any error alert |
+| 11 | Common case says **nothing** and Connected simply activates | Any message where none is warranted |
+| 12 | If the entitlement lags: **"Finishing setup — this completes on its own, no action needed"** | The words *fail, error, unavailable, try again, retry, refund, lost* |
+
+**F10 exists because Apple used to take the money while the app said "Purchase
+unavailable"**, inviting a second purchase. The unit test pins the vocabulary;
+this run pins the behaviour on a real Apple payment sheet.
+
+### What this run does NOT do
+
+No enforcement, no cleanup, no worker, no Production promotion. **`membership`
+holding a row again does not entitle anything** — prediction 6 says so
+explicitly, and D4 is what makes a Sandbox row honest rather than dangerous.
+
+---
+
 ## Q1 DISCHARGED, AND MOST OF G6a, ON GENUINE APPLE — 2026-08-25
 
 **Obtained incidentally while clearing the fixture for B-24n**, which is exactly
