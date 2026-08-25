@@ -580,6 +580,44 @@ statements as separate round trips will not roll it back at all. Where a
 runtime proof is needed, it goes through the QA plan against real accounts —
 see E8/E8b for the B-6 example.
 
+## STANDING RULE — a production mutation's guard must be enforced by Postgres
+
+**Never pair an unconditional `COMMIT` with an instruction to inspect the result
+and `ROLLBACK` if it looks wrong.** By the time the count is read the commit has
+happened, and the two instructions contradict each other. Caught by review on
+2026-08-25, in a procedure this file's own "Never" section already had the
+reasoning to reject.
+
+**And do not fix it by splitting `BEGIN` and `COMMIT` across two SQL-editor
+submissions.** Studio gives no session continuity between Run clicks — each is
+its own request over a pooled connection — so the follow-up `COMMIT` most likely
+lands with no transaction in progress. **That fails safe and reads exactly like
+success**, which is the worst property a safety procedure can have.
+
+The shape that works is **one submission, with the guard inside it**:
+
+```sql
+DO $$
+DECLARE n integer;
+BEGIN
+  DELETE FROM public.some_table WHERE <scoped predicate>;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'ABORT: expected exactly 1 row, deleted %', n;
+  END IF;
+END $$;
+```
+
+`RAISE EXCEPTION` aborts the block's own transaction, so a wrong count rolls
+itself back and reports the number it saw. **No human decision sits between the
+observation and the outcome** — the same reasoning that rejected D4's allowlist,
+one level down: a safety property must not rest on operational discipline when
+the database can hold it.
+
+Precede it with a read-only `SELECT` of the same predicate, and **do not select
+`user_id`** — a pasted result must not be able to put a production UID into the
+repository or a transcript.
+
 ## Working rule
 
 The audit register (`docs/audit-findings.md`) is **evidence, not the
