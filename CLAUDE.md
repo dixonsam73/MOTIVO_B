@@ -280,6 +280,52 @@ writer established rather than one the test manufactured.
 
 ---
 
+## S-1, S-2 AND S-3 DISCHARGED ON GENUINE APPLE SANDBOX — 2026-08-25
+
+**The first evidence in this project that is not "verified against a faithful
+local reproduction".** Real device, real Sandbox subscription, Apple's servers,
+the deployed endpoints.
+
+**S-1.** A genuine `currentEntitlements` JWS passed the **pinned Apple Root CA
+G3** and the full claim boundary. Attestation fired **unattended on the first
+cold launch** — the invariant holding, nothing else gating it. This is the half
+no local fixture could supply: every local payload is signed by a throwaway CA,
+so a dead verifier and a healthy one look identical until real Apple bytes pass
+the shipping anchor.
+
+**S-2.** The legacy claim established `binding_method = 'legacy_claim'`, and
+**the row itself evidences the `GET -> PUT -> GET` ordering**: that provenance is
+written only when the client's JWS carried no token AND Apple reports ours — both
+true at once means the PUT happened and an independent re-read confirmed it
+before establishment. `pending_cleanup_at` and `entitlement_ended_at` both NULL,
+so F11 held on real Apple state.
+
+**S-3 — THE SINGLE ASSERTION THAT PROVES THE WHOLE PROTOCOL.** A real
+`DID_RENEW` arrived 47 minutes later and ingested as **`applied`**. **14
+notifications for this tester are `ignored`/`unmapped`; exactly one is
+`applied`** — same subscription, same `originalTransactionId`, same endpoint, and
+**the only thing that changed between them is the binding**. Apple carried our
+token into a genuine renewal, which is what B-24 predicted and what no stub can
+demonstrate.
+
+**D4 confirmed on real Apple state:** `connected_member()` **false**,
+`membership_state()` **`sandbox_only`**, on a live entitled Apple-verified
+Sandbox membership.
+
+**Two incidental observations.** Apple **reused** `originalTransactionId` across
+lapse-and-resubscribe — evidence on a question this file deliberately leaves
+open, and **not** licence to depend on it. And Sign in with Apple returned the
+**same `sub` after the credential had been manually revoked**, re-authenticating
+the 2026-08-15 identity rather than minting a new one; `auth.users` did not grow.
+
+**THE FIXTURE'S ORDER DID NOT MATTER, AND THAT IS WORTH KNOWING.** The purchase
+was made on the pre-U5f build and SIWA completed *afterwards*. Binding requires
+`ensure_membership_binding` plus Set App Account Token, and that build has
+neither — so the subscription was token-less regardless, which **Apple itself
+confirmed** by landing the `SUBSCRIBED` notification `ignored`/`unmapped`.
+
+---
+
 ## U5 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-23
 
 **P0-P8 and P6b all executed and passed.** The U5b schema, `membership_attest_v1`

@@ -1502,6 +1502,106 @@ explain a rule are exactly the ones that defeat a naive search for it.
 
 ---
 
+## GENUINE APPLE SANDBOX — S-1, S-2 AND S-3 ALL DISCHARGED, 2026-08-25
+
+**The first evidence in this project that is not "verified against a faithful
+local reproduction".** Device A, a real Sandbox subscription, Apple's own
+servers, the deployed endpoints.
+
+### The fixture, and why the order it was created in did not matter
+
+Purchase on the **pre-U5f build** (F3b-era, `e157b1c`), which is *structurally*
+incapable of binding: `product.purchase()` with no options and **zero**
+`appAccountToken` references anywhere in it. SIWA was completed **after** the
+purchase, which changes nothing — binding requires `ensure_membership_binding`
+plus Set App Account Token, and that build has neither.
+
+**Apple confirmed the fixture independently**: the resulting `SUBSCRIBED` /
+`RESUBSCRIBE` notification landed `ignored`/**`unmapped`** — Apple's own
+statement that the subscription carried no `appAccountToken`.
+
+Two incidental observations worth keeping:
+
+- **Apple REUSED `originalTransactionId 2000001220187383`** across
+  lapse-and-resubscribe on the same tester. That is evidence on a question
+  `CLAUDE.md` deliberately leaves open. **It does not license depending on it**;
+  the standing rule stands.
+- **Sign in with Apple returned the SAME `sub` after the credential had been
+  manually revoked**, re-authenticating the existing identity (created
+  2026-08-15) rather than minting a new one. `auth.users` did not grow.
+
+### S-1 — a genuine Apple JWS against the PINNED anchor
+
+The first-launch attestation POSTed to `membership_attest_v1` and received
+**HTTP 200 in ~3.0 s**. A real `currentEntitlements` JWS passed x5c chain
+verification against **Apple Root CA G3** and the full claim boundary — bundleId,
+`Sandbox`, Monthly, non-Family-Shared.
+
+**This is the half no local evidence could ever supply.** Every local fixture is
+signed by a throwaway CA, so a dead verifier and a healthy one are
+indistinguishable until a real Apple payload passes the shipping anchor.
+
+**Attestation fired UNATTENDED on the first cold launch**, with no user action —
+the invariant `(locally entitled ∧ hasConnectedIdentity ∧ isConfigured)` holding
+and nothing else gating it.
+
+### S-2 — the legacy claim, and the ordering is evidenced by the ROW
+
+| | |
+|---|---|
+| `binding_rows` | 0 -> **1** |
+| `membership_rows` | 0 -> **1** |
+| `binding_method` | **`legacy_claim`** |
+| `environment` / `original_transaction_id` | `Sandbox` / `2000001220187383` |
+| `pending_cleanup_at` / `entitlement_ended_at` | **NULL / NULL** — F11 held |
+| `conflict_rows` | **0** |
+
+**`legacy_claim` is only reachable through `GET -> PUT -> GET`.** The writer
+derives that provenance when the client's JWS did **not** carry our token, and it
+writes at all only when **Apple reports our token**. Both true in one row means:
+the pre-claim read saw no token, the PUT happened, and an independent re-read
+observed ours before establishment. `renewal_info_signed_date` 0.5 s before the
+write confirms the state stored came from the **post-claim** read.
+
+**Client and server agree to the millisecond:** `bound_at` 17:31:55.757 UTC
+against a client-observed 200 at 17:31:55.779 UTC.
+
+**The 401 seen just beforehand is expected**: a days-old access token, PostgREST
+answering 401, `ensureValidBackendSession` refreshing via `/auth/token`, and
+everything after succeeding. **The binding row is the proof it resolved** —
+`ensure_membership_binding()` is `authenticated`-only and derives identity from
+`auth.uid()`, so a stale token could not have created it.
+
+### S-3 — THE SINGLE ASSERTION THAT PROVES THE WHOLE PROTOCOL
+
+At **18:18:10** Apple sent `DID_RENEW` for the same subscription, and ingestion
+recorded it **`applied`** with **no failure category**.
+
+**The before/after is as clean as this project will ever get:** 14 notifications
+for this tester are `ignored`/`unmapped`; **one** is `applied`. Same
+subscription, same `originalTransactionId`, same tester, same endpoint. **The
+only thing that changed between them is the binding.**
+
+`applied` requires `membership_resolve_binding_v1` to map an `appAccountToken` to
+an identity — so **Apple carried our binding token into a real renewal**, which
+is precisely what B-24 predicted and what no stub could demonstrate.
+
+The row refreshed correctly: `renewal_date` 18:19 -> **19:19**, `updated_at`
+0.27 s after Apple's signature, `last_notification_uuid` populated.
+
+**Provenance stayed immutable through the refresh** — `binding_method` still
+`legacy_claim`, and `bound_at = created_at`, so the canonical writer did not
+re-provenance an established row.
+
+### D4 confirmed on a REAL Apple subscription
+
+`connected_member()` = **false** and `membership_state()` = **`sandbox_only`**,
+on a live, entitled, Apple-verified Sandbox membership. **A Sandbox subscription
+confers no Production entitlement**, demonstrated on genuine Apple state rather
+than a fixture.
+
+---
+
 ## U5d — RESULTS. 469 assertions green, 2026-08-23. LOCAL ONLY, NOT DEPLOYED
 
 **`membership_attest_v1` implements B-24's protocol end to end.** One Edge
