@@ -1502,6 +1502,65 @@ explain a rule are exactly the ones that defeat a naive search for it.
 
 ---
 
+## Q1 DISCHARGED, AND MOST OF G6a, ON GENUINE APPLE — 2026-08-25
+
+**Obtained incidentally while clearing the fixture for B-24n**, which is exactly
+how Q1 was always meant to be scored: *"Read the row after G6a's genuine expiry
+... Costs no waiting."*
+
+The lifecycle, all four notifications **`applied`** — the binding kept mapping
+every type, not just `DID_RENEW`:
+
+```
+18:18:10  DID_RENEW                                        -> applied
+19:18:08  DID_RENEW                                        -> applied
+19:31:39  DID_CHANGE_RENEWAL_STATUS / AUTO_RENEW_DISABLED   -> applied
+20:19:03  EXPIRED / VOLUNTARY                               -> applied
+```
+
+### Q1 — the quarantine arithmetic, on real Apple dates
+
+| | |
+|---|---|
+| `entitlement_ended_at` | `2026-08-25 20:19:00` |
+| `pending_cleanup_at` | `2026-10-24 20:19:00` |
+| Difference | **EXACTLY 60 days** |
+
+**And the end instant came from APPLE, not our clock** — `entitlement_ended_at`
+is `20:19:00` exactly, while `updated_at` is `20:19:05.099`. The writer preferred
+Apple's own paid-through date over the moment we happened to hear about it, which
+is what makes the 60 days measured from the truth.
+
+**THIS IS THE FIRST NON-NULL `pending_cleanup_at` IN THIS PROJECT'S HISTORY, AND
+IT IS CORRECT.** Scheduling is a *transition* from entitled to not-entitled;
+U5's establishment never schedules (F11), and this row was scheduled by U4's
+canonical writer on a genuine expiry. **No worker exists, so nothing acts on it.**
+
+### G6a — voluntary cancellation, and the Cancel/Grace conflation did NOT occur
+
+- **Entitlement was continuous to the paid-through date.** Cancelled 19:31, and
+  the subscription stayed `apple_status = 1` and entitled until 20:19.
+- **Billing Grace was NEVER entered** — its appearance would have been a fail. No
+  `DID_FAIL_TO_RENEW`, no `grace_period_expires_date`, `is_in_billing_retry`
+  false throughout. **Cancellation is a renewal-preference change, not a billing
+  event**, confirmed on real Apple state rather than argued from the table.
+- At expiry: `apple_status = 2`, `expiration_intent = 1` (voluntary), derived
+  entitlement false, quarantine scheduled.
+
+**What G6a still does NOT have:** the presence-hidden half, which needs Device B
+as an observer and belongs with U6/U7. Recorded as partial rather than passed.
+
+### One prediction of mine was wrong, and the correction is the lesson
+
+I predicted expiry at **19:19**. A further renewal fired at **19:18**, before the
+cancellation registered at 19:31, so the subscription ran to **20:19** instead.
+**The mechanism was right and the timing assumption was wrong** — I assumed the
+cancellation would land before the next hourly renewal, and there was no reason
+it had to. With an accelerated renewal rate, any instruction that takes minutes
+to carry out can be overtaken by a renewal.
+
+---
+
 ## GENUINE APPLE SANDBOX — S-1, S-2 AND S-3 ALL DISCHARGED, 2026-08-25
 
 **The first evidence in this project that is not "verified against a faithful
