@@ -1583,12 +1583,34 @@ inverse — Apple taking the money while the app said "Purchase unavailable" —
 the defect F10 removed, and it did not occur. **No sign-in step appeared**, so
 U5f's "an already-authenticated member sees no extra step" holds on device.
 
-### Still outstanding on this fixture
+### The refresh loop, captured before the fixture expired
 
-The tester renews on a **5-minute** cycle (`renewal_date 15:03:13`), so ~12
-renewals cap it around 15:58 UTC. The `DID_RENEW` -> `applied` observation for a
-**bound-at-source** row is not yet captured; S-3 proved it only for
-`legacy_claim`. Cheap, but time-boxed.
+```
+14:58:15  SUBSCRIBED / INITIAL_BUY  -> ignored / unestablished
+15:02:35  DID_RENEW                 -> applied
+15:07:35  DID_RENEW                 -> applied
+```
+
+**`unestablished` -> `applied` on the SAME subscription, with no intervention.**
+That is the direct demonstration that `unestablished` is a transient race state
+and not a defect: attestation established the row moments after Apple's first
+delivery, and the very next renewal updated it. **Nothing was re-attested and
+nothing was repaired** — the design's claim that a later notification completes
+it either way is now observed rather than argued.
+
+**AND THIS SUBSCRIPTION HAS NEVER PRODUCED A SINGLE `unmapped` NOTIFICATION.**
+That is the bound-at-source signature, and the contrast with S-3 is the whole of
+B-24 in two rows:
+
+| Path | Before binding | After binding |
+|---|---|---|
+| `legacy_claim` (S-2/S-3) | **14 `unmapped`** | `applied` |
+| `purchase` (B-24n) | **none — mapped from birth** | `applied` |
+
+The legacy path had to *acquire* its binding through `GET -> PUT -> GET`, and the
+14 unmapped notifications are the record of the window before it did. The
+bound-at-source path never has that window, because StoreKit hands Apple the
+token at purchase.
 
 ---
 
