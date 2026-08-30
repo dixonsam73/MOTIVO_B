@@ -1575,6 +1575,40 @@ produced it.
 **`INITIAL_BUY` also gives the clean first-purchase observation** the record
 noted the spent F3b fixture could no longer produce.
 
+### Provenance is IMMUTABLE under refresh, and the race is now quantified
+
+Read after three renewals:
+
+```
+binding_method : purchase          -- UNCHANGED
+bound_at       : 2026-08-30 14:58:20.651151+00   -- UNCHANGED
+renewal_date   : 2026-08-30 15:18:13+00          -- advanced
+entitlement_ended_at / pending_cleanup_at : NULL / NULL
+```
+
+**A refresh must never be able to rewrite HOW ownership was proved**, or a stream
+of ordinary renewals becomes a path to laundering provenance. Verified for
+`legacy_claim` during S-3; now verified on the purchase path too, across three
+`applied` refreshes that moved `renewal_date` and touched nothing else.
+
+**F11 held through REFRESH, not merely through establishment.** Both scheduling
+columns stayed NULL while the row was updated repeatedly — scheduling is a
+transition out of entitlement, and an entitled row being refreshed has no
+transition to make.
+
+**And the race is measured rather than inferred:**
+
+```
+14:58:15.504  Apple's SUBSCRIBED arrives -> no row exists -> unestablished
+14:58:20.651  attestation establishes the row (bound_at)
+```
+
+**5.1 seconds.** Earlier this was argued from the writer's outcome vocabulary —
+`unestablished` means *binding resolved, nothing to update*. The two timestamps
+now show the sequence directly, and they are the cleanest evidence in the project
+that **U4's canonical writer originates nothing**: it met a mapped, complete,
+Apple-signed notification with no row to write, and wrote none.
+
 ### F10 — passed on its strongest branch
 
 **The app said nothing and Connected activated.** That is the common case the
