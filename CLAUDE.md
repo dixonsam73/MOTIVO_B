@@ -922,24 +922,25 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **21** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** |
-| Open Phase 3 obligations | **3** | C-26, C-31, B-11. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **22** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (OPEN) |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-33, filed 2026-08-30 by the U6a gate**. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The twenty-one rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
+The twenty-two rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
-**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved) and U5g's **B-32** (Resolved).
+**C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved), U5g's **B-32** (Resolved) and the U6a gate's
+**B-33** (OPEN).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
 in the same unit — five deployed and verified in production, and **B-28
 discharged by Apple's own test notification** — so the arithmetic is 6 resolved
 by U4, 6 previously resolved (B-23, B-4, B-12, B-13, B-9, C-9), 6 resolved after
-U4 (C-52, C-53, B-31, C-54, B-32, B-24), and 3 open. **Do not read "U4 is done"
+U4 (C-52, C-53, B-31, C-54, B-32, B-24), and 4 open. **Do not read "U4 is done"
 as reducing the open obligations: it never touched them.**
 
-**The open-obligation arithmetic, shown rather than asserted.** Twenty-one tagged
+**The open-obligation arithmetic, shown rather than asserted.** Twenty-two tagged
 rows, minus the eighteen resolved:
 
 - **C-9** — Resolved 2026-08-12, in the denominator only because its phase cell
@@ -955,18 +956,26 @@ rows, minus the eighteen resolved:
   resolved inside U5g;
 - **B-24** — Resolved 2026-08-30, by B-24n on genuine Apple;
 
-= **3 open: C-26, B-11 and C-31.** **B-24 CLOSED ON 2026-08-30**, on its own
+= **4 open: C-26, B-11, C-31 and B-33.** **B-24 CLOSED ON 2026-08-30**, on its own
 stated condition — *"this row closes when the protocol runs for real, not when
 its server half compiles"* — with both branches now discharged against genuine
 Apple: `legacy_claim` by S-1/S-2/S-3 and **bound-at-source by B-24n**. **B-32 was
 filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by
 U5d** and **C-54 by the correction that followed U5e**.
 
-**THE THREE REMAINING ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
+**THREE OF THE FOUR ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
 Do not read B-24's closure as progress against them: membership is now
 *established* authoritatively, and still **nothing consults it**. Zero policies
 enforce it, no worker exists, no cleanup runs, and Production is untouched. That
 gap is exactly C-26, and it is unchanged by everything U5 did.
+
+**B-33 IS THE FOURTH AND IT IS A DIFFERENT SHAPE — do not fold it in with the
+other three.** It is not a missing capability; it is a **wrong sentence in a
+deployed migration's comment** that U6 would have implemented from, and it
+carries no production defect at all: U3's revokes are correct and the schema
+needs no change. It is open because the sentence is still there and the wrapper
+that replaces it is not yet written. **It closes inside U6a**, where the other
+three do not.
 
 **The backend-verification count went 4 → 0, and that is a different statement
 from the row arithmetic.** B-23 was never a fifth member of it — it was their
