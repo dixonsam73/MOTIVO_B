@@ -280,6 +280,72 @@ writer established rather than one the test manufactured.
 
 ---
 
+## B-24 IS RESOLVED — B-24n AND F10 ON GENUINE APPLE, 2026-08-30
+
+**The bound-at-source half, and with it every reason B-24 listed for staying
+open.** Those reasons were: the endpoint not deployed, no client existing to
+present a JWS, and everything verified only against a faithful local
+reproduction. All three are now false. The row closed on its own stated
+condition — *"this row closes when the protocol runs for real, not when its
+server half compiles."*
+
+A U5f purchase on a **fresh Sandbox tester**, carrying `.appAccountToken`,
+established `binding_method = 'purchase'` on a new `originalTransactionId`, with
+`pending_cleanup_at` and `entitlement_ended_at` both NULL, `connected_member()`
+false, `membership_state()` `sandbox_only`, and the conflict table empty. **All
+eight committed predictions matched and nothing was repaired forward.**
+
+**`'purchase'` PROVES AN ABSENCE.** Provenance is derived, never supplied, so
+that value is written only when the client's own Apple-signed JWS already
+carried our stored token — which means the legacy branch was never entered and
+**no Set App Account Token PUT was issued at all**. There is no other way to
+observe a call that did not happen.
+
+### The binding row was never touched, and a different Apple Account bought it
+
+```
+binding_created_at : 2026-08-25 17:31:54.005854+00
+binding_updated_at : 2026-08-25 17:31:54.005854+00   -- IDENTICAL
+```
+
+`binding_rows = 1` alone would have been satisfied by deleting the old row and
+minting a new one. **The identical timestamps exclude that**, so one unchanged
+token survived a legacy claim, eleven renewals, a cancellation, a genuine expiry,
+deletion of the membership row, **a change of Apple Account**, and a fresh
+purchase. **Two Apple Accounts, one Études identity, one token, two
+`originalTransactionId`s** — which measures rather than argues the settled claim
+that the token is an attribute of the IDENTITY, not of a subscription, and is the
+part no local reproduction could have shown.
+
+### The race produced an assertion nobody scheduled
+
+`SUBSCRIBED`/`INITIAL_BUY` landed **`ignored`/`unestablished`** at 14:58:15 — a
+predicted pass, with delivery beating attestation. `unmapped` would have
+falsified B-24n; `unestablished` means the binding matched **on the first
+notification of the subscription's life**.
+
+**So the membership row came from attestation, not from ingestion**, and U4's
+UPDATE-ONLY rule — the correction of 2026-08-20 — was exercised **against genuine
+Apple traffic** in exactly the window where a writer that originated rows would
+have had to invent `binding_method`.
+
+### F10 passed on its strongest branch
+
+**The app said nothing and Connected activated.** Only propagation and
+unresolvable refusal earn a word, and neither arose. The inverse — Apple taking
+the money while the app says "Purchase unavailable" — is the defect F10 removed.
+**No sign-in step appeared**, so U5f's "an already-authenticated member sees no
+extra step" holds on device.
+
+### What this does NOT close
+
+**Nothing consults membership.** Zero policies enforce it, no worker exists, no
+cleanup runs, Production ASSN is still unset and attestation is Sandbox-only.
+Membership is now *established* authoritatively and is still *read by nothing* —
+which is C-26, B-11 and C-31, and unchanged by any of this.
+
+---
+
 ## S-1, S-2 AND S-3 DISCHARGED ON GENUINE APPLE SANDBOX — 2026-08-25
 
 **The first evidence in this project that is not "verified against a faithful
@@ -844,7 +910,7 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Count | Value | What it is |
 |---|---|---|
 | Phase-3-tagged register rows | **21** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11, **B-24** — unchanged by U4. **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Open Phase 3 obligations | **3** | C-26, C-31, B-11. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
@@ -869,12 +935,18 @@ minus:
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
 
-= **4 open: C-26, B-11, C-31 and B-24.** **B-32 was filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by U5d** and
-**C-54 by the correction that followed U5e**. All four remaining are the
-server-authority work
-itself, and none of them has begun. **B-24 is a design defect caught before
-implementation**, so it is open in the sense that U5 has not yet built the
-corrected protocol — not in the sense that anything defective ships.
+= **3 open: C-26, B-11 and C-31.** **B-24 CLOSED ON 2026-08-30**, on its own
+stated condition — *"this row closes when the protocol runs for real, not when
+its server half compiles"* — with both branches now discharged against genuine
+Apple: `legacy_claim` by S-1/S-2/S-3 and **bound-at-source by B-24n**. **B-32 was
+filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by
+U5d** and **C-54 by the correction that followed U5e**.
+
+**THE THREE REMAINING ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
+Do not read B-24's closure as progress against them: membership is now
+*established* authoritatively, and still **nothing consults it**. Zero policies
+enforce it, no worker exists, no cleanup runs, and Production is untouched. That
+gap is exactly C-26, and it is unchanged by everything U5 did.
 
 **The backend-verification count went 4 → 0, and that is a different statement
 from the row arithmetic.** B-23 was never a fifth member of it — it was their

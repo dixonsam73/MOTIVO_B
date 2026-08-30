@@ -1502,6 +1502,96 @@ explain a rule are exactly the ones that defeat a naive search for it.
 
 ---
 
+## B-24n AND F10 — BOTH DISCHARGED ON GENUINE APPLE. 2026-08-30
+
+**Every committed prediction matched. Nothing was repaired forward.** Purchase
+14:58 UTC on Device A, U5f build, fresh Sandbox tester, real Apple payment sheet
+headed *Sandbox*.
+
+### Resumption verification, before anything was touched
+
+Repo `33d854a` = `origin/33d854a`, tree clean. **All five Edge Functions
+unchanged in version AND SHA** — and no version drift is itself informative,
+since `secrets set` is known to re-version all five while changing none, so that
+rules out a secrets change as well as a redeploy. Fixture: `membership_rows 0`,
+`binding_rows 1`, `conflict_rows 0`, **zero notifications in the five-day gap**.
+
+### B-24n — the eight predictions
+
+| # | Predicted | Observed |
+|---|---|---|
+| 2 | `binding_method = 'purchase'` | **`purchase`** |
+| 3 | NEW `original_transaction_id` | **`2000001228947923`** ≠ `2000001220187383` |
+| 4 | `pending_cleanup_at` NULL, `entitlement_ended_at` NULL | **both NULL** |
+| 5 | `apple_status 1`, `auto_renew_status 1`, Sandbox | **1 / 1 / Sandbox** |
+| 6 | `connected_member` false, `membership_state` `sandbox_only` | **false / `sandbox_only`** |
+| 7 | `membership_rows 1`, `binding_rows 1` unchanged | **1 / 1** |
+| 8 | `membership_binding_conflict` empty | **0** |
+
+**PREDICTION 2 IS AN ORDERING PROOF, LIKE S-2's, AND IT PROVES AN ABSENCE.**
+Provenance is derived, never supplied: `membership_establish_v1` writes
+`'purchase'` only when the client's Apple-signed JWS token is not distinct from
+our stored binding. So `'purchase'` in the row is evidence that **the legacy
+branch was never entered and NO PUT was issued to Apple at all**. There is no
+other way to observe a call that did not happen.
+
+### The binding row was never touched, and that is the strongest single number
+
+```
+binding_created_at : 2026-08-25 17:31:54.005854+00
+binding_updated_at : 2026-08-25 17:31:54.005854+00   -- IDENTICAL
+```
+
+**Not merely "one row" — the SAME row, never updated since the legacy claim
+created it.** `binding_rows = 1` alone would have been satisfied by deleting the
+old row and minting a new one; the identical timestamps exclude that.
+
+So one unchanged token survived, in order: a legacy claim, eleven renewals, a
+voluntary cancellation, a genuine expiry, deletion of the membership row, **a
+change of Apple Account**, and a fresh purchase — and bound the new subscription
+on sight. **"The token is an attribute of the identity, not of a subscription"
+is now measured rather than argued**, and the Apple-Account change is the part no
+local reproduction could have shown: two different Apple Accounts, one Études
+identity, one token, two `originalTransactionId`s.
+
+### Prediction 9 — and U4's UPDATE-ONLY invariant proved incidentally
+
+```
+SUBSCRIBED / INITIAL_BUY -> ignored / unestablished   14:58:15.504
+```
+
+**A pass, and the race resolved in Apple's favour** — delivery beat attestation.
+`unmapped` would have falsified B-24n; `unestablished` is the writer's category
+for *the binding resolved and there was nothing to update*, which means the
+binding matched **on the very first notification of the subscription's life**.
+
+**And the row therefore came from attestation, not from ingestion.** At 14:58:15
+no membership row existed and U4's canonical writer created none — the
+UPDATE-ONLY rule corrected on 2026-08-20 **exercised against genuine Apple
+traffic**, in exactly the window where a writer that originated rows would have
+had to invent `binding_method`. That was never a scheduled assertion; the race
+produced it.
+
+**`INITIAL_BUY` also gives the clean first-purchase observation** the record
+noted the spent F3b fixture could no longer produce.
+
+### F10 — passed on its strongest branch
+
+**The app said nothing and Connected activated.** That is the common case the
+design specifies: only propagation and unresolvable refusal earn a word. The
+inverse — Apple taking the money while the app said "Purchase unavailable" — is
+the defect F10 removed, and it did not occur. **No sign-in step appeared**, so
+U5f's "an already-authenticated member sees no extra step" holds on device.
+
+### Still outstanding on this fixture
+
+The tester renews on a **5-minute** cycle (`renewal_date 15:03:13`), so ~12
+renewals cap it around 15:58 UTC. The `DID_RENEW` -> `applied` observation for a
+**bound-at-source** row is not yet captured; S-3 proved it only for
+`legacy_claim`. Cheap, but time-boxed.
+
+---
+
 ## B-24n AND F10 — PREDICTIONS, COMMITTED BEFORE THE RUN. 2026-08-25
 
 **Written and committed before the device is touched.** B-24n is the half of
