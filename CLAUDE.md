@@ -24,13 +24,26 @@ U0 (this record), U1 (the local backend baseline), U2 (the four backend
 verifications), U3 — DEPLOYED TO PRODUCTION 2026-08-17 — U4 in full, including
 U4h/U4i — DEPLOYED TO PRODUCTION AND ACCEPTED 2026-08-20 — U5a, a gate unit
 (2026-08-20): F1/C-52 corrected and verified, F3b EXECUTED and scored **P2** —
-**U5b, U5c and U5d (2026-08-23): the SQL foundation, the attestation
-support and `membership_attest_v1` itself** — all **LOCAL ONLY AND NOT
-DEPLOYED** — **U5e (2026-08-23): client plumbing and F6**, and **U5f
-(2026-08-23): the new join flow and attestation orchestration** — the first
-product-visible U5 unit. **NOTHING IS DEPLOYED and nothing has met Apple.** The
-whole protocol exists locally, client and server, and is unproven end to end.
-**U5g — deployment and genuine Sandbox QA — has not begun.**
+**U5b, U5c and U5d (2026-08-23): the SQL foundation, the attestation support
+and `membership_attest_v1` itself** — **U5e (2026-08-23): client plumbing and
+F6** — **U5f (2026-08-23): the new join flow and attestation orchestration**,
+the first product-visible U5 unit — and **U5g — DEPLOYED TO PRODUCTION AND
+ACCEPTED 2026-08-23**. **THE WHOLE PROTOCOL IS DEPLOYED AND HAS MET APPLE IN
+BOTH DIRECTIONS**: the legacy claim on 2026-08-25 (S-1, S-2, S-3) and
+bound-at-source on 2026-08-30 (B-24n, F10), both on genuine Apple Sandbox.
+**U6 AND U7 HAVE NOT BEGUN** — nothing consults membership and no cleanup
+worker exists.
+
+**CORRECTED 2026-08-30, AND THIS IS THE FOURTH INSTANCE OF ONE FAILURE MODE.**
+This paragraph read "U5b, U5c and U5d ... **LOCAL ONLY AND NOT DEPLOYED** ...
+**NOTHING IS DEPLOYED and nothing has met Apple** ... **U5g ... has not begun**"
+for seven days after U5g deployed — while the heading three sections below read
+"U5 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-23", and while two
+genuine Apple Sandbox runs were recorded elsewhere in this same file. Written
+before the deploy and never re-read afterwards: **exactly C-52, exactly the U4
+heading corrected immediately below, and exactly the rig-state section corrected
+at `c7cb0f7`.** **This one is the opening paragraph** — the first thing a new
+session reads, and therefore the last thing anybody re-reads.
 
 **CORRECTED 2026-08-20.** This paragraph previously read "U4b-U4g ... IMPLEMENTED
 AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
@@ -83,7 +96,7 @@ all, because no Apple subscription carries an `appAccountToken` and no binding
 exists to match. The second becomes false the moment U5 ships, by design;
 reading it later as an invariant would make U5 look like a regression.
 
-**Six findings were filed and five are implemented-not-deployed: B-25** (derived
+**Six findings were filed and five are DEPLOYED IN PRODUCTION: B-25** (derived
 entitlement failed *into* scheduled cleanup when Apple omitted a field — every
 renewal-info field is optional), **B-26** (`'duplicate'` was structurally
 unwritable, so QA G2 asserted something no correct implementation could
@@ -914,7 +927,7 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
-The nineteen rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
+The twenty-one rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
 **C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved) and U5g's **B-32** (Resolved).
 
