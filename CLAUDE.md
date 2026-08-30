@@ -1867,12 +1867,81 @@ and whether anything still carries material release or security risk rather than
 being cleanup or later-phase work. **Produce it from the evidence, not by moving
 statuses to improve the numbers.** An item that is open stays open.
 
-**Rig state at end of 2026-08-15 — read before planning device QA. THIS
-SUPERSEDES THE 2026-08-14 DESCRIPTION, WHICH IS NOW WRONG IN EVERY PARTICULAR
-FOR DEVICE A.**
+**RIG STATE AT END OF U5 — 2026-08-30. READ THIS BEFORE PLANNING ANY DEVICE QA.
+IT SUPERSEDES THE 2026-08-15 DESCRIPTION THAT FOLLOWS IT, WHICH IS NOW WRONG
+ABOUT DEVICE A IN ALMOST EVERY PARTICULAR.** The older block is kept because its
+Phase 2 material is still accurate and still load-bearing; it is marked, not
+rewritten.
 
-**Device A holds NO usable Connected identity, account state or fixture. It sits
-at first-launch onboarding.** The Connected identity it carried through Phase 2 —
+**This section was stale for five days and nobody noticed until a handover forced
+a re-read** — the same shape as C-52 and the U4 heading. A rig description is the
+one document a device QA plan is built from, so it fails silently: the plan looks
+sound and the fixture it assumes does not exist.
+
+### Device A — verified 2026-08-30 at `41ae743`
+
+| | |
+|---|---|
+| Build | **U5f client** (U5e/U5f shipped), no temporary instrumentation |
+| Connected identity | **LIVE and usable** — the 2026-08-15 identity, re-authenticated |
+| Apple credential | **NOT revoked any more** — see below |
+| `membership_binding` | **1 row**, created `2026-08-25 17:31:54`, **never updated** |
+| `membership` | **1 row**, Sandbox, `binding_method = 'purchase'`, otid `2000001228947923` |
+| Sandbox tester signed in | **the second tester**, created 2026-08-30 |
+| Local journal contents | **not surveyed** — do not assume empty or populated |
+
+**THE REVOCATION STATEMENT BELOW IS OBSOLETE AND THIS IS WHY.** The 2026-08-15
+block says Device A holds nothing usable *because its Apple credential was
+manually revoked*. On 2026-08-25 **Sign in with Apple returned the SAME `sub`
+after that manual revocation**, re-authenticating the existing identity rather
+than minting a new one — `auth.users` did not grow. Revoking the credential
+withdrew authentication and not the account, exactly as C-45 and invariant 5
+say. **So the identity was never lost, and the inference drawn from the
+revocation was wrong even while the revocation itself was correctly recorded.**
+
+**THE CURRENT SANDBOX SUBSCRIPTION EXPIRES ON ITS OWN, ~15:58 UTC 2026-08-30.**
+Purchased 14:58 on a 5-minute renewal cycle, so Apple's ~12-renewal cap ends it
+within the hour. Nothing needs it: B-24n and F10 are discharged. **Expect a final
+`EXPIRED` to schedule quarantine 60 days out, exactly as Q1 recorded — that is a
+free confirmation, not a defect and not something to chase.** After it lands,
+`membership` holds a lapsed Sandbox row with `pending_cleanup_at` set and **no
+worker exists to act on it**.
+
+**BOTH SANDBOX TESTERS ARE NOW SPENT FOR CLEAN-FIRST-PURCHASE PURPOSES, AND A
+THIRD IS THE ONLY ROUTE TO ANOTHER.** The first reported `RESUBSCRIBE` rather
+than `INITIAL_BUY` from 2026-08-20 onward; the second delivered its one genuine
+`INITIAL_BUY` on 2026-08-30. **Clearing purchase history has never been observed
+to work in this project** — see the Environment section — so plan any future run
+needing a first purchase around minting a new tester, and design it to need
+exactly one.
+
+**DEVICE A'S IDENTITY IS PRE-CUTOVER, AND THAT IS A PROPERTY U6 PLANNING MUST
+KNOW.** It was minted 2026-08-15 20:08:05, and `cutover_at` is
+2026-08-17 19:08:27, so it is inside the frozen 16-row snapshot and the
+grandfather clause applies to it. **It therefore cannot demonstrate post-cutover
+behaviour on its own.** Stated as a fixture fact, not a design decision — what to
+do about it belongs to U6.
+
+### Device B — unchanged
+
+Untouched by Phase 2 and by all of Phase 3. Still the established / lapsed
+control fixture. **Never run Erase All on it.**
+
+### The 2026-08-15 block below
+
+Everything it says about **Phase 2**, the D15 run, the destroyed Phase 2 fixture,
+the C-44 revocation outcome and the abandoned refresh token **remains accurate
+and is not superseded**. Only its Device A availability statements are.
+
+---
+
+**HISTORICAL — rig state at end of 2026-08-15. SUPERSEDED FOR DEVICE A by the
+section above; retained for its Phase 2 record.** It in turn superseded the
+2026-08-14 description.
+
+**Device A held NO usable Connected identity, account state or fixture at that
+date, and sat at first-launch onboarding.** The Connected identity it carried
+through Phase 2 —
 `cfadb7cb-12d3-47cc-ac79-c574e5341eb1`, restored intact from the encrypted backup
 — was **deleted by the D15 destructive run on 2026-08-15**, a legitimate gate,
 not an accident. The container went with it: all 8 `Documents` files, `Scores`,
@@ -1898,7 +1967,10 @@ it is the normal first-run shape rather than an anomaly; the earlier
 
 **The Apple credential has since been manually revoked**, so no client can
 currently authenticate to that identity — which is why Device A holds nothing
-usable while the backend identity remains. **Retained as evidence, not deleted to
+usable while the backend identity remains. **[OBSOLETE 2026-08-25 — the
+revocation is correctly recorded, the inference from it is not. SIWA later
+returned the SAME `sub` and re-authenticated this identity. See the current rig
+state above.]** **Retained as evidence, not deleted to
 tidy the count.** It is **not** a C-36 fixture and must not be used as one: its
 credential is revoked and it has already authenticated. It is a **Phase 3
 reference case**, being the first observed instance of the "authenticated, no
@@ -1934,9 +2006,14 @@ from production notification rows, not assumed.** The purchase at 2026-08-20
 `EXPIRED`/`VOLUNTARY` — consistent with Apple's documented sandbox cap of up to
 12 renewals before auto-renewal turns off. **So the F3b entitlement CANNOT be
 reused for S-1, S-2, B-24n, G11 or F10**; every one of those needs a live
-entitlement and the fixture is spent. The tester also reported `RESUBSCRIBE`
-rather than `INITIAL_BUY`, so it can no longer produce a clean first-purchase
-observation either.
+entitlement and the fixture is spent. **[HISTORICAL — FOUR of the five were
+subsequently discharged on later fixtures: S-1 and S-2 on 2026-08-25 (with S-3),
+B-24n and F10 on 2026-08-30. **G11 was NOT** — its essential behaviour was
+observed incidentally during S-1, where attestation fired unattended on a first
+cold launch, but it has never been run as a scored gate. The paragraph is kept
+because its sandbox-renewal-cap observation still holds.]** The tester also
+reported `RESUBSCRIBE` rather than `INITIAL_BUY`, so it can no longer produce a
+clean first-purchase observation either.
 
 **Device B Release is UNTOUCHED by Phase 2** — still the established / lapsed
 control fixture. No Phase 2 commit touched it and no Phase 2 run spent it.
