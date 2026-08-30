@@ -218,3 +218,124 @@ public.connected_member_self(); drop table public.shadow_enforcement_stat;`
   *successful* G4 and a *blocked* U6b, and conflating the two is how one metric
   came to stand for four questions.
 - Nothing about production. Everything here is local until deployed.
+
+---
+
+# ACTUAL RESULTS — 2026-08-30, appended. THE PREDICTION ABOVE IS UNCHANGED.
+
+**Everything above this line is the prediction as committed at `5945855`, and it
+is preserved verbatim including the parts that were wrong.** Overwriting it would
+destroy the only thing that makes a prediction worth committing.
+
+## Structural delta — 10 of 10 surfaces MATCHED
+
+`columns` 130 · `constraints` 67 · `functions` 24 with **9 modified** ·
+`function_grants` 72 · `rls_enabled` 15 · `policies` 33 with **23 modified** ·
+`table_grants` 102 · `column_grants` 523 · `triggers` 5 · `storage_buckets` 2.
+
+**23 policies attached, 9 functions modified, and ZERO bare observer calls** —
+G4-S3's cliff was avoided on the first attempt.
+
+*(One scare during checking was a measurement error, not a delta: an ad-hoc
+trigger query omitted the `storage` schema and read 1 instead of 5.
+`capture-schema.sh`'s own query reads 5. The lesson is small and real — check
+the gate's query, not a query that looks like it.)*
+
+## BLAST RADIUS — THE PREDICTION WAS WRONG IN BOTH DIRECTIONS
+
+**Predicted 2 assertions changing. Actual: 1, and it was neither of them.**
+
+| Assertion | Predicted | ACTUAL |
+|---|---|---|
+| **U4 A57b** | fails, 0 → 23 | **stayed GREEN at 0** |
+| **U5 A67c** | fails, 0 → 23 | **stayed GREEN at 0** |
+| **U3 A15c** | unchanged | **FAILED, 0 → 1** |
+
+Measured on a fresh reset: U3 **96/1**, U4 **73/96/43 green**, U5
+**68/53/55/62 green**.
+
+### Why A15c failed, and it is the more useful half
+
+`shadow_observe()` calls `membership_state()`. A15c asserts that no function
+outside the `membership%` namespace depends on membership, and shadow_observe
+acquires exactly that dependency. **The assertion was right and the prediction
+was wrong.** When predicting, its source was checked for the string
+"membership" — the table it *writes to* was read, and the function it *calls*
+was missed.
+
+### Why A57b and A67c staying green is the WORSE finding
+
+Their claim is *"NO policy consults membership"*. Under U6a that is **false in
+substance** — 23 policies reach membership state via
+`shadow_observe -> membership_state` — and both still passed, because
+`shadow_observe` matches neither alternation of `connected_member|membership`.
+
+**§1 of the prediction argued the names were substantive and not an evasion, and
+§4 committed to extending the regexes so they could not pass by namespace
+accident. But §4 also predicted they would FAIL — and that wrong prediction was
+doing the safety work.** They passed, so nothing forced the correction. **A
+naming decision justified as honest still silently neutralised two invariants**,
+which is precisely the outcome §1 claimed it would not have.
+
+**A15c caught what A57b was built to catch, by accident of construction rather
+than by design.** That is the transferable lesson: an invariant that names a
+*namespace* is defeated by a new object outside it, while one that names a
+*dependency* is not.
+
+## DISPOSITION — approved 2026-08-30, and no assertion was weakened
+
+| Assertion | Change |
+|---|---|
+| **A15c** | `shadow_observe` added as a **single explicit exception, by name**. No namespace, no pattern. Any other function acquiring a membership dependency still fails it |
+| **A57b / A67c** | Regex extended to name `shadow_observe`; expectation **0 → 23**. **Made STRICTER**, not merely re-pointed: each gains a companion asserting **no policy calls an entitlement predicate directly** (`connected_member(`, `membership_state(`, `connected_member_self(` = 0), and a third asserting the observer returns `true`. The claim is now *"the enumerated policies consult shadow telemetry, and enforcement remains non-binding and behaviourally inert"* |
+
+The attached-vs-detached row-count comparison — the strongest form of inertness —
+is **G4-S2** in `supabase/tests/u6a/acceptance.sh`.
+
+## FINAL SUITE COUNTS — all green, each on its own fresh `db reset`
+
+| Suite | Predicted | Actual |
+|---|---|---|
+| U3 acceptance | 97 | **97** |
+| U4 modules / acceptance / e2e | 73 / 96 / 43 | **73 / 98 / 43** |
+| U5 modules / client-structural / acceptance / e2e | 68 / 53 / 55 / 62 | **68 / 53 / 57 / 62** |
+| U6a acceptance | 62 | **74** |
+| **Total** | 609 | **625** |
+
+U4 and U5 acceptance each gained **+2**: the companion assertions paired with the
+re-pointed A57b and A67c. U6a came in at 74 rather than the predicted 62, from
+assertions added while writing it — G4-S2's capture/re-attach pair, and **G4-S8**,
+which was not in the plan and should have been:
+
+> **G4-S8 — the observer fires from POLICY EVALUATION, not only when called
+> directly.** Nothing else in the suite distinguished *attached and working* from
+> *attached and silent*, and those look identical from outside. It asserts that
+> `posts.select` recorded **once per identity class, separately** — four rows,
+> four distinct `user_id`s, none conflated, which is also what makes
+> `sandbox_only` separable from a real lapse.
+
+### Four defects were introduced while writing the suite and caught by running it
+
+Recorded because each is a repeat of a lesson already in this repository.
+
+1. **A source-text assertion defeated by a comment.** G4-S1c counted `return ` in
+   raw `prosrc` and read 3 — two real returns plus the phrase *"the ONLY return
+   value this can have"* **inside a comment**. `U5c-34` and three U5d assertions
+   had the identical shape. Comments are now stripped, and the property asserted
+   is the real one: every return yields `true`.
+2. **`docker exec -i` inside a `while read` loop steals the loop's stdin**, and
+   this host runs **bash 3.2**, which has no associative arrays. The G4-S3 loop
+   died silently after one iteration and the suite simply stopped, with a zero
+   exit and no error.
+3. **A detection regex that could never match.** G4-S3 looked for
+   `( SELECT public.shadow_observe`; Postgres renders the qual **without** the
+   schema prefix and **with** an `AS shadow_observe` alias, so every policy read
+   as "bare" while the bare-count double-counted the alias. **A check that cannot
+   fire is worse than no check** — it reports the thing it never tested.
+4. **A teardown that was not the inverse of the setup.** G4-S2 detaches via the
+   rollback baseline, which restores **33 policies AND 9 functions**; the
+   re-attach restored only policies. The suite passed and left the nine RPCs
+   detached, and `inventory-complete.sh` then failed with
+   `observed functions = 0`. Both halves are now captured, restored, and
+   **asserted** — a teardown that is not asserted is a teardown that silently did
+   not happen.

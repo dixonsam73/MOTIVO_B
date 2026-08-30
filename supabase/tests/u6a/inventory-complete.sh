@@ -90,8 +90,30 @@ PC=$(psq "select count(*) from pg_policies where tablename='post_comments' and c
 [ "$PC" = "0" ] && echo "  PASS  post_comments has no INSERT/UPDATE policy (writes are SECURITY DEFINER only)" || { echo "  FAIL  post_comments INSERT/UPDATE policies = $PC"; FAIL=1; }
 AD=$(psq "select count(*) from pg_policies where tablename='account_directory' and qual not like '%auth.uid()%'")
 [ "$AD" = "0" ] && echo "  PASS  every account_directory policy is owner-scoped (discovery is not in RLS)" || { echo "  FAIL  non-owner-scoped account_directory policies = $AD"; FAIL=1; }
-EN=$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (qual like '%connected_member%' or with_check like '%connected_member%')")
-[ "$EN" = "0" ] && echo "  PASS  zero policies consult connected_member (U6 has not begun)" || { echo "  FAIL  policies consulting connected_member = $EN"; FAIL=1; }
+# UPDATED AT U6a: this read "zero policies consult connected_member (U6 has not
+# begun)". U6a HAS begun, and the honest claim is narrower: no policy calls an
+# ENTITLEMENT PREDICATE directly. The observer is reached instead, and it is
+# inert. Leaving the old wording would have been a claim that quietly went stale.
+EN=$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~ 'connected_member\(|membership_state\(|connected_member_self\('")
+[ "$EN" = "0" ] && echo "  PASS  zero policies call an entitlement predicate directly (enforcement not bound)" || { echo "  FAIL  policies calling an entitlement predicate = $EN"; FAIL=1; }
+
+echo
+echo "-- direction 6: the OBSERVED set matches the inventory exactly --"
+OBS=$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) like '%shadow_observe%'")
+TOT=$(psq "select count(*) from pg_policies where schemaname in ('public','storage')")
+OPEN=$((TOT-OBS))
+[ "$OBS" = "23" ] && echo "  PASS  23 policies observed" || { echo "  FAIL  observed policies = $OBS, inventory says 23"; FAIL=1; }
+[ "$OPEN" = "10" ] && echo "  PASS  10 policies open" || { echo "  FAIL  open policies = $OPEN, inventory says 10"; FAIL=1; }
+# The SECURITY DEFINER half -- policy work does not reach these, so a policy-only
+# count would report two thirds of the surface as the whole.
+FOBS=$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and p.proname<>'shadow_observe' and pg_get_functiondef(p.oid) like '%shadow_observe%'")
+[ "$FOBS" = "9" ] && echo "  PASS  9 client-reachable functions observed" || { echo "  FAIL  observed functions = $FOBS, inventory says 9"; FAIL=1; }
+# Storage policies specifically, since they are a separate schema and easy to miss.
+SOBS=$(psq "select count(*) from pg_policies where schemaname='storage' and (coalesce(qual,'')||coalesce(with_check,'')) like '%shadow_observe%'")
+[ "$SOBS" = "7" ] && echo "  PASS  7 storage policies observed" || { echo "  FAIL  observed storage policies = $SOBS, inventory says 7"; FAIL=1; }
+# Client-reachable Edge Functions: enumerated in section 3 as OUT of reach.
+EF=$(ls -1 supabase/functions | grep -v '^_shared$' | grep -v '^deno' | wc -l | tr -d ' ')
+[ "$EF" = "5" ] && echo "  PASS  5 Edge Functions enumerated and structurally out of policy reach" || { echo "  FAIL  Edge Function count = $EF, inventory enumerates 5"; FAIL=1; }
 
 echo
 echo "=============================================================="

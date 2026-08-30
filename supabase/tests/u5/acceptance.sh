@@ -220,7 +220,12 @@ echo
 echo "-- structural"
 is A67  "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and pg_get_functiondef(p.oid) ~* 'insert into public\.membership *\(';")" "1" "exactly ONE function inserts into public.membership"
 is A67b "$(psq "select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and pg_get_functiondef(p.oid) ~* 'insert into public\.membership *\(';")" "membership_establish_v1" "...and it is the establishment writer"
-is A67c "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership';")" "0" "NO policy consults membership — U5b enforces nothing"
+#
+# REWRITTEN AT U6a, 2026-08-30, for the same reason as U4's A57b: the old form
+# stayed green under U6a while the claim it made became false. See A57b.
+is A67c "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership|shadow_observe';")" "23" "the 23 enumerated policies consult shadow telemetry"
+is A67c2 "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member\\(|membership_state\\(|connected_member_self\\(';")" "0" "...and U5b's writers are still consulted by NO policy -- enforcement is not bound"
+is A67c3 "$(psq "select public.shadow_observe('probe.a67c')::text;")" "true" "...and the observer is inert: it returns true, always"
 is A67d "$(psq "select count(*) from public.membership where pending_cleanup_at is not null;")" "0" "U5b scheduled no cleanup anywhere"
 is A67e "$(psq "select relrowsecurity::text from pg_class where relname='membership_binding_conflict';")" "true" "RLS enabled on the conflict table"
 

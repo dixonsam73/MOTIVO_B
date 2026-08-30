@@ -211,7 +211,14 @@ is A15b "$(psq "select count(*) from pg_policies where schemaname in ('public','
 # entitlement check. It used to name U3's three helpers as the exemption, which
 # made U4's own seven functions look like a violation of a U3 property. Excluding
 # the whole Phase 3 namespace says what was meant and still catches the hazard.
-is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','ensure_membership_binding') and p.proname not like 'membership%';")" "0" "pre-existing functions referencing membership"
+#
+# RE-POINTED AT U6a, 2026-08-30, AND IT CAUGHT WHAT A57b WAS SUPPOSED TO CATCH.
+# U6a's shadow_observe() calls membership_state(), so it acquires exactly the
+# dependency this assertion exists to detect -- and it FAILED here, unpredicted,
+# while A57b and A67c stayed green. shadow_observe is named as a SINGLE EXPLICIT
+# EXCEPTION, never a namespace or pattern: any OTHER function acquiring a
+# membership dependency still fails this, which is the whole point of the row.
+is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','ensure_membership_binding','shadow_observe') and p.proname not like 'membership%';")" "0" "no function outside the membership namespace depends on membership, except shadow_observe"
 is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at is not null;")" "0" "cleanup scheduled"
 is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "5" "trigger count unchanged"
 is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"

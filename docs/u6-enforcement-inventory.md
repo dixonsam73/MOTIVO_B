@@ -172,9 +172,37 @@ different directions on two different rows.
 
 ---
 
-## 4. OPEN DECISIONS THIS INVENTORY FORCES
+## 3.5 U6a OBJECTS — added 2026-08-30, and they are NOT gated surfaces
 
-### D-U6-1 — GATE-SUBJECT has no safe predicate yet. **BLOCKING for quarantine visibility.**
+| Function | secdef | Grants | Direction |
+|---|---|---|---|
+| `connected_member_self()` | yes | `authenticated` only | **OPEN-CRITICAL** — the zero-argument viewer predicate B-33 requires. Gating it would be circular |
+| `shadow_observe(text)` | yes | `authenticated` only | **OPEN-CRITICAL** — the observer itself. Always returns true, never raises |
+
+Neither takes a user id, so neither can be aimed at another identity.
+
+## 3.6 THE SETTLED DIRECTIONS — decided 2026-08-30, §4's questions are CLOSED
+
+**23 observed, 10 open, 33 total — asserted mechanically by
+`supabase/tests/u6a/inventory-complete.sh` direction 6, not counted by hand.**
+
+**OBSERVED (23).** `posts` SELECT *(non-owner branch)* / INSERT / UPDATE ·
+`post_shares` SELECT / INSERT / UPDATE · `post_comments` SELECT *(owner and
+recipient branches)* · `follows` INSERT / UPDATE · `connected_attachments`
+SELECT / INSERT / UPDATE · `post_comment_views` all three ·
+`account_directory` INSERT · `storage.objects` seven.
+
+**OPEN (10).** All six DELETEs · `follows` SELECT · `account_directory` SELECT
+and UPDATE · `attachments_user_select_auth`.
+
+## 4. THE DECISIONS THIS INVENTORY FORCED — ALL SETTLED 2026-08-30
+
+**Recorded as decided rather than deleted, because the reasoning is the durable
+part.** The original text of each follows.
+
+### D-U6-1 — **SETTLED: option 1.** A server-owned visibility state on
+### `account_directory`, not directly client-writable. **It is U6b, not U6a**, and
+### no uuid-addressable membership oracle is created. Original analysis:
 
 Quarantine requires a lapsed member's presence to become "invisible to other
 members immediately", and `search_account_directory` requires them to become
@@ -200,19 +228,23 @@ Three candidate resolutions, none yet chosen:
    shippable exception inside the paid-access boundary, which is what D4 rejected
    once already for the same reason.
 
-### D-U6-2 — should DELETE paths be gated?
+### D-U6-2 — **SETTLED: no.** All withdrawal/DELETE paths stay ungated. Lapse
+### must never prevent deleting your own data, account or relationships. Original:
 
 Six DELETE policies are marked OPEN above on one argument: **withdrawal is not
 consumption.** A lapsed member retracting their own post, unfollowing, or
 removing an attachment is reducing their footprint, and gating it strands
 content the member has asked to remove. Needs an explicit yes.
 
-### D-U6-3 — may a lapsed member still edit `display_name`?
+### D-U6-3 — **SETTLED: yes.** Self-profile maintenance is separate from
+### discoverability. Original:
 
 Expiry retains it so attribution survives (G10). Retention and editability are
 different questions and the durable record answers only the first.
 
-### D-U6-4 — does GATE-VIEWER apply to a member reading their OWN backend content?
+### D-U6-4 — **SETTLED: no.** A lapsed member reads their own retained material;
+### only branches reaching other members' content are gated. For `post_comments`
+### that means the `author_user_id` branch alone stays open (Q1). Original:
 
 `posts_select_public_or_owner` has an owner branch. Quarantine hides presence
 *from others*; it does not say whether the lapsed member may still read their own
