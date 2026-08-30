@@ -935,11 +935,12 @@ C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
 distinction this table exists to preserve.** U4 added six rows and closed all six
 in the same unit — five deployed and verified in production, and **B-28
 discharged by Apple's own test notification** — so the arithmetic is 6 resolved
-by U4, 6 previously resolved (B-23, B-4, B-12, B-13, B-9, C-9), 4 open. **Do not
-read "U4 is done" as reducing the open obligations: it never touched them.**
+by U4, 6 previously resolved (B-23, B-4, B-12, B-13, B-9, C-9), 6 resolved after
+U4 (C-52, C-53, B-31, C-54, B-32, B-24), and 3 open. **Do not read "U4 is done"
+as reducing the open obligations: it never touched them.**
 
-**The open-obligation arithmetic, shown rather than asserted.** Nine tagged rows,
-minus:
+**The open-obligation arithmetic, shown rather than asserted.** Twenty-one tagged
+rows, minus the eighteen resolved:
 
 - **C-9** — Resolved 2026-08-12, in the denominator only because its phase cell
   contains a literal `3`, and owing Phase 3 nothing;
@@ -947,6 +948,12 @@ minus:
 - **B-4, B-12, B-13** — Resolved 2026-08-16 by U2;
 - **B-9** — its row was already Resolved, and U2 discharged the two-recipient
   subcase that was the only thing carried;
+- **B-25, B-26, B-27, B-28, B-29, B-30** — all six filed AND resolved by U4;
+- **C-52** and **C-53** — filed and resolved by U5a; **B-31** — filed by U5a,
+  resolved by U5d;
+- **C-54** — filed by U5e and resolved the same day; **B-32** — filed and
+  resolved inside U5g;
+- **B-24** — Resolved 2026-08-30, by B-24n on genuine Apple;
 
 = **3 open: C-26, B-11 and C-31.** **B-24 CLOSED ON 2026-08-30**, on its own
 stated condition — *"this row closes when the protocol runs for real, not when
