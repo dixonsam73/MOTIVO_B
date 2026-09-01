@@ -31,8 +31,11 @@ the first product-visible U5 unit — and **U5g — DEPLOYED TO PRODUCTION AND
 ACCEPTED 2026-08-23**. **THE WHOLE PROTOCOL IS DEPLOYED AND HAS MET APPLE IN
 BOTH DIRECTIONS**: the legacy claim on 2026-08-25 (S-1, S-2, S-3) and
 bound-at-source on 2026-08-30 (B-24n, F10), both on genuine Apple Sandbox.
-**U6 AND U7 HAVE NOT BEGUN** — nothing consults membership and no cleanup
-worker exists.
+**U6a — SHADOW ENFORCEMENT — DEPLOYED TO PRODUCTION AND VERIFIED 2026-09-01.**
+23 policies and 9 RPCs now *observe* membership; **not one of them enforces it**,
+and the observer returns `true` on every path. **U6b, U6c AND U7 HAVE NOT
+BEGUN** — nothing consults membership *for a decision* and no cleanup worker
+exists.
 
 **CORRECTED 2026-08-30, AND THIS IS THE FOURTH INSTANCE OF ONE FAILURE MODE.**
 This paragraph read "U5b, U5c and U5d ... **LOCAL ONLY AND NOT DEPLOYED** ...
@@ -50,6 +53,93 @@ AND GREEN LOCALLY BUT NOT DEPLOYED", which the very next section contradicted in
 its own heading. It was written before the deploy and never re-read afterwards —
 **the same failure mode as C-52 four lines of reasoning apart**: a durable
 document describing a state it is not itself evidence of.
+
+## U6a IS LIVE IN PRODUCTION — shadow enforcement, deployed and verified 2026-09-01
+
+**23 policies and 9 SECURITY DEFINER RPCs now carry an observer. NOTHING IS
+ENFORCED.** `shadow_observe` returns `true` on every path and swallows its own
+write failure, so no request's outcome changed — a property of the code, proven
+by G4-S2 comparing row counts with the observer attached and detached.
+**`shadow_enforcement_stat` holds zero rows, zero privilege for every client
+role, and RLS is on.** The record is `supabase/sql/README-u6a-deployment.md`.
+
+**Every predicted number matched production and nothing was repaired forward.**
+Structural delta 10 of 10 — columns 130, constraints 67, functions 24 with 9
+modified, function_grants 72 with **zero** modified, rls_enabled 15, policies 33
+with 23 modified, and four surfaces byte-identical. B-23 returned **GATE MET**
+after recapture with only the standing `account_id_format` exception. **The
+deployed state is byte-identical to the prediction captured before the deploy**,
+and both fingerprints moved to exactly the rehearsed local values, so
+production's 33 policies and 9 functions are the same bytes the 74-assertion
+suite ran against.
+
+**Verified in the DEPLOYED BUNDLE rather than the tree: 23 observer calls, 23
+wrapped as `(select …)`, ZERO BARE.** That is the one property review cannot
+catch, because both forms are functionally correct and only the timing differs —
+278ms against 3.9ms at 5000 rows.
+
+**B-33 CLOSES HERE, on both halves.** The predicate reachable from a policy qual
+is `connected_member_self()`, zero-argument and granted to `authenticated` only;
+`connected_member(uuid)` and `membership_state(uuid)` stay ungranted to every
+client role, so the membership oracle is structurally unbuildable. And **U3's
+false comment is corrected in place with the original sentence quoted, not
+deleted** — the point is to recognise a claim that is correct-sounding and cannot
+be falsified by reading.
+
+### THE FIRST APPLY REPORTED SUCCESS AND APPLIED NOTHING
+
+**This outlives U6a and it is the reason to re-read this section before any
+future deploy.** The SQL editor answered *"Success. No rows returned."* and
+production was **completely unchanged** — both fingerprints still at their
+pre-U6a values, 22 functions, zero new objects. Not partial. Nothing.
+
+**The mechanism was not at fault, established by probes rather than argued.** A
+bare `create table` landed; `begin; create table …; commit;` landed; the project
+and the read path were right. So DDL, multi-statement submission and explicit
+transactions all work, and **what failed was the submitted text** — most likely
+the P1 no-op verification file running a second time, which is valid, commits,
+returns no rows and changes nothing.
+
+**A SUCCESS MESSAGE IS NOT EVIDENCE THAT THE INTENDED TEXT RAN.**
+`supabase/README.md` already warned that a Studio submission can fail in a way
+that *"reads exactly like success"*; that warning was about a split
+`BEGIN`/`COMMIT` and this arrived by a route it did not cover. **The
+generalisation is the durable part: any procedure whose success is reported by
+the thing being asked to act is unverified.** U3, U4 and U5 were not safer — they
+were caught by post-deploy verification rather than by the apply.
+
+**The fix was not more care at the keyboard.** It was a guard *inside* the
+transaction asserting the state it had just produced, and a final `SELECT` that
+returns a row — so **"no rows returned" became the symptom instead of the
+disguise**. `supabase/sql/2026-09-01-u6a-apply-production.sql`, rehearsed both
+ways before it was offered.
+
+### The rollback was regenerated from production, and the local one was right
+
+The 2026-08-30 baseline came from the **local** reproduction, so relying on it
+would have made the rollback correct only if fidelity held — and fidelity is what
+B-23 measures, never what it may assume. The same generator pointed at production
+produced **zero differences** across all 33 policy statements and all 9 function
+definitions. **The local file was correct all along, and that is now a
+measurement.** The full rollback was rehearsed end to end locally and its proof is
+not that the DROPs succeeded: **B-23 returned GATE MET on the rolled-back
+instance**, which is structural identity with live production.
+
+**`supabase db query` is SINGLE-STATEMENT.** It reaches production and its role
+holds write as well as read — that is how the whole read-only pre-flight was done
+— but it refuses more than one statement. Enough for the ten structural queries,
+never enough for a migration. **The gap between "there is no path" and "the path
+is single-statement" is where somebody improvises.**
+
+### What U6a does NOT do
+
+**Nothing consults membership for a decision**, no `account_directory` visibility
+state is maintained (U6b), no worker exists and no cleanup runs (U7). **G11 has
+still never been run as a scored gate**, and it is U6b's entry condition — as is
+G4-B2, zero grandfather-only decisions, which is **not** a U6a pass condition. A
+window that observes grandfather-only decisions is a *successful* G4 and a
+*blocked* U6b. **Device A's identity is pre-cutover**, so it cannot demonstrate
+post-cutover behaviour on its own.
 
 ## U4 IS LIVE IN PRODUCTION — deployed and accepted 2026-08-20
 
@@ -922,15 +1012,15 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **22** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (OPEN) |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-33, filed 2026-08-30 by the U6a gate**. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **22** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a) |
+| Open Phase 3 obligations | **3** | C-26, C-31 and B-11. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
 The twenty-two rows are **C-26, B-11, C-31, B-23, B-24, B-4, B-12, B-13, B-9,
 C-9**, plus U4's six: **B-25, B-26, B-27, B-28, B-29, B-30**, plus U5a's three:
 **C-52** (Resolved), **B-31** (Resolved by U5d) and **C-53** (Resolved), plus U5e's **C-54** (Resolved), U5g's **B-32** (Resolved) and the U6a gate's
-**B-33** (OPEN).
+**B-33** (Resolved by U6a, 2026-09-01).
 
 **THE DENOMINATOR MOVED AND THE OPEN COUNT DID NOT, which is exactly the
 distinction this table exists to preserve.** U4 added six rows and closed all six
@@ -956,26 +1046,36 @@ rows, minus the eighteen resolved:
   resolved inside U5g;
 - **B-24** — Resolved 2026-08-30, by B-24n on genuine Apple;
 
-= **4 open: C-26, B-11, C-31 and B-33.** **B-24 CLOSED ON 2026-08-30**, on its own
+- **B-33** — filed by the U6a gate 2026-08-30 and resolved by U6a 2026-09-01;
+
+= **3 open: C-26, B-11 and C-31.** **B-24 CLOSED ON 2026-08-30**, on its own
 stated condition — *"this row closes when the protocol runs for real, not when
 its server half compiles"* — with both branches now discharged against genuine
 Apple: `legacy_claim` by S-1/S-2/S-3 and **bound-at-source by B-24n**. **B-32 was
 filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by
 U5d** and **C-54 by the correction that followed U5e**.
 
-**THREE OF THE FOUR ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
-Do not read B-24's closure as progress against them: membership is now
-*established* authoritatively, and still **nothing consults it**. Zero policies
-enforce it, no worker exists, no cleanup runs, and Production is untouched. That
-gap is exactly C-26, and it is unchanged by everything U5 did.
+**ALL THREE ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.** Do not
+read B-24's closure, or U6a's deploy, as progress against them. Membership is
+*established* authoritatively and is now *observed* by 23 policies — and **still
+nothing consults it for a decision**. Zero policies enforce it, no worker exists,
+no cleanup runs. That gap is exactly C-26, and **U6a was built to leave it
+exactly where it was**: G4-S2 proves row counts identical with the observer
+attached and detached, which is the honest form of "enforcement has not begun".
 
-**B-33 IS THE FOURTH AND IT IS A DIFFERENT SHAPE — do not fold it in with the
-other three.** It is not a missing capability; it is a **wrong sentence in a
-deployed migration's comment** that U6 would have implemented from, and it
-carries no production defect at all: U3's revokes are correct and the schema
-needs no change. It is open because the sentence is still there and the wrapper
-that replaces it is not yet written. **It closes inside U6a**, where the other
-three do not.
+**B-33 WAS THE FOURTH AND IT IS RESOLVED — 2026-09-01, by U6a.** It was never a
+missing capability; it was a **wrong sentence in a deployed migration's comment**
+that U6 would have implemented from, carrying no production defect at all —
+U3's revokes are correct and the schema needed no change. **It had two halves and
+both are now done:** `connected_member_self()` is deployed, zero-argument,
+`SECURITY DEFINER`, granted to `authenticated` only, and consulted as
+`(select …)` in all 23 policies with **zero bare calls in production**; and the
+U3 migration comment is corrected in place, **with the false sentence quoted
+rather than deleted**, because the thing to recognise is a claim that is
+correct-sounding and unfalsifiable by reading. The same correction is applied to
+U3 acceptance's `A3h`, whose comment restated it. **`connected_member(uuid)` and
+`membership_state(uuid)` remain ungranted to every client role**, so the
+membership oracle stays structurally unbuildable.
 
 **The backend-verification count went 4 → 0, and that is a different statement
 from the row arithmetic.** B-23 was never a fifth member of it — it was their

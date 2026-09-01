@@ -476,10 +476,36 @@ revoke execute on function public.membership_state(uuid)      from public, anon,
 revoke execute on function public.ensure_membership_binding() from public, anon, authenticated, service_role;
 
 -- membership_state() is the one helper a server identity calls directly.
--- connected_member() needs no grant at all: at U6 it is evaluated inside RLS
--- policy expressions, which run as part of the query rather than as a direct
--- call -- so it decides what clients may see while remaining unreachable BY
--- them.
+--
+-- CORRECTED 2026-09-01 BY B-33, AND THE ORIGINAL SENTENCE IS QUOTED BECAUSE IT
+-- IS THE THING TO RECOGNISE, NOT THE THING TO FORGET. It read:
+--
+--   "connected_member() needs no grant at all: at U6 it is evaluated inside RLS
+--    policy expressions, which run as part of the query rather than as a direct
+--    call -- so it decides what clients may see while remaining unreachable BY
+--    them."
+--
+-- THAT IS FALSE. Measured 2026-08-30: EXECUTE **is** checked, against the
+-- INVOKING role, for a function referenced from a policy qual. A policy
+-- consulting the ungranted connected_member() raises `permission denied for
+-- function connected_member` -- a total Connected outage on the first query
+-- after enforcement binds, for entitled and unentitled members alike. It is
+-- correct-sounding, and connected_member() genuinely IS unreachable as a direct
+-- call, which is why no amount of reading separates it from the truth.
+--
+-- THE REVOKES BELOW ARE STILL RIGHT AND DO NOT CHANGE. Only the reason was
+-- wrong. U6a (deployed 2026-09-01) supplies what the sentence assumed was
+-- unnecessary: public.connected_member_self(), a ZERO-ARGUMENT SECURITY DEFINER
+-- wrapper over auth.uid() granted to `authenticated` only, whose body reaches
+-- this still-ungranted uuid-taking form. Zero arguments is the point -- there is
+-- nothing to aim, so the membership oracle is structurally unbuildable rather
+-- than merely discouraged. Granting connected_member(uuid) to `authenticated`
+-- would have worked and would have made the entitlement predicate answerable
+-- for any uuid the caller has no relationship to.
+--
+-- And it must be invoked as `(select ...)`, never bare: the bare form lands in
+-- the per-row Filter at 278ms/5000 rows against 3.9ms as an InitPlan, and both
+-- forms are functionally correct, so review cannot catch it.
 --
 -- THIS IS THE ONLY PRIVILEGE U3 GRANTS TO ANY NON-OWNER ROLE. Everything else
 -- above is a revoke, so the complete U3 privilege surface is one line long and

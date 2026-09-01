@@ -94,10 +94,15 @@ is A3f "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.re
 # The one deliberate exception to "no non-owner privileges anywhere", stated as
 # an assertion so the model is positively confirmed and not merely negatively.
 is A3g "$(psq "select has_function_privilege('service_role','public.membership_state(uuid)','EXECUTE')::text;")" "true" "service_role EXECUTE on membership_state"
-# AMENDED FOR U5b, 2026-08-23 -- see A4. connected_member() carries EXECUTE for
-# nobody, still, and that half is unchanged: at U6 it is evaluated inside policy
-# expressions rather than called, so it decides what clients may see while
-# remaining unreachable BY them.
+# AMENDED FOR U5b, 2026-08-23 -- see A4. AND THE REASON RE-STATED 2026-09-01 BY
+# B-33, because the one written here was false: a function referenced from a
+# policy qual DOES have EXECUTE checked against the invoking role, so "evaluated
+# rather than called" never made it reachable-by-policy-yet-unreachable-by-role.
+# The ASSERTION is unchanged and still right -- connected_member(uuid) carries
+# EXECUTE for nobody -- and U6a is what makes that survivable: policies consult
+# the zero-argument connected_member_self() wrapper, which is granted to
+# `authenticated` and reaches this form internally. Keeping this form ungranted
+# is what stops it becoming a membership oracle over every user.
 is A3h "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated','service_role')) r where n.nspname='public' and p.proname='connected_member' and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "EXECUTE on connected_member: nobody"
 
 # ------------------------------------------------------------------ fixtures
