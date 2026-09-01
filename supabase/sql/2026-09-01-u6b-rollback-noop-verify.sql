@@ -533,3 +533,18 @@ end
 $post$;
 
 commit;
+
+-- ADDED 2026-09-01 AFTER P2. This file ended at `commit;`, so the SQL editor
+-- reported "Success. No rows returned." -- which is EXACTLY what a submission
+-- that ran the wrong text reports. The apply file was built with a returning
+-- SELECT for precisely that reason and this one was not; the lesson was applied
+-- unevenly. Settling it needed an out-of-band check on pg_policy.xmin.
+--
+-- Now it returns a row. "No rows returned" is the symptom again, not the pass.
+select
+  (select md5(string_agg(schemaname||'|'||tablename||'|'||policyname||'|'||cmd||'|'||coalesce(qual,'')||'|'||coalesce(with_check,''), E'\n' order by schemaname, tablename, policyname))
+     from pg_policies where schemaname in ('public','storage'))                 as policy_fp,
+  (select count(*) from pg_policy where age(xmin) < 200)                        as policies_just_rewritten,
+  (select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+     where n.nspname='public' and age(p.xmin) < 200)                            as functions_just_rewritten,
+  'ROLLBACK BASELINE VERIFIED AS A NO-OP'                                       as status;

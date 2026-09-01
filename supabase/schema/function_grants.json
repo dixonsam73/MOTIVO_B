@@ -87,6 +87,48 @@
     "can_execute": false,
     "direct_execute": false,
     "grantee": "anon",
+    "proname": "enforcement_active",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "enforcement_active",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "enforcement_active",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "enforcement_gate",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "enforcement_gate",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "enforcement_gate",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
     "proname": "ensure_membership_binding",
     "public_execute": false
   },
@@ -270,6 +312,27 @@
     "direct_execute": true,
     "grantee": "service_role",
     "proname": "membership_due_for_reconciliation_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "membership_entitled_until",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "membership_entitled_until",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "membership_entitled_until",
     "public_execute": false
   },
   {
@@ -465,21 +528,42 @@
     "can_execute": false,
     "direct_execute": false,
     "grantee": "anon",
-    "proname": "shadow_observe",
+    "proname": "tg_membership_propagate_entitled_until",
     "public_execute": false
   },
   {
-    "can_execute": true,
-    "direct_execute": true,
+    "can_execute": false,
+    "direct_execute": false,
     "grantee": "authenticated",
-    "proname": "shadow_observe",
+    "proname": "tg_membership_propagate_entitled_until",
     "public_execute": false
   },
   {
     "can_execute": false,
     "direct_execute": false,
     "grantee": "service_role",
-    "proname": "shadow_observe",
+    "proname": "tg_membership_propagate_entitled_until",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "tg_set_entitled_until",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "tg_set_entitled_until",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "tg_set_entitled_until",
     "public_execute": false
   },
   {

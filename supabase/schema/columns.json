@@ -64,6 +64,14 @@
     "table_name": "account_directory"
   },
   {
+    "column_default": null,
+    "column_name": "entitled_until",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 9,
+    "table_name": "account_directory"
+  },
+  {
     "column_default": "gen_random_uuid()",
     "column_name": "id",
     "data_type": "uuid",
@@ -221,6 +229,14 @@
     "data_type": "timestamp with time zone",
     "is_nullable": "NO",
     "ordinal_position": 5,
+    "table_name": "follows"
+  },
+  {
+    "column_default": null,
+    "column_name": "followed_entitled_until",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 6,
     "table_name": "follows"
   },
   {
@@ -536,6 +552,14 @@
     "table_name": "membership_control"
   },
   {
+    "column_default": "false",
+    "column_name": "enforcement_enabled",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 10,
+    "table_name": "membership_control"
+  },
+  {
     "column_default": null,
     "column_name": "user_id",
     "data_type": "uuid",
@@ -848,6 +872,14 @@
     "table_name": "post_shares"
   },
   {
+    "column_default": null,
+    "column_name": "owner_entitled_until",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 7,
+    "table_name": "post_shares"
+  },
+  {
     "column_default": "gen_random_uuid()",
     "column_name": "id",
     "data_type": "uuid",
@@ -977,6 +1009,14 @@
   },
   {
     "column_default": null,
+    "column_name": "owner_entitled_until",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 17,
+    "table_name": "posts"
+  },
+  {
+    "column_default": null,
     "column_name": "user_id",
     "data_type": "uuid",
     "is_nullable": "NO",
@@ -1037,6 +1077,14 @@
     "data_type": "timestamp with time zone",
     "is_nullable": "NO",
     "ordinal_position": 8,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": "false",
+    "column_name": "enforced",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 9,
     "table_name": "shadow_enforcement_stat"
   }
 ]

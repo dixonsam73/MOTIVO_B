@@ -144,6 +144,54 @@
     "table_name": "account_directory"
   },
   {
+    "column_name": "entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
     "column_name": "follow_requests_enabled",
     "grantee": "authenticated",
     "privilege_type": "INSERT",
@@ -1501,6 +1549,48 @@
   },
   {
     "column_name": "created_at",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "follows"
+  },
+  {
+    "column_name": "followed_entitled_until",
     "grantee": "service_role",
     "privilege_type": "UPDATE",
     "table_name": "follows"
@@ -2178,6 +2268,54 @@
     "table_name": "post_shares"
   },
   {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "post_shares"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "post_shares"
+  },
+  {
     "column_name": "owner_user_id",
     "grantee": "authenticated",
     "privilege_type": "INSERT",
@@ -2893,6 +3031,54 @@
   },
   {
     "column_name": "notes",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "posts"
+  },
+  {
+    "column_name": "owner_entitled_until",
     "grantee": "service_role",
     "privilege_type": "UPDATE",
     "table_name": "posts"

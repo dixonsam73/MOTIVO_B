@@ -368,7 +368,7 @@
   {
     "conname": "shadow_enforcement_stat_pkey",
     "contype": "p",
-    "definition": "PRIMARY KEY (user_id, surface, decided_clause, bucket_hour)",
+    "definition": "PRIMARY KEY (user_id, surface, decided_clause, bucket_hour, enforced)",
     "table_name": "shadow_enforcement_stat"
   },
   {
