@@ -364,5 +364,41 @@
     "contype": "p",
     "definition": "PRIMARY KEY (id)",
     "table_name": "posts"
+  },
+  {
+    "conname": "shadow_enforcement_stat_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id, surface, decided_clause, bucket_hour)",
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "conname": "shadow_enforcement_stat_user_id_fkey",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "conname": "shadow_stat_bucket_aligned",
+    "contype": "c",
+    "definition": "CHECK ((bucket_hour = date_trunc('hour'::text, bucket_hour)))",
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "conname": "shadow_stat_clause_check",
+    "contype": "c",
+    "definition": "CHECK ((decided_clause = ANY (ARRAY['entitled'::text, 'expired'::text, 'sandbox_only'::text, 'grandfathered'::text, 'unknown'::text])))",
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "conname": "shadow_stat_observations_positive",
+    "contype": "c",
+    "definition": "CHECK ((observations > 0))",
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "conname": "shadow_stat_surface_bounded",
+    "contype": "c",
+    "definition": "CHECK (((length(surface) >= 1) AND (length(surface) <= 64)))",
+    "table_name": "shadow_enforcement_stat"
   }
 ]

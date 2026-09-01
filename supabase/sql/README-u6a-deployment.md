@@ -624,3 +624,149 @@ row counts are identical attached and detached.
 ```
 
 Rehearsed end to end locally on 2026-09-01 — see P-4.
+
+---
+
+# U6a IS LIVE IN PRODUCTION — deployed and verified 2026-09-01
+
+**P0–P6 all executed. Every predicted number matched production exactly and
+nothing was repaired forward.** The prediction above is unedited, including the
+part of the procedure that failed.
+
+## THE FIRST APPLY REPORTED SUCCESS AND APPLIED NOTHING
+
+**This is the most useful thing this deployment produced, and it belongs at the
+top rather than in a footnote.**
+
+P2 was submitted and the SQL editor answered **"Success. No rows returned."**
+Production was then read from outside and was **completely unchanged** — policy
+fingerprint still `7d6c09eb…`, function fingerprint still `48e8cc60…`, 22
+functions, zero new objects, zero policies carrying the observer. **Not a partial
+application. Nothing at all.**
+
+**The mechanism was never at fault, and that was established by probes rather
+than reasoned about.** Three single-purpose submissions, each verified from
+outside:
+
+| Probe | Result |
+|---|---|
+| `select current_database(), cutover_rows, public_functions` | `postgres` / 16 / **22** — right project, reads correct |
+| `create table public._u6a_editor_probe (x int);` | **LANDED** — the editor writes DDL |
+| `begin; create table public._u6a_editor_probe2 (x int); commit;` | **LANDED** — multi-statement and explicit transactions both work |
+
+So DDL, multi-statement submission and `BEGIN`/`COMMIT` all work, and **what
+failed was the submitted text**. The economical explanation is that the P1 no-op
+verification file ran a second time: it is valid, it commits, it returns no rows,
+and it changes nothing.
+
+**A SUCCESS MESSAGE IS NOT EVIDENCE THAT THE INTENDED TEXT RAN.** `supabase/README.md`
+already warned that a Studio submission can fail in a way that *"reads exactly
+like success"* — that warning was about a split `BEGIN`/`COMMIT`, and this
+arrived by a route it did not cover. **The generalisation is the durable part:
+any procedure whose success is reported by the thing being asked to act is
+unverified.** The three prior deploys were not safer; they were luckier, and they
+were caught by post-deploy verification rather than by the apply itself.
+
+**THE ANSWER WAS NOT MORE CARE AT THE KEYBOARD.** It was
+`supabase/sql/2026-09-01-u6a-apply-production.sql`: the migration byte-identical,
+wrapped, with the guard **inside the same transaction** asserting the state it
+just produced, and **ending in a `SELECT` that returns a row**. `RAISE EXCEPTION`
+aborts, so a wrong number rolls itself back and reports what it saw, and **"no
+rows returned" becomes the symptom** rather than the disguise. Rehearsed both
+ways locally before it was offered: applies clean, and a second run aborts on the
+first `create table` leaving the instance untouched.
+
+**The two probe tables were dropped inside that transaction**, so the diagnosis
+left no residue and an aborted migration would have left them alone.
+
+## Structural delta — 10 of 10 surfaces MATCHED, measured on production
+
+| Surface | Predicted | **Production** |
+|---|---|---|
+| `columns` | 130 | **130** |
+| `constraints` | 67 | **67** |
+| `functions` | 24, 9 modified | **24, 9 modified** |
+| `function_grants` | 72, 0 modified | **72, 0 modified** |
+| `rls_enabled` | 15 | **15** |
+| `policies` | 33, 23 modified | **33, 23 modified** |
+| `table_grants` · `column_grants` · `triggers` · `storage_buckets` | identical | **identical** |
+
+`git diff --stat supabase/schema` touched exactly six files and left four
+untouched.
+
+### The deployed state is byte-identical to the pre-deploy prediction
+
+The refreshed production snapshot was compared against the local post-U6a capture
+taken **before** the deploy: **byte-identical on nine of ten surfaces**, with
+`constraints` differing in exactly one row — `account_id_format`, the single
+standing catalog-serialization exception, unchanged from before U6a. **U6a
+introduced no new exception**, and all six `shadow_enforcement_stat` constraints
+are present in production.
+
+**B-23 returned GATE MET** after recapture, with that one approved and
+mechanically verified exception — the same posture U4's and U5b's deploys ended
+in.
+
+### Fingerprints moved to exactly the rehearsed values
+
+| | pre-U6a | **production, post-deploy** | local, post-U6a |
+|---|---|---|---|
+| policies | `7d6c09eb…` | **`bad893a9…`** | `bad893a9…` |
+| functions | `48e8cc60…` | **`052ee5ce…`** | `052ee5ce…` |
+
+**Production's 33 policies and 9 functions are byte-identical to the build the
+74-assertion suite ran against** — not merely "23 policies mention the observer".
+
+## The properties that matter, verified IN THE DEPLOYED BUNDLE
+
+**G4-S3's cliff was avoided in production**, and this is the one that review
+cannot catch because both forms are functionally correct:
+
+```
+policies carrying the observer   23
+total shadow_observe calls       23
+wrapped as ( SELECT ... )        23
+BARE calls                        0
+```
+
+**The deployed observer is inert and fail-open**, read from `pg_proc` rather than
+from the migration file: `SECURITY DEFINER`, `VOLATILE`, **2 `return true` and 0
+returns of anything else** with comments stripped, and the
+`exception when others then` handler present. *(Comments stripped deliberately —
+counting `return` in raw `prosrc` is the defect that produced a false 3 while the
+suite was being written.)*
+
+**Privilege surface, exactly as designed:**
+
+```
+shadow_observe         anon false | authenticated TRUE (direct) | service_role false
+connected_member_self  anon false | authenticated TRUE (direct) | service_role false
+connected_member       anon false | authenticated false         | service_role false
+membership_state       anon false | authenticated false         | service_role TRUE
+```
+
+**The uuid-addressable membership oracle remains unbuildable** — B-33's whole
+reason for the zero-argument wrapper. `shadow_enforcement_stat` holds **zero
+privilege for every client role** and has RLS enabled.
+
+## U6a REMAINS ENFORCEMENT-FREE, and it is proven rather than stated
+
+- **`shadow_enforcement_stat` holds ZERO rows**, which is correct: it is written
+  only when an authenticated request evaluates an observed policy, and no such
+  request has arrived.
+- **The observer returns `true` on every path**, verified in the deployed bundle
+  above. No request's outcome changed.
+- **Membership state is untouched by the deploy:** `membership` 1,
+  `membership_binding` 1, `membership_cutover` **16**, conflicts 0,
+  `pending_cleanup_at` **1** — the same values as the pre-flight, so U6a moved
+  nothing.
+
+**NOTHING CONSULTS MEMBERSHIP FOR A DECISION.** 23 policies now *observe* it; none
+*enforces* it. **C-26, B-11 and C-31 are unchanged by this deploy**, and reading
+"U6a is live" as progress against them would be the same error as reading B-24's
+closure that way. **B-33 closes here** — the deployed predicate is the
+zero-argument wrapper the finding called for.
+
+**No client build ships and no device action follows.** U6a is SQL only: no Edge
+Function was deployed, no secret was set, and there is therefore no download-diff
+step and no re-versioning hazard.

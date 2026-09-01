@@ -7,7 +7,7 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "account_directory",
-    "with_check": "(user_id = auth.uid())"
+    "with_check": "(( SELECT shadow_observe('account_directory.insert'::text) AS shadow_observe) AND (user_id = auth.uid()))"
   },
   {
     "cmd": "SELECT",
@@ -37,13 +37,13 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "connected_attachments",
-    "with_check": "((sender_user_id = auth.uid()) AND (recipient_user_id <> auth.uid()) AND (storage_bucket = 'attachments'::text) AND (storage_path ~ (((('^users/'::text || (auth.uid())::text) || '/connected/'::text) || (asset_id)::text) || '\\.[A-Za-z0-9]+$'::text)) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.followed_user_id = auth.uid()) AND (f.follower_user_id = connected_attachments.recipient_user_id) AND (f.status = 'approved'::text)))))"
+    "with_check": "(( SELECT shadow_observe('connected_attachments.insert'::text) AS shadow_observe) AND ((sender_user_id = auth.uid()) AND (recipient_user_id <> auth.uid()) AND (storage_bucket = 'attachments'::text) AND (storage_path ~ (((('^users/'::text || (auth.uid())::text) || '/connected/'::text) || (asset_id)::text) || '\\.[A-Za-z0-9]+$'::text)) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.followed_user_id = auth.uid()) AND (f.follower_user_id = connected_attachments.recipient_user_id) AND (f.status = 'approved'::text))))))"
   },
   {
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "connected_attachments_select_recipient",
-    "qual": "(recipient_user_id = auth.uid())",
+    "qual": "(( SELECT shadow_observe('connected_attachments.select'::text) AS shadow_observe) AND (recipient_user_id = auth.uid()))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "connected_attachments",
@@ -53,7 +53,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "connected_attachments_update_recipient",
-    "qual": "(recipient_user_id = auth.uid())",
+    "qual": "(( SELECT shadow_observe('connected_attachments.update'::text) AS shadow_observe) AND (recipient_user_id = auth.uid()))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "connected_attachments",
@@ -77,7 +77,7 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "follows",
-    "with_check": "((follower_user_id = auth.uid()) AND (status = 'requested'::text) AND follow_requests_open(followed_user_id))"
+    "with_check": "(( SELECT shadow_observe('follows.insert'::text) AS shadow_observe) AND ((follower_user_id = auth.uid()) AND (status = 'requested'::text) AND follow_requests_open(followed_user_id)))"
   },
   {
     "cmd": "SELECT",
@@ -93,7 +93,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "follows_update_approve_by_followed",
-    "qual": "((followed_user_id = auth.uid()) AND (status = 'requested'::text))",
+    "qual": "(( SELECT shadow_observe('follows.update'::text) AS shadow_observe) AND ((followed_user_id = auth.uid()) AND (status = 'requested'::text)))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "follows",
@@ -103,7 +103,7 @@
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "pcv_select_self",
-    "qual": "(auth.uid() = viewer_user_id)",
+    "qual": "(( SELECT shadow_observe('post_comment_views.select'::text) AS shadow_observe) AND (auth.uid() = viewer_user_id))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_comment_views",
@@ -113,7 +113,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "pcv_update_self",
-    "qual": "(auth.uid() = viewer_user_id)",
+    "qual": "(( SELECT shadow_observe('post_comment_views.update'::text) AS shadow_observe) AND (auth.uid() = viewer_user_id))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_comment_views",
@@ -127,7 +127,7 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_comment_views",
-    "with_check": "(auth.uid() = viewer_user_id)"
+    "with_check": "(( SELECT shadow_observe('post_comment_views.insert'::text) AS shadow_observe) AND (auth.uid() = viewer_user_id))"
   },
   {
     "cmd": "DELETE",
@@ -143,7 +143,7 @@
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "post_comments_select_visible",
-    "qual": "((auth.uid() = owner_user_id) OR (auth.uid() = author_user_id) OR (auth.uid() = recipient_user_id))",
+    "qual": "((auth.uid() = author_user_id) OR (( SELECT shadow_observe('post_comments.select'::text) AS shadow_observe) AND ((auth.uid() = owner_user_id) OR (auth.uid() = recipient_user_id))))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_comments",
@@ -167,13 +167,13 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_shares",
-    "with_check": "((owner_user_id = auth.uid()) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE ((p.id = post_shares.post_id) AND (p.owner_user_id = auth.uid())))) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.followed_user_id = auth.uid()) AND (f.follower_user_id = post_shares.recipient_user_id) AND (f.status = 'approved'::text)))))"
+    "with_check": "(( SELECT shadow_observe('post_shares.insert'::text) AS shadow_observe) AND ((owner_user_id = auth.uid()) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE ((p.id = post_shares.post_id) AND (p.owner_user_id = auth.uid())))) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.followed_user_id = auth.uid()) AND (f.follower_user_id = post_shares.recipient_user_id) AND (f.status = 'approved'::text))))))"
   },
   {
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "post_shares_select_recipient",
-    "qual": "(recipient_user_id = auth.uid())",
+    "qual": "(( SELECT shadow_observe('post_shares.select'::text) AS shadow_observe) AND (recipient_user_id = auth.uid()))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_shares",
@@ -183,7 +183,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "post_shares_update_recipient",
-    "qual": "(recipient_user_id = auth.uid())",
+    "qual": "(( SELECT shadow_observe('post_shares.update'::text) AS shadow_observe) AND (recipient_user_id = auth.uid()))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "post_shares",
@@ -207,13 +207,13 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "posts",
-    "with_check": "(owner_user_id = auth.uid())"
+    "with_check": "(( SELECT shadow_observe('posts.insert'::text) AS shadow_observe) AND (owner_user_id = auth.uid()))"
   },
   {
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "posts_select_public_or_owner",
-    "qual": "((owner_user_id = auth.uid()) OR ((is_public = true) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.follower_user_id = auth.uid()) AND (f.followed_user_id = posts.owner_user_id) AND (f.status = 'approved'::text))))))",
+    "qual": "((owner_user_id = auth.uid()) OR (( SELECT shadow_observe('posts.select'::text) AS shadow_observe) AND (is_public = true) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.follower_user_id = auth.uid()) AND (f.followed_user_id = posts.owner_user_id) AND (f.status = 'approved'::text))))))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "posts",
@@ -223,7 +223,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "posts_update_owner",
-    "qual": "(owner_user_id = auth.uid())",
+    "qual": "(( SELECT shadow_observe('posts.update'::text) AS shadow_observe) AND (owner_user_id = auth.uid()))",
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "posts",
@@ -233,7 +233,7 @@
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "attachments_select_via_visible_post",
-    "qual": "((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] = 'users'::text) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE ((lower((storage.foldername(objects.name))[2]) = lower((p.owner_user_id)::text)) AND (EXISTS ( SELECT 1\n           FROM jsonb_array_elements(p.attachments) a(value)\n          WHERE (((a.value ->> 'bucket'::text) = objects.bucket_id) AND ((a.value ->> 'path'::text) = objects.name))))))))",
+    "qual": "(( SELECT shadow_observe('storage.attachments_via_post'::text) AS shadow_observe) AND ((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] = 'users'::text) AND (EXISTS ( SELECT 1\n   FROM posts p\n  WHERE ((lower((storage.foldername(objects.name))[2]) = lower((p.owner_user_id)::text)) AND (EXISTS ( SELECT 1\n           FROM jsonb_array_elements(p.attachments) a(value)\n          WHERE (((a.value ->> 'bucket'::text) = objects.bucket_id) AND ((a.value ->> 'path'::text) = objects.name)))))))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
@@ -257,7 +257,7 @@
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
-    "with_check": "((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] = 'users'::text) AND (lower((storage.foldername(name))[2]) = lower((auth.uid())::text)))"
+    "with_check": "(( SELECT shadow_observe('storage.attachments_insert'::text) AS shadow_observe) AND ((bucket_id = 'attachments'::text) AND ((storage.foldername(name))[1] = 'users'::text) AND (lower((storage.foldername(name))[2]) = lower((auth.uid())::text))))"
   },
   {
     "cmd": "SELECT",
@@ -273,7 +273,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "attachments_user_update_auth",
-    "qual": "((bucket_id = 'attachments'::text) AND (name ~~ (('users/'::text || (auth.uid())::text) || '/%'::text)))",
+    "qual": "(( SELECT shadow_observe('storage.attachments_update'::text) AS shadow_observe) AND ((bucket_id = 'attachments'::text) AND (name ~~ (('users/'::text || (auth.uid())::text) || '/%'::text))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
@@ -297,13 +297,13 @@
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
-    "with_check": "((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text)))"
+    "with_check": "(( SELECT shadow_observe('storage.avatars_insert'::text) AS shadow_observe) AND ((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text))))"
   },
   {
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "avatars_select_owner_or_approved_follower",
-    "qual": "((bucket_id = 'avatars'::text) AND ((auth.uid() = (split_part(name, '/'::text, 2))::uuid) OR (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.follower_user_id = auth.uid()) AND (f.followed_user_id = (split_part(objects.name, '/'::text, 2))::uuid) AND (f.status = 'approved'::text))))))",
+    "qual": "((bucket_id = 'avatars'::text) AND ((auth.uid() = (split_part(name, '/'::text, 2))::uuid) OR (( SELECT shadow_observe('storage.avatars_select'::text) AS shadow_observe) AND (EXISTS ( SELECT 1\n   FROM follows f\n  WHERE ((f.follower_user_id = auth.uid()) AND (f.followed_user_id = (split_part(objects.name, '/'::text, 2))::uuid) AND (f.status = 'approved'::text)))))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
@@ -313,7 +313,7 @@
     "cmd": "UPDATE",
     "permissive": "PERMISSIVE",
     "policyname": "avatars_update_owner_only",
-    "qual": "((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text)))",
+    "qual": "(( SELECT shadow_observe('storage.avatars_update'::text) AS shadow_observe) AND ((bucket_id = 'avatars'::text) AND (name = (('users/'::text || (auth.uid())::text) || '/avatar.jpg'::text))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",
@@ -323,7 +323,7 @@
     "cmd": "SELECT",
     "permissive": "PERMISSIVE",
     "policyname": "connected_attachment_recipient_select",
-    "qual": "((bucket_id = 'attachments'::text) AND (EXISTS ( SELECT 1\n   FROM connected_attachments ca\n  WHERE ((ca.storage_bucket = objects.bucket_id) AND (ca.storage_path = objects.name) AND (ca.recipient_user_id = auth.uid()) AND (ca.deleted_at IS NULL)))))",
+    "qual": "(( SELECT shadow_observe('storage.attachments_recipient'::text) AS shadow_observe) AND ((bucket_id = 'attachments'::text) AND (EXISTS ( SELECT 1\n   FROM connected_attachments ca\n  WHERE ((ca.storage_bucket = objects.bucket_id) AND (ca.storage_path = objects.name) AND (ca.recipient_user_id = auth.uid()) AND (ca.deleted_at IS NULL))))))",
     "roles": "{authenticated}",
     "schemaname": "storage",
     "tablename": "objects",

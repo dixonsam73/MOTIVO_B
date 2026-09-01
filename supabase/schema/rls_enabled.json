@@ -68,5 +68,10 @@
     "rls_enabled": true,
     "rls_forced": false,
     "table_name": "posts"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
+    "table_name": "shadow_enforcement_stat"
   }
 ]

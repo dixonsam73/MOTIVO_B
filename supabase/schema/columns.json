@@ -974,5 +974,69 @@
     "is_nullable": "YES",
     "ordinal_position": 16,
     "table_name": "posts"
+  },
+  {
+    "column_default": null,
+    "column_name": "user_id",
+    "data_type": "uuid",
+    "is_nullable": "NO",
+    "ordinal_position": 1,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": null,
+    "column_name": "surface",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 2,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": null,
+    "column_name": "decided_clause",
+    "data_type": "text",
+    "is_nullable": "NO",
+    "ordinal_position": 3,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": null,
+    "column_name": "bucket_hour",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 4,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": null,
+    "column_name": "would_deny",
+    "data_type": "boolean",
+    "is_nullable": "NO",
+    "ordinal_position": 5,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": "1",
+    "column_name": "observations",
+    "data_type": "bigint",
+    "is_nullable": "NO",
+    "ordinal_position": 6,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "first_seen",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 7,
+    "table_name": "shadow_enforcement_stat"
+  },
+  {
+    "column_default": "now()",
+    "column_name": "last_seen",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "NO",
+    "ordinal_position": 8,
+    "table_name": "shadow_enforcement_stat"
   }
 ]

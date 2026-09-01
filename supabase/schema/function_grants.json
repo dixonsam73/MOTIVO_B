@@ -42,6 +42,27 @@
     "public_execute": false
   },
   {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "connected_member_self",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "connected_member_self",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "connected_member_self",
+    "public_execute": false
+  },
+  {
     "can_execute": true,
     "direct_execute": true,
     "grantee": "anon",
@@ -438,6 +459,27 @@
     "direct_execute": false,
     "grantee": "service_role",
     "proname": "search_account_directory",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "shadow_observe",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "shadow_observe",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "shadow_observe",
     "public_execute": false
   },
   {
