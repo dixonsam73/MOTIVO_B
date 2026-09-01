@@ -142,3 +142,89 @@ consumed by resubscribing.
 original `created_at 2026-08-30 14:58:20.651151+00` and its continuity across the
 2026-08-30 purchase are **not recoverable**. That cost is accepted for a gate that
 has never been scored and is U6b's entry condition.
+
+---
+
+# RESULTS — 2026-09-01. THE PREDICTIONS ABOVE ARE UNCHANGED.
+
+**G11 PASSES. 15 of 16 predictions confirmed from production, zero falsifiers
+triggered, nothing repaired forward.** G11-15 is a device-side observation and is
+recorded separately below.
+
+## The precondition — G11-1 to G11-5, all HIT
+
+```
+membership_rows 0 | binding_rows 1 | binding_never_updated t | conflicts 0
+state_after grandfathered | connected_member_after TRUE
+```
+
+**G11-4 and G11-5 were the counterintuitive pair and both landed.** Deleting the
+row *increased* what the predicate grants, exactly as D4's `bool_or`-over-empty-set
+reasoning says it must.
+
+## The cold launch — G11-6 to G11-16
+
+| # | Predicted | Actual |
+|---|---|---|
+| G11-6 | attestation fires unattended | **HIT** — app relaunched 12:05 BST; row created **11:05:40.346 UTC** |
+| G11-7 | 1 row established | **HIT** |
+| G11-8 | `binding_method = 'purchase'` | **HIT** — not `legacy_claim` |
+| G11-9 | otid `2000001228947923`, Sandbox | **HIT** |
+| G11-10 | `pending_cleanup_at` / `entitlement_ended_at` NULL | **HIT / HIT** |
+| G11-11 | `created_at` new | **HIT** — 2026-09-01 11:05:40, was 2026-08-30 14:58:20 |
+| G11-12 | binding timestamps unmoved | **HIT** — still `2026-08-25 17:31:54.005854+00`, identical |
+| G11-13 | conflicts 0 | **HIT** |
+| G11-14 | back to `sandbox_only` / false | **HIT** |
+| G11-15 | the app says nothing | **device-side — see below** |
+| G11-16 | no Apple notification required | **HIT** — `notifications_since_delete = 0` |
+
+## G11-12 IS THE RESULT THAT CARRIES, AND IT IS AN ABSENCE PROOF
+
+`membership_binding.created_at` and `updated_at` are **both still
+2026-08-25 17:31:54.005854+00**, byte-identical to their values seven days and
+one destroyed membership row ago. **Identical timestamps are the only way to
+observe that no Set App Account Token PUT was issued** — provenance is derived,
+never supplied, so `purchase` is written only when the client's own Apple-signed
+JWS already carried our stored token.
+
+**The token survived the deletion of the membership row underneath it.** Together
+with B-24n this is the second independent demonstration that the token is an
+attribute of the **identity**, not of a subscription or of a membership record.
+
+## G11-16 — established with ZERO Apple notifications
+
+**Zero notifications arrived between the deletion and the establishment.** The row
+came from **attestation**, not ingestion, which is the whole architectural split:
+the client presents *who*, the server reads *now* from Apple directly, and U4's
+canonical writer — UPDATE-ONLY since the 2026-08-20 correction — could not have
+produced this row at all.
+
+## THE FREE ASSERTION LANDED, AND MORE SHARPLY THAN PREDICTED
+
+D4's fall-through, observed live in production inside a 41-second window:
+
+```
+11:05:07.630   sandbox_only     row still present
+    ~deletion commits
+11:05:39.599   grandfathered    EXACTLY ONE observation, 0.747s before establishment
+11:05:40.346   membership row ESTABLISHED
+11:05:41.687   row refreshed from Apple's authoritative state
+11:05:47.857   sandbox_only     back again
+```
+
+Both clauses belong to the same identity. The `grandfathered` aggregate holds
+**exactly one** observation with `first_seen = last_seen`, bracketed by
+`sandbox_only` on both sides — the `sandbox_only` row's counter spans the
+establishment, which is why its window straddles it.
+
+**This is D4's semantics measured rather than argued**, in a window under a minute
+wide, on live production traffic. The naive `WHERE`-clause implementation D4
+rejected would have produced `grandfathered` on *both* sides of that boundary.
+
+## WHAT THIS RUN DID NOT PROVE — unchanged from §2, and not quietly upgraded
+
+**Nothing about a genuinely dormant identity returning with a years-old JWS.**
+Device A had attested before; the precondition was manufactured. The client could
+not tell the difference, which is what makes this a valid test of the
+**mechanism** — and it remains no test of the **population**. That residual is
+open and is not closed by this pass.
