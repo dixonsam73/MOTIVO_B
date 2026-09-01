@@ -231,3 +231,91 @@ rejection stands. The options remain a separate QA project, a Production
 subscription bought for the purpose, or a tester carve-out **outside** the
 predicate — now weighable against a real enforcement surface, which is why it was
 deferred rather than guessed.
+
+---
+
+# EXPERIMENT RESULTS — 2026-09-01. THE PREDICTIONS ABOVE ARE UNCHANGED.
+
+**GF-1 to GF-9 ALL HIT. Zero rollback triggers. Nothing was repaired forward.**
+
+## The statement's own returned row
+
+```
+grandfather_enabled f | pre_cutover_now_denied 15 | now_unknown 15 | still_grandfathered 0
+device_a_state sandbox_only | device_a_connected f
+membership 1 | binding 1 | cutover 16 | conflicts 0
+```
+
+`now_unknown = 15` and **not** `expired` — the derivation from the deployed
+function bodies held: the grandfather arm is `select exists (…)`, which returns
+`false` and never NULL, so `coalesce` yields false rather than falling through and
+`membership_state()` reaches its final `else`.
+
+## GF-6 — the window now shows what U6b would deny
+
+Device B, driven through feed, post, attachment and one comment:
+
+```
+11:50:01  unknown  account_directory.insert       deny=true  n=2
+11:50:08  unknown  storage.attachments_recipient  deny=true  n=2
+11:50:08  unknown  storage.attachments_via_post   deny=true  n=1
+11:50:08  unknown  posts.select                   deny=true  n=1
+11:50:34  unknown  rpc.add_post_comment           deny=true  n=1
+```
+
+**Every `unknown` observation carries `would_deny = true` — zero exceptions**, and
+all 7 belong to a single grandfather-dependent identity. **Device A produced NONE
+of them**, so GF-3 held under live traffic and not merely at rest: its Sandbox row
+decides at arm 2 and the grandfather arm is never reached.
+
+## THE CONCRETE INERTNESS PROOF IS THE COMMENT
+
+`rpc.add_post_comment` recorded **`unknown` / `would_deny = true`** at 11:50:34,
+and `post_comments` went **3 → 4**. **The predicate said "not entitled" and the
+write landed anyway.** That is the strongest single demonstration this window can
+produce: a decision recorded, and no decision changed.
+
+The device saw nothing — feed, post and attachment all normal — which is GF-7 and
+GF-8 **scoped to the exercised fixtures**, exactly as corrected before the run.
+The structural claim they rest on is unchanged and was asserted by the statement's
+own preconditions 4 and 5 against the live catalog: no policy references an
+entitlement predicate directly, and `shadow_observe` is still the inert fail-open
+observer.
+
+## GF-5 — the clause-keyed aggregate preserved the pre-flip evidence
+
+**11 historical `grandfathered` rows carrying 16 observations survive untouched**
+alongside the 5 new `unknown` rows. Nothing was mutated in place, because
+`decided_clause` is part of the primary key. **The before and after of this
+experiment sit in the same table**, and on `account_directory.insert` the same
+identity can be read on both sides of the boundary:
+
+```
+before   grandfathered  deny=false
+after    unknown        deny=true
+```
+
+## GF-9 — the membership tables did not move
+
+`membership` 1 · `membership_binding` 1 · `membership_cutover` 16 · conflicts 0,
+identical to the pre-check. One boolean changed and nothing else.
+
+## STATE LEFT RUNNING, DELIBERATELY
+
+**`grandfather_enabled` stays `false`.** This is not a temporary probe to be
+reverted — it is the first step of the retirement in §4, and the flag being off is
+now the intended steady state until the cleanup migration removes the branch
+entirely. `u6b_bound_at` remains **null**: enforcement is still unbound, so the
+system continues to deny nothing.
+
+**The rollback statement remains valid and one row** for as long as
+`u6b_bound_at` is null. After U6b binds, this flag stops being telemetry and
+becomes access — which is what precondition 3 exists to refuse.
+
+## WHAT THIS DOES NOT ESTABLISH
+
+**Nothing about the 14 identities that generated no traffic.** The window now
+records what U6b *would* do to the one grandfather-dependent identity we drive;
+it says nothing about the others, and under B-34 it never can. **That is not a gap
+to be closed — it is the reason Gate 2 was retired rather than satisfied.** The
+census, not the window, is what enumerated the population.
