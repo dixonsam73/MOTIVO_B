@@ -156,18 +156,44 @@ to the third arm. `membership_state()` then reaches its final `else`.
 | **GF-4** | The 1 post-cutover identity is **UNCHANGED** — already `'unknown'` / false |
 | **GF-5** | **No existing `shadow_enforcement_stat` row changes.** The aggregate is keyed on `decided_clause`, so new decisions create NEW rows; the historical `grandfathered` rows survive as evidence |
 | **GF-6** | New observations from those identities carry `decided_clause = 'unknown'`, `would_deny = true` |
-| **GF-7** | **NOT ONE REQUEST FAILS.** Row counts identical, nothing enforced, no error on any device |
-| **GF-8** | **No user-visible change on any device.** `AppMode` resolves from local StoreKit; the server predicate is not consulted by the client |
+| **GF-7** | **On the EXERCISED FIXTURES (Device A, Device B): not one request fails.** Row counts identical, no error observed |
+| **GF-8** | **On the EXERCISED FIXTURES: no user-visible change.** `AppMode` resolves from local StoreKit; the server predicate is not consulted by the client |
 | **GF-9** | `membership`, `membership_binding`, `membership_cutover` and `membership_binding_conflict` are **untouched** — this writes one boolean in `membership_control` and nothing else |
+
+### GF-7 AND GF-8 ARE SCOPED TO WHAT WE CAN ACTUALLY OBSERVE
+
+**Corrected 2026-09-01 before execution.** Both read *"on any device"*, and that
+is a claim over a population we cannot observe: **the dormant beta installs are
+exactly the ones that generate nothing**, which is B-34's lesson turned on my own
+predictions. A prediction phrased over unobservable devices cannot be falsified
+and therefore cannot be evidence.
+
+**So the two claims are separated, and only one of them is an observation:**
+
+- **Observed (GF-7, GF-8):** scoped to Device A and Device B, the fixtures this
+  experiment actually drives. That is the whole of what the run can measure.
+- **Structural, and it does cover every install including dormant ones:**
+  `shadow_observe` returns `true` on every path, and **no policy calls an
+  entitlement predicate directly** — asserted by U6a's acceptance companions to
+  A57b/A67c and by the deployed function body, verified in the bundle rather than
+  the tree. **No request decision changes for anybody, because nothing consults
+  `connected_member()` to decide anything.**
+
+**The safety property is the structural one, and it does not depend on the
+observation.** The observation confirms it on the fixtures; it never extends it.
+**Do not report "no user impact" as an observed result** — report that the
+predicate is not consulted by any decision path, and that the two exercised
+fixtures behaved accordingly.
 
 ### ROLLBACK CONDITION — stated before, so it is not negotiated afterwards
 
 **Roll back immediately — `grandfather_enabled = true` — on ANY of:**
 
-- any request failing anywhere, on any device (GF-7 violated: enforcement is
-  live when it must not be);
-- any user-visible change on any device (GF-8 violated: the client is consulting
-  the server predicate, which contradicts the settled split);
+- any request failing **on an exercised fixture** (GF-7 violated: enforcement is
+  live when it must not be) — **or a report of failure from any other install**,
+  which would be evidence the structural claim above is false;
+- any user-visible change **on an exercised fixture** (GF-8 violated: the client
+  is consulting the server predicate, which contradicts the settled split);
 - `connected_member()` returning **true** for an identity predicted false, or
   false for one predicted true (GF-1/GF-3/GF-4);
 - any identity reading `would_deny = true` that **you identify as one that should
