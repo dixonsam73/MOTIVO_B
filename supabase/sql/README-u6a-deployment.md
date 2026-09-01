@@ -551,6 +551,15 @@ Production's `supabase_migrations.schema_migrations` records none of these
 migrations, so `db push` would replay all five including the baseline
 reproduction.
 
+**AND `supabase db query` IS NOT A SUBSTITUTE, measured at this pre-flight.** It
+does reach production — that is how the read-only work above was done, and its
+role holds write as well as read — but it **refuses more than one statement**
+(`cannot insert multiple commands into a prepared statement`). Every step below
+that mutates is multi-statement, so **P1 and P2 cannot be run from the agent
+environment at all**; they are the account holder's, in the SQL editor. The
+finding is recorded in `supabase/README.md` because the next unit will meet it
+too.
+
 | # | Step | Who | Notes |
 |---|---|---|---|
 | **P0** | P-1's gates, re-run | Either | Any surprise **stops the deploy**. `pending_cleanup_at = 1` is expected |

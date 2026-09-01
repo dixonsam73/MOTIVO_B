@@ -72,6 +72,37 @@ worked example.
 the obvious command to reach for**, and the next person to deploy — at U6 or U7 —
 will not necessarily have read a unit-specific file first.
 
+### `supabase db query` IS NOT AN ESCAPE HATCH — it is SINGLE-STATEMENT ONLY
+
+**Measured 2026-09-01 at the U6a pre-flight, because the U5 package's flat claim
+that there is "no arbitrary-SQL CLI path" is not quite what is true, and the gap
+between the two readings is where somebody improvises.**
+
+`supabase db query --linked` **does** work, and it is how `capture-schema.sh`
+reads production. Its role, `cli_login_postgres`, is a member of `postgres` and
+therefore holds write as well as read. So the honest statement is not "there is
+no path" — it is this:
+
+```
+$ supabase db query --local "create table public._probe(x int); select 1/0;"
+{"error":{"code":"LegacyDbQueryExecError",
+  "message":"failed to execute query: error: cannot insert multiple commands
+             into a prepared statement"}}
+```
+
+**It refuses more than one statement.** Enough for the ten read-only structural
+queries, each of which is one `select`; **not** enough for a migration, a
+rollback baseline, or anything wrapped in `BEGIN; … COMMIT;`.
+
+**Do not work around this by folding a migration into one `DO $$ … $$` block.**
+It would mean editing the file to make the mechanism accept it, which is the one
+thing every deployment procedure in this repository forbids, and nesting
+`$function$` bodies inside `$$` is a quoting hazard with no upside.
+
+**The conclusion is the same as `db push`'s and the reason is different, which is
+why both are written down.** Multi-statement production SQL goes through the
+account holder in the SQL editor.
+
 Never edit a function in the dashboard. If one is ever edited there, the repo
 is silently stale and the next deploy from Git will overwrite the change
 without either version being reviewed. Before editing a function, re-download
