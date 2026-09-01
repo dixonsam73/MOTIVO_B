@@ -1012,8 +1012,8 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **23** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN) |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **24** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day) |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
@@ -1486,13 +1486,33 @@ cold launch. **Not a lockout.**
 1. **every snapshot UID has acquired authoritative membership state; or**
 2. **twelve months have elapsed since U6b binding**
 
-**— and, before removal in either case, a final `auth.users.last_sign_in_at`
-safety check is performed.**
+**— and, before removal in either case, a final LIVENESS safety check is
+performed.**
 
-**The safety check is meaningful, not ceremonial. Any snapshot UID that has
-signed in since U6b but still lacks authoritative membership state is evidence
-that U5 migration/reconciliation failed for that identity, and blocks snapshot
-removal until dispositioned.**
+**The safety check is meaningful, not ceremonial. Any snapshot UID that has been
+ACTIVE since U6b but still lacks authoritative membership state is evidence that
+U5 migration/reconciliation failed for that identity, and blocks snapshot removal
+until dispositioned.**
+
+**CORRECTED 2026-09-01 BY B-35. THIS CHECK WAS SPECIFIED ON
+`auth.users.last_sign_in_at`, AND THAT COLUMN CANNOT ANSWER THE QUESTION.**
+GoTrue advances it only on re-authentication, never on token refresh — so an
+identity holding a long-lived session is fully active and reads as though it has
+not signed in since before the cutover. **Measured, not reasoned:** both
+identities that generated the 48 shadow observations of 2026-09-01 carry
+`last_sign_in_at` of 2026-08-25 and **2026-08-14**, the latter three days BEFORE
+`cutover_at`, while `auth.users.updated_at` and their `auth.sessions` rows both
+moved that day.
+
+**The check must key on `max(auth.sessions.updated_at)` per user, cross-checked
+against `auth.users.updated_at`** — the two agreed on every bucket across all 16
+snapshot identities when the census was run. **`last_sign_in_at` may be recorded
+alongside, and must never be the predicate.**
+
+**The failure direction is what makes this load-bearing: it fails OPEN.** A
+blind check reports "nobody active" and lets the snapshot be removed out from
+under identities that are still using it — which is the one outcome U6c exists to
+prevent, arriving silently and looking like a pass.
 
 **"Zero grandfather-dependent requests in the shadow window" must never stand in
 for U6c safety.** The shadow metric proves something about *observed traffic*
