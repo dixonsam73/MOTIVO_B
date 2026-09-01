@@ -134,9 +134,12 @@ is single-statement" is where somebody improvises.**
 ### What U6a does NOT do
 
 **Nothing consults membership for a decision**, no `account_directory` visibility
-state is maintained (U6b), no worker exists and no cleanup runs (U7). **G11 has
-still never been run as a scored gate**, and it is U6b's entry condition — as is
-G4-B2, zero grandfather-only decisions, which is **not** a U6a pass condition. A
+state is maintained (U6b), no worker exists and no cleanup runs (U7). **G11 PASSED AS A SCORED GATE ON 2026-09-01, 16 of 16 predictions with zero
+falsifiers** — see `supabase/sql/README-g11-gate.md`. It is one of U6b's entry
+conditions and it is now MET. **G4-B2 is the other, and it was restated the same
+day: the shadow window is ONE-DIRECTIONAL — non-zero BLOCKS, zero can never
+UNBLOCK — and the unblocking evidence is the 16-identity census, not the window.**
+Neither is a U6a pass condition. A
 window that observes grandfather-only decisions is a *successful* G4 and a
 *blocked* U6b. **Device A's identity is pre-cutover**, so it cannot demonstrate
 post-cutover behaviour on its own.
@@ -2159,9 +2162,11 @@ from production notification rows, not assumed.** The purchase at 2026-08-20
 reused for S-1, S-2, B-24n, G11 or F10**; every one of those needs a live
 entitlement and the fixture is spent. **[HISTORICAL — FOUR of the five were
 subsequently discharged on later fixtures: S-1 and S-2 on 2026-08-25 (with S-3),
-B-24n and F10 on 2026-08-30. **G11 was NOT** — its essential behaviour was
+B-24n and F10 on 2026-08-30. **G11 was not, at that date** — its essential behaviour was
 observed incidentally during S-1, where attestation fired unattended on a first
-cold launch, but it has never been run as a scored gate. The paragraph is kept
+cold launch. **G11 was subsequently RUN AND PASSED as a scored gate on
+2026-09-01**, on a resubscribed tester-2 fixture with the membership row deleted
+under a guard. The paragraph is kept
 because its sandbox-renewal-cap observation still holds.]** The tester also
 reported `RESUBSCRIBE` rather than `INITIAL_BUY`, so it can no longer produce a
 clean first-purchase observation either.

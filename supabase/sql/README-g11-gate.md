@@ -147,9 +147,14 @@ has never been scored and is U6b's entry condition.
 
 # RESULTS — 2026-09-01. THE PREDICTIONS ABOVE ARE UNCHANGED.
 
-**G11 PASSES. 15 of 16 predictions confirmed from production, zero falsifiers
-triggered, nothing repaired forward.** G11-15 is a device-side observation and is
-recorded separately below.
+**G11 PASSES, 16 OF 16, zero falsifiers triggered, nothing repaired forward.**
+
+**G11-15 confirmed on device 2026-09-01: no message, no sign-in sheet, nothing
+tapped.** That is F10's silent path on its strongest branch — an identity the
+server did not know, restored to full Connected access on a cold launch, and
+**told nothing, because there was nothing it needed to do.** The failure mode F10
+removed is the inverse: Apple has the money and the app says "Purchase
+unavailable".
 
 ## The precondition — G11-1 to G11-5, all HIT
 
@@ -175,7 +180,7 @@ reasoning says it must.
 | G11-12 | binding timestamps unmoved | **HIT** — still `2026-08-25 17:31:54.005854+00`, identical |
 | G11-13 | conflicts 0 | **HIT** |
 | G11-14 | back to `sandbox_only` / false | **HIT** |
-| G11-15 | the app says nothing | **device-side — see below** |
+| G11-15 | the app says nothing | **HIT** — confirmed on device |
 | G11-16 | no Apple notification required | **HIT** — `notifications_since_delete = 0` |
 
 ## G11-12 IS THE RESULT THAT CARRIES, AND IT IS AN ABSENCE PROOF

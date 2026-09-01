@@ -211,8 +211,10 @@ public.connected_member_self(); drop table public.shadow_enforcement_stat;`
 
 - **Anything about identities that generate no traffic.** A dormant pre-cutover
   subscriber produces zero observations, and zero observations is not evidence
-  of safety. That is **G11**, which has never been run and is **U6b's** entry
-  condition.
+  of safety. That is **G11** — **run and PASSED as a scored gate on 2026-09-01,
+  16 of 16**, after this document was written. It is **U6b's** entry condition and
+  it is now met; the *other* entry condition, the grandfather-dependent
+  population, is not.
 - **G4-B2 (zero grandfather-only decisions) is NOT a U6a pass condition.** It is
   U6b's entry condition. A window that observes grandfather-only decisions is a
   *successful* G4 and a *blocked* U6b, and conflating the two is how one metric
