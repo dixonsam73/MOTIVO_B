@@ -339,3 +339,279 @@ Recorded because each is a repeat of a lesson already in this repository.
    `observed functions = 0`. Both halves are now captured, restored, and
    **asserted** — a teardown that is not asserted is a teardown that silently did
    not happen.
+
+---
+
+# PRODUCTION DEPLOYMENT — PLAN AND PRE-FLIGHT, 2026-09-01. **NOT YET EXECUTED**
+
+**Everything above this line is the LOCAL record and is unchanged.** This
+section is the production package. **No production mutation has been made.**
+Every number below was measured against **live production** on 2026-09-01, not
+carried over from the local figures above — that is the whole point of it being
+a separate section.
+
+## P-0. THE COMMITTED PRODUCTION SNAPSHOT IS CURRENT — no drift since U5
+
+`supabase/capture-schema.sh` was run against the linked production project and
+its output compared byte for byte against the committed `supabase/schema/`:
+
+```
+IDENTICAL  columns.json     constraints.json   functions.json    policies.json
+IDENTICAL  function_grants.json                rls_enabled.json  triggers.json
+IDENTICAL  table_grants.json                   column_grants.json
+IDENTICAL  storage_buckets.json
+```
+
+**Ten of ten.** Production has not moved since the U5 deploy of 2026-08-23. This
+is recorded first because everything downstream depends on it: the local
+prediction was computed against that snapshot, and this is what licenses using
+it — **measured, not assumed**.
+
+## P-1. LIVE PRE-FLIGHT GATES — all read-only, all clean
+
+| Gate | Observed | Meaning |
+|---|---|---|
+| `shadow_enforcement_stat` exists | **0** | U6a not applied |
+| `shadow_observe` exists | **0** | " |
+| `connected_member_self` exists | **0** | " |
+| `public` functions | **22** | matches the snapshot baseline |
+| policies (`public` + `storage`) | **33** | " |
+| `membership` rows | **1** | Device A's Sandbox row |
+| `membership_binding` rows | **1** | |
+| `membership_cutover` rows | **16** | U3's frozen snapshot, unmoved |
+| `membership_binding_conflict` rows | **0** | |
+| `membership` rows with `pending_cleanup_at` | **1** | **see below** |
+
+### `pending_cleanup_at` IS NOW 1, AND THAT IS NOT A REGRESSION
+
+U5's acceptance recorded **zero** rows carrying `pending_cleanup_at`. That figure
+is now **1**, and a reader who treats it as an invariant will read this deploy as
+breaking one. It is not. The Sandbox subscription on Device A expired on
+2026-08-30 within Apple's ~12-renewal cap, and CLAUDE.md predicted the
+consequence in advance: *"expect a final `EXPIRED` to schedule quarantine 60 days
+out … that is a free confirmation, not a defect"*. **Scheduling is what a
+notification is allowed to do; executing is not.** No cleanup worker exists — that
+is U7 — so nothing acts on it, and U6a adds nothing that could.
+
+## P-2. PREDICTED STRUCTURAL DELTA — derived from the LIVE capture
+
+Before = live production, 2026-09-01. After = a clean
+`supabase db reset --local` from the committed migrations, captured with the
+same ten queries.
+
+| Surface | Live prod | After U6a | Delta |
+|---|---|---|---|
+| `columns` | 122 | **130** | **+8** |
+| `constraints` | 61 | **67** | **+6** |
+| `functions` | 22 | **24** | **+2 new, 9 MODIFIED, 0 removed** |
+| `function_grants` | 66 | **72** | **+6 new, 0 MODIFIED** |
+| `rls_enabled` | 14 | **15** | **+1** |
+| `policies` | 33 | **33** | **0 added, 0 removed, 23 MODIFIED, 10 untouched** |
+| `table_grants` | 102 | 102 | **byte-identical** |
+| `column_grants` | 523 | 523 | **byte-identical** |
+| `triggers` | 5 | 5 | **byte-identical** |
+| `storage_buckets` | 2 | 2 | **byte-identical** |
+
+Identical to §3's local prediction on every surface — but arrived at
+independently, which is the only thing that makes the agreement worth anything.
+
+**The 23 modified policies and the 10 untouched ones were enumerated from the
+diff, not counted by hand**, and the untouched set is exactly §2's: all six
+DELETEs, `follows` SELECT, `account_directory` SELECT and UPDATE, and
+`attachments_user_select_auth`.
+
+**`function_grants` has ZERO modified rows, which is stricter than U5.** U5
+flipped `ensure_membership_binding`/`authenticated` from false to true; U6a flips
+nothing. Its six new rows are two functions across three roles, and only
+`authenticated` is true on either:
+
+```
+connected_member_self  anon false | authenticated TRUE (direct) | service_role false
+shadow_observe         anon false | authenticated TRUE (direct) | service_role false
+```
+
+**`connected_member(uuid)` and `membership_state(uuid)` remain ungranted to every
+client role** — the uuid-addressable membership oracle stays unbuildable, which is
+B-33's whole reason for the zero-argument wrapper.
+
+## P-3. B-23 PRE-DEPLOY — **GATE NOT MET, 55 problems**, and that is correct
+
+U6a modifies rather than only adds, so the gate must fail before the deploy and
+return green after recapture, exactly as U4's and U5b's did. **All 55 are U6a
+objects and the arithmetic is closed:**
+
+```
+23  policies        (qual or with_check differs)
+ 9  functions       (definition differs)
+ 2  functions       (connected_member_self, shadow_observe — new)
+ 1  rls_enabled     (shadow_enforcement_stat)
+ 6  constraints     (shadow_enforcement_stat)
+ 8  columns         (shadow_enforcement_stat)
+ 6  function_grants (2 functions x 3 roles)
+---
+55
+```
+
+The `account_id_format` pair is **not** among them: it is the single declared
+standing exception, detected and mechanically verified by the gate. Counting it
+would overstate the delta by one.
+
+## P-4. THE ROLLBACK IS REGENERATED FROM PRODUCTION, AND THE OLD ONE WAS RIGHT
+
+**`supabase/sql/2026-08-30-u6a-rollback-baseline.sql` was generated from the
+LOCAL B-23 reproduction.** A reproduction is the same software, not the same
+deployment. Relying on it would have made the rollback correct only if fidelity
+held — and fidelity is the thing B-23 measures, never the thing it may assume.
+
+So the same generator was pointed at production and the outputs diffed.
+
+> **ZERO DIFFERENCES.** All 33 `alter policy` statements and all 9 function
+> definitions are byte-identical between the local-derived file and production's
+> own catalog.
+
+**The local file was a correct rollback for production all along. That is now a
+measurement rather than an inference, which is the only reason it can be relied
+on** — and it is a second, independent confirmation of B-23's fidelity claim,
+reached without the gate.
+
+The rollback of record for this deployment is nevertheless the
+production-generated file, because a rollback should be provably *of* the thing
+it restores:
+
+```
+supabase/sql/2026-09-01-u6a-rollback-baseline-production.sql   the restoration
+supabase/sql/2026-09-01-u6a-rollback-noop-verify.sql           the same body, guarded
+```
+
+**Both are emitted by one generator from one production capture, so their bodies
+cannot drift apart** — asserted, not promised: the bodies diff clean.
+
+### Production's pre-U6a fingerprints
+
+```
+policies   33   7d6c09eb1921878fd98b0ebd9fe9f664
+functions   9   48e8cc60b6ca66d102ce10cfec70a19c
+```
+
+Definitions, so they are reproducible rather than remembered — `md5` over
+`string_agg`, policies keyed `schemaname|tablename|policyname|cmd|qual|with_check`
+ordered by the first three, functions over `pg_get_functiondef` ordered by name.
+**The pre-U6a local reproduction produces both values identically**, which is the
+same fidelity result arriving by a third route.
+
+### The no-op verification proves THREE things, not one
+
+`2026-09-01-u6a-rollback-noop-verify.sql` is one submission with the guard inside
+it, per the standing rule in `supabase/README.md` — `RAISE EXCEPTION` aborts its
+own transaction, so no human decision sits between the observation and the
+outcome.
+
+1. **The file still matches production.** The BEFORE fingerprints are asserted
+   against the captured literals, so drift between capture and deploy stops the
+   run instead of shipping a rollback to a state that no longer exists.
+2. **Applying it is a no-op.** AFTER must equal BEFORE.
+3. **The session can actually `ALTER POLICY` all 33** — including the ten on
+   `storage.objects`, owned by `supabase_storage_admin`. A fingerprint comparison
+   alone would not give this. It exercises the exact privilege the migration
+   needs, before the migration needs it, on a statement whose failure costs
+   nothing.
+
+### Both directions were tested locally, because a check that cannot fire is worse than no check
+
+| Test | Instance | Result |
+|---|---|---|
+| **Negative** | local **with** U6a applied | **ABORTED**, naming the drifted fingerprint |
+| **Positive** | local reset to **pre-U6a** | **`NOTICE: verified as a byte-identical no-op`**, committed |
+
+That is defect 3 of the four found while writing the U6a suite, applied in
+advance rather than discovered again.
+
+### THE FULL ROLLBACK WAS REHEARSED END TO END, and it returns the instance to production
+
+On a local instance with U6a applied: apply the production rollback baseline,
+then the three DROPs.
+
+| Measure | After U6a | After rollback | Live production |
+|---|---|---|---|
+| policy fingerprint | `bad893a9…` | **`7d6c09eb…`** | `7d6c09eb…` |
+| function fingerprint | `052ee5ce…` | **`48e8cc60…`** | `48e8cc60…` |
+| `public` functions | 24 | **22** | 22 |
+| policies | 33 | **33** | 33 |
+| `shadow_enforcement_stat` | present | **absent** | absent |
+
+**And then the B-23 gate was re-run on the rolled-back instance: GATE MET**, with
+only the standing `account_id_format` exception. **That is the rollback proof —
+not that the DROPs succeeded, but that the instance is once again structurally
+identical to live production.**
+
+## P-5. DEPLOYMENT ORDER
+
+**`supabase db push` IS STILL NOT THE MECHANISM** — see the U5 README §0.
+Production's `supabase_migrations.schema_migrations` records none of these
+migrations, so `db push` would replay all five including the baseline
+reproduction.
+
+| # | Step | Who | Notes |
+|---|---|---|---|
+| **P0** | P-1's gates, re-run | Either | Any surprise **stops the deploy**. `pending_cleanup_at = 1` is expected |
+| **P1** | **Run `2026-09-01-u6a-rollback-noop-verify.sql`** | **Account holder** | One paste. Expect exactly one `NOTICE`. **Any EXCEPTION is a STOP** |
+| **P2** | **Apply the migration atomically** | **ACCOUNT HOLDER ONLY** | §P-6 below |
+| **P3** | Re-run P-2's delta and P-1's gates | Either | Any disagreement stops the deploy |
+| **P4** | `./supabase/capture-schema.sh` then `./supabase/verify-baseline.sh` | Either | Must return **GATE MET**, only `account_id_format` |
+| **P5** | Confirm the observer is inert in production | Either | §P-7 |
+| **P6** | Commit the refreshed snapshot and the results together | Either | |
+| **P7** | **STOP.** No client change, no device action | — | U6a ships no client. Nothing to install |
+
+**No Edge Function is deployed and no secret is set.** U6a is SQL only, which is
+why there is no download-diff step and no re-versioning hazard.
+
+## P-6. THE MIGRATION, AS ONE ATOMIC TRANSACTION
+
+Run in the Supabase SQL editor by the account holder. The file is
+`supabase/migrations/20260830120000_u6a_shadow.sql`, applied **verbatim**:
+
+```sql
+BEGIN;
+-- paste the ENTIRE contents of
+--   supabase/migrations/20260830120000_u6a_shadow.sql
+-- unmodified, then:
+COMMIT;
+```
+
+It contains **1 `create table`, 2 `create function`, 23 `alter policy` and 9
+`CREATE OR REPLACE FUNCTION`**, plus grants and revokes, and **no transaction
+control of its own** — verified, so the wrapper above is the only one.
+
+**Do not `CASCADE` anything. Do not edit the file to make a statement succeed.** A
+statement that fails means the analysis was wrong; `ROLLBACK` and report.
+
+## P-7. POST-DEPLOY INERTNESS CHECK
+
+The shadow window's own first evidence, and it is read-only:
+
+```sql
+select count(*) as observations, count(distinct user_id) as identities
+from public.shadow_enforcement_stat;
+```
+
+**Zero rows immediately after the deploy is CORRECT and expected** — the table is
+written only when an authenticated request evaluates an observed policy. **Do not
+select `user_id`**; a pasted result must not put a production UID into the
+repository or a transcript.
+
+**Every clause a row can carry is telemetry and none of it is enforcement.** If
+`would_deny` is true for an identity, that identity was still served: the
+observer returns `true` on every path, and the acceptance suite's G4-S2 proves
+row counts are identical attached and detached.
+
+## P-8. FULL ROLLBACK, if it is ever needed
+
+```
+1.  apply supabase/sql/2026-09-01-u6a-rollback-baseline-production.sql
+2.  drop function public.shadow_observe(text);
+    drop function public.connected_member_self();
+    drop table    public.shadow_enforcement_stat;
+3.  ./supabase/capture-schema.sh && ./supabase/verify-baseline.sh   -> GATE MET
+```
+
+Rehearsed end to end locally on 2026-09-01 — see P-4.
