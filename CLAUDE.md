@@ -1015,7 +1015,7 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **24** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day) |
+| Phase-3-tagged register rows | **25** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision) |
 | Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
@@ -1411,6 +1411,19 @@ The approved temporary cutover compatibility design:
   entitlement transitions from true to false, so a user with no row has nothing
   to transition. This is structural and holds independently of the snapshot.
 
+**RETIREMENT DECIDED 2026-09-01 — B-36. THE SNAPSHOT HAS NO ENTITLEMENT
+PREDICATE, and that is why this whole mechanism is being removed rather than
+wound down.** U3's population statement is `where u.created_at < cutover_at` and
+nothing else, so the snapshot captured **every identity that existed, not every
+identity that was paying**. The clause therefore grants Connected to all 16
+pre-cutover identities regardless of whether any ever subscribed — and the cohort
+is pre-release beta, which the account holder has confirmed need not be
+preserved. **U6b's Gate 2 is retired, not satisfied: it was unsatisfiable by
+construction**, since an identity that never had a subscription can never acquire
+authoritative membership state. `connected_member()` loses its middle `coalesce`
+arm, `membership_state()` loses `'grandfathered'`, and `membership_cutover` plus
+three `membership_control` columns become dead.
+
 **It is not a backfill, and calling it one would be wrong.** `Get Notification
 History` can enumerate `originalTransactionId` values server-side, but the app
 does **not** set `appAccountToken` — `product.purchase()` is called with no
@@ -1483,6 +1496,18 @@ case under the chosen design is a few denied requests in the first seconds of a
 cold launch. **Not a lockout.**
 
 ### U6c — removing the snapshot
+
+**SUPERSEDED IN DIRECTION 2026-09-01 BY B-36, AND THIS HEADING IS KEPT BECAUSE
+THE REASONING BELOW RETURNS THE MOMENT A PRODUCTION CUSTOMER EXISTS.** The
+account holder confirmed that Études has never been publicly released, that there
+are no production customers, and that preserving pre-release beta accounts or
+their server-side content is **not a release requirement**. The decision is
+therefore to **retire the grandfather mechanism outright rather than to remove the
+snapshot at the end of a compatibility period** — which makes everything in this
+subsection an ordinary cleanup migration: no twelve-month clock, no liveness
+safety check, no dated post-phase obligation. **The simplification depends
+entirely on the cohort being disposable, and that dependency is the thing to
+re-read before adopting it.** See `supabase/sql/README-grandfather-retirement.md`.
 
 **U6c may remove the migration snapshot when either:**
 
