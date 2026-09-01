@@ -240,3 +240,31 @@ explain**.
 - **Do NOT restart P6.** `enforcement_enabled` stays **FALSE**.
 - **Do NOT reinstall, erase or reset Device A.** Its local state is C-55's only
   evidence.
+
+
+---
+
+## AGREED ADJUSTMENT TO P6 BEFORE IT IS RE-ATTEMPTED — 2026-09-01
+
+Three items, and no broader retest.
+
+1. **C-55 IS DECLARED IN ADVANCE AND EXCLUDED FROM SCORING.** Device A's
+   journal-row → `SessionDetailView` navigation is **known-broken independently of
+   enforcement** — it reproduces with `enforcement_enabled` FALSE and with the
+   device in Solo making no backend request at all. **It must not be scored as an
+   enforcement symptom.** It nearly contaminated the record once already, in that
+   exact direction.
+2. **ONE BASELINE CHECK FIRST.** Once Device A is genuinely Connected again *and*
+   Supabase is healthy, verify **one feed → remote post navigation with
+   enforcement OFF** before binding. The feed uses a different destination
+   (`pushRemotePostID`) from the journal row (`pushSessionID`), and **Device A's
+   feed path has never been exercised since C-55 appeared** — so it is untested,
+   not known-good. One tap, and it is the difference between a scored gate and
+   another contaminated window.
+3. **Device B carries the own-attachment-readable carve-out.** D-U6-4 is
+   `owner_user_id = auth.uid()`, identical whatever clause is decided, so Device
+   B's `unknown` identity exercises it as well as Device A's `sandbox_only` —
+   and it does not depend on the path C-55 affects.
+
+**Everything else in P6 is unchanged. Production enforcement stays FALSE and P6
+remains stopped until the Supabase incident is healthy.**
