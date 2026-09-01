@@ -570,3 +570,49 @@ devices behave exactly as they do today.
 own profile, account deletion reachable — still working; **and the entire
 Connected corpus invisible, because backfill resolves every `entitled_until` to
 NULL when no Production membership row has ever existed.**
+
+
+---
+
+# 16. P4 — DEVICE INERTNESS. PASSED, 2026-09-01
+
+**Device A had lapsed to Solo, so it was NOT used and NOTHING was purchased,
+fabricated or bypassed to restore it.** In Solo `canViewFeed` is false, so it
+issues no authenticated request at all; and while unbound the gate short-circuits
+*before* consulting entitlement, so the identity class affects only the recorded
+clause and never the decision. **One class proves inertness; a second adds no
+evidence.** At P6 that stops being true.
+
+**Device B, real operations on the newly gated surfaces:** feed, opened a post,
+played its attachment, published a session with an audio attachment, left a
+comment. **All normal. No error, no prompt, no membership screen.** Device A,
+launched and looked at, was ordinary Solo.
+
+**Verified from production:** posts 100 → **101**, comments 4 → **5**, **one new
+attachment storage object**, **drift 0**, conflicts 0, `enforcement_enabled`
+false, `u6b_bound_at` null.
+
+**The storage write needed the direct observation** — B-34 established the window
+can never see that surface, so its silence would have proved nothing.
+
+## `would_deny` changed meaning at P2, and the separability claim was overstated
+
+```
+enforced=false  unknown  deny=true    last 12:14:57   <- shadow_observe
+enforced=false  unknown  deny=false   last 16:37:13   <- enforcement_gate
+```
+
+Same identity, same clause, no entitlement change. `shadow_observe` derived
+`would_deny` from entitlement regardless of any flag; `enforcement_gate` derives
+it from the actual decision, which while unbound is always *allow*.
+
+**CORRECTION TO §8's CLAIM.** `enforced` in the primary key separates **unbound
+from bound** — it does NOT separate `shadow_observe` from `enforcement_gate`,
+because both are `enforced = false`. These two rows stayed distinct only because
+they fell in different hour buckets; **had P2 landed mid-hour they would have
+merged and `would_deny` would have been overwritten.** The P2 boundary remains
+reconstructable from `first_seen`/`last_seen` against the deploy time — by
+timestamp, not by column. Weaker than §8 implied, bounded, and recorded rather
+than left to be discovered.
+
+**P5 next: commit the flip predictions. P6 is the flip and has not been written.**
