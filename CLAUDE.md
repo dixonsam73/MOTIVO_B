@@ -54,6 +54,35 @@ its own heading. It was written before the deploy and never re-read afterwards �
 **the same failure mode as C-52 four lines of reasoning apart**: a durable
 document describing a state it is not itself evidence of.
 
+## U6b — DEPLOYED AND INERT. ENFORCEMENT WAS BOUND FOR SIX MINUTES AND ROLLED BACK. 2026-09-01
+
+**U6b-1 IS LIVE IN PRODUCTION AND DENIES NOTHING.** The gate, the kill switch, the
+four denormalised `entitled_until` columns and their five triggers are deployed;
+`enforcement_enabled` is **FALSE**. B-23 returned **GATE MET** after recapture, and
+the deployed state is **byte-identical to the pre-deploy local build** on nine of
+ten surfaces, the tenth differing only by the standing `account_id_format`
+exception. Device inertness was confirmed on real traffic at P4.
+
+**ENFORCEMENT WAS BOUND AT 16:52:52 AND ROLLED BACK AT 16:58:29.** The structural
+bind succeeded and every prediction held — ten guards passed, and the policy
+fingerprint was unchanged afterwards, proving the flip wrote one boolean and one
+timestamp. **`u6b_bound_at` REMAINS SET, DELIBERATELY:** it records that binding
+happened, which stays true, and it makes the bind statement **refuse to run a
+second time**. A re-bind is a conscious act, never a repeat.
+
+**THE BEHAVIOURAL DENY-PATH QA IS INCOMPLETE AND MUST NOT BE READ AS PASSED.** A
+Supabase service incident was in progress during the QA window, and the device
+symptoms seen under it — an empty feed with its empty-state message *absent*,
+attribution rendering as `User` — are the shape of **failed** requests, not denied
+ones. Only **two** surfaces were ever exercised under enforcement, both denying
+gracefully; **`posts.select` never fired**, so publish, comment, own-attachment,
+own-profile and account-deletion-reachable were never tested at all. **The deny
+path is NOT verified in production.** The record is
+`supabase/sql/README-u6b-p6-binding.md`.
+
+**Nothing in U6b touches the client.** Zero client code shipped, and the grant path
+remains deferred to the first genuine App Store subscription after public release.
+
 ## U6a IS LIVE IN PRODUCTION — shadow enforcement, deployed and verified 2026-09-01
 
 **23 policies and 9 SECURITY DEFINER RPCs now carry an observer. NOTHING IS
@@ -1015,8 +1044,8 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **25** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision) |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **26** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision); **U6b's interrupted deny-path QA filed C-55** (OPEN, mechanism unknown, unrelated to enforcement) |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **C-55** (Device A Solo journal navigation, mechanism UNKNOWN, not caused by U6b) and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 

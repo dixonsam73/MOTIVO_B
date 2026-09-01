@@ -112,3 +112,70 @@ identity is entitled and the allow branch is never exercised in production. That
 is the release gate, unchanged: **before a second paying subscriber exists, the
 first genuine App Store subscription is verified end to end.** P6 proves the deny
 path and the carve-outs; it cannot and does not prove the grant path.
+
+---
+
+# P6 RESULT — BOUND, THEN ROLLED BACK. DENY-PATH QA **INCOMPLETE**. 2026-09-01
+
+## What happened, as facts
+
+| | |
+|---|---|
+| **Bound** | `enforcement_enabled = true`, `u6b_bound_at` = **2026-09-01 16:52:52.452956+00** |
+| **Rolled back** | `enforcement_enabled = false` at **2026-09-01 16:58:29.176354+00** |
+| **`u6b_bound_at`** | **retained, deliberately** — it records that binding happened, which stays true |
+| **Now** | `enforcement_enabled` **FALSE**. **U6b-1 remains deployed and INERT** |
+
+## The structural bind SUCCEEDED and every prediction held
+
+All ten guards passed and the returned row matched exactly: `enforcement_enabled t`,
+`bound t`, membership 1, binding 1, cutover 16, conflicts 0,
+`posts_visible_to_others` 0.
+
+Verified independently afterwards: `enforcement_active()` **true**, Device A
+`sandbox_only` / false, **drift 0**, and the policy fingerprint **unchanged at the
+U6b-1 value** — proof that P6 wrote one boolean and one timestamp and nothing else.
+
+**F-1 to F-5 all hold.**
+
+## THE BEHAVIOURAL DENY-PATH QA IS INCOMPLETE, AND IS NOT RECORDED AS ANYTHING ELSE
+
+**A Supabase service incident was in progress during the QA window.** Device
+symptoms observed under it — an empty feed with its empty-state message *absent*,
+and author attribution rendering as `User` instead of the stored display name —
+are the shape of **failed** requests rather than denied ones: a denial returns
+zero rows and would render the empty state.
+
+**So the observations are contaminated and cannot be scored.** Of D-1 to D-10,
+**none is recorded as passed or failed.**
+
+**What the telemetry shows is the whole behavioural evidence there is:**
+
+```
+16:54:13  sandbox_only (Device A)  rpc.has_unread_private_comments  deny=true  n=3
+16:56:36  unknown      (Device B)  rpc.has_unread_private_comments  deny=true  n=6
+16:56:39  unknown      (Device B)  storage.attachments_recipient    deny=true  n=1
+```
+
+**Three rows, ten observations, two surfaces.** `posts.select` **never fired**, so
+D-1 — the prediction that the feed shows only the viewer's own posts — went
+**untested rather than falsified**, and publish, comment, own-attachment,
+own-profile and account-deletion-reachable were never exercised at all.
+
+**THE DENY PATH IS NOT VERIFIED IN PRODUCTION.** The two surfaces that were
+exercised both denied gracefully, which is consistent with the design and is not
+a substitute for the gate.
+
+## What must happen before P6 is attempted again
+
+1. The Supabase incident is **resolved**.
+2. Both devices relaunched with enforcement **off**, confirming normal behaviour —
+   a clean baseline before re-binding.
+3. **A re-bind is a conscious act, not a repeat.** `u6b_bound_at` is set, so
+   `2026-09-01-u6b-2-bind-production.sql` will **refuse** on its first
+   precondition. That is by design.
+4. Device A's `sandbox_only` fixture re-established if it has lapsed again — its
+   `renewal_date` was 17:21:02.
+
+**C-55 is open and unrelated to enforcement**; it does not block P6, but Device A
+cannot serve as a QA fixture while it is unobservable.
