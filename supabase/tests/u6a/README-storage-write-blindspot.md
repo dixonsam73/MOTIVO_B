@@ -99,3 +99,127 @@ because that difference is real. A local result here is **evidence about
 production, never proof of it**, and any finding that comes out of this must
 carry that qualifier into the register — *verified against a faithful local
 reproduction* — exactly as U2's four did.
+
+---
+
+# RESULTS — 2026-09-01. THE PREDICTIONS ABOVE ARE UNCHANGED.
+
+**7 of 8 predictions held. The one that failed is the one the whole investigation
+was for, and BOTH committed hypotheses turned out to be wrong.**
+
+| # | Predicted | Actual |
+|---|---|---|
+| P-A1 | `rls_enabled=true`, `rls_forced=false` | **HIT** |
+| P-A2 | owner `supabase_storage_admin` | **HIT** |
+| P-A3 | `rolbypassrls = false` | **HIT** |
+| P-A4 | all 4 write policies carry the observer | **HIT** |
+| **P-B1** | **upload succeeds → hypothesis (b)** | **FALSIFIED — the upload was REFUSED** |
+| P-B2 | SQL control fires the observer | **HIT** |
+| P-D1 | both directory RPCs instrumented | **HIT** |
+| P-D2 | called from an unexercised path | **HIT**, and sharper — see below |
+
+## (b) IS FALSE: THERE IS NO ENFORCEMENT GAP
+
+With `attachments_user_insert_auth`'s `WITH CHECK` set to `false`, an
+authenticated upload through storage-api was **rejected**:
+
+```
+HTTP 400  {"statusCode":"403","error":"Unauthorized",
+           "message":"new row violates row-level security policy"}
+```
+
+**RLS genuinely gates the storage write path.** The pre-existing enforcement gap
+I predicted does not exist, and U6b's binding on these policies will do real
+work. That is the reassuring half and it was the more important question.
+
+## (a) IS ALSO FALSE
+
+`auth.uid()` is not NULL there. The policy's own predicate proves it: the
+baseline upload passed
+`lower((storage.foldername(name))[2]) = lower((auth.uid())::text)`, which cannot
+succeed on a NULL uid.
+
+## THE ACTUAL MECHANISM — the predicate runs and its side effects are discarded
+
+**Proven with a sequence, because `nextval()` is not transactional and therefore
+survives a rollback.** Across one HTTP upload:
+
+```
+before:  seq last_value=1  is_called=f   stat_rows=0
+         upload HTTP 200
+after:   seq last_value=2  is_called=t   stat_rows=0   object_created=1
+```
+
+**The observer ran exactly once. Its `INSERT` did not survive.** Consistent with
+storage-api performing an RLS-checked insert whose effects are discarded and then
+writing the real row through a path that bypasses RLS — `relforcerowsecurity` is
+false and the owner is `supabase_storage_admin`, so owner-bypass is available.
+
+Corroborated at both ends, so a null result cannot be mistaken for a broken
+experiment: an **unconditionally-raising** observer makes the upload fail
+**500 / P0001**, so the observer *is* reached; and the **SQL control** persists an
+observation, so the write path works when RLS genuinely applies.
+
+**This is a third mechanism neither hypothesis enumerated**, and it is the useful
+kind of wrong: the two candidates I wrote down were "not instrumented" and "not
+enforced", and the truth is *"instrumented, enforced, and the evidence thrown
+away."*
+
+## THE FIRST RUN OF THIS EXPERIMENT PROVED NOTHING, AND SAID SO
+
+Three defects, all caught by reading the output rather than by review:
+
+1. **`UID` is a readonly shell variable.** It silently became `501`, the OS uid,
+   so every path and claim was wrong. Renamed `USERID`, and the script now
+   asserts the value looks like a uuid before proceeding.
+2. **The bucket enforces `allowed_mime_types`.** `application/octet-stream` was
+   rejected 415, so no upload ever occurred and "0 observations" meant nothing.
+3. **The control's stderr was suppressed**, so its failure — caused by (1) —
+   was invisible. `0 rows` read exactly like a real negative.
+
+**All three produced the same symptom the real finding produces: zero
+observations.** That is precisely why P-B2 was written into the plan as a
+mandatory control, and it earned its place on the first run.
+
+## SECONDARY FINDINGS FROM THE SAME EVIDENCE
+
+**Surface labels can be misattributed, and counts are not request counts.** All
+permissive policies for the command are evaluated, so an `attachments` insert
+also evaluates `avatars_insert_owner_only`: the SQL control recorded
+**`storage.avatars_insert` and `storage.attachments_insert` at the same
+microsecond**. Where an `OR` short-circuits, one of them is skipped — which is
+why the production counters for `storage.attachments_recipient` (8) and
+`storage.attachments_via_post` (6) diverge despite covering the same reads.
+
+**A comment author reading their own comments is permanently invisible.**
+`post_comments_select_visible` is `(auth.uid() = author_user_id) OR (observer AND
+(owner OR recipient))` — Q1's deliberately open author branch is evaluated first,
+so the `OR` short-circuits and the observer never runs. Correct behaviour, and a
+blind spot nobody had stated.
+
+**`get_account_directory_by_user_ids` is cache-gated.**
+`AccountDirectoryService.swift:258` calls it only for identities **missing from
+the local cache**. So G10's surface — where `search_account_directory` may gate on
+the viewer and this one must *never* gate on the subject — is reached **only on a
+cold cache**. Shadow evidence about U6b's most delicate change is therefore weak
+**by construction**, not merely absent so far.
+
+## WHAT THIS MEANS FOR U6b
+
+1. **The shadow window can never produce a single observation about storage
+   writes.** Their absence must never be read as safety.
+2. **`would_deny` counts are lower bounds**, not request counts.
+3. **A surface's silence has at least three causes** — never reached, allowed by
+   an earlier `OR` branch, or observed-and-rolled-back — and only the first is
+   what a reader assumes.
+
+**A shadow window's silence is not evidence.** That belongs beside *zero
+observations is not evidence of safety*: same error, one level down.
+
+## TEARDOWN
+
+Asserted after every probe, never assumed — U6a's defect 4 was a teardown that
+silently did not happen. The policy was restored and matched against the captured
+original; `shadow_observe` was restored from `pg_get_functiondef` and asserted to
+contain the real body and no probe text; the probe sequence was dropped and its
+absence asserted. **Local only. No production mutation at any point.**
