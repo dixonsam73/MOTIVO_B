@@ -458,3 +458,115 @@ gating on `posts`/`post_shares`, or record it as a named follow-on unit.**
 > served on a real device.
 
 **Nothing in §11 or §6 can mark this satisfied.**
+
+---
+
+# 15. IMPLEMENTATION RESULT AND THE PRODUCTION PLAN — 2026-09-01. NOT DEPLOYED
+
+**Built and green locally. Nothing is deployed and `enforcement_enabled` has not
+been flipped anywhere.**
+
+## 15.1 The one measurement, run before implementing
+
+**Claim tested:** a `SECURITY DEFINER` trigger function fires for an
+`authenticated` caller **without** that role holding EXECUTE.
+
+| | |
+|---|---|
+| SECURITY DEFINER trigger fn, granted to nobody | **FIRED** |
+| **CONTROL** — invoker-rights twin, same grants | **`permission denied for function`** |
+
+**The control is what makes it evidence.** B-33's first experiment failed because
+a defensive clause destroyed the only thing being measured; here the probe was
+shown capable of detecting a permission failure before its success was believed.
+**`membership_entitled_until` stays granted to nobody. No extra grant was needed.**
+
+## 15.2 Local result — all green on fresh resets
+
+```
+u3/acceptance      97      u5/acceptance      57      u6a/acceptance (superseded)  3
+u4/acceptance      98      u5/e2e             62      u6b/acceptance              54
+u4/e2e             43      u5/client-struct   53      inventory-complete    COMPLETE
+```
+
+**U4's and U5's TypeScript module suites were not re-run and are not claimed:**
+U6b touches no Edge Function and no shared module, only SQL.
+
+**Structural, verified in the built database:** 23 policies carry the gate,
+**zero bare calls**, 4 policies carry the subject check, 9 RPCs gated,
+`shadow_observe` gone, `membership_entitled_until` executable by no client role,
+4 columns, 5 triggers, `enforced` in the primary key.
+
+## 15.3 Blast radius — 3 assertions moved, and one suite was superseded
+
+| | |
+|---|---|
+| **U3 `A15c`** | exception list widened **by name** from 1 to 6. No namespace, no pattern — any *other* function acquiring a membership dependency still fails it |
+| **U3 `A16b`** | trigger count 5 → **10**, still an exact count |
+| **U4 `A57c`** | trigger count 1 → **6**, still an exact count |
+| **U6a's suite** | **superseded** — its subject, `shadow_observe`, no longer exists |
+
+**The U6a suite was not edited until it passed, and it is not a stub that always
+passes** — that is the "check that cannot fire" defect this repository names. Its
+twelve assertions with unique value are **carried into U6b group K unchanged in
+substance**, and what remains is an executable guard on the supersession that
+**can fail**: it asserts `shadow_observe` is genuinely absent, that the successor
+exists, and that all twelve carried assertions are present in it.
+
+**A blanket rename also rewrote four HISTORICAL comments** describing U6a's
+`shadow_observe` — which would have made the record read as though the function
+were always called something else. **Restored.** Historical material may be marked
+superseded; it must never be rewritten to look as though it was always right.
+
+**The inventory gate caught a real gap:** both trigger functions inherited
+`PUBLIC` EXECUTE by default. Postgres refuses a direct call to a trigger function
+so it is hygiene rather than a hole, but a `SECURITY DEFINER` function reading
+`membership` should not carry a default grant. **Both are now explicitly revoked**
+and all five new functions are documented in `docs/u6-enforcement-inventory.md`.
+
+## 15.4 PREDICTED PRODUCTION DELTA — measured against live production, not estimated
+
+| Surface | Prod | After U6b-1 | Delta |
+|---|---|---|---|
+| `columns` | 130 | **136** | **+6** |
+| `functions` | 24 | **28** | **+5 new, −1 dropped, 9 MODIFIED** |
+| `function_grants` | 72 | **84** | **+15 new, −3 dropped** |
+| `column_grants` | 523 | **554** | **+31** |
+| `triggers` | 5 | **10** | **+5** |
+| `policies` | 33 | **33** | **0 added, 23 MODIFIED** |
+| `constraints` | 67 | **67** | **0 added, 1 MODIFIED** — the stat PK gains `enforced` |
+| `rls_enabled` · `table_grants` · `storage_buckets` | | | **IDENTICAL** |
+
+**B-23 will report GATE NOT MET with exactly 99 problems**, and the arithmetic
+closes with every one a U6b object:
+
+```
+31 column_grants + 23 policies + 18 function_grants + 15 functions
+ + 6 columns + 5 triggers + 1 constraints  =  99
+```
+
+## 15.5 PRODUCTION SEQUENCE — stop points are absolute
+
+| # | Step | Denies? |
+|---|---|---|
+| **P0** | Re-run the live pre-flight; confirm `enforcement_enabled` absent and `u6b_bound_at` null | no |
+| **P1** | **Regenerate the rollback baseline FROM PRODUCTION** and verify it as a no-op | no |
+| **P2** | Apply U6b-1 — one submission, guard inside, ending in a `SELECT` that returns a row | **no — ships with the flag false** |
+| **P3** | `capture-schema.sh` + `verify-baseline.sh` → **GATE MET** | no |
+| **P4** | **Prove inertness on Device A and Device B.** Nothing changes | no |
+| **P5** | Commit predictions for the flip | no |
+| **P6** | **THE FLIP** — one row, guarded, `u6b_bound_at` set in the same transaction | **YES** |
+| **P7** | Device QA per §11.1 | — |
+| **P8** | Score, commit, refresh the snapshot | — |
+| **P9** | U6b-4 grandfather cleanup, separately | no |
+
+**P2 and P6 are separate deployments and must not be combined.** Everything
+between them is the evidence that P6 is safe to take.
+
+**Expected at P4, and it is the whole point of shipping the flag off:** both
+devices behave exactly as they do today.
+
+**Expected at P7:** every gated surface refused; every carve-out — own material,
+own profile, account deletion reachable — still working; **and the entire
+Connected corpus invisible, because backfill resolves every `entitled_until` to
+NULL when no Production membership row has ever existed.**

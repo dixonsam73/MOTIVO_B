@@ -217,15 +217,26 @@ is A15b "$(psq "select count(*) from pg_policies where schemaname in ('public','
 # made U4's own seven functions look like a violation of a U3 property. Excluding
 # the whole Phase 3 namespace says what was meant and still catches the hazard.
 #
+# RE-POINTED AGAIN AT U6b, 2026-09-01. U6b RENAMES the observer to
+# enforcement_gate -- a function that DENIES must not be called shadow_observe
+# (C-25/F6) -- and adds three more dependents outside the namespace:
+# enforcement_active, tg_set_entitled_until and tg_membership_propagate_entitled_until.
+# ALL SIX ARE NAMED BY HAND. No namespace, no pattern: any other function
+# acquiring a membership dependency still fails this.
+#
 # RE-POINTED AT U6a, 2026-08-30, AND IT CAUGHT WHAT A57b WAS SUPPOSED TO CATCH.
-# U6a's shadow_observe() calls membership_state(), so it acquires exactly the
+# U6a's shadow_observe() called membership_state(), so it acquired exactly the
 # dependency this assertion exists to detect -- and it FAILED here, unpredicted,
-# while A57b and A67c stayed green. shadow_observe is named as a SINGLE EXPLICIT
+# while A57b and A67c stayed green. That function was named as a SINGLE EXPLICIT
 # EXCEPTION, never a namespace or pattern: any OTHER function acquiring a
 # membership dependency still fails this, which is the whole point of the row.
-is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','ensure_membership_binding','shadow_observe') and p.proname not like 'membership%';")" "0" "no function outside the membership namespace depends on membership, except shadow_observe"
+is A15c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prosrc ilike '%membership%' and p.proname not in ('connected_member','ensure_membership_binding','enforcement_gate','enforcement_active','tg_set_entitled_until','tg_membership_propagate_entitled_until') and p.proname not like 'membership%';")" "0" "no function outside the membership namespace depends on membership, except six named by hand"
 is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at is not null;")" "0" "cleanup scheduled"
-is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "5" "trigger count unchanged"
+# RE-POINTED FOR U6b, 2026-09-01: 5 -> 10. U6b adds five triggers -- four
+# BEFORE INSERT OR UPDATE row triggers maintaining the denormalised visibility
+# timestamp, and one AFTER trigger on `membership` propagating it. The assertion
+# is not weakened: it still pins an exact count, so a sixth would fail it.
+is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "10" "trigger count: U3's 5 plus U6b's 5"
 is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"
 is A14b "$(psq "select coalesce((select cutover_at::text from public.membership_control),'null');")" "null" "cutover_at unset locally"
 

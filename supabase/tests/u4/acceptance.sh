@@ -229,7 +229,7 @@ is A57  "$(psq "select count(*) from pg_policies where schemaname in ('public','
 # expected 0, described as "NO policy consults membership". Under U6a that claim
 # is FALSE IN SUBSTANCE -- 23 policies reach membership state through
 # shadow_observe -> membership_state -- and yet the assertion still passed,
-# because `shadow_observe` matches neither alternation. The U6a plan PREDICTED
+# because `shadow_observe` matched neither alternation. The U6a plan PREDICTED
 # this assertion would fail and it did not, so nothing forced the correction.
 #
 # U6a's correct claim is no longer "no policy consults membership". It is:
@@ -237,10 +237,13 @@ is A57  "$(psq "select count(*) from pg_policies where schemaname in ('public','
 # non-binding and behaviourally inert. That needs both halves, so it is two
 # assertions -- structural attachment, and inertness. The full attached-vs-
 # detached row comparison is G4-S2 in supabase/tests/u6a/acceptance.sh.
-is A57b "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership|shadow_observe';")" "23" "the 23 enumerated policies consult shadow telemetry"
+is A57b "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member|membership|enforcement_gate';")" "23" "the 23 enumerated policies consult shadow telemetry"
 is A57b2 "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) ~* 'connected_member\\(|membership_state\\(|connected_member_self\\(';")" "0" "...and NO policy calls an entitlement predicate directly -- enforcement is not bound"
-is A57b3 "$(psq "select public.shadow_observe('probe.a57b')::text;")" "true" "...and the observer is inert: it returns true, always"
-is A57c "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and not t.tgisinternal;")" "1" "trigger count unchanged"
+is A57b3 "$(psq "select public.enforcement_gate('probe.a57b')::text;")" "true" "...and the observer is inert: it returns true, always"
+# RE-POINTED FOR U6b, 2026-09-01: 1 -> 6. U6b adds five triggers in `public`
+# maintaining the denormalised visibility timestamp. Still an exact count, so a
+# seventh fails it.
+is A57c "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and not t.tgisinternal;")" "6" "trigger count: U4's 1 plus U6b's 5"
 is A57d "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and pg_get_functiondef(p.oid) ~* 'delete +from +public\.(posts|post_shares|post_comments|follows|account_directory|connected_attachments|post_comment_views)';")" "0" "no U4 function deletes Domain 3 content"
 is A57e "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and pg_get_functiondef(p.oid) ~* 'storage\.objects';")" "0" "no U4 function touches storage"
 is A57f "$(psq "select count(*) from pg_extension where extname='pg_cron';")" "0" "no scheduler installed"

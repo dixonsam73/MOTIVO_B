@@ -250,3 +250,42 @@ different questions and the durable record answers only the first.
 *from others*; it does not say whether the lapsed member may still read their own
 server-side posts. **Invariant 1 is not in play** — the local journal is
 untouched either way — so this is a product decision, not a safety one.
+
+---
+
+## U6b ADDITIONS — 2026-09-01
+
+`shadow_observe(text)` is **retired**; every reference below replaces it.
+
+### Functions
+
+| Function | Reachable by `authenticated`? | Role |
+|---|---|---|
+| `enforcement_gate(text)` | **yes** — B-33: EXECUTE *is* checked in a policy qual | The viewer-side gate. Decision first and unwrapped (**fail closed**), telemetry second and wrapped. **Takes no uuid, so it cannot be aimed at an identity** |
+| `enforcement_active()` | **yes** | Reads one global boolean. Discloses nothing about any identity, so it is not an oracle. Used by the four subject-side quals and by the gate |
+| `membership_entitled_until(uuid)` | **NO — granted to nobody** | **The one canonical derivation of visibility.** SECURITY DEFINER callers only. Storing a *timestamp* rather than a boolean is what makes lapse happen by time passing, with no scheduler and no worker |
+| `tg_set_entitled_until()` | **NO — revoked** | BEFORE INSERT/UPDATE on the four tables. Overwrites unconditionally, so a client-supplied value is always discarded |
+| `tg_membership_propagate_entitled_until()` | **NO — revoked** | AFTER INSERT/UPDATE/DELETE on `membership`. Propagates to that identity's own rows only |
+
+**Both trigger functions are explicitly revoked.** Trigger functions inherit
+`PUBLIC` EXECUTE by default; Postgres refuses a direct call to one anyway, so this
+is hygiene rather than a hole — but a `SECURITY DEFINER` function that reads
+`membership` should not carry a default grant, and U3 set that standard.
+
+### Subject-side gating — four policies and one RPC
+
+`posts_select_public_or_owner`, `post_shares_select_recipient`,
+`attachments_select_via_visible_post`, `avatars_select_owner_or_approved_follower`
+gate on the **author/subject** via a denormalised `entitled_until` timestamp;
+`search_account_directory` does the same (**D-U6-1**).
+
+**`get_account_directory_by_user_ids` deliberately has NO subject gate** —
+retained-comment attribution must survive lapse *and* cleanup (**G10**), and a
+comment-stripped source assertion enforces it.
+
+### The retention half, which must NOT be gated
+
+`post_comments_select_visible`, `connected_attachments_select_recipient` and
+`connected_attachment_recipient_select` stay subject-open, because ordinary expiry
+cleanup **retains** those rows: comments authored on other members' surviving
+posts, and sent attachments while a live recipient reference remains.

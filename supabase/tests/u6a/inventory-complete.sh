@@ -99,17 +99,17 @@ EN=$(psq "select count(*) from pg_policies where schemaname in ('public','storag
 
 echo
 echo "-- direction 6: the OBSERVED set matches the inventory exactly --"
-OBS=$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) like '%shadow_observe%'")
+OBS=$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) like '%enforcement_gate%'")
 TOT=$(psq "select count(*) from pg_policies where schemaname in ('public','storage')")
 OPEN=$((TOT-OBS))
 [ "$OBS" = "23" ] && echo "  PASS  23 policies observed" || { echo "  FAIL  observed policies = $OBS, inventory says 23"; FAIL=1; }
 [ "$OPEN" = "10" ] && echo "  PASS  10 policies open" || { echo "  FAIL  open policies = $OPEN, inventory says 10"; FAIL=1; }
 # The SECURITY DEFINER half -- policy work does not reach these, so a policy-only
 # count would report two thirds of the surface as the whole.
-FOBS=$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and p.proname<>'shadow_observe' and pg_get_functiondef(p.oid) like '%shadow_observe%'")
+FOBS=$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and p.proname<>'enforcement_gate' and pg_get_functiondef(p.oid) like '%enforcement_gate%'")
 [ "$FOBS" = "9" ] && echo "  PASS  9 client-reachable functions observed" || { echo "  FAIL  observed functions = $FOBS, inventory says 9"; FAIL=1; }
 # Storage policies specifically, since they are a separate schema and easy to miss.
-SOBS=$(psq "select count(*) from pg_policies where schemaname='storage' and (coalesce(qual,'')||coalesce(with_check,'')) like '%shadow_observe%'")
+SOBS=$(psq "select count(*) from pg_policies where schemaname='storage' and (coalesce(qual,'')||coalesce(with_check,'')) like '%enforcement_gate%'")
 [ "$SOBS" = "7" ] && echo "  PASS  7 storage policies observed" || { echo "  FAIL  observed storage policies = $SOBS, inventory says 7"; FAIL=1; }
 # Client-reachable Edge Functions: enumerated in section 3 as OUT of reach.
 EF=$(ls -1 supabase/functions | grep -v '^_shared$' | grep -v '^deno' | wc -l | tr -d ' ')
