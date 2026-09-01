@@ -2139,6 +2139,38 @@ grandfather clause applies to it. **It therefore cannot demonstrate post-cutover
 behaviour on its own.** Stated as a fixture fact, not a design decision — what to
 do about it belongs to U6.
 
+### PHYSICAL DEVICE IDENTITIES AND INSTALLED BUILDS — established 2026-09-01 by `devicectl`
+
+**Recorded because "Device A" and "Device B" were used throughout this project
+without ever naming a physical device or a bundle, and that ambiguity produced a
+false premise in C-55 which survived until it was challenged.**
+
+| Label | Physical device | Installed |
+|---|---|---|
+| **Device A** | **SD beta burner** — iPhone 16e | `com.sdsongs.etudes` (**Release**) **only** |
+| **Device B** | **SD iPhone** — iPhone 17 Pro | `com.sdsongs.etudes` (Release) **and** `com.samueldixon.motivo.dev` (**"Études Dev"**, Debug) |
+
+**DEVICE B HAS TWO INSTALLS AND ANY QA STEP MUST NAME WHICH.** They are different
+bundle identifiers with different containers and different local data. "Device B"
+alone is not a specification — that is exactly what went wrong.
+
+**Both configurations share ONE backend.** A single `Info.plist` carries a single
+`SUPABASE_URL` pointing at the production project, so **every server-side
+observation is valid regardless of which install produced it** — the server gates
+on identity, never on bundle id.
+
+**WHICH TO USE:** anything involving StoreKit, purchases or entitlement-driven
+mode **must be Release**, because Debug's bundle id is unknown to App Store
+Connect and `Product.products(for:)` returns empty. Pure server-behaviour checks
+work from either, but the unit must still name one.
+
+**A GAP WORTH KNOWING BEFORE IT BITES AGAIN: THE BUILD NUMBER CANNOT IDENTIFY A
+BUILD.** Both configurations are hard-coded `MARKETING_VERSION 1.0` and
+`CURRENT_PROJECT_VERSION 131` and neither is incremented, so **every install from
+this project reports `1.0 (131)` whatever commit it came from**. `devicectl`
+exposes no install date or hash and the app displays no version at all. **There is
+currently no way to tell which source a Release install was built from.**
+
 ### Device B — unchanged
 
 Untouched by Phase 2 and by all of Phase 3. Still the established / lapsed
