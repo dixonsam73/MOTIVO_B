@@ -179,3 +179,64 @@ a substitute for the gate.
 
 **C-55 is open and unrelated to enforcement**; it does not block P6, but Device A
 cannot serve as a QA fixture while it is unobservable.
+
+## CONTEMPORANEOUS EXTERNAL EVIDENCE — Supabase incident, 401 JWT rejections
+
+**Reported by the account holder from Supabase's own status page during the same
+window.** Recorded because it materially strengthens the contamination finding
+above, and because "an incident was in progress" is a much weaker statement than
+what the incident actually was.
+
+| | |
+|---|---|
+| Nature | **HTTP 401 errors due to JWT rejections** |
+| Course | Persisted with **PostgREST 14.17**; rolled back to **14.5** owing to unintended performance side effects, investigation continuing |
+| Earlier updates | **Intermittent** 401s; waiting or refreshing can succeed |
+| Vendor note | Some customers resolved persistent symptoms by restarting the project |
+
+### WHY THIS FITS, AND WHY IT IS NOT PROOF
+
+**A 401 is an AUTHENTICATION failure, not an authorisation one.** That distinction
+is the whole reason this is explanatory: U6b's gate denies *authorisation* — an
+RLS denial returns **zero rows**, and a denied RPC returns `false` or `not
+permitted`. **Neither produces a 401, and neither produces a failed request.**
+
+The symptoms observed were the shape of **failure**, not denial:
+
+- feed **empty with its empty-state message ABSENT** — a returned-zero-rows result
+  would have rendered the empty state;
+- author attribution falling back to `User` — the directory lookup failed rather
+  than returning a row.
+
+**And it explains the asymmetry that was otherwise puzzling.** Direct Postgres
+access stayed healthy throughout because `supabase db query` reaches the database
+through the Management API and **never presents the app's JWT**; the app reaches
+it through PostgREST, which is exactly where the rejections were occurring. **A
+healthy database was never evidence of a healthy API layer**, and that was stated
+before this report arrived rather than after.
+
+**STATED AS SUPPORT, NOT AS PROOF.** No request-level capture from either device
+was taken during the window, so no observed 401 is on record here — the link is
+between a vendor-reported fault and symptoms of the matching shape, at the
+matching time, on the matching layer. **That is strong corroboration and it is not
+a measurement.** D-1 to D-10 remain **unscored**, and the deny path remains
+**unverified in production**; better external evidence for *why* the window was
+contaminated does not convert a contaminated window into a result.
+
+### One thing left explicitly open rather than folded in
+
+**Device A's Connected → Solo transition during the window is NOT explained here,
+and no mechanism is claimed.** Intermittent 401s are a *plausible* contributor —
+`AuthManager` has a `network-auth-challenge` path — but **nothing establishes that
+it fired**, and it is not recorded as though it had. It is separate again from
+C-55, which is a purely local navigation path that **no API-layer fault can
+explain**.
+
+### Standing instructions while the incident is unresolved
+
+- **Do NOT restart the Supabase project**, notwithstanding the vendor's note that
+  it has resolved symptoms for others. Restarting would destroy the conditions
+  under which these observations were taken.
+- **Do NOT restart P6.** `enforcement_enabled` stays **FALSE**.
+- **Do NOT reinstall, erase or reset Device A.** Its local state is C-55's only
+  evidence.
