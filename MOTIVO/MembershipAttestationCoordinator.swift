@@ -124,6 +124,15 @@ final class MembershipAttestationCoordinator: ObservableObject {
     /// Used after account deletion and sign-out, where the next attestation
     /// concerns a different identity and must not be throttled by this one's.
     func reset() {
+        // C-55: publish ONLY when there is something to clear. `@Published`
+        // has no equality check, so `lastOutcome = nil` over an already-nil
+        // value still sends `objectWillChange` on a root `@StateObject` —
+        // which invalidated the root body, re-delivered the publisher feeding
+        // the `.onReceive` that calls this, and re-entered on the next frame.
+        // The guard changes nothing about a real reset: whenever any value is
+        // non-default the full clear runs exactly as before.
+        if inFlight == nil, lastAttemptAt == nil, lastOutcome == nil, !isAttesting { return }
+
         inFlight?.cancel()
         inFlight = nil
         lastAttemptAt = nil

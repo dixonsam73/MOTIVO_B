@@ -102,6 +102,15 @@ public enum BackendKeys {
 
 @inline(__always)
 public func setBackendMode(_ mode: BackendMode) {
+    // C-55: write ONLY on an actual change. A UserDefaults write posts a
+    // change notification even when the stored value is identical, and this
+    // function is reached from `applyActivation`, which runs inside a root
+    // `.onReceive` — so the redundant write invalidated the root body, which
+    // re-delivered the publisher, which called this again on the next frame.
+    // Measured on Device A as a per-frame loop off CA::Transaction::commit.
+    // The guard removes the no-op write and nothing else: a genuine mode
+    // change writes exactly as before.
+    if UserDefaults.standard.string(forKey: BackendKeys.modeKey) == mode.rawValue { return }
     UserDefaults.standard.set(mode.rawValue, forKey: BackendKeys.modeKey)
 }
 

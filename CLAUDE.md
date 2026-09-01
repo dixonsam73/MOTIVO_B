@@ -1053,8 +1053,8 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **26** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision); **U6b's interrupted deny-path QA filed C-55** (OPEN, mechanism unknown, unrelated to enforcement) |
-| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **C-55** (Device A Solo journal navigation, mechanism UNKNOWN, not caused by U6b) and **B-34, filed 2026-09-01 from the U6a production shadow window** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **26** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision); **U6b's interrupted deny-path QA filed C-55** (**RESOLVED 2026-09-01** — a runaway SwiftUI re-render loop, not a navigation defect; unrelated to enforcement, as recorded). **Its Phase cell reads `4`, so it never entered this literal-`3` count — yet it was listed among the open Phase 3 obligations. That inconsistency predates this unit and is recorded rather than silently corrected, because the two counts are deliberately different questions and quietly aligning them would destroy exactly the distinction the table exists to preserve** |
+| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window**. **C-55 WAS THE FIFTH AND IS RESOLVED 2026-09-01** — the mechanism was a runaway SwiftUI re-render loop, **not** a navigation defect; two no-op guards removed it, no navigation code changed, and the fix was accepted on Device A against a scoring rule fixed before the run. **C-56 was filed by that investigation and is Phase 5, so it does NOT enter this count** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
@@ -1095,6 +1095,24 @@ its server half compiles"* — with both branches now discharged against genuine
 Apple: `legacy_claim` by S-1/S-2/S-3 and **bound-at-source by B-24n**. **B-32 was
 filed and resolved inside U5g**, on real Apple evidence. **B-31 was resolved by
 U5d** and **C-54 by the correction that followed U5e**.
+
+**C-55 IS RESOLVED — 2026-09-01 — AND IT WAS NOT WHAT IT LOOKED LIKE.** The
+symptom was "tapping a journal row does not open `SessionDetailView`"; the cause
+was a **runaway SwiftUI re-render loop saturating the main thread**, which
+starved the tap gesture. An `.onReceive` on the root scene body mutated state
+that invalidated that same body, `@Published` re-delivered on every
+re-subscription, and the handler re-entered each frame off
+`CA::Transaction::commit`. **Measured on Device A's live process by read-only
+`xctrace --attach`, not inferred.** The fix is **two guards, 18 added lines**,
+each making an already-intended no-op actually be one — `setBackendMode` writes
+only on a real change, `MembershipAttestationCoordinator.reset()` publishes only
+when there is something to clear. **NO NAVIGATION CODE WAS CHANGED.** Device A
+went from 4,418 backtraces in 12s to **zero samples** and the row now opens.
+**Why Device B never exhibited it is UNKNOWN and does not block closure** — Device
+A's arm predates any plausible Device B build, so "B is older" does not explain
+it. **The leading hypothesis — two stacked `navigationDestination(isPresented:)`
+modifiers — was FALSIFIED BY EXPERIMENT**, and the register already contained the
+real mechanism, written down on 2026-08-11 as an observation about C-38.
 
 **THREE OF THE FOUR ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
 **B-34 is the fourth and is a different shape — it is a defect in what the U6a
