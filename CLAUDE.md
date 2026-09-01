@@ -71,13 +71,22 @@ happened, which stays true, and it makes the bind statement **refuse to run a
 second time**. A re-bind is a conscious act, never a repeat.
 
 **THE BEHAVIOURAL DENY-PATH QA IS INCOMPLETE AND MUST NOT BE READ AS PASSED.** A
-Supabase service incident was in progress during the QA window, and the device
-symptoms seen under it — an empty feed with its empty-state message *absent*,
-attribution rendering as `User` — are the shape of **failed** requests, not denied
-ones. Only **two** surfaces were ever exercised under enforcement, both denying
+Supabase service incident — **HTTP 401 JWT rejections at PostgREST**, persisting on
+14.17 and rolled back to 14.5 — was in progress during the QA window, and the
+device symptoms seen under it — an empty feed with its empty-state message
+*absent*, attribution rendering as `User` — are the shape of **failed** requests,
+not denied ones. Only **two** surfaces were ever exercised under enforcement, both denying
 gracefully; **`posts.select` never fired**, so publish, comment, own-attachment,
 own-profile and account-deletion-reachable were never tested at all. **The deny
-path is NOT verified in production.** The record is
+path is NOT verified in production.**
+
+**A 401 IS AN AUTHENTICATION FAILURE AND AN RLS DENIAL IS NOT**, which is why the
+vendor fault explains those symptoms and the gate does not: a denial returns zero
+rows and would have rendered the empty state. It also explains why direct Postgres
+access stayed healthy throughout — that path reaches the database through the
+Management API and **never presents the app's JWT**, while the app goes through
+PostgREST, which is exactly where the rejections were. **Corroboration, not
+measurement: no request-level 401 was captured from either device.** The record is
 `supabase/sql/README-u6b-p6-binding.md`.
 
 **Nothing in U6b touches the client.** Zero client code shipped, and the grant path
