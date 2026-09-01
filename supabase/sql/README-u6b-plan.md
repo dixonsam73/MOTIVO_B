@@ -4,6 +4,15 @@
 no function, no flag, no production mutation. This is the plan and its committed
 predictions-to-be.
 
+**FIVE DECISIONS TAKEN 2026-09-01 ARE FOLDED IN BELOW.** (1) **Fail CLOSED** on
+an error in the entitlement path; no fail-open fallback. (2) **D-U6-1 is IN
+SCOPE** — lapsed members become undiscoverable in `search_account_directory`,
+while `get_account_directory_by_user_ids` keeps resolving retained authors.
+(3) **`shadow_enforcement_stat` keeps its name**, with the transition documented.
+(4) **The Device A reinstall is WITHDRAWN — it was never necessary. See §5.1.**
+(5) **Production deny-path tests run BEFORE the grandfather cleanup**, which
+becomes a separate no-op-against-verified-state unit.
+
 **Gate 6 is settled and this plan assumes its answer:** no production Sandbox
 grant mechanism, no entitlement override, no allowlist, no Sandbox exception. The
 `qa_fixture` row is **rejected**. See `README-gate6-enforcement-qa.md`.
@@ -19,11 +28,29 @@ public.enforcement_gate(p_surface text) returns boolean
   volatile security definer, granted to `authenticated` only
 ```
 
-1. **Record telemetry** — the existing body, write wrapped in
-   `exception when others then null`. Telemetry that can fail a request is not
-   telemetry, and that reasoning is unchanged.
-2. **If enforcement is globally disabled, return `true`.**
-3. **Otherwise return `connected_member_self()`.**
+**ORDER MATTERS AND IT IS INVERTED FROM `shadow_observe`.** The decision is taken
+**first and unwrapped**; telemetry is written **second and wrapped**.
+
+1. **Decide, NOT wrapped.** Read `enforcement_active()`; if disabled return
+   `true`, else return `connected_member_self()`. **An error here propagates and
+   the request fails — FAIL CLOSED, decided 2026-09-01.** There is no fail-open
+   entitlement fallback anywhere.
+2. **Record, wrapped** in `exception when others then null`, using the
+   already-computed decision. Telemetry that can fail a request is not telemetry —
+   and now that the decision precedes it, **a failed write cannot change an
+   outcome**, which the old ordering could not guarantee.
+
+**The null-uid early return is DELETED from the decision path.** It is kept only
+as "skip the telemetry write, there is nothing to attribute". An unauthenticated
+caller now flows into `connected_member_self()` → `connected_member(null)` →
+**false**, asserted by U3's A10. **Fail-closed by construction rather than by a
+special case.**
+
+**Fail-closed is a deliberate trade and the reasoning is recorded so it can be
+re-argued on evidence rather than taste:** a wrongly-denied paying member
+complains within minutes and the kill switch is one row; a wrongly-granted
+non-member is silent, indefinite, and undetectable by users. **A silent grant on
+error is exactly how B-11 came to exist.**
 
 **The rename is not cosmetic and the cost is accepted.** A function called
 `shadow_observe` that denies requests is precisely the C-25 defect — a name that
@@ -154,19 +181,84 @@ observation, and the absence of telemetry proves nothing.**
 **Both halves are needed.** Local proves the predicate; production proves the
 deployed storage-api path still routes through it.
 
+## 4b. D-U6-1 — LAPSED MEMBERS BECOME UNDISCOVERABLE (decision 2, in scope)
+
+**The two directory RPCs diverge, and the divergence is the entire point.**
+
+| RPC | Gates on the VIEWER | Gates on the SUBJECT |
+|---|---|---|
+| `search_account_directory` | **yes** — `enforcement_gate` | **YES, new** — rows filtered to `connected_member(ad.user_id)` |
+| `get_account_directory_by_user_ids` | **yes** — `enforcement_gate` | **NEVER** |
+
+```sql
+-- search only:
+and (not public.enforcement_active() or public.connected_member(ad.user_id))
+```
+
+**The subject filter respects the kill switch too**, or flipping enforcement off
+would not fully restore prior behaviour — a rollback that only half-rolls-back is
+not a rollback.
+
+**Calling `connected_member(uuid)` here creates no oracle.**
+`search_account_directory` is `SECURITY DEFINER`, so the call runs as the owner
+and needs no grant; `connected_member(uuid)` stays ungranted to every client role
+(K4). The caller sees search results, never an arbitrary uuid probe. **The residual
+disclosure — "search a name, and absence implies unentitled" — IS the product
+behaviour being asked for**, bounded to names the searcher already knows and 20
+rows, and it is disclosure by design rather than leakage.
+
+**G10 IS PROTECTED BY A SOURCE-TEXT ASSERTION, AND IT MUST STRIP COMMENTS.**
+Acceptance asserts `get_account_directory_by_user_ids`'s body contains **zero**
+occurrences of `connected_member`. Gating it on the subject would break
+attribution for every retained comment on every surviving post. **Comments are
+stripped before matching** — U5c-34 and three U5d assertions were each defeated by
+a well-commented file explaining the very rule being checked.
+
+**Scale caveat, recorded rather than discovered later:** the subject filter is a
+`STABLE` per-row function call evaluated before `limit 20`. Trivial at 17
+identities; it is a filtered-set cost that will want an index or a materialised
+entitlement column long before it is a real corpus.
+
 ## 5. THE G10 COLD-CACHE DIRECTORY TEST — DESIGNED, NOT INCIDENTAL
 
 `get_account_directory_by_user_ids` is **cache-gated** at
 `AccountDirectoryService.swift:258`, so ordinary use never reaches it. It must be
 forced.
 
+### 5.1 THE REINSTALL IS WITHDRAWN — IT WAS NEVER NECESSARY
+
+**Corrected 2026-09-01, and only because the reinstall's cost was challenged
+before it was authorised.** I proposed a Device A reinstall to force a cold
+directory cache. **I had not read the cache.** It is
+`private actor DirectoryAccountCache` holding a plain in-memory dictionary, and
+the source says so in its own comment:
+
+> *batch directory lookup cache (viewer-local, in-memory only). Note: This cache
+> is intentionally ephemeral (clears on cold start).*
+
+**A force-quit and relaunch clears it completely. Nothing is lost, because
+nothing needed clearing beyond process memory.**
+
+**What a reinstall WOULD have destroyed, stated because it was nearly spent for
+nothing:** the entire app container — local journal, sessions, Scores and their
+index, media, attachments, `AttachmentPrivacy.json`, `CommentsStore.json`, the
+received-attachment cache and all settings. **CLAUDE.md records Device A's local
+journal as "not surveyed — do not assume empty or populated"**, so the cost was
+not merely large, it was *unknown*, which is worse. The Keychain items
+(`supabaseAccessToken_v1`, `appleUserID`) survive app deletion on iOS while the
+UserDefaults identity keys do not, so a reinstall would also have left a split
+auth state nobody had designed for.
+
+**The lesson is the cheap one: I proposed a destructive step from an assumption
+about code I had not opened, and the question "state exactly what is lost"
+is what caught it.**
+
 | Half | Where | Assertion |
 |---|---|---|
-| **Unentitled viewer refused** | **Production**, Device A, **cold cache via reinstall** | the RPC refuses |
+| **Unentitled viewer refused** | **Production**, Device A, **cold cache via force-quit + relaunch** | the RPC refuses |
 | **Entitled viewer still resolves a LAPSED subject** | **Local**, Production fixtures | attribution survives — **gating on the subject would break every retained comment** |
 
-**Reinstall, do not erase.** `Erase All` on Device B is forbidden by the rig
-rules; a reinstall clears the client cache without a destructive backend path.
+**Never run `Erase All` on Device B**, and no reinstall is required on either.
 
 ## 6. THE LOCAL GRANT-PATH MATRIX — Production fixtures, real policies
 
@@ -216,8 +308,21 @@ working.
 the whole shadow-window evidence base becomes uninterpretable.
 
 **So `shadow_enforcement_stat` gains `enforced boolean not null default false`,
-written from the control flag at decision time.** The 56 observations already
-collected stay readable as what they are, forever.
+written from the control flag at decision time — AND IT GOES INTO THE PRIMARY
+KEY.** The 56 observations already collected stay readable as what they are,
+forever.
+
+**`enforced` is in the key for the reason GF-5 proved:** `decided_clause` being in
+the key is what preserved 11 `grandfathered` rows intact beside the new `unknown`
+ones, so the before and after of that experiment sit in one table. The same
+property is wanted here — **an hour that straddles the binding flip must produce
+two rows, not one mutated row**, or the moment enforcement began becomes
+unreconstructable.
+
+**The table keeps its name, deliberately (decision 3).** Renaming would break
+continuity with every committed reference to the shadow evidence. The name is
+historical from the moment `enforced` is true, and it is documented as such here
+rather than fixed by a rename that would cost more than it buys.
 
 The bounded-aggregate shape is unchanged — one row per identity × surface × clause
 × hour — so volume stays bounded under real traffic, which is what B-29 was filed
@@ -249,3 +354,107 @@ documents refer to throughout, they are inert once the mechanism is gone, and
 This is the only evidence that closes the grant path in production, it is
 unobtainable before release, and **it must not be quietly marked satisfied by the
 local matrix.**
+
+---
+
+# 11. IMPLEMENTATION AND DEPLOYMENT SEQUENCE — four units, and only one denies
+
+**Nothing below has been built. Each unit's numbers are MEASURED and COMMITTED as
+predictions before it deploys** — no figure in this section is estimated.
+
+| Unit | What | Denies anything? |
+|---|---|---|
+| **U6b-1** | The migration. Gate, flag, telemetry column, 23 policies, 9 RPCs, D-U6-1 | **NO — ships with `enforcement_enabled = false`** |
+| **U6b-2** | The binding flip. One row | **YES** |
+| **U6b-3** | Device QA, production + local | — |
+| **U6b-4** | Grandfather cleanup | **NO — no-op against verified state** |
+
+### U6b-1 contents
+
+```
+add   membership_control.enforcement_enabled   boolean not null default false
+add   shadow_enforcement_stat.enforced         boolean not null default false  (INTO THE PK)
+new   public.enforcement_active()              -- zero-arg, internal, no client grant
+new   public.enforcement_gate(text)            -- granted to `authenticated` only
+alter 23 policies    shadow_observe -> enforcement_gate, every reference `(select …)`
+alter 9  RPCs        perform -> `if not … then raise exception 'not permitted'`
+alter search_account_directory  + the D-U6-1 subject filter
+drop  public.shadow_observe(text)
+```
+
+### Prediction-first gates, in order
+
+| # | Step | Gate |
+|---|---|---|
+| **P0** | Build U6b-1 locally, `db reset`, run every suite | **All green.** U3 97 · U4 73/98/43 · U5 68/53/57/62 · U6a's successor. Any red stops the unit |
+| **P1** | Capture the local post-U6b-1 structural delta against live production | **Committed as a prediction before deploy**, like U6a's 10-of-10 |
+| **P2** | Re-generate the rollback baseline **from production**, verify it as a no-op | Not the local file. B-23 fidelity is measured, never assumed |
+| **P3** | Apply U6b-1 — **one submission, guard inside, ending in a SELECT that returns a row** | Guard asserts 23 policies carry `enforcement_gate`, **zero bare calls**, `shadow_observe` gone, `enforcement_enabled` **false** |
+| **P4** | `capture-schema.sh` + `verify-baseline.sh` | **GATE MET**, only `account_id_format` |
+| **P5** | **Prove U6b-1 is inert**: exercise Device A and Device B | **Nothing changes.** This is the whole point of shipping the flag off |
+| **P6** | Commit predictions for the flip | Before P7, never after |
+| **P7** | **U6b-2 — the flip.** One row, guarded, returns a row | Guard asserts `u6b_bound_at` is set in the same transaction |
+| **P8** | **U6b-3 device QA** — §11.1 order | Any unpredicted refusal → rollback |
+| **P9** | Score, commit, refresh the snapshot | |
+| **P10** | **U6b-4 cleanup**, separately, after P8 is accepted | |
+
+## 11.1 DEVICE QA ORDER — deny path first, own-material carve-outs last
+
+**Device A before Device B**, because Device A is the spent-fixture and Device B
+is the control that must survive.
+
+1. **Device A — force-quit and relaunch.** Cold directory cache. Expect the feed
+   **empty, not erroring**, and `rpc.get_account_directory_by_user_ids`
+   **refused** (G10 viewer half).
+2. **Device A — open a known post directly.** Expect **not found**.
+3. **Device A — attempt to publish a session with an attachment.** Expect the
+   post **refused**, and — **the B-34 direct test** — the storage upload refused
+   with `new row violates row-level security policy`. **The telemetry will show
+   nothing for the storage surface, and that proves nothing either way.**
+4. **Device A — attempt a comment.** Expect `not permitted`.
+5. **Device A — THE CARVE-OUTS, which must all still WORK:** read own retained
+   material (D-U6-4), edit own profile (D-U6-3), and confirm the account-deletion
+   route is reachable (D-U6-2, C-35) — **reachable, do NOT run it.**
+6. **Device B — repeat 1-5.** **Never `Erase All`, never delete the account.**
+7. **Telemetry check:** new rows carry `enforced = true` and sit *beside* the
+   historical `enforced = false` rows, not merged into them.
+
+## 12. ROLLBACK — one row, and what triggers it
+
+```sql
+update public.membership_control set enforcement_enabled = false where id;
+```
+
+Read live inside the gate on every call: no partially-applied window, no cache.
+
+**Roll back on:** any identity that should be entitled being denied; **any
+carve-out failing** — own material, own profile, or account deletion; an error
+where an empty result was predicted; any refusal the matrix did not predict;
+attribution breaking for retained comments.
+
+**Not a trigger:** unentitled fixtures being denied. That is the unit working.
+
+## 13. A SCOPE GAP I AM NOT SILENTLY CLOSING
+
+**"Undiscoverable" is not "invisible", and the product rule asks for the second.**
+
+D-U6-1 removes a lapsed member from `search_account_directory`. But every gate in
+this plan is **viewer-side**: `posts_select_public_or_owner` checks whether *the
+reader* is entitled, never whether the *author* is. **So after U6b a lapsed
+member's posts remain visible to entitled readers**, while CLAUDE.md's quarantine
+rule says *"the Connected presence becomes invisible to other members
+immediately."*
+
+**That is a genuine gap between this plan and the settled product rule.** It is
+not in the decisions taken, so I have not folded it in — but it must not be
+discovered after binding. **It needs a decision: extend U6b to author-side
+gating on `posts`/`post_shares`, or record it as a named follow-on unit.**
+
+## 14. RELEASE GATE — unchanged and undischargeable
+
+> **Before a second paying subscriber exists**, the first genuine App Store
+> subscription is verified end to end in production: `environment = 'Production'`,
+> `binding_method = 'purchase'`, `connected_member()` true, full Connected surface
+> served on a real device.
+
+**Nothing in §11 or §6 can mark this satisfied.**
