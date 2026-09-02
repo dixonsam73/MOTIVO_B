@@ -273,3 +273,88 @@ once the rollback is no longer wanted.
 | C-59 open, non-blocking | It concerns the enforcement **write-deny** path; U6b-4 binds nothing |
 | No cohort preservation work | The 16 rows are dropped. The rollback reconstructs them from a retained column — that is rollback fidelity, not preservation |
 | Retained `cutover_*` columns | **An intentional refinement from the approved wording, agreed 2026-09-02 after being challenged** — see the section above. Inert historical/rollback metadata with no live semantics |
+
+---
+
+# APPLIED TO PRODUCTION AND VERIFIED — 2026-09-02
+
+**U6b-4 IS LIVE. THE GRANDFATHER MECHANISM IS RETIRED AND THE RETIREMENT IS
+IRREVERSIBLE BY FLAG.** Applied under explicit P3 authorisation against
+`d2bf398`, verified at local = remote = that commit, 0/0, clean tree.
+
+**EVERY PREDICTED NUMBER MATCHED PRODUCTION AND NOTHING WAS REPAIRED FORWARD.**
+
+## The statement's own returned row
+
+```
+cutover_table_rows 0 | control_columns 8 | cutover_at_retained 2026-08-17 19:08:27.125223+00
+cutover_count_retained 16 | u6b_bound_at_preserved 2026-09-01 16:52:52.452956+00
+enforcement_enabled f | policies 33 | membership_rows 1
+historical_grandfathered_rows 11
+status: U6b-4 APPLIED -- grandfather mechanism RETIRED, enforcement still OFF
+```
+
+**THAT ROW IS THE STATEMENT REPORTING ON ITSELF AND IS NOT THE VERIFICATION.**
+Everything below was measured independently afterwards — the standing rule that
+any procedure whose success is reported by the thing being asked to act is
+unverified.
+
+## Independent verification
+
+| | |
+|---|---|
+| `membership_cutover` | **gone** |
+| `membership_control` columns | **8** — both grandfather controls absent |
+| Functions referencing any retired object | **0** |
+| `enforcement_enabled` / `enforcement_active()` | **false / false** — the flag and the gate agree |
+| `u6b_bound_at` | **preserved** |
+| `auth.users` / `posts` / conflicts | **17 / 101 / 0** — unmoved |
+
+## THE BEHAVIOURAL DELTA IS ZERO, AND IT IS MEASURED
+
+Post-apply census: **1 identity `sandbox_only`/false, 16 `unknown`/false.**
+**Identical to the pre-apply baseline**, which is what Guard B1 asserted inside
+the transaction and what the whole safety argument rested on. The arm removed was
+already inert, and this is the evidence rather than the claim.
+
+## Structural delta — 10 of 10 predicted surfaces matched
+
+| Surface | Predicted | Measured | |
+|---|---|---|---|
+| functions | 28 | **28** | 2 modified |
+| policies | 33 | **33** | untouched |
+| columns | 132 | **132** | −4 |
+| constraints | 65 | **65** | −2 |
+| rls_enabled | 14 | **14** | −1 |
+| triggers | 10 | **10** | untouched |
+| function_grants | 84 | **84** | **0** |
+| table_grants | 102 | **102** | **0** |
+| column_grants | 554 | **554** | **0** |
+| storage_buckets | 2 | **2** | untouched |
+
+**The snapshot diff is DELETIONS ONLY apart from the two replaced function
+bodies**, and every touched object is one of U6b-4's: `membership_cutover` (table,
+2 columns, pkey, FK, RLS), `membership_control.grandfather_enabled` and
+`grandfather_expires_at`, and exactly `connected_member` and `membership_state`.
+**Nothing else moved.**
+
+## The two preservation constraints held
+
+**Zero** grandfather or cutover references survive in any of the 28 production
+function definitions. And `shadow_stat_clause_check` **still accepts
+`'grandfathered'`** — verified in the recaptured snapshot, with **11 historical
+telemetry rows** carrying that value still present and still valid. The before
+and after of the retirement remain in the same table as evidence.
+
+## What is NOT changed by this
+
+**Enforcement is still OFF and nothing denies anything.** `u6b_bound_at` remains
+set, so the bind statement still refuses to run a second time. No client code
+shipped. No worker exists and no cleanup runs — that is still U7. **C-59 is still
+open** and must close before the next enforcement bind.
+
+**Restoring grandfathering is no longer a boolean.** It is
+`2026-09-02-u6b4-rollback-production.sql`, which rebuilds the table, the two
+columns and both function bodies, and reconstructs the 16 rows from `auth.users`
+via the retained `cutover_at`. That path was proven by B-23 returning GATE MET on
+a rolled-back instance before any of this ran.

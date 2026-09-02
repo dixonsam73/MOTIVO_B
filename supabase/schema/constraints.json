@@ -228,18 +228,6 @@
     "table_name": "membership_control"
   },
   {
-    "conname": "membership_cutover_pkey",
-    "contype": "p",
-    "definition": "PRIMARY KEY (user_id)",
-    "table_name": "membership_cutover"
-  },
-  {
-    "conname": "membership_cutover_user_fk",
-    "contype": "f",
-    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
-    "table_name": "membership_cutover"
-  },
-  {
     "conname": "membership_notification_accepted_is_complete",
     "contype": "c",
     "definition": "CHECK (((outcome = 'rejected'::text) OR ((notification_uuid IS NOT NULL) AND (signed_date IS NOT NULL) AND ((environment IS NOT NULL) OR (outcome = 'ignored'::text)))))",

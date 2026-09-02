@@ -37,11 +37,6 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
-    "table_name": "membership_cutover"
-  },
-  {
-    "rls_enabled": true,
-    "rls_forced": false,
     "table_name": "membership_notification"
   },
   {

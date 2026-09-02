@@ -5,7 +5,7 @@
     "security_definer": true
   },
   {
-    "definition": "CREATE OR REPLACE FUNCTION public.connected_member(target_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select coalesce(\n    (select bool_or(\n         m.environment = 'Production'\n         and (coalesce(m.renewal_date > now(), false)\n              or coalesce(m.is_in_billing_retry\n                          and m.grace_period_expires_date > now(), false))\n       )\n       from public.membership m\n      where m.user_id = target_user_id),      -- NO environment filter here\n\n    (select exists (\n       select 1\n         from public.membership_cutover c\n         cross join public.membership_control k\n        where c.user_id = target_user_id\n          and k.grandfather_enabled\n          and (k.grandfather_expires_at is null\n               or now() < k.grandfather_expires_at))),\n\n    false\n  );\n$function$\n",
+    "definition": "CREATE OR REPLACE FUNCTION public.connected_member(target_user_id uuid)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select coalesce(\n    (select bool_or(\n         m.environment = 'Production'\n         and (coalesce(m.renewal_date > now(), false)\n              or coalesce(m.is_in_billing_retry\n                          and m.grace_period_expires_date > now(), false))\n       )\n       from public.membership m\n      where m.user_id = target_user_id),      -- NO environment filter here\n\n    false\n  );\n$function$\n",
     "proname": "connected_member",
     "security_definer": true
   },
@@ -105,7 +105,7 @@
     "security_definer": true
   },
   {
-    "definition": "CREATE OR REPLACE FUNCTION public.membership_state(target_user_id uuid)\n RETURNS text\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select case\n    when exists (select 1 from public.membership m\n                  where m.user_id = target_user_id\n                    and m.environment = 'Production')\n      then case when public.connected_member(target_user_id)\n                then 'entitled' else 'expired' end\n    when exists (select 1 from public.membership m\n                  where m.user_id = target_user_id)\n      then 'sandbox_only'\n    when public.connected_member(target_user_id) then 'grandfathered'\n    else 'unknown'\n  end;\n$function$\n",
+    "definition": "CREATE OR REPLACE FUNCTION public.membership_state(target_user_id uuid)\n RETURNS text\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO ''\nAS $function$\n  select case\n    when exists (select 1 from public.membership m\n                  where m.user_id = target_user_id\n                    and m.environment = 'Production')\n      then case when public.connected_member(target_user_id)\n                then 'entitled' else 'expired' end\n    when exists (select 1 from public.membership m\n                  where m.user_id = target_user_id)\n      then 'sandbox_only'\n    else 'unknown'\n  end;\n$function$\n",
     "proname": "membership_state",
     "security_definer": true
   },
