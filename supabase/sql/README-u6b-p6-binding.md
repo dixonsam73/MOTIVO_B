@@ -268,3 +268,54 @@ Three items, and no broader retest.
 
 **Everything else in P6 is unchanged. Production enforcement stays FALSE and P6
 remains stopped until the Supabase incident is healthy.**
+
+
+---
+
+## FEED QUERY-SHAPE DISCRIMINATION — LOCAL, REAL HTTP, 2026-09-02
+
+**Question:** `posts.select` telemetry was absent in production on two occasions
+where a feed demonstrably rendered other members' posts. Does the gate actually
+evaluate and decide on the shape the client really sends, or was the feed simply
+never gated?
+
+**Method.** The actual client query — `GET /rest/v1/posts?select=*&order=created_at.desc`,
+**no filter, RLS-only** (`BackendShim.swift`, the `"all"` scope) — issued against
+the local stack over real HTTP with a real JWT. Unentitled viewer, and an
+**entitled** author so the subject check passes and **only the viewer gate is
+under test**.
+
+| | total | own | **other's** |
+|---|---|---|---|
+| enforcement **OFF** | 6 | 2 | **4** |
+| enforcement **ON** | 2 | 2 | **0** |
+
+**RESULT: the viewer gate is genuinely evaluated and decides correctly on the
+production client query shape.** With enforcement on, the unentitled viewer
+received **none** of the author's posts. The author's `owner_entitled_until` was
+in the future for all four, so the subject check passed and **the denial can only
+have come from the viewer gate**.
+
+**The own-post carve-out remained intact** — 2 own posts returned under both the
+`all` and `mine` shapes with enforcement on.
+
+**`posts.select` telemetry was absent in BOTH runs**, including the OFF run where
+the viewer legitimately received the author's posts. So **telemetry silence on
+this GET/read path is a BLIND SPOT and is not evidence of missing enforcement** —
+the same class as B-34's storage finding.
+
+*(An unverified possible mechanism, recorded as a pointer only and deliberately
+not pursued: PostgREST may run `GET` requests in a read-only transaction, in which
+the observer's `INSERT` cannot commit and is swallowed by its fail-open handler.
+**This is not established** and nothing here depends on it.)*
+
+### CONSEQUENCE FOR P6 SCORING — binding change
+
+**GET/read-path denials are judged by ACCESS BEHAVIOUR, never by requiring
+telemetry.** A feed or post read that returns zero of another member's rows is a
+pass whether or not any observation is recorded.
+
+**D-10 is amended accordingly:** telemetry gaining `enforced = true` rows remains
+expected for **writes and RPCs**, and is **NOT** a pass condition for reads.
+Absence of a read-path observation must not be scored as a failure, and — equally
+— must not be scored as evidence of safety.
