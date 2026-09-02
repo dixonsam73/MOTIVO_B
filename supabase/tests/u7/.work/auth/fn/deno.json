@@ -1,0 +1,6 @@
+{
+  "imports": {
+    "@peculiar/x509": "npm:@peculiar/x509@1.12.3"
+  },
+  "lock": "./deno.lock"
+}

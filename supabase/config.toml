@@ -79,3 +79,22 @@ verify_jwt = false
 # unauthenticated because Apple sends no Supabase JWT. This one requires a real
 # authenticated Etudes session and refuses without one.
 verify_jwt = false
+
+[functions.membership_cleanup_v1]
+# verify_jwt = false, AND THE FUNCTION'S OWN CHECK IS THEREFORE THE ENTIRE
+# AUTHORISATION BOUNDARY. Same story as appstore_reconcile_v1, byte-identical
+# expression, for the same reason: verify_jwt = true would NOT have secured this.
+# It admits ANY valid user JWT, and every authenticated Apple user can obtain
+# one -- so the platform gate would have let a stranger reach the most
+# destructive endpoint in the system. Instead the body compares the presented
+# credential against SERVICE_ROLE_KEY in constant time and answers 401 otherwise.
+#
+# MEASURED, NOT REVIEWED -- supabase/tests/u7/auth-probe.sh, 11 assertions:
+# no header, the anon key, junk, the key +1 char, the key -1 char, a wrong
+# secret and A GENUINE SIGNED USER JWT all return 401; the correct key returns
+# 200; GET is 405; and with SERVICE_ROLE_KEY absent from the environment the
+# function fails CLOSED (500, no work done) rather than comparing two empties.
+#
+# WITHOUT THIS BLOCK THE CLI DEFAULTS verify_jwt TO TRUE, which would reject the
+# service-role caller at the gateway and make the worker uninvokable.
+verify_jwt = false
