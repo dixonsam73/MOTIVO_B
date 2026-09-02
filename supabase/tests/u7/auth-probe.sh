@@ -13,7 +13,9 @@
 #
 # THE THING BEING DISPROVED is that "an Authorization header is present" is
 # enough. The anon key is a syntactically valid JWT that any client holds, and a
-# real user JWT is obtainable by anyone who can sign in. Both must be REFUSED.
+# real user JWT is obtainable by anyone who can sign in. Both must be REFUSED --
+# which is precisely why platform JWT verification alone is not sufficient
+# authorisation for a destructive endpoint: it would admit AUTH-7.
 set -uo pipefail
 cd "$(dirname "$0")/../../.."
 source supabase/tests/u2/lib.sh
@@ -87,7 +89,7 @@ s=b64(hmac.new(b"super-secret-jwt-token-with-at-least-32-characters-long",
 print(f"{h}.{p}.{s}")
 PY
 )
-is AUTH-7 "$(code "Bearer $UJWT")" "401" "AUTH-7 a REAL signed user JWT -> 401 (what verify_jwt=true would have let in)"
+is AUTH-7 "$(code "Bearer $UJWT")" "401" "AUTH-7 a REAL signed user JWT -> 401 (platform verification alone would admit it)"
 is AUTH-8 "$(code "Bearer $SR")"   "200" "AUTH-8 the service role key -> 200 (the check is not vacuously refusing)"
 is AUTH-9 "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -X GET "http://127.0.0.1:$PORT/" -H "Authorization: Bearer $SR")" "405" "GET is refused regardless"
 

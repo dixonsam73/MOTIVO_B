@@ -30,13 +30,23 @@ if (!presented || !secretEquals(presented, SERVICE_ROLE)) {
 `secretEquals` compares length first, then XOR-accumulates every byte — content
 does not leak through timing; length may.
 
-**Why `verify_jwt = true` would have been WORSE, not safer.** It authenticates
-*any* valid Supabase JWT — including the anon key and every end-user token. Every
-authenticated Apple user can obtain one. It would have put a stranger's token on
-the doorstep of the most destructive endpoint in the system while *looking* like
-platform-grade protection. **`verify_jwt = false` plus an explicit secret check is
-strictly stronger here**, and it is the same authorisation story as
-`appstore_reconcile_v1` — byte-identical expression, deliberately.
+**Why platform JWT verification alone would not have authorised this endpoint.**
+`verify_jwt = true` authenticates *any* valid Supabase JWT, including the anon key
+and every end-user token — and an ordinary authenticated user's valid JWT **must
+still be refused** by a destructive endpoint. Platform verification therefore
+answers *"is this a valid token"*, which is **not** the question this function
+needs answered. **The required caller authorisation is supplied by the explicit
+constant-time comparison against the service-role secret**, and it is the same
+authorisation story as `appstore_reconcile_v1` — byte-identical expression,
+deliberately.
+
+**CORRECTED 2026-09-02. This paragraph previously read "Why `verify_jwt = true`
+would have been WORSE, not safer" and called the explicit check "strictly
+stronger".** That overstated a narrower settled point and invited a general
+conclusion about platform JWT verification that is not being made here. **The
+claim is only that platform verification alone is INSUFFICIENT authorisation for
+this destructive endpoint**, because it would admit a token every authenticated
+Apple user can obtain. Nothing about the authentication path changes.
 
 **MEASURED — `supabase/tests/u7/auth-probe.sh`, 11/11:**
 
@@ -48,7 +58,7 @@ strictly stronger here**, and it is the same authorisation story as
 | service key **+1 char** | **401** |
 | service key **−1 char** | **401** |
 | a wrong secret, no scheme | **401** |
-| **a genuine signed user JWT** — what `verify_jwt=true` would have admitted | **401** |
+| **a genuine signed user JWT** — the token platform verification alone would have admitted | **401** |
 | the correct service role key | **200** — the check is not vacuously refusing |
 | `GET` | **405** |
 | **`SERVICE_ROLE_KEY` absent from the environment** | **fail-CLOSED — 500, no work done** |
