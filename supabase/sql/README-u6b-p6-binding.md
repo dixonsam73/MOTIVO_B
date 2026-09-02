@@ -414,3 +414,33 @@ behaviour and not introduced by U6b.
 The blocking defect is resolved and the safety-critical half passes. **The
 write-denial half and the second identity class remain unexercised**, so P6 is
 **not** scored as a pass.
+
+
+---
+
+## FINAL P6 MATRIX — five actions, both identity classes. NOT YET RUN
+
+| # | Device | Action | Closes |
+|---|---|---|---|
+| 1 | **A** (`sandbox_only`) | attempt to **publish** a session | **D-3** |
+| 2 | **A** | **directory search** for a known member | **D-7** |
+| 3 | **B — Études Dev** (`unknown`) | open feed → **filtered/empty WITH its empty-state message** | **D-1**, second class |
+| 4 | **B** | attempt to open a **previously visible** post | **D-2** |
+| 5 | **B** | **account deletion reachable** — confirm, DO NOT run | **C-35 for `unknown`** |
+
+**Step 5 is kept despite the general instruction not to repeat carve-outs**, because
+C-35 is the only dangerous class and `unknown` decides by a different clause than
+`sandbox_only`. One tap.
+
+### D-4 and D-5 — recorded accurately, and NOT as production-device passes
+
+**D-4 (comment refused) and D-5 (another member's attachment refused) are covered
+by the local enforcement suite** — `U6b-G4` and the structural RPC-gate
+assertions — **and were NOT independently exercised on the production device,
+because D-2 makes the underlying post and its content unreachable through the
+UI.** Once another member's post cannot be opened there is no route to comment on
+it or fetch its attachment.
+
+**They must not be recorded as production-device passes.** The deny path is
+layered, and the outer layer hiding the inner one is the enforcement working — but
+it is not the same thing as having tested the inner one on device.
