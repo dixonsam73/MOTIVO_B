@@ -185,6 +185,29 @@ is C5f-19b "$(code MOTIVO/ConnectedMembershipStore.swift 'entitlementMissingAfte
 is C5f-20 "$(code MOTIVO/ProfileView.swift 'connectedPromoSection')" "2" "Connected remains behind an explicit entry point"
 is C5f-21 "$(code $COORD 'signIn|ASAuthorization')" "0" "attestation can never initiate authentication"
 
+# ==================================================== C-56  403 IS NOT A 401
+#
+# U6b enforcement produced legitimate AUTHORISATION denials; the observed
+# post-bind requests returned 403 and NetworkManager treated them as
+# AUTHENTICATION challenges, refreshed, failed, and fell through to signOut(),
+# which deletes the Keychain tokens -- collapsing a locally entitled client to
+# Solo irreversibly.
+#
+# COMMENTS ARE STRIPPED FIRST AND THAT IS LOAD-BEARING HERE: the fix's own
+# comment explains 403 four times, and a naive source check would read those and
+# pass while the code was wrong. U5c-34's shape, anticipated rather than repeated.
+echo
+echo "-- C-56  an authorisation denial must not be an auth challenge --"
+is C56-1 "$(code MOTIVO/NetworkManager.swift '403')" "0" "ZERO occurrences of 403 in NetworkManager CODE"
+is C56-2 "$(code MOTIVO/NetworkManager.swift 'status == 401')" "1" "the auth challenge triggers on 401, exactly once"
+is C56-3 "$(code MOTIVO/NetworkManager.swift 'onAuthChallenge')" "2" "the challenge hook still exists and is still invoked"
+is C56-4 "$(code MOTIVO/AuthManager.swift 'onAuthChallenge')" "1" "AuthManager still wires the hook"
+is C56-5 "$(code MOTIVO/AuthManager.swift 'network-auth-challenge')" "1" "...to ensureValidSession, unchanged"
+is C56-6 "$(code MOTIVO/FollowStore.swift 'status == 401 \|\| status == 403')" "1" "FollowStore's 401/403 MESSAGE path is untouched -- it never signs out"
+# C56-7 FIRST COMPARED A VALUE TO ITSELF and could never fail -- the exact
+# "a check that cannot fire" defect this repository names. Pinned to a number.
+is C56-7 "$(code MOTIVO/AuthManager.swift 'hasConnectedIdentity')" "1" "hasConnectedIdentity still defined and used (C-35 deletion authority)"
+
 echo
 echo "  $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ] || exit 1

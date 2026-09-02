@@ -72,7 +72,9 @@ public final class NetworkManager {
     // Step 7: user session bearer token (access token from Supabase Auth)
     private var bearerToken: String? = nil
 
-    /// Optional auth challenge handler used to refresh a session after a 401/403.
+    /// Optional auth challenge handler used to refresh a session after a 401.
+    /// NOT invoked for 403 -- see C-56: an authorisation denial is not an
+    /// authentication failure, and refreshing on one destroys a valid session.
     /// If it returns true, the original request will be retried once.
     public var onAuthChallenge: (() async -> Bool)? = nil
 
@@ -275,11 +277,31 @@ public final class NetworkManager {
         // First attempt
         let first = await performOnce()
 
-        // Auth-challenge path: refresh session and retry once on 401/403.
+        // Auth-challenge path: refresh session and retry once on 401 ONLY.
+        //
+        // C-56, 2026-09-02. THIS CONDITION USED TO INCLUDE 403 AND THAT DESTROYED
+        // VALID SESSIONS. 401 is an AUTHENTICATION failure -- the token is bad, so
+        // refreshing is exactly right. 403 is an AUTHORISATION denial -- the token
+        // is fine and the caller is simply not permitted, so a refresh cannot
+        // change the outcome, the retry is guaranteed to fail, and the only effect
+        // is that `ensureValidSession` falls through to `signOut()` and DELETES the
+        // Keychain tokens. `hasConnectedIdentity` then goes false and
+        // ProductionAppModeActivation collapses the client to Solo -- irreversibly,
+        // because the credentials are gone.
+        //
+        // Measured on Device A, 2026-09-02: after U6b enforcement was bound, the
+        // observed post-bind requests produced 403 AUTHORISATION responses (32 of
+        // them, and zero 401s anywhere), and the client treated them as
+        // authentication challenges. The settled architecture says a legitimate
+        // server-side denial must never collapse a locally entitled client into
+        // Solo, and this was the path that did it.
+        //
+        // 403 now propagates through the ordinary denial/error path to the caller,
+        // which is what an authorisation denial is.
         if case .failure(let err) = first,
            let ne = err as? NetworkError,
            case .httpError(let status, _) = ne,
-           (status == 401 || status == 403),
+           status == 401,
            let handler = onAuthChallenge {
 
             let refreshed = await handler()
