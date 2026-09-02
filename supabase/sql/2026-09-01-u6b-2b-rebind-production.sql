@@ -68,18 +68,40 @@ begin
   select count(*) into n from public.membership where environment = 'Production';
   if n <> 0 then raise exception 'ABORT: % Production membership rows exist -- stop and re-plan; this is no longer a deny-path-only run', n; end if;
 
-  -- PRECONDITION 6 — THE SANDBOX QA FIXTURE IS LIVE.
-  -- The first attempt burned its window with no fixture to score against. This
-  -- makes "do not bind without something to test" structural rather than
-  -- remembered. Device A must be sandbox_only AND currently entitled by Apple.
-  select count(*) into n from public.membership m
-   where m.environment = 'Sandbox'
-     and m.renewal_date > now()
-     and public.membership_state(m.user_id) = 'sandbox_only'
-     and public.connected_member(m.user_id) = false;
-  if n <> 1 then
-    raise exception 'ABORT: expected exactly 1 live Sandbox fixture reading sandbox_only/false, found %. Re-establish the genuine Apple Sandbox resubscription before binding.', n;
-  end if;
+  -- PRECONDITION 6 — REMOVED 2026-09-02, AND DELIBERATELY NOT REPLACED.
+  --
+  -- It required exactly ONE LIVE Sandbox fixture, and its own comment said why:
+  -- "do not bind without something to test", made structural after the first
+  -- attempt burned its window with nothing to score. **THAT WAS QA READINESS,
+  -- NOT A PRODUCTION SAFETY INVARIANT, AND P6 DISCHARGED IT** -- the deny-path
+  -- evidence for the sandbox_only class exists and is committed. Keeping it
+  -- would have forced a fresh Apple Sandbox subscription to satisfy a spent
+  -- guard, on a tester already at Apple's ~12-renewal cap.
+  --
+  -- A REPLACEMENT WAS DRAFTED AND REJECTED ON MEASUREMENT, NOT ON TASTE. The
+  -- candidate was "zero Sandbox membership rows may read connected_member =
+  -- true" -- the half that looked like a genuine invariant. It fails twice:
+  --
+  --   (i) IT CANNOT FIRE. Precondition 5 already asserts zero Production
+  --       membership rows, and with the grandfather arm retired (U6b-4)
+  --       connected_member is false for EVERY identity. The count is
+  --       structurally 0, so the assertion can never fail -- the C56-7 defect,
+  --       a check that only looks like verification.
+  --
+  --   (ii) IT WOULD MIS-FIRE IF PRECONDITION 5 WERE EVER RELAXED. An identity
+  --        holding BOTH a Sandbox and a live Production subscription is
+  --        explicitly permitted -- "one identity may hold both a Sandbox and a
+  --        Production membership" -- and reads connected_member = true, so the
+  --        guard would count its Sandbox row and abort on a LEGITIMATE state.
+  --        Measured locally, not reasoned: connected_member=true,
+  --        state=entitled, guard counts 1.
+  --
+  -- Simultaneously vacuous now and wrong later. **PRECONDITION 5 -- zero
+  -- Production membership rows -- already carries the load**, and the
+  -- environment-separation invariant itself is established elsewhere: U6b
+  -- acceptance E5 (sandbox_only -> DENY), D4's own design record, and the live
+  -- production check run during this bind's preflight. The final bind does not
+  -- acquire a testing subsystem to re-prove them.
 
   -- THE RE-BIND. u6b_bound_at is NOT rewritten.
   update public.membership_control
