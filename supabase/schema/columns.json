@@ -393,6 +393,22 @@
   },
   {
     "column_default": null,
+    "column_name": "cleanup_completed_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 20,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
+    "column_name": "cleanup_claimed_at",
+    "data_type": "timestamp with time zone",
+    "is_nullable": "YES",
+    "ordinal_position": 21,
+    "table_name": "membership"
+  },
+  {
+    "column_default": null,
     "column_name": "user_id",
     "data_type": "uuid",
     "is_nullable": "NO",
