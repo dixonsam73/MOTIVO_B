@@ -52,13 +52,24 @@ establish() {  # user, env, otid, apple_token, jws_token, state_expr
 }
 
 # ============================================ D4 — environment separation
-echo "-- D4: Production entitlement only, and no grandfather fall-through"
+echo "-- D4: Production entitlement only (grandfather fall-through RETIRED)"
 
-# The critical case: a SANDBOX-only identity that IS in the cutover snapshot.
-# Under the naive WHERE-clause fix this returns TRUE via the grandfather clause,
-# which is the exact inversion of invariant 8.
+# RE-POINTED BY U6b-4, AND ONE OF THESE ASSERTIONS LOST DISCRIMINATING POWER.
+# STATED RATHER THAN GLOSSED, because a suite that looks unchanged while testing
+# less is worse than one that admits it.
+#
+# A60 was the critical case: a SANDBOX-only identity IN the cutover snapshot.
+# Under the naive WHERE-clause fix, bool_or returned NULL over an empty set and
+# coalesce fell through to the GRANTING grandfather clause -- the exact inversion
+# of invariant 8. With that clause retired, NULL now falls through to `false`,
+# so a correct implementation and the naive one produce the SAME answer here.
+# A60 still asserts the right outcome; it can no longer catch that bug.
+#
+# A60m restores the discrimination STRUCTURALLY: it pins that the environment
+# test lives inside bool_or and NOT in the WHERE clause. That placement is D4's
+# correction, it is currently harmless to get wrong, and it becomes load-bearing
+# again the moment anyone adds a third coalesce arm.
 psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id) values ('$A');
 insert into public.membership (user_id, environment, original_transaction_id, product_id,
        renewal_date, renewal_info_signed_date, binding_method, bound_at)
 values ('$A','Sandbox','TXN-SBX-LIVE','com.sdsongs.etudes.connected.monthly',
@@ -80,7 +91,6 @@ SQL
 
 # Production behaviour is unchanged.
 psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id) values ('$B');
 insert into public.membership (user_id, environment, original_transaction_id, product_id,
        renewal_date, renewal_info_signed_date, binding_method, bound_at)
 values ('$B','Production','TXN-PRD-LIVE','com.sdsongs.etudes.connected.monthly',
@@ -102,14 +112,16 @@ SQL
 is A60f "$(psq "select public.connected_member('$B');")" "f" "live Sandbox does NOT rescue lapsed Production"
 is A60g "$(psq "select public.membership_state('$B');")" "expired" "state(expired), not sandbox_only"
 
-# No rows at all -> grandfather clause, unchanged.
-psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id) values ('$C');
-SQL
-is A60h "$(psq "select public.connected_member('$C');")" "t" "no rows + snapshot still grandfathers"
-is A60i "$(psq "select public.membership_state('$C');")" "grandfathered" "state(grandfathered)"
+# No rows at all -> NOT entitled. This is the retirement's whole point: absence
+# of a membership record was the ONE case the grandfather clause converted into
+# entitlement, and it no longer does. Absence is never entitlement.
+is A60h "$(psq "select public.connected_member('$C');")" "f" "no membership rows -> NOT entitled (grandfathering RETIRED)"
+is A60i "$(psq "select public.membership_state('$C');")" "unknown" "state(unknown), never 'grandfathered'"
 is A60j "$(psq "select public.membership_state('$D');")" "unknown" "state(unknown)"
 is A60k "$(psq "select public.connected_member(null);")" "f" "NULL input fails closed"
+# A60m — D4's correction, pinned structurally now that A60 cannot catch it.
+is A60m "$(psq "select (regexp_replace(pg_get_functiondef(p.oid),'--[^\n]*','','g') ~ 'bool_or[^)]*environment')::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='connected_member';")" "true" "the environment test is INSIDE bool_or, not in the WHERE clause (D4)"
+is A60n "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and p.proname='connected_member' and pg_get_functiondef(p.oid) like '%grandfather%';")" "0" "no grandfather arm survives in the predicate"
 
 # ================================================ ACL survived REPLACE
 echo

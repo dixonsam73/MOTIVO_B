@@ -88,8 +88,25 @@ out. It is replaced by **one recorded product decision** — §1 itself.
   `bool_or`-over-an-empty-set subtlety, no clause ordering.** The predicate D4
   spent a full design round getting right becomes trivially correct.
 - `membership_state()` drops `'grandfathered'` — five values become four.
-- `membership_cutover`, `grandfather_enabled`, `grandfather_expires_at` and
-  `u6b_bound_at` all become dead.
+- `membership_cutover`, `grandfather_enabled` and `grandfather_expires_at` all
+  become dead.
+- **CORRECTED 2026-09-02: `u6b_bound_at` IS NOT DEAD AND MUST BE RETAINED.** This
+  bullet listed it among the dead columns, and that was written on 2026-09-01
+  **before U6b bound**, when it was still null and read as an unused placeholder.
+  It has been set since 2026-09-01 16:52:52, it records that binding happened,
+  and it makes the bind statement **refuse to run a second time**. Dropping it
+  would delete that refusal. **The same failure mode as C-52 and the U4 heading:
+  a durable document describing a state it is not itself evidence of** — right
+  when written, never re-read afterwards, and load-bearing for the unit that
+  implements from it. U6b-4 retains it and its apply guard asserts it survives.
+- **`cutover_at`, `cutover_identity_count` and `cutover_verified_at` are also
+  RETAINED**, as the historical record of a boundary that was declared and
+  verified. No function reads them (measured 2026-09-02: zero references across
+  all 28 production functions), and CLAUDE.md's standing rule is that
+  `cutover_at` is never altered. Retaining them also makes the U6b-4 rollback
+  **data-complete**: the 16-row snapshot is exactly reconstructible from
+  `auth.users` using `cutover_at`, so no identifier needs to live in this
+  repository.
 - **U6c DISAPPEARS AS PREVIOUSLY CONCEIVED.** No twelve-month clock, no liveness
   safety check, no dated post-phase obligation carried on B-11. It becomes an
   ordinary cleanup migration.

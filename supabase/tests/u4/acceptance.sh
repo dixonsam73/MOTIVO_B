@@ -23,7 +23,11 @@ is()  { if [ "$2" = "$3" ]; then ok "$1" "$4 = $3"; else bad "$1" "$4: expected 
 echo "== U4 acceptance =="
 
 # ------------------------------------------------------------------ structure
-is A41  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name like 'membership%';")" "7" "membership tables after U4 + U5b (adds membership_binding_conflict)"
+# RE-POINTED BY U6b-4: membership_cutover is dropped (B-36), 7 -> 6. The exact
+# count is kept rather than loosened, and A41c pins the dropped one by name so
+# this cannot pass again by some other table appearing.
+is A41  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name like 'membership%';")" "6" "membership tables after U4 + U5b + U6b-4 retirement"
+is A41c "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name='membership_cutover';")" "0" "membership_cutover is the one that went"
 is A41b "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name='membership_notification_reject_stat';")" "1" "reject-stat table exists"
 is A42  "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('membership_resolve_binding_v1','membership_apply_state_v1','membership_record_notification_v1','membership_record_reject_v1','membership_ingest_notification_v1','membership_apply_reconciliation_v1','membership_due_for_reconciliation_v1');")" "7" "U4 functions"
 is A42b "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_notification' and column_name in ('delivery_count','last_received_at');")" "2" "B-26 columns"

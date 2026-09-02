@@ -62,7 +62,10 @@ echo "== U3 acceptance =="
 # U4 -- adding membership_notification_reject_stat -- fail a U3 assertion about
 # U3's own objects. Naming the five says what was always meant, and would still
 # catch one of them going missing.
-is A1  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name in ('membership','membership_binding','membership_notification','membership_cutover','membership_control');")" "5" "U3's five tables"
+# RE-POINTED BY U6b-4: membership_cutover is DROPPED (B-36). Four tables, and
+# the fifth is asserted ABSENT below rather than quietly dropped from the list.
+is A1  "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name in ('membership','membership_binding','membership_notification','membership_control');")" "4" "U3's four surviving tables"
+is A1c "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name='membership_cutover';")" "0" "membership_cutover is GONE (U6b-4)"
 is A1b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('connected_member','membership_state','ensure_membership_binding');")" "3" "new helpers"
 
 # ------------------------------------------------------- client reachability
@@ -107,26 +110,27 @@ is A3h "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pro
 
 # ------------------------------------------------------------------ fixtures
 A=$(mkuser u3a); B=$(mkuser u3b)
-psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id) values ('$A');
-SQL
+# U6b-4: there is no snapshot to insert into. $A is simply a pre-cutover-aged
+# identity with no membership row, which is now the ONLY thing that shape means.
 
 # ------------------------------------------------------- helper derivations
 is A5  "$(psq "select public.connected_member('$B');")" "f" "unknown identity"
-is A6  "$(psq "select public.connected_member('$A');")" "t" "grandfathered identity"
+is A6  "$(psq "select public.connected_member('$A');")" "f" "an identity with no membership row is NOT entitled -- grandfathering RETIRED (B-36/U6b-4)"
 is A10 "$(psq "select public.connected_member(null);")" "f" "NULL input"
 is A10b "$(psq "select public.connected_member('00000000-0000-0000-0000-000000000000');")" "f" "unknown uuid"
-is A28 "$(psq "select public.membership_state('$A');")" "grandfathered" "state(grandfathered)"
+is A28 "$(psq "select public.membership_state('$A');")" "unknown" "state(unknown) -- 'grandfathered' is no longer producible"
 is A28b "$(psq "select public.membership_state('$B');")" "unknown" "state(unknown)"
 
-# A7 — real state overrides grandfathering (expired row on a snapshot identity)
+# A7 — an expired Production row derives NOT ENTITLED. Before U6b-4 this also
+# proved real state OVERRIDES grandfathering; there is no longer a second clause
+# for it to override, so the assertion survives with a narrower meaning.
 psqf <<SQL >/dev/null
 insert into public.membership (user_id, environment, original_transaction_id, product_id,
        renewal_date, renewal_info_signed_date, binding_method, bound_at)
 values ('$A','Production','TXN-EXPIRED','com.sdsongs.etudes.connected.monthly',
         now() - interval '1 day', now(), 'legacy_claim', now());
 SQL
-is A7  "$(psq "select public.connected_member('$A');")" "f" "expired row beats grandfather"
+is A7  "$(psq "select public.connected_member('$A');")" "f" "expired Production row -> not entitled"
 is A28c "$(psq "select public.membership_state('$A');")" "expired" "state(expired)"
 
 # A8 — entitled
@@ -159,16 +163,15 @@ update public.membership set grace_period_expires_date = now() + interval '10 da
 SQL
 is A9c "$(psq "select public.connected_member('$A');")" "t" "retry + future grace"
 
-# A11 — grandfather switch
+# A11 — RETIRED BY U6b-4 AND REPLACED IN PLACE, not deleted. It tested that the
+# grandfather switch could turn the compatibility clause off and back on. Both
+# the switch and the clause are gone, so the assertion now pins their ABSENCE --
+# which is the property that must never silently regress.
 psqf <<SQL >/dev/null
 delete from public.membership where user_id='$A';
-update public.membership_control set grandfather_enabled = false where id;
 SQL
-is A11 "$(psq "select public.connected_member('$A');")" "f" "grandfather disabled"
-psqf <<SQL >/dev/null
-update public.membership_control set grandfather_enabled = true where id;
-SQL
-is A11b "$(psq "select public.connected_member('$A');")" "t" "grandfather re-enabled"
+is A11 "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_control' and column_name in ('grandfather_enabled','grandfather_expires_at');")" "0" "the grandfather switch is GONE -- restoring it is a migration, never a flag"
+is A11b "$(psq "select (pg_get_functiondef(p.oid) like '%cutover%' or pg_get_functiondef(p.oid) like '%grandfather%')::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='connected_member';")" "false" "connected_member references NO retired object"
 
 # ---------------------------------------------------------------- constraints
 is A12 "$(refuses "insert into public.membership (user_id,environment,original_transaction_id,product_id,renewal_info_signed_date,binding_method,bound_at) values ('$A','Production','DUP','p',now(),'purchase',now()), ('$B','Production','DUP','p',now(),'purchase',now());")" "refused" "duplicate (env,txn)"
@@ -197,7 +200,7 @@ is A24b "$(psq "select count(*) from pg_constraint where conrelid='public.member
 
 # A26 — legacy path needs no fake membership row
 is A26 "$(psq "select count(*) from public.membership where user_id='$A';")" "0" "binding exists with zero membership rows"
-is A26b "$(psq "select public.membership_state('$A');")" "grandfathered" "state with binding but no membership"
+is A26b "$(psq "select public.membership_state('$A');")" "unknown" "state with binding but no membership"
 
 # A13 — cascade
 psqf <<SQL >/dev/null
@@ -205,7 +208,7 @@ insert into public.membership (user_id,environment,original_transaction_id,produ
 values ('$A','Production','TXN-CASC','p',now(),'purchase',now());
 delete from auth.users where id='$A';
 SQL
-is A13 "$(psq "select (select count(*) from public.membership where user_id='$A') + (select count(*) from public.membership_binding where user_id='$A') + (select count(*) from public.membership_cutover where user_id='$A');")" "0" "auth.users cascade removes all three"
+is A13 "$(psq "select (select count(*) from public.membership where user_id='$A') + (select count(*) from public.membership_binding where user_id='$A');")" "0" "auth.users cascade removes both surviving tables"
 
 # ---------------------------------------------------------------- inertness
 is A15 "$(psq "select count(*) from pg_policies where qual ilike '%connected_member%' or with_check ilike '%connected_member%';")" "0" "policies calling connected_member"
@@ -237,8 +240,11 @@ is A16 "$(psq "select count(*) from public.membership where pending_cleanup_at i
 # timestamp, and one AFTER trigger on `membership` propagating it. The assertion
 # is not weakened: it still pins an exact count, so a sixth would fail it.
 is A16b "$(psq "select count(*) from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace where n.nspname in ('public','storage') and not t.tgisinternal;")" "10" "trigger count: U3's 5 plus U6b's 5"
-is A14 "$(psq "select count(*) from public.membership_cutover;")" "0" "local cutover snapshot empty"
-is A14b "$(psq "select coalesce((select cutover_at::text from public.membership_control),'null');")" "null" "cutover_at unset locally"
+# A14 — RETIRED BY U6b-4: there is no snapshot table to be empty. A14b survives
+# unchanged: cutover_at is RETAINED as the historical record of a declared
+# boundary, and is still unset on a fresh local instance.
+is A14 "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name='membership_cutover';")" "0" "no snapshot table exists to hold a snapshot"
+is A14b "$(psq "select coalesce((select cutover_at::text from public.membership_control),'null');")" "null" "cutover_at RETAINED as a column and unset locally"
 
 # ================= binding runtime + runtime client denial ==================
 #
@@ -319,13 +325,13 @@ probe() { # $1 method, $2 url, $3 bearer, $4 body
   case "$code" in 2??) TWOXX=$((TWOXX+1));; esac
   case "$(printf '%s' "$body" | head -1)" in '['*) ARRAYS=$((ARRAYS+1));; esac
 }
-for TBL in membership membership_binding membership_notification membership_cutover membership_control; do
+for TBL in membership membership_binding membership_notification membership_control; do
   for KEY in "$AK" "$AUTHJWT"; do probe GET "$API/rest/v1/$TBL?select=*" "$KEY" ""; done
 done
 for FN in connected_member membership_state; do
   for KEY in "$AK" "$AUTHJWT"; do probe POST "$API/rest/v1/rpc/$FN" "$KEY" "{\"target_user_id\":\"$E\"}"; done
 done
-is A22  "$SEEN"   "14" "runtime probes attempted (5 tables + 2 RPCs, x2 roles)"
+is A22  "$SEEN"   "12" "runtime probes attempted (4 tables + 2 RPCs, x2 roles)"
 is A22b "$TWOXX"  "0"  "successful (2xx) client responses"
 is A22c "$ARRAYS" "0"  "responses returning a JSON row array"
 
@@ -345,109 +351,69 @@ is A22d "$ANON_VERDICT" "refused" "anon STILL refused over HTTP (U5b)"
 is A22e "$(printf '%s' "$AUTH_BODY" | tr -d '\"' | grep -cE '^[0-9a-f]{8}-')" "1" "authenticated receives a uuid token over HTTP (U5b)"
 is A22f "$(psq "select (binding_token::text = '$(printf '%s' "$AUTH_BODY" | tr -d '\"')')::text from public.membership_binding where user_id='$E';")" "true" "...and it is the CALLER'S OWN stored token"
 
-# A27 -- a dormant snapshot identity acquires a binding lazily, and acquiring
-# one must NOT fabricate membership. Both halves of the state rule are checked:
-# grandfathered when the identity is in the snapshot, unknown when it is not.
+# A27 -- a dormant identity acquires a binding lazily, and acquiring one must
+# NOT fabricate membership. RE-POINTED BY U6b-4: there is no snapshot, so both
+# halves of the old state rule now collapse to 'unknown'. The load-bearing half
+# -- that a binding never fabricates membership -- is UNCHANGED and is the
+# reason this block survives at all.
 S=$(mkuser u3s)
-psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id) values ('$S');
-SQL
-is A27  "$(psq "select count(*) from public.membership_binding where user_id='$S';")" "0" "snapshot identity starts unbound"
+is A27  "$(psq "select count(*) from public.membership_binding where user_id='$S';")" "0" "dormant identity starts unbound"
 TS=$(as_identity "$S")
 is A27b "$(psq "select count(*) from public.membership_binding where user_id='$S';")" "1" "binding created on demand"
 is A27c "$(psq "select count(*) from public.membership where user_id='$S';")" "0" "no membership row fabricated"
-is A27d "$(psq "select public.membership_state('$S');")" "grandfathered" "bound snapshot identity"
-is A27e "$(psq "select public.membership_state('$E');")" "unknown" "bound NON-snapshot identity"
+is A27d "$(psq "select public.membership_state('$S');")" "unknown" "a binding alone NEVER produces entitlement"
+is A27e "$(psq "select public.membership_state('$E');")" "unknown" "...and neither does one on any other identity"
 
-# Fixtures removed so the cutover section below starts from the same state it
-# did before this block existed -- cascade takes the bindings and the snapshot
-# row with them.
+# Fixtures removed -- cascade takes the bindings with them.
 psqf <<SQL >/dev/null
 delete from auth.users where id in ('$E','$F','$G','$S');
 SQL
 is A27f "$(psq "select count(*) from public.membership_binding;")" "0" "binding fixtures cleaned up"
-is A27g "$(psq "select count(*) from public.membership_cutover;")" "0" "snapshot empty again before cutover section"
+is A27g "$(psq "select count(*) from public.membership;")" "0" "no membership row was ever fabricated by any of it"
 
-# ============================= cutover boundary =============================
-# The corrected mechanism (supabase/sql/2026-08-16-u3-cutover-population.sql)
-# exercised end to end against LOCAL identities. Production is not touched.
+# ================= cutover boundary — RETIRED BY U6b-4 =====================
+#
+# A32 to A40 tested the U3 cutover population mechanism: the boundary column
+# guards, the population statement, its re-run idempotence, the convergence
+# check and the finalisation guard. **THE MECHANISM THEY TESTED NO LONGER
+# EXISTS.** `membership_cutover` is dropped and `grandfather_enabled` /
+# `grandfather_expires_at` are dropped (B-36, U6b-4).
+#
+# THEY ARE RETIRED IN PLACE RATHER THAN DELETED, and the group that replaces
+# them asserts the RETIREMENT rather than nothing -- the U6a-to-U6b group K
+# precedent: never leave a suite exercising an object that no longer exists, and
+# never edit one until it always passes. A deleted section proves nothing; this
+# one fails loudly if any part of the retired mechanism comes back.
+#
+# WHAT WAS LOST AND IS NOT RECOVERABLE HERE, stated rather than glossed: the
+# population statement's correctness -- that '<' captures pre-boundary and
+# excludes NULL-dated identities -- was verified in production at U3's P6/P8 and
+# is recorded in CLAUDE.md. It is history now, not a live property, because
+# nothing populates a snapshot any more.
+#
+# cutover_at, cutover_identity_count and cutover_verified_at are RETAINED as the
+# historical record of a boundary that was declared and verified. No function
+# reads them; A41 pins that.
 
-# A32 — cutover_verified_at exists, is nullable, and starts unset.
-is A32 "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_control' and column_name='cutover_verified_at' and is_nullable='YES';")" "1" "cutover_verified_at nullable column"
-is A32b "$(psq "select coalesce((select cutover_verified_at::text from public.membership_control),'null');")" "null" "verified_at unset before cutover"
+is A32 "$(psq "select count(*) from information_schema.tables where table_schema='public' and table_name='membership_cutover';")" "0" "the snapshot table is gone"
+is A33 "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_control' and column_name in ('grandfather_enabled','grandfather_expires_at');")" "0" "both grandfather controls are gone"
+is A34 "$(psq "select count(*) from information_schema.columns where table_schema='public' and table_name='membership_control' and column_name in ('cutover_at','cutover_identity_count','cutover_verified_at');")" "3" "the cutover RECORD is retained -- history is not erased"
+is A35 "$(psq "select (u6b_bound_at is not null)::text from public.membership_control;")" "false" "u6b_bound_at is retained as a column and unset locally"
+is A36 "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and (pg_get_functiondef(p.oid) like '%membership_cutover%' or pg_get_functiondef(p.oid) like '%grandfather%');")" "0" "NO function references any retired object"
+is A37 "$(psq "select count(*) from pg_policies where schemaname in ('public','storage') and (coalesce(qual,'')||coalesce(with_check,'')) like '%cutover%';")" "0" "no policy references the snapshot"
+is A38 "$(psq "select public.membership_state('$(mkuser u3ret)');")" "unknown" "a brand-new identity is 'unknown', never 'grandfathered'"
 
-# A33 — verification cannot precede the boundary it verifies.
-is A33 "$(refuses "update public.membership_control set cutover_verified_at = now(), cutover_identity_count = 0 where id and cutover_at is null;")" "refused" "verified_at without cutover_at"
-# The count is tied to VERIFICATION, not to the boundary -- setting one
-# without the other is refused in both directions.
-is A33b "$(refuses "update public.membership_control set cutover_identity_count = 0 where id;")" "refused" "count without verified_at"
+# A39 — THE CONSTRAINT THAT MUST NOT BE NARROWED. Historical telemetry rows
+# carry decided_clause = 'grandfathered' and stay valid forever. Removing the
+# live branch must never remove the historical vocabulary: the aggregate is
+# keyed on decided_clause, so the before and after of the retirement sit in the
+# same table as evidence, and narrowing this check would break existing rows.
+is A39 "$(psq "select (pg_get_constraintdef(oid) like '%grandfathered%')::text from pg_constraint where conname='shadow_stat_clause_check';")" "true" "historical 'grandfathered' telemetry REMAINS VALID"
+is A39b "$(psq "insert into public.shadow_enforcement_stat (user_id,surface,decided_clause,would_deny,enforced,bucket_hour,observations,last_seen) values ('$(mkuser u3hist)','probe.retired','grandfathered',false,false,date_trunc('hour',now()),1,now()) returning 'ok';")" "ok" "...and such a row can still be WRITTEN, not merely tolerated"
 
-# Local identities: C created BEFORE the boundary, D created AFTER it.
-C=$(mkuser u3c)
-psqf <<SQL >/dev/null
-begin;
-update public.membership_control set cutover_at = now(), updated_at = now() where id and cutover_at is null;
-insert into public.membership_cutover (user_id)
-select u.id from auth.users u
- where u.created_at < (select cutover_at from public.membership_control where id)
- on conflict (user_id) do nothing;
-commit;
-SQL
-D=$(mkuser u3d)
-
-# A34 — the predicate is total and disjoint: C in, D out.
-is A34 "$(psq "select count(*) from public.membership_cutover where user_id='$C';")" "1" "pre-boundary identity captured"
-is A34b "$(psq "select count(*) from public.membership_cutover where user_id='$D';")" "0" "POST-boundary identity excluded"
-is A34c "$(psq "select public.connected_member('$D');")" "f" "post-cutover identity not entitled"
-
-# A35 — re-running the population is idempotent and CANNOT admit D.
-BEFORE=$(psq "select count(*) from public.membership_cutover;")
-psqf <<SQL >/dev/null
-insert into public.membership_cutover (user_id)
-select u.id from auth.users u
- where u.created_at < (select cutover_at from public.membership_control where id)
- on conflict (user_id) do nothing;
-SQL
-is A35 "$(psq "select count(*) from public.membership_cutover;")" "$BEFORE" "re-run population changes nothing"
-is A35b "$(psq "select count(*) from public.membership_cutover where user_id='$D';")" "0" "re-run still excludes post-cutover"
-
-# A36 — convergence completeness check reports zero on a converged snapshot.
-is A36 "$(psq "select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id) and not exists (select 1 from public.membership_cutover c where c.user_id=u.id);")" "0" "missing qualifying identities"
-
-# A37 — PERMANENT INVARIANT: no post-cutover or NULL-dated row in the snapshot.
-is A37 "$(psq "select count(*) from public.membership_cutover c join auth.users u on u.id=c.user_id where u.created_at is null or u.created_at >= (select cutover_at from public.membership_control where id);")" "0" "post-cutover rows in snapshot"
-
-# A38 — the NULL hazard is real and the guard detects it.
-# auth.users.created_at is nullable with no default; a NULL satisfies NEITHER
-# side of the boundary, so it must be caught BEFORE a boundary is declared.
-psqf <<SQL >/dev/null
-update auth.users set created_at = null where id='$D';
-SQL
-is A38 "$(psq "select count(*) from auth.users where created_at is null;")" "1" "NULL created_at guard detects it"
-is A38b "$(psq "select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id) and u.id='$D';")" "0" "NULL is excluded by '<'"
-is A38c "$(psq "select count(*) from auth.users u where u.created_at >= (select cutover_at from public.membership_control where id) and u.id='$D';")" "0" "NULL is ALSO excluded by '>=' -- unclassifiable"
-psqf <<SQL >/dev/null
-update auth.users set created_at = now() where id='$D';
-SQL
-
-# A39 — finalisation sets verified_at and the counts agree.
-psqf <<SQL >/dev/null
-update public.membership_control
-   set cutover_identity_count = (select count(*) from public.membership_cutover),
-       cutover_verified_at = now(), updated_at = now()
- where id and cutover_at is not null and cutover_verified_at is null;
-SQL
-is A39 "$(psq "select (cutover_verified_at is not null)::text from public.membership_control where id;")" "true" "verified_at set after convergence"
-is A39b "$(psq "select (cutover_identity_count = (select count(*) from public.membership_cutover))::text from public.membership_control where id;")" "true" "recorded count = materialised"
-is A39c "$(psq "select (cutover_identity_count = (select count(*) from auth.users u where u.created_at < (select cutover_at from public.membership_control where id)))::text from public.membership_control where id;")" "true" "recorded count = by-predicate"
-
-# A40 — finalisation is itself re-run protected.
-V=$(psq "select cutover_verified_at from public.membership_control where id;")
-psqf <<SQL >/dev/null
-update public.membership_control set cutover_verified_at = now()
- where id and cutover_at is not null and cutover_verified_at is null;
-SQL
-is A40 "$(psq "select cutover_verified_at from public.membership_control where id;")" "$V" "finalisation guard prevents overwrite"
+# A40 — the entitlement predicate is now two-armed and reaches no retired object.
+is A40 "$(psq "select (pg_get_functiondef(p.oid) like '%coalesce%')::text from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname='connected_member';")" "true" "connected_member still coalesces -- the Sandbox-only NULL case is unchanged"
+is A41 "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.prokind='f' and pg_get_functiondef(p.oid) like '%cutover_at%';")" "0" "no function reads the retained cutover record"
 
 echo
 printf "  %d passed, %d failed\n" "$PASS" "$FAIL"
