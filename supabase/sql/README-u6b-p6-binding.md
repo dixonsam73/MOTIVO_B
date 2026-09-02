@@ -319,3 +319,28 @@ pass whether or not any observation is recorded.
 expected for **writes and RPCs**, and is **NOT** a pass condition for reads.
 Absence of a read-path observation must not be scored as a failure, and — equally
 — must not be scored as evidence of safety.
+
+
+---
+
+## DEVICE A ACCEPTANCE SEQUENCE — corrected wording, 2026-09-02
+
+Blocked until the C-57 fix is installed on Device A. Four steps, one of which is
+the actual assertion.
+
+1. **Install the fixed Release build. With `enforcement_enabled` still FALSE**,
+   sign in (SIWA) and confirm the client reaches **Connected**. Baseline: it
+   recovers.
+2. **Re-bind** (`2026-09-01-u6b-2b-rebind-production.sql`), relaunch Device A, and
+   confirm **it STAYS Connected** with a filtered or empty feed rather than
+   dropping to Solo. **That single observation is the test.**
+3. Confirm **account deletion remains reachable** while denied — C-35.
+4. **Return `enforcement_enabled` to FALSE**, explicitly:
+
+```sql
+update public.membership_control set enforcement_enabled = false, updated_at = now() where id;
+```
+
+**"Kill switch" in step 4 means exactly that statement** — setting the flag back
+to FALSE. It is not a figure of speech for "stop testing", and P6 is not left
+bound at the end of this sequence.

@@ -73,7 +73,7 @@ public final class NetworkManager {
     private var bearerToken: String? = nil
 
     /// Optional auth challenge handler used to refresh a session after a 401.
-    /// NOT invoked for 403 -- see C-56: an authorisation denial is not an
+    /// NOT invoked for 403 -- see C-57: an authorisation denial is not an
     /// authentication failure, and refreshing on one destroys a valid session.
     /// If it returns true, the original request will be retried once.
     public var onAuthChallenge: (() async -> Bool)? = nil
@@ -279,7 +279,7 @@ public final class NetworkManager {
 
         // Auth-challenge path: refresh session and retry once on 401 ONLY.
         //
-        // C-56, 2026-09-02. THIS CONDITION USED TO INCLUDE 403 AND THAT DESTROYED
+        // C-57, 2026-09-02. THIS CONDITION USED TO INCLUDE 403 AND THAT DESTROYED
         // VALID SESSIONS. 401 is an AUTHENTICATION failure -- the token is bad, so
         // refreshing is exactly right. 403 is an AUTHORISATION denial -- the token
         // is fine and the caller is simply not permitted, so a refresh cannot
