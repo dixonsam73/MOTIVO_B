@@ -221,6 +221,45 @@ ambiguous; and the aggregate-function issue above.
 
 ---
 
+## SCOPE REFINEMENT — RECORDED AS A REFINEMENT, NOT AS THE ORIGINAL SCOPE
+
+**The approved U6b-4 scope said: drop `grandfather_enabled`, `grandfather_expires_at`,
+and the `cutover_*` control columns that become dead. THIS PACKAGE RETAINS ALL
+THREE `cutover_*` COLUMNS.** That is a deviation from the approved wording, it
+was made while preparing the package and NOT flagged at the time, and it was
+reconciled and accepted only when the account holder challenged it on
+2026-09-02. **It is recorded here as an intentional refinement agreed after the
+fact — not rewritten to look as though it was always the scope.**
+
+**Retained:** `cutover_at`, `cutover_identity_count`, `cutover_verified_at`.
+**Note the naming:** the column is `cutover_identity_count`, and there are THREE
+retained `cutover_*` columns, not two — `cutover_verified_at` is the third.
+
+**They have NO live entitlement, security or runtime semantics after U6b-4.**
+Measured, not assumed: zero references across all 28 production functions, zero
+policies, and neither `connected_member` nor `membership_state` touches them once
+this migration lands. They are **inert historical metadata**, with one
+operational role — `cutover_at` is the ROLLBACK'S RECONSTRUCTION KEY, which is a
+recovery input rather than a runtime path.
+
+**THE ARGUMENT THAT DECIDED IT IS AN ASYMMETRY, and it is the part worth
+re-reading:** retention is reversible and the retirement is not. Dropping these
+three columns later is a one-line migration with no behavioural effect, available
+at any time. Removing them *now* would permanently discard the reconstruction key
+in the very transaction that makes the snapshot unrecoverable — **two
+irreversible losses in one step, for tidiness.**
+
+**One consequence not stated in the original proposal:** the three columns are
+bound by three CHECK constraints — `membership_control_count_nonnegative`,
+`membership_control_count_with_verification` and
+`membership_control_verified_needs_cutover`. Dropping the columns means dropping
+those too, so the delta would move from columns −4 / constraints −2 to
+**columns −7 / constraints −5**.
+
+**The literal-compliance route remains open and is the safer ordering:** apply
+U6b-4 as prepared, then drop the three columns as a separate trivial migration
+once the rollback is no longer wanted.
+
 ## Constraints carried and honoured
 
 | Constraint | How |
@@ -233,3 +272,4 @@ ambiguous; and the aggregate-function issue above.
 | No U7 work | No worker, no cleanup |
 | C-59 open, non-blocking | It concerns the enforcement **write-deny** path; U6b-4 binds nothing |
 | No cohort preservation work | The 16 rows are dropped. The rollback reconstructs them from a retained column — that is rollback fidelity, not preservation |
+| Retained `cutover_*` columns | **An intentional refinement from the approved wording, agreed 2026-09-02 after being challenged** — see the section above. Inert historical/rollback metadata with no live semantics |
