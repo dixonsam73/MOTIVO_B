@@ -159,5 +159,69 @@ is U6b-K11 "$(psq "select count(*) from public.shadow_enforcement_stat where use
 # The U6b addition to that group: the two eras must be distinguishable forever.
 is U6b-K12 "$(psq "select count(*) from information_schema.key_column_usage where constraint_name='shadow_enforcement_stat_pkey' and column_name='enforced';")" "1" "enforced is IN the primary key, so shadow and enforcement rows never merge"
 
+# ================================================== L. C-59 — THE WRITE DENY PATH
+#
+# C-59: the enforcement WRITE-deny path had never been observed behaving, either
+# locally or in production. It was structurally enforced -- posts_insert_owner
+# carries enforcement_gate in its WITH CHECK -- and its shadow-path reachability
+# was demonstrated on 2026-09-01. Nothing had ever watched it DENY.
+#
+# SCORED ON DATABASE OUTCOME, NEVER ON TELEMETRY. A denied INSERT aborts the
+# statement, which rolls back the observer's own write (B-34's blind spot), so an
+# absent shadow_enforcement_stat row cannot distinguish "denied" from "never
+# attempted". The only sound evidence is whether the row exists afterwards.
+#
+# IT TRAVERSES THE REAL POLICY. Every statement runs `set local role
+# authenticated` with a JWT claim and issues a plain INSERT -- the same path
+# PostgREST takes. enforcement_gate() is never called directly here. L1
+# additionally requires the refusal to be an RLS violation SPECIFICALLY, so a
+# NOT NULL violation or a typo cannot be mistaken for enforcement working.
+#
+# TWO CONTROLS MAKE IT DISCRIMINATING RATHER THAN VACUOUS. L3 shows an ENTITLED
+# author inserting under the SAME enforcement, so the gate is not blanket-
+# refusing. L7 replays the IDENTICAL refused statement with enforcement OFF and
+# it succeeds, so the refusal was the gate and not the statement.
+
+echo; echo "-- L  BOUND: the WRITE deny path, by database outcome (C-59) --"
+
+# Runs one statement as an authenticated identity through the real RLS path, and
+# separates an RLS refusal from any other error.
+as_writes() {
+  local out
+  out=$(psq "set local role authenticated; select set_config('request.jwt.claims', json_build_object('sub','$1','role','authenticated')::text, true); $2")
+  case "$out" in
+    *"violates row-level security policy"*) echo "rls_refused" ;;
+    *ERROR*)                                echo "other_error" ;;
+    *)                                      echo "accepted" ;;
+  esac
+}
+INS_LAP="insert into public.posts (id,owner_user_id,is_public,created_at,attachments) values (gen_random_uuid(),'$A_LAP',true,now(),'[]'::jsonb);"
+INS_OK="insert into public.posts (id,owner_user_id,is_public,created_at,attachments) values (gen_random_uuid(),'$A_OK',true,now(),'[]'::jsonb);"
+owns() { psq "select count(*) from public.posts where owner_user_id='$1';"; }
+
+setflag true
+is U6b-L0 "$(psq "select enforcement_enabled::text from public.membership_control;")" "true" "enforcement is bound for the write tests"
+
+LAP_BEFORE=$(owns "$A_LAP"); OK_BEFORE=$(owns "$A_OK")
+is U6b-L1 "$(as_writes "$A_LAP" "$INS_LAP")" "rls_refused" "an UNENTITLED author's own INSERT is refused BY THE POLICY"
+is U6b-L2 "$(owns "$A_LAP")" "$LAP_BEFORE" "...and NO ROW LANDED -- the database outcome, not telemetry"
+
+is U6b-L3 "$(as_writes "$A_OK" "$INS_OK")" "accepted" "an ENTITLED author inserts under the SAME enforcement -- the gate discriminates"
+is U6b-L4 "$(owns "$A_OK")" "$((OK_BEFORE+1))" "...and that row DID land"
+
+# The carve-outs must survive the write gate. DELETE was asserted structurally
+# by K4; this is the behavioural half, and it is the one that matters because a
+# member who cannot delete cannot leave.
+DEL_BEFORE=$(owns "$A_LAP")
+is U6b-L5 "$(as_writes "$A_LAP" "delete from public.posts where owner_user_id='$A_LAP' and id = (select id from public.posts where owner_user_id='$A_LAP' limit 1);")" "accepted" "the unentitled owner can still DELETE their own post (D-U6-2)"
+is U6b-L6 "$(owns "$A_LAP")" "$((DEL_BEFORE-1))" "...and the delete actually removed it"
+is U6b-L7 "$(seen "$A_LAP" "public.posts where owner_user_id='$A_LAP'")" "$((DEL_BEFORE-1))" "the unentitled owner still READS their own posts (D-U6-4)"
+
+# THE CONTROL. The identical statement that was refused above now succeeds.
+setflag false
+LAP_OFF=$(owns "$A_LAP")
+is U6b-L8 "$(as_writes "$A_LAP" "$INS_LAP")" "accepted" "the IDENTICAL refused INSERT succeeds with enforcement OFF"
+is U6b-L9 "$(owns "$A_LAP")" "$((LAP_OFF+1))" "...and the row landed -- so L1 was the GATE, not the statement"
+
 echo; echo "  $PASS passed, $FAIL failed"; echo
 [ "$FAIL" -eq 0 ]

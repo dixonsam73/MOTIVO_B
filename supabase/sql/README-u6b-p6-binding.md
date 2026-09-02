@@ -565,3 +565,41 @@ defeated by the delegation, which is U5c-34's lesson arriving a third time.
    must NOT be narrowed: a historical row carries that value
    (2026-09-01 10:13:15), and narrowing the constraint alongside the branch
    removal would break existing rows.
+
+---
+
+# C-59 CLOSED — the write deny path has been watched denying. 2026-09-02
+
+**D-3's local half is no longer outstanding.** The P6 matrix scored D-3 as
+"structurally enforced, shadow-path reachability demonstrated, but no behavioural
+enforcement denial observed either locally or in production". The local half is
+now closed by **U6b acceptance group L**, 10 assertions.
+
+**SCORED ON DATABASE OUTCOME, NEVER ON TELEMETRY** — a denied INSERT aborts the
+statement and rolls back the observer's own write (B-34), so an absent
+`shadow_enforcement_stat` row cannot distinguish *denied* from *never attempted*.
+The only sound evidence is whether the row exists afterwards.
+
+| | |
+|---|---|
+| **L1** | the unentitled author's own INSERT is refused, specifically as `new row violates row-level security policy for table "posts"` |
+| **L2** | **no row landed** |
+| **L3 / L4** | an **ENTITLED** author inserts successfully under the **same** enforcement — the gate discriminates rather than blanket-refusing |
+| **L5 / L6** | the unentitled owner can still **DELETE** their own post (D-U6-2, behavioural half of K4) |
+| **L7** | ...and still reads their own posts (D-U6-4) |
+| **L8 / L9** | the **identical** refused statement succeeds with enforcement **OFF** — so L1 was the gate, not the statement |
+
+**It traverses the real policy.** `set local role authenticated` plus a JWT claim
+and a plain INSERT — the path PostgREST takes. `enforcement_gate()` is never
+called directly, and `posts_insert_owner` is the **only** INSERT policy on
+`posts`.
+
+**Falsified deliberately rather than assumed discriminating.** With enforcement
+off, the L1 check returns `accepted` — so **L1 would fail**. The assertion can
+fire, which is the property C56-7 taught us to check.
+
+**THE PRODUCTION-DEVICE OBSERVATION REMAINS UNMADE, AND NO PRODUCTION TEST COULD
+HAVE SUPPLIED IT.** Capturing it needs a re-bind, and the reason it cannot be
+seen there at all is **B-34** — which stays open on its own account. D-3's
+production half is therefore not closed and is not claimed to be; what has
+changed is that the mechanism is no longer unobserved anywhere.
