@@ -53,7 +53,20 @@ is A44c "$(psq "select count(*) from information_schema.column_privileges where 
 is A44d "$(psq "select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and c.relname like 'membership%' and not c.relrowsecurity;")" "0" "membership tables without RLS"
 
 # EXACTLY FOUR U4 functions are granted, and only to service_role.
-is A45  "$(psq "select string_agg(p.proname,',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%_v1' and has_function_privilege('service_role',p.oid,'EXECUTE');")" "membership_apply_reconciliation_v1,membership_due_for_reconciliation_v1,membership_establish_v1,membership_ingest_notification_v1,membership_record_reject_v1" "service_role EXECUTE set"
+# AMENDED FOR U7b, 2026-09-02, AND IT FAILED FIRST — WHICH IS THE ASSERTION
+# WORKING. U7b grants EXECUTE on membership_due_for_cleanup_v1 and
+# membership_cleanup_complete_v1 to service_role, so this set genuinely changed
+# and A45 caught it. It was the ONLY assertion in any suite whose RESULT moved,
+# against a U7b prediction that said every suite would stay green — U5b's lesson
+# recurring: "which assertions change their RESULT" is a different question from
+# "which assertions mention the thing I am changing", and predicting at the
+# schema-surface level does not answer either.
+#
+# DELIBERATELY STILL A WHOLE-SURFACE EXACT SET rather than a split or a count.
+# Its value is the negative half — that NOTHING ELSE is reachable by
+# service_role — and that property survives only while every future grant is
+# forced to edit this line consciously. Do not relax it to a LIKE or a count.
+is A45  "$(psq "select string_agg(p.proname,',' order by p.proname) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%_v1' and has_function_privilege('service_role',p.oid,'EXECUTE');")" "membership_apply_reconciliation_v1,membership_cleanup_complete_v1,membership_due_for_cleanup_v1,membership_due_for_reconciliation_v1,membership_establish_v1,membership_ingest_notification_v1,membership_record_reject_v1" "service_role EXECUTE set"
 is A45b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('membership_apply_state_v1','membership_resolve_binding_v1','membership_record_notification_v1') and has_function_privilege('service_role',p.oid,'EXECUTE');")" "0" "internal writers unreachable by service_role"
 is A45c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace cross join (select rolname from pg_roles where rolname in ('anon','authenticated')) r where n.nspname='public' and p.proname like 'membership%' and has_function_privilege(r.rolname,p.oid,'EXECUTE');")" "0" "NO client EXECUTE on any membership function"
 is A45d "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname like 'membership%' and exists (select 1 from aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a where a.privilege_type='EXECUTE' and a.grantee=0);")" "0" "PUBLIC EXECUTE anywhere"
