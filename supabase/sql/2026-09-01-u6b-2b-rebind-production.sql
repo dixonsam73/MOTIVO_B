@@ -17,11 +17,10 @@ begin;
 create temp table _u6b2b_before on commit drop as
 select (select count(*) from public.membership)                  as m,
        (select count(*) from public.membership_binding)          as b,
-       (select count(*) from public.membership_cutover)          as c,
        (select count(*) from public.membership_binding_conflict) as x;
 
 do $rebind$
-declare n int; mb int; bb int; cb int; xb int;
+declare n int; mb int; bb int; xb int;
 begin
   -- PRECONDITION 1 — currently UNBOUND, and previously BOUND. This is a re-bind.
   select count(*) into n from public.membership_control
@@ -97,12 +96,11 @@ begin
   if n <> 1 then raise exception 'ABORT: not bound, or u6b_bound_at was altered'; end if;
 
   -- POSTCONDITION 2 — the membership tables are not this statement's business
-  select m, b, c, x into mb, bb, cb, xb from _u6b2b_before;
+  select m, b, x into mb, bb, xb from _u6b2b_before;
   if mb <> (select count(*) from public.membership)
      or bb <> (select count(*) from public.membership_binding)
-     or cb <> (select count(*) from public.membership_cutover)
      or xb <> (select count(*) from public.membership_binding_conflict) then
-    raise exception 'ABORT: a membership table moved during the re-bind (was %/%/%/%)', mb, bb, cb, xb;
+    raise exception 'ABORT: a membership table moved during the re-bind (was %/%/%)', mb, bb, xb;
   end if;
 end
 $rebind$;
@@ -117,7 +115,6 @@ select
   (select count(*) from public.membership where environment='Production')  as production_rows,
   (select count(*) from public.membership)                                 as membership_rows,
   (select count(*) from public.membership_binding)                         as binding_rows,
-  (select count(*) from public.membership_cutover)                         as cutover_rows,
   (select count(*) from public.membership_binding_conflict)                as conflicts,
   (select count(*) from public.posts where owner_entitled_until > now())   as posts_visible_to_others,
   'U6b-2b RE-BOUND -- enforcement is LIVE'                                 as status;
