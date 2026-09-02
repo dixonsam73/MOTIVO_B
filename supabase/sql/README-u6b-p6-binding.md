@@ -444,3 +444,124 @@ it or fetch its attachment.
 **They must not be recorded as production-device passes.** The deny path is
 layered, and the outer layer hiding the inner one is the enforcement working — but
 it is not the same thing as having tested the inner one on device.
+
+---
+
+# P6 FINAL RUN — 2026-09-02. PRODUCTION DENY PATH **SUBSTANTIALLY PASSED**
+
+**This is deliberately NOT recorded as "P6 complete" or "P6 passed".** The
+correct statement is: **production deny-path verification substantially passed,
+with D-3 behavioural enforcement coverage OUTSTANDING.** Four of the five actions
+are production passes; one is structural only, and saying otherwise would convert
+an unexercised path into a claimed one.
+
+Bound `2026-09-02 11:17:55.79947+00` by the guarded re-bind, which returned
+`u6b_bound_at` **preserved** at the original `2026-09-01 16:52:52.452956+00` —
+binding happened once, and the record of it is not rewritten by a repeat.
+Kill switch executed `2026-09-02 11:28:07.133938+00`. Enforcement was live for
+**about ten minutes**.
+
+## The scored matrix — each distinction preserved as stated
+
+| | Class | Action | Result |
+|---|---|---|---|
+| **D-1** | `unknown` | feed filtered | **PRODUCTION PASS** |
+| **D-2** | `unknown` | direct open of non-owner post | **Non-owner content filtered from the production feed; direct-open behaviour NOT independently exercised** |
+| **D-3** | `sandbox_only` | publish refused | **Structurally enforced, and shadow-path reachability previously demonstrated — but NO behavioural enforcement denial has yet been observed, locally OR in production** |
+| **D-7** | `sandbox_only` | directory search | **PRODUCTION PASS** — nothing found |
+| **Carve-outs** | `unknown` | account deletion reachable | **PRODUCTION PASS** |
+
+## C-57 — behaviourally VERIFIED under live enforcement
+
+**Across both `sandbox_only` and `unknown`, with no credential destruction and no
+sign-out across the observed denials.** `auth.users` stayed at **17** throughout,
+and both devices remained Connected while being denied. This was the primary
+purpose of the run: it is the exact failure that forced the 2026-09-01 rollback,
+and it is now measured rather than argued.
+
+Telemetry captured both classes — `sandbox_only` on
+`rpc.has_unread_private_comments` (11 observations) and `unknown` on the same
+surface (7) plus **`storage.attachments_recipient`** (1), a storage-path denial
+that DID record, which is new relative to B-34's blind spot.
+
+## D-1's result CORRECTS an earlier inference, which is withdrawn
+
+Device B saw **its own posts and nobody else's**. That is not an anomaly and not
+an artefact of two installs on one device: `posts_select_public_or_owner` carries
+an **ungated owner branch**, which is carve-out **D-U6-4** — a member must always
+reach their own content, or account deletion and export break under denial.
+
+**The withdrawn claim:** after the first bind this record inferred, from Device
+A's empty feed, that the `all` feed scope excludes the viewer's own posts. Device
+B disproves it under the identical policy. Device A's empty feed was observed in
+the contaminated window — C-57 signing it out, amid the Supabase 401 incident —
+so it never supported that inference. **The inference is withdrawn; the earlier
+observation is left standing as what was seen.**
+
+## D-3 — why it is short, stated precisely
+
+Three separate statements, and collapsing them is how this would be misread:
+
+- **Structurally enforced.** `posts_insert_owner` carries `enforcement_gate` in
+  its **`with_check`**, and **8** write policies do. An unentitled identity
+  cannot insert, by construction. `posts_delete_owner` remains ungated — D-U6-2
+  intact.
+- **Shadow-path reachability previously demonstrated.** The row
+  `posts.insert / sandbox_only / would_deny = true`, 2026-09-01 10:11:41, proves
+  the publish path reaches the policy and the policy decides deny — **under
+  observation, not under enforcement**.
+- **No behavioural enforcement denial has been observed anywhere.** In
+  production, no `posts.insert` row landed on 2026-09-02, and **absence is
+  structurally uninformative**: under enforcement an INSERT denial aborts the
+  statement, which rolls back the stat write — B-34's blind spot. It cannot
+  distinguish *denied* from *never attempted*. Locally, there are **ZERO** insert
+  attempts between `setflag true` and `setflag false` in
+  `supabase/tests/u6b/acceptance.sh`; groups E–H are all reads, and `U6b-C1`
+  inserts while **unbound**, testing the trigger overwrite.
+
+**Nothing was written during the enforced window** — posts, comments and
+attachment objects all `0` since the re-bind, `posts` total unchanged at 101.
+That is *consistent with* refusal and is **not evidence of** it, because a
+client-side enqueue in `SessionSyncQueue` is indistinguishable from a server
+refusal when viewed from the database.
+
+**Filed as C-59.** It must be closed before the next enforcement bind. It does
+**not** block grandfather cleanup / U6b-4.
+
+## Independent post-kill verification
+
+| | |
+|---|---|
+| `enforcement_enabled` | **false** |
+| `enforcement_active()` | **false** — the gate agrees with the flag |
+| `u6b_bound_at` | **preserved**, 2026-09-01 16:52:52.452956+00 |
+| Drift, all four denormalised columns | **0** |
+| Triggers | **5** present |
+| `posts` / `auth.users` | **101 / 17**, unchanged |
+| `membership_binding.updated_at` | **2026-08-25 17:31:54** — untouched throughout |
+| Production rows / conflicts / cutover | **0 / 0 / 16** |
+
+## A state fact this run established, and it was deliberate rather than drift
+
+`grandfather_enabled` is **false**, set by
+`2026-09-01-grandfather-disable-shadow-experiment.sql` and left off. So all 16
+pre-cutover identities read `unknown`, and Device B is one of them. **The matrix
+therefore ran against the post-retirement world**, which is the configuration
+U6b-4 is heading for anyway.
+
+`membership_state` reaches the snapshot **transitively**, via
+`when public.connected_member(target_user_id) then 'grandfathered'`. An earlier
+source-text check here reported it as not reading the snapshot; that check was
+defeated by the delegation, which is U5c-34's lesson arriving a third time.
+
+## TWO CONSTRAINTS CARRIED FORWARD TO U6b-4
+
+1. **Removing the grandfather branch and control is INTENTIONALLY IRREVERSIBLE
+   and requires SEPARATE HUMAN AUTHORISATION.** The shadow experiment's
+   documented rollback — `set grandfather_enabled = true` — dies with the column.
+   Consistent with B-36, and a one-way door that must be a conscious act.
+2. **Historical telemetry must continue accepting the existing `'grandfathered'`
+   clause value after the live branch is removed.** `shadow_stat_clause_check`
+   must NOT be narrowed: a historical row carries that value
+   (2026-09-01 10:13:15), and narrowing the constraint alongside the branch
+   removal would break existing rows.

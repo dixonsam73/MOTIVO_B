@@ -70,7 +70,35 @@ timestamp. **`u6b_bound_at` REMAINS SET, DELIBERATELY:** it records that binding
 happened, which stays true, and it makes the bind statement **refuse to run a
 second time**. A re-bind is a conscious act, never a repeat.
 
-**THE BEHAVIOURAL DENY-PATH QA IS INCOMPLETE AND MUST NOT BE READ AS PASSED.** A
+**PRODUCTION DENY-PATH VERIFICATION IS SUBSTANTIALLY PASSED, WITH D-3
+BEHAVIOURAL ENFORCEMENT COVERAGE OUTSTANDING — 2026-09-02.** Re-bound 11:17:55,
+kill switch 11:28:07, enforcement live for about ten minutes, `u6b_bound_at`
+preserved so the record of the first binding is not rewritten. **This is
+deliberately not recorded as "P6 complete" or "P6 passed".** **D-1 production
+PASS** (feed filtered); **D-2 — non-owner content filtered from the production
+feed, direct-open behaviour NOT independently exercised**; **D-3 — structurally
+enforced and shadow-path reachability previously demonstrated, but NO
+behavioural enforcement denial has been observed either locally or in
+production, filed as C-59**; **D-7 production PASS** (directory search empty);
+**account-deletion and carve-outs production PASS**.
+
+**C-57 IS BEHAVIOURALLY VERIFIED UNDER LIVE ENFORCEMENT**, across both
+`sandbox_only` and `unknown`, **with no credential destruction and no sign-out
+across the observed denials** — `auth.users` held at 17 and both devices stayed
+Connected while being denied. That was the run's primary purpose and it is the
+exact failure that forced the rollback below. Post-kill: gate agrees with the
+flag, **drift 0** on all four denormalised columns, five triggers, binding
+`updated_at` untouched at 2026-08-25, Production rows 0, conflicts 0.
+
+**D-1 CORRECTS AN EARLIER INFERENCE, NOW WITHDRAWN.** Device B saw its own posts
+and nobody else's — the **ungated owner branch**, carve-out D-U6-4, working as
+designed. The earlier claim that the feed's `all` scope excludes the viewer's own
+posts was drawn from Device A's empty feed in the contaminated window and is
+withdrawn; the observation stands, the inference does not.
+
+**THE RECORD BELOW IS THE 2026-09-01 RUN AND REMAINS ACCURATE AS OF ITS DATE.**
+
+**THE BEHAVIOURAL DENY-PATH QA WAS INCOMPLETE ON 2026-09-01 AND MUST NOT BE READ AS PASSED.** A
 Supabase service incident — **HTTP 401 JWT rejections at PostgREST**, persisting on
 14.17 and rolled back to 14.5 — was in progress during the QA window, and the
 device symptoms seen under it — an empty feed with its empty-state message
@@ -1053,8 +1081,8 @@ separate. Conflating them is how B-9's subcase went missing once already.**
 
 | Count | Value | What it is |
 |---|---|---|
-| Phase-3-tagged register rows | **26** | Every row whose Phase cell contains a literal `3`. Was 10; **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision); **U6b's interrupted deny-path QA filed C-55** (**RESOLVED 2026-09-01** — a runaway SwiftUI re-render loop, not a navigation defect; unrelated to enforcement, as recorded). **Its Phase cell reads `4`, so it never entered this literal-`3` count — yet it was listed among the open Phase 3 obligations. That inconsistency predates this unit and is recorded rather than silently corrected, because the two counts are deliberately different questions and quietly aligning them would destroy exactly the distinction the table exists to preserve** |
-| Open Phase 3 obligations | **4** | C-26, C-31, B-11 and **B-34, filed 2026-09-01 from the U6a production shadow window**. **C-55 WAS THE FIFTH AND IS RESOLVED 2026-09-01** — the mechanism was a runaway SwiftUI re-render loop, **not** a navigation defect; two no-op guards removed it, no navigation code changed, and the fix was accepted on Device A against a scoring rule fixed before the run. **C-56 was filed by that investigation and is Phase 5, so it does NOT enter this count** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
+| Phase-3-tagged register rows | **27** | Every row whose Phase cell contains a literal `3`. Was 10; **U6b's final P6 run filed C-59** (OPEN — a COVERAGE defect on the enforcement write-deny path, not a production defect); **U4 filed six — B-25 to B-30 — and resolved all six**; **U5a filed three — C-52, B-31, C-53 — and resolved two**; **U5e filed C-54** (Resolved); **U5g filed B-32** (Resolved); **the U6a gate filed B-33** (Resolved by U6a); **the U6a production shadow window filed B-34** (OPEN); **the 16-identity census filed B-35** (Resolved the same day); **the beta-cohort classification filed B-36** (Resolved the same day, by a product decision); **U6b's interrupted deny-path QA filed C-55** (**RESOLVED 2026-09-01** — a runaway SwiftUI re-render loop, not a navigation defect; unrelated to enforcement, as recorded). **Its Phase cell reads `4`, so it never entered this literal-`3` count — yet it was listed among the open Phase 3 obligations. That inconsistency predates this unit and is recorded rather than silently corrected, because the two counts are deliberately different questions and quietly aligning them would destroy exactly the distinction the table exists to preserve** |
+| Open Phase 3 obligations | **5** | C-26, C-31, B-11, **B-34, filed 2026-09-01 from the U6a production shadow window**, and **C-59, filed 2026-09-02 from U6b's final P6 run** — the enforcement write-deny path has never been observed behaving, locally or in production. **C-59 IS A COVERAGE DEFECT, NOT A PRODUCTION DEFECT:** the path is structurally enforced (`posts_insert_owner` gates in its `with_check`) and its shadow-path reachability was demonstrated on 2026-09-01; what is missing is any observation of it actually denying. **It must be closed before the next enforcement bind and does NOT block U6b-4.** **C-58 was filed 2026-09-02 and is Phase 4, so it does NOT enter this count** — a bounded product/UX follow-up on follower attribution for a lapsed viewer, with the global fix explicitly rejected. **C-55 WAS THE FIFTH AND IS RESOLVED 2026-09-01** — the mechanism was a runaway SwiftUI re-render loop, **not** a navigation defect; two no-op guards removed it, no navigation code changed, and the fix was accepted on Device A against a scoring rule fixed before the run. **C-56 was filed by that investigation and is Phase 5, so it does NOT enter this count** — a coverage defect in the U6a metric, NOT a production defect. **B-35 was filed and RESOLVED the same day** — U6c's liveness check was keyed on `auth.users.last_sign_in_at`, which is blind to long-lived sessions and fails OPEN; corrected in both durable documents before U6c's clock has started. **B-33 was filed 2026-08-30 by the U6a gate and RESOLVED 2026-09-01 by U6a itself**, on both halves of its stated condition — the wrapper is deployed and the false sentence is corrected. **B-24 IS RESOLVED — 2026-08-30, by B-24n on genuine Apple** (was open through U4 and all of U5's implementation). **B-32 was filed and RESOLVED by U5g.** **B-31 was added by U5a and RESOLVED by U5d**; **C-54 was filed by U5e and RESOLVED the same day**; U5a also filed and resolved C-52 and C-53 |
 | Backend-verification obligations | **0** | Was 4. **All four executed by U2.** B-24 is a design defect, not a verification |
 | QA obligations with no register row | **9** | C5–C10, plus C2 and C3's recovery halves and C12's proxy half |
 
@@ -1089,7 +1117,7 @@ rows, minus the eighteen resolved:
 
 - **B-33** — filed by the U6a gate 2026-08-30 and resolved by U6a 2026-09-01;
 
-= **4 open: C-26, B-11, C-31 and B-34.** **B-24 CLOSED ON 2026-08-30**, on its own
+= **5 open: C-26, B-11, C-31, B-34 and C-59.** **C-59 was filed 2026-09-02 by U6b's final P6 run** and is the only one of the five that is a COVERAGE defect rather than missing capability or a metric gap. **B-24 CLOSED ON 2026-08-30**, on its own
 stated condition — *"this row closes when the protocol runs for real, not when
 its server half compiles"* — with both branches now discharged against genuine
 Apple: `legacy_claim` by S-1/S-2/S-3 and **bound-at-source by B-24n**. **B-32 was
@@ -1114,7 +1142,12 @@ it. **The leading hypothesis — two stacked `navigationDestination(isPresented:
 modifiers — was FALSIFIED BY EXPERIMENT**, and the register already contained the
 real mechanism, written down on 2026-08-11 as an observation about C-38.
 
-**THREE OF THE FOUR ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
+**THREE OF THE FIVE ARE ENFORCEMENT AND CLEANUP, AND NONE OF THEM HAS BEGUN.**
+**C-59 is the fifth and is different again — the enforcement write-deny path has
+never been observed behaving, locally or in production. It is a COVERAGE defect,
+not a production defect: the path is structurally enforced and its shadow-path
+reachability was demonstrated; nothing has ever watched it deny. It must close
+before the next enforcement bind and does not block U6b-4.**
 **B-34 is the fourth and is a different shape — it is a defect in what the U6a
 window can SEE, not in what production does.** Do not
 read B-24's closure, or U6a's deploy, as progress against them. Membership is
