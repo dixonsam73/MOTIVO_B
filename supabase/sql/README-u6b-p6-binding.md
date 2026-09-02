@@ -614,3 +614,98 @@ client publish IS observable without any new machinery** — by its request/resp
 and by whether the row persists afterwards, which is exactly the criterion C-59
 was scored on. B-34 remains an **observability limitation**, never an
 implementation or security blocker.
+
+---
+
+# FINAL U6 BIND — ENFORCEMENT IS LIVE AND DURABLE. 2026-09-02
+
+**Bound `2026-09-02 15:30:20.83726+00` under explicit human authorisation, and
+NOT followed by the kill switch.** `u6b_bound_at` preserved at
+`2026-09-01 16:52:52.452956+00` — binding happened once and its record is not
+rewritten. All nine returned values matched the prediction.
+
+## D-3 PRODUCTION PASSES — the one thing P6 could not score
+
+**All three tightened elements, in a single trace, with no instrumentation
+added.** The evidence came from the existing `#if DEBUG` client path on Device B
+(Études Dev) attached to Xcode.
+
+| Element | Evidence |
+|---|---|
+| the real request **reached the server** | `Task <131> sent request, body S 418` → `received response, status 403` |
+| it was **refused**, unambiguously on authorisation | `error=HTTP error 403 body={"code":"42501", … "message":"new row violates row-level security policy for table \"posts\""}` |
+| it **did not persist** | `posts` **101 → 101**, `posts_since_bind` **0**, the refused post id absent, shares 0, storage objects 0 |
+
+**`42501` is PostgreSQL's `insufficient_privilege`, and the message is the
+`WITH CHECK` refusal from `posts_insert_owner` — byte-identical to what C-59
+produced locally.** The server-path and production-path evidence now agree
+exactly.
+
+**THE CLIENT QUEUED THE POST RATHER THAN LOSING IT.** `Flush completed •
+remaining=1` — `SessionSyncQueue` retained the item. Nothing was destroyed by the
+refusal, and this is why "nothing was written" alone was never sufficient
+evidence: a queued item and a refused one look identical from the database.
+**Operationally this means the queued post will publish if enforcement is ever
+lifted for that identity**, which is correct behaviour and worth knowing.
+
+## C-57 HELD AGAIN, UNDER DURABLE ENFORCEMENT
+
+`auth.users` **17**, unchanged. The 403 did **not** trigger `onAuthChallenge` —
+the C-57 fix narrowed that to 401 alone — and the log shows the app continuing
+with 200 responses immediately afterwards. No sign-out, no drop to Solo, on the
+run that is not being rolled back.
+
+## The 400s are the fail-closed RPC deny path, not a fault
+
+Two requests returned **400**. Four gated RPCs raise on denial —
+`add_post_comment`, `get_unread_private_comment_groups`, `reply_to_commenter`,
+`respond_to_commenters` — and PostgREST renders a raised exception as 4xx.
+`get_unread_private_comment_groups` is a read RPC the client polls and the
+18-byte body matches its shape. **This is the fail-closed decision working.**
+Attribution is by shape and is consistent rather than proven; no unexplained
+failure occurred and no acceptance step was affected.
+
+**It also explains their silence in telemetry**: the raise aborts the statement,
+which rolls back the observer's own write. Only the two NON-raising surfaces
+recorded — `storage.attachments_recipient` and `rpc.has_unread_private_comments`,
+both `unknown`/`deny=true`. **B-34 confirmed in production for the first time**,
+incidentally and exactly as predicted.
+
+**No `posts.insert` telemetry row exists for the refused publish either** — same
+mechanism. That is precisely why D-3 was scored on database outcome.
+
+## The acceptance matrix
+
+| # | Result |
+|---|---|
+| 1 — feed shows own posts only | **PASS** |
+| 2 — publish refused, reached server, did not persist | **PASS — D-3 production** |
+| 3 — account deletion reachable | **PASS** |
+| 4 — stays signed in and Connected throughout | **PASS** |
+
+Settled invariants were not re-proven. P6's evidence was reused.
+
+## Closed by this run
+
+**B-11** — stage 2, binding. Its final stated condition was G11 passed (done,
+16 of 16) and the enforcement-path Sandbox QA resolved (Gate 6, settled and
+discharged). Enforcement is now durably binding.
+
+**C-26** — server-side membership authority now decides. Its Billing Grace
+element is the SERVER's support for the state, implemented and asserted by U6b
+E3/E4; **the Production App Store Connect promotion is C-31's obligation and
+stays open.**
+
+**U6** closes with them.
+
+**Still open:** C-31 (Production Billing Grace promotion) · B-34 (an
+observability limitation, not a blocker) · U7 (no cleanup worker exists; a lapsed
+Sandbox row carries `pending_cleanup_at` that nothing acts on).
+
+## The kill switch remains available and unchanged
+
+```sql
+update public.membership_control set enforcement_enabled = false, updated_at = now() where id;
+```
+One boolean, effective on the next predicate evaluation. `u6b_bound_at` is never
+rewritten by it.
