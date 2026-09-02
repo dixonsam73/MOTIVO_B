@@ -103,7 +103,15 @@ is A-12b "$(claimcnt "$DUA")" "1" "exactly the due row of that identity is claim
 
 psq "update public.membership set cleanup_claimed_at = now() - interval '2 hours' where user_id='$DUE';" >/dev/null
 is A-13 "$(sel 50 | grep -c "^$DUE/")" "1" "N: an EXPIRED claim makes the identity a candidate again"
-is A-14 "$(psq "select pg_get_functiondef(oid) ~ 'interval ''1 hour''' from pg_proc where proname='membership_due_for_cleanup_v1';")" "t" "lease interval is one hour"
+# RE-POINTED FOR U7c, 2026-09-02, AND MADE STRICTER RATHER THAN MERELY MOVED.
+# It FAILED first, which is the assertion working: U7c moved the lease interval
+# out of the selector into membership_cleanup_lease_v1() so preview and execute
+# cannot disagree about it. A-14 now pins the VALUE and the fact that it has
+# exactly ONE definition -- the property U7c actually created, which the old
+# single-function assertion could not express.
+is A-14  "$(psq "select public.membership_cleanup_lease_v1()::text;")" "01:00:00" "lease interval is one hour"
+is A-14b "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('membership_due_for_cleanup_v1','membership_cleanup_eligible_v1') and pg_get_functiondef(p.oid) ~ 'interval ''''[0-9]';")" "0" "A-14b neither selector hardcodes an interval -- ONE definition"
+is A-14c "$(psq "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and p.proname in ('membership_due_for_cleanup_v1','membership_cleanup_eligible_v1') and pg_get_functiondef(p.oid) ~ 'membership_cleanup_lease_v1';")" "2" "...and both selectors consult it"
 is A-15 "$(psq "select public.connected_member('$DUA');")" "t" "a claim does not alter entitlement (DUA still Production-entitled)"
 is A-15b "$(psq "select public.membership_state('$DUE');")" "sandbox_only" "a claim does not alter membership_state"
 
