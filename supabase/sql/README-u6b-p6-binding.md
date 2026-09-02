@@ -344,3 +344,73 @@ update public.membership_control set enforcement_enabled = false, updated_at = n
 **"Kill switch" in step 4 means exactly that statement** — setting the flag back
 to FALSE. It is not a figure of speech for "stop testing", and P6 is not left
 bound at the end of this sequence.
+
+
+---
+
+# P6 SECOND RUN — 2026-09-02. C-57 PROVEN. DENY PATH **PARTIALLY** SCORED
+
+**Re-bound 10:42:04, kill switch 10:47:27.** `enforcement_enabled` is **FALSE**;
+`u6b_bound_at` still records the first bind at 2026-09-01 16:52:52.
+
+## The primary purpose of this run — C-57 — PASSES
+
+**Same device, same denials, opposite outcome:**
+
+| | denials | result |
+|---|---|---|
+| before the fix (10:34) | 32 x 403 | `signOut()`, credentials deleted, **irreversible Solo** |
+| **after the fix (10:42)** | **17 x deny=true** | **stayed CONNECTED**, session alive 10:42:30, auth.users 17, binding untouched |
+
+**That is the assertion this run existed to make, and it is measured rather than
+inferred.**
+
+## Scored PASSES
+
+- **F-1..F-5** — the flip itself: exactly one row, `u6b_bound_at` preserved, no
+  membership table moved, drift 0.
+- **Denial is live** — `rpc.has_unread_private_comments` denied **17 times**,
+  `sandbox_only`, `would_deny=true`.
+- **D-1's DENY half** — the feed was empty **WITH its empty-state message**, so
+  the query **succeeded and returned zero rows**. That is a denial, not a
+  failure, and it is the discriminator that separated this from the PostgREST
+  incident.
+- **D-6** own attachment readable · **D-8** own profile loads and edits ·
+  **D-9 account deletion reachable** — the carve-outs, and the only class whose
+  failure would have been dangerous.
+
+## NOT EXERCISED — named rather than absorbed
+
+**D-2, D-3, D-4, D-5, D-7 were not run, and the whole Device B `unknown` half was
+not run.** With the feed empty there was nothing to open, and no publish or
+comment attempt was made. **They are not scored as passes and must not be read as
+any.**
+
+**D-1's UI prediction was WRONG and that is my error, not a defect.** I predicted
+the feed would show the viewer's own posts. It showed none. The local real-HTTP
+discrimination proved the API *does* return own posts under enforcement, so the
+`all` feed scope evidently excludes them in the UI. The API half of D-1 is
+confirmed; the UI half was a bad prediction.
+
+## AN UNRECORDED PRODUCT-VISIBLE CONSEQUENCE — needs a decision
+
+Under enforcement, Device A's follower rendered as **`User . 1492f0`** rather than
+a display name.
+
+**This is two settled decisions interacting, not a defect.** `follows` SELECT is
+deliberately **ungated** (D-U6-2 — you cannot delete what you cannot see), while
+`get_account_directory_by_user_ids` gates on the **viewer**. So an unentitled
+member keeps a usable follow list but **cannot see who is in it**.
+
+**G10 is intact** — it forbids gating on the *subject*, and retained attribution
+still resolves for entitled viewers. What is gated here is the viewer.
+
+**Whether that UX is acceptable is a product decision nobody has taken.** A
+secondary note: the fallback renders a UUID prefix, which is pre-existing
+behaviour and not introduced by U6b.
+
+## P6 STATUS: NOT COMPLETE
+
+The blocking defect is resolved and the safety-critical half passes. **The
+write-denial half and the second identity class remain unexercised**, so P6 is
+**not** scored as a pass.
