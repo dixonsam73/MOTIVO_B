@@ -2168,6 +2168,26 @@ false premise in C-55 which survived until it was challenged.**
 | **Device A** | **SD beta burner** — iPhone 16e | `com.sdsongs.etudes` (**Release**) **only** |
 | **Device B** | **SD iPhone** — iPhone 17 Pro | `com.sdsongs.etudes` (Release) **and** `com.samueldixon.motivo.dev` (**"Études Dev"**, Debug) |
 
+**SANDBOX TESTER ↔ DEVICE ↔ `originalTransactionId` — established 2026-09-01 by
+reading Device A's Settings, not by inferring from names.**
+
+| Tester | Device | `originalTransactionId` | Window |
+|---|---|---|---|
+| **tester 1** (`sdsongsltd@gmail.com`) | — | **2000001220187383** | 2026-08-20 → 2026-08-25, 18 notifications |
+| **tester 2** (`sdsongsltd+devicec@…`) | **Device A** — SD beta burner | **2000001228947923** | 2026-08-30 → 2026-09-01, 29 notifications |
+| (`sdsongsltd+deviceB@…`) | **Device B** — SD iPhone | — | no subscription of its own on record |
+
+**The record previously said only "the second tester, created 2026-08-30" and
+never named it**, which cost a round trip — the same ambiguity class as "Device B"
+meaning two different installs. **Full addresses are deliberately not written
+here**; the plus-tag disambiguates all three and the account holder holds the
+rest.
+
+**RESUBSCRIBING DEVICE A MUST BE DONE ON `+devicec`.** A different tester means a
+different `originalTransactionId` and therefore a SECOND `membership` row — at
+which point the U6b re-bind guard correctly refuses, because it requires exactly
+one live Sandbox row.
+
 **DEVICE B HAS TWO INSTALLS AND ANY QA STEP MUST NAME WHICH.** They are different
 bundle identifiers with different containers and different local data. "Device B"
 alone is not a specification — that is exactly what went wrong.
