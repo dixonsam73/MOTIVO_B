@@ -598,8 +598,19 @@ called directly, and `posts_insert_owner` is the **only** INSERT policy on
 off, the L1 check returns `accepted` — so **L1 would fail**. The assertion can
 fire, which is the property C56-7 taught us to check.
 
-**THE PRODUCTION-DEVICE OBSERVATION REMAINS UNMADE, AND NO PRODUCTION TEST COULD
-HAVE SUPPLIED IT.** Capturing it needs a re-bind, and the reason it cannot be
-seen there at all is **B-34** — which stays open on its own account. D-3's
-production half is therefore not closed and is not claimed to be; what has
-changed is that the mechanism is no longer unobserved anywhere.
+**THE PRODUCTION-DEVICE OBSERVATION REMAINS UNMADE.** Capturing it needs a bind,
+which was out of scope for C-59. D-3's production half is therefore not closed
+and is not claimed to be; what has changed is that the mechanism is no longer
+unobserved anywhere.
+
+**CORRECTED 2026-09-02 — DISTINGUISH TELEMETRY BLINDNESS FROM BEHAVIOURAL
+UNOBSERVABILITY.** This paragraph read *"no production test could have supplied
+it"* and *"the reason it cannot be seen there at all is B-34"*. **That overstates
+B-34 and the overstatement is the kind that closes off a real option.** What B-34
+establishes is narrow: *shadow/observer telemetry* cannot prove whether a denied
+INSERT was attempted, because its side effect may roll back. It says nothing
+about whether the behaviour itself can be seen. **Under a future bind, a real
+client publish IS observable without any new machinery** — by its request/response
+and by whether the row persists afterwards, which is exactly the criterion C-59
+was scored on. B-34 remains an **observability limitation**, never an
+implementation or security blocker.
