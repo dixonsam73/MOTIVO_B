@@ -95,45 +95,77 @@ jobs:
           FN_URL: ${{ vars.CLEANUP_FN_URL }}
           MODE: ${{ steps.mode.outputs.mode }}
         run: |
-          set -euo pipefail
+          # THE PAYLOAD NEVER CROSSES A SHELL BOUNDARY.
+          #
+          # Replaced curl 2026-09-03. A stock-runner curl invocation logged a
+          # 29-byte body and uploaded_bytes=29 while the authenticated handler
+          # recorded 83 bytes, unparseable, with no mode field and no
+          # content-type -- arriving by the normal Cloudflare route with
+          # content-length: 83. That payload was never identified. This caller
+          # AVOIDS the condition rather than explaining it, and the investigation
+          # is closed unless this caller reproduces it.
+          #
+          # `<<'PY'` is a QUOTED heredoc, so the shell interpolates nothing: the
+          # body is built and sent inside one process, from the environment.
+          # python3 and urllib are stock on ubuntu-latest -- stdlib only, no
+          # action, no dependency, no new infrastructure.
+          #
+          # The caller fingerprints what it sends, so agreement with the
+          # handler's raw_sha256 is provable at BOTH ends rather than inferred.
+          # That is the check whose absence made the curl discrepancy
+          # unresolvable.
+          #
+          # NO SECRET IS PRINTED. The key is read from the environment, never
+          # placed on a command line, and appears only in the Authorization
+          # header. Proxy variables are reported as a BOOLEAN only -- a proxy URL
+          # can embed credentials and is never printed.
+          python3 - <<'PY'
+          import hashlib, json, os, re, sys, urllib.request, urllib.error
 
-          # ACTIVATION STEP 2 NOT DONE -> FAIL LOUDLY. Silence is the failure mode
-          # this whole unit is most exposed to, so an unconfigured job must be
-          # noisy rather than quietly successful.
-          if [ -z "${INVOKE_KEY:-}" ]; then
-            echo "::error::CLEANUP_INVOKE_KEY is not set. The scheduler is NOT activated; nothing was invoked."
-            exit 1
-          fi
-          if [ -z "${FN_URL:-}" ]; then
-            echo "::error::CLEANUP_FN_URL repository variable is not set. Nothing was invoked."
-            exit 1
-          fi
+          mode = os.environ["MODE"]
+          url = os.environ["FN_URL"]
+          key = os.environ["INVOKE_KEY"]
 
-          BODY=$(printf '{"mode":"%s","limit":25}' "$MODE")
+          # ACTIVATION NOT DONE -> FAIL LOUDLY. Silence is the failure mode this
+          # unit is most exposed to, so an unconfigured job must be noisy rather
+          # than quietly successful.
+          if not key:
+              sys.exit("::error::CLEANUP_INVOKE_KEY is not set. The scheduler is NOT activated; nothing was invoked.")
+          if not url:
+              sys.exit("::error::CLEANUP_FN_URL is not set. Nothing was invoked.")
 
-          # Capture status and body separately so a non-200 is a hard failure
-          # rather than something to read past.
-          HTTP=$(curl -sS --max-time 300 -o /tmp/cleanup-response.json -w '%{http_code}' \
-                   -X POST "$FN_URL" \
-                   -H "Authorization: Bearer ${INVOKE_KEY}" \
-                   -H 'content-type: application/json' \
-                   -d "$BODY")
+          payload = json.dumps({"mode": mode, "limit": 25}, separators=(",", ":")).encode("utf-8")
+          print(f"resolved MODE=[{mode}]")
+          print(f"request BODY=[{payload.decode()}]")
+          print(f"request BODY bytes={len(payload)}")
+          print(f"request BODY sha256={hashlib.sha256(payload).hexdigest()}")
+          print("proxy env present: " + str(any(
+              os.environ.get(v) for v in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy"))))
 
-          # UUIDs are redacted before anything reaches the run log. Production
-          # identifiers are kept out of this repository by standing rule, and a
-          # CI log is close enough to it to deserve the same treatment.
-          sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g' \
-            /tmp/cleanup-response.json > /tmp/cleanup-redacted.json || true
+          req = urllib.request.Request(url, data=payload, method="POST")
+          req.add_header("Authorization", f"Bearer {key}")
+          req.add_header("Content-Type", "application/json")
+          try:
+              with urllib.request.urlopen(req, timeout=300) as r:
+                  status, raw = r.status, r.read().decode("utf-8", "replace")
+          except urllib.error.HTTPError as e:
+              status, raw = e.code, e.read().decode("utf-8", "replace")
 
-          echo "HTTP $HTTP"
-          echo "--- response (uuids redacted) ---"
-          cat /tmp/cleanup-redacted.json || true
-          echo
+          # UUIDs are redacted before anything is printed or written. Production
+          # identifiers are kept out of this repository by standing rule, and a CI
+          # log deserves the same treatment.
+          red = re.sub(
+              r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+              "<uuid>", raw)
+          print(f"HTTP {status}")
+          print("--- response (uuids redacted) ---")
+          print(red)
+          with open("/tmp/cleanup-redacted.json", "w") as fh:
+              fh.write(red)
 
-          if [ "$HTTP" != "200" ]; then
-            echo "::error::membership_cleanup_v1 returned HTTP $HTTP"
-            exit 1
-          fi
+          if status != 200:
+              sys.exit(f"::error::membership_cleanup_v1 returned HTTP {status}")
+          PY
 
       - name: Summary
         if: always()
