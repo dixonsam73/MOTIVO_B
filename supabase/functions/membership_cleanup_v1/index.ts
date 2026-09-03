@@ -245,6 +245,28 @@ Deno.serve(async (req) => {
   const modeFieldSafe = rawModeField === null
     ? null
     : (/^[A-Za-z0-9_-]{0,20}$/.test(rawModeField) ? rawModeField : "<non-conforming>");
+  // STRUCTURAL METADATA ONLY -- extended 2026-09-03 after the first diagnostic
+  // showed the handler receiving 83 bytes with no mode field and no content-type,
+  // while the runner logged a 29-byte body and uploaded_bytes=29.
+  //
+  // NOTHING HERE CAN CARRY A VALUE. Header NAMES without their values; the URL
+  // PATHNAME with query and fragment discarded; whether the body parsed and what
+  // JSON type it is; and top-level KEY NAMES only, each admitted solely if it
+  // matches a conservative pattern. No header value, no body content and no
+  // property value is ever reflected.
+  let parsedType: string | null = null;
+  let topKeys: string[] | null = null;
+  try {
+    const v = rawBody ? JSON.parse(rawBody) : undefined;
+    if (v !== undefined) {
+      parsedType = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+      if (parsedType === "object") {
+        topKeys = Object.keys(v as Record<string, unknown>).sort()
+          .map((k) => /^[A-Za-z0-9_.-]{1,40}$/.test(k) ? k : "<non-conforming>");
+      }
+    }
+  } catch { parsedType = "unparseable"; }
+
   const diag = {
     raw_bytes: rawBytes,
     raw_sha256: rawSha,
@@ -252,6 +274,13 @@ Deno.serve(async (req) => {
     mode_field_type: typeof body.mode,
     header_content_type: req.headers.get("content-type"),
     header_content_length: req.headers.get("content-length"),
+    // The highest-value datum: whose request is this? A curl invocation carries
+    // accept/user-agent/content-type; a platform-originated one looks different.
+    header_names: [...req.headers.keys()].sort(),
+    method: req.method,
+    url_path: new URL(req.url).pathname,
+    parsed_type: parsedType,
+    top_level_keys: topKeys,
   };
 
   // DRY RUN IS THE DEFAULT. Destructive execution requires naming itself, so a
