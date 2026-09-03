@@ -442,3 +442,159 @@ on the ratified decision not to build a second scheduler platform to eliminate
 it.** The mitigation is that the job **fails loudly** on any non-200 and writes a
 run summary, so its liveness is observable to anyone who looks — and the honest
 statement is that **someone must look.**
+
+---
+
+## 13. A1 EXECUTED — 2026-09-03. THE WORKER NOW ACCEPTS ONLY THE INVOCATION KEY
+
+**A1.1 → A1.2 → A1.3, in that order, so no window existed in which a redeployed
+worker expected an unset key.**
+
+### A1.1 — the secret
+
+A **256-bit random hex** value (`openssl rand -hex 32`) was generated, written to
+`~/.etudes-secrets/cleanup_invoke_key` (**dir 700, file 600**, outside the
+repository, the same location and posture as the Apple `.p8`), and set as the
+Supabase Edge Function secret `CLEANUP_INVOKE_KEY`. **The value was never
+printed, never echoed, never placed on a command line and is not in the
+repository.** It reached Supabase through a mode-600 env file that was deleted
+immediately afterwards.
+
+**It is stored locally deliberately: A2 needs the same value as a GitHub
+repository secret**, and a key nobody can retrieve would have to be rotated at
+A2 rather than reused.
+
+### A1.2 — the redeploy
+
+`supabase functions deploy membership_cleanup_v1` — **only that function was
+deployed.**
+
+**EVERY FUNCTION'S VERSION NUMBER MOVED, AND ONLY ONE FUNCTION'S CONTENT DID.**
+This is the phenomenon **U5 recorded and causally attributed**: `secrets set`
+bumps every function's version with **every SHA unchanged**, while
+`functions deploy` touches only the named one. Verified here on `updated_at`
+rather than taken on trust:
+
+| Function | v | Content last updated |
+|---|---|---|
+| `membership_cleanup_v1` | **3** | **2026-09-03 11:17:45Z** ← today |
+| `appstore_reconcile_v1` | 4 | 2026-08-23 21:09:43Z |
+| `membership_attest_v1` | 2 | 2026-08-23 21:09:43Z |
+| `appstore_notifications_v1` | 3 | 2026-08-20 12:23:49Z |
+| `revoke_apple_identity_v1` | 4 | 2026-08-13 17:47:41Z |
+| `delete_account_v1` | 10 | 2026-08-13 12:06:37Z |
+
+**Five functions kept their original deploy dates**, so nothing but the cleanup
+worker changed. `ezbr_sha256` prefixes are recorded in the commit for future
+comparison. All six remain `ACTIVE` with `verify_jwt=false`.
+
+### A1.3 — production authorisation boundary
+
+| | Presented | Result |
+|---|---|---|
+| **P-AUTH-1** | no credential | **401** |
+| **P-AUTH-2** | empty bearer | **401** |
+| **P-AUTH-3** | wrong credential | **401** |
+| **P-AUTH-4** | cleanup key **+1 char** | **401** |
+| **P-AUTH-5** | cleanup key **−1 char** | **401** |
+| **P-AUTH-6** | **the SERVICE ROLE key** — returned **200** before A1 | **401** |
+| **P-AUTH-7** | the project **anon key**, a genuinely valid project JWT | **401** |
+| **P-AUTH-8** | a user-shaped JWT | **401** |
+| **P-AUTH-9** | `GET` with the correct key | **405** |
+| **P-AUTH-10** | **the correct cleanup key** | **200**, `identities: 0`, `claimed: false`, `deleted: false` |
+
+**P-AUTH-6 is the property A1 exists to create**, and it is now true in
+production.
+
+**One honest limit on P-AUTH-8.** Minting a *genuinely signed* production
+end-user JWT would require a real user credential, which I neither have nor
+should use. What was sent is user-shaped but not signed by the production secret.
+**The genuinely-signed case is covered locally** — `auth-probe.sh` AUTH-9 signs a
+real token with the local GoTrue secret against **identical code** and gets 401 —
+and **P-AUTH-7 covers the stronger production half**: a token with a *valid*
+project signature is refused. Together the property holds; neither alone would
+carry it.
+
+### Nothing was mutated
+
+State captured immediately before and after A1.3 is **identical in every field**:
+`auth.users` 17, posts 101, comments 5, follows 9, attachment objects 15,
+`pending_cleanup_at` `2026-11-01 15:16:44+00`, `cleanup_completed_at` **NULL**,
+`cleanup_claimed_at` and `renewal_info_signed_date` still carrying yesterday's
+P5 values, conflicts 0, enforcement **true**, `pg_cron` **0**.
+
+**`identities: 0` is the correct dry-run answer** — Device A's schedule returned
+to Apple's own derived value during yesterday's refusal, so nothing is due.
+
+---
+
+## 14. A2 PREFLIGHT — THE BRANCH QUESTION, AND WHY A2 SHRANK
+
+### The repository's actual state
+
+| | |
+|---|---|
+| Default branch | **`main`**, at `1f0e090` — *"1.0-build-128 for TestFlight"* |
+| Working branch | `feature/solo-connected` |
+| Divergence | **`main` is 0 commits ahead; the feature branch is 311 commits ahead** |
+| Difference | **239 files, +60,814 / −1,282** |
+
+**`main` predates all of Phase 1, 2 and 3.** The entire membership architecture —
+every migration, both audits, all six Edge Functions' source, the whole test
+suite — exists only on the working branch.
+
+**MERGING `feature/solo-connected` INTO `main` WOULD BE A RELEASE-SHAPED EVENT OF
+311 COMMITS, AND IT MUST NOT HAPPEN BECAUSE A CRON NEEDS A FILE.** That merge may
+well be intended eventually; it is an independent decision about releasing the
+product, and coupling it to scheduler activation would be exactly the ad-hoc
+release strategy to avoid.
+
+### The workflow needs nothing from the repository
+
+Measured, not assumed: the file contains **zero** references to repo code — no
+`actions/checkout`, no build step, no script path, no dependency. It makes one
+HTTPS call to an endpoint that is already deployed. **It therefore applies
+cleanly to `main` on its own and behaves identically there.**
+
+### The finding that makes A2 smaller than planned
+
+**`workflow_dispatch` runs from ANY branch containing the workflow file. Only the
+`schedule` trigger is restricted to the default branch.**
+
+So the entire workflow path — the secret, the URL variable, the credential, the
+invocation, the redaction, the summary — **can be verified by manual dispatch on
+`feature/solo-connected`, with nothing on `main` at all.** The merge then has to
+prove only one remaining thing: that the cron fires.
+
+### Proposed A2, in two parts
+
+| Step | Action | Touches `main`? |
+|---|---|---|
+| **A2.1** | Push the branch (4 commits, see below). Add repository **secret** `CLEANUP_INVOKE_KEY` (the value in `~/.etudes-secrets/cleanup_invoke_key`) and repository **variable** `CLEANUP_FN_URL`. Then **manually dispatch** the workflow on `feature/solo-connected` and confirm: HTTP **200**, mode resolves to **`dry_run`**, `identities: 0`, UUIDs redacted in the log, and **no lease, no completion, no count change** | **No** |
+| **A2.2** | Only once A2.1 is green: put **only** `.github/workflows/membership-cleanup.yml` on `main` via a **one-file PR branched from `main`** — not a merge of the working branch. The daily schedule then begins, in `dry_run` | **One file** |
+
+**A2.2 is the smallest correct action**: one self-contained CI file, one PR, no
+product code, no coupling to a release decision. If the working branch is later
+merged to `main` for its own reasons, the file is already there and the merge is
+a no-op for it.
+
+**One consequence to accept knowingly:** between A2.2 and any future release
+merge, `main` carries a workflow whose worker source lives on another branch. The
+file's own header explains what it invokes and that the worker is deployed to
+Supabase, so it is self-describing rather than mysterious — but it is a real
+oddity and it is better named than discovered.
+
+### Four commits are unpushed, and I cannot push them
+
+`4383144`, `e30b189`, `90fb6b6`, `1e9db64`. **`git push` fails from this shell** —
+`could not read Username for 'https://github.com': Device not configured` — which
+is an environment limitation rather than a credential problem, and `fetch` works
+normally. **A2.1 requires these to be on the remote**, so pushing them is the
+account holder's step.
+
+---
+
+## 15. STOPPED AFTER A1
+
+**A2 and A3 not performed.** No GitHub secret, no repository variable, no
+dispatch, nothing on `main`, `CLEANUP_MODE` unset, `pg_cron` 0.
