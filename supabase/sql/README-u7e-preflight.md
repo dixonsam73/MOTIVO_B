@@ -619,3 +619,82 @@ account holder's step.
 
 **A2 and A3 not performed.** No GitHub secret, no repository variable, no
 dispatch, nothing on `main`, `CLEANUP_MODE` unset, `pg_cron` 0.
+
+---
+
+## 16. A2 COMPLETE — THE SCHEDULER IS LIVE IN `dry_run`. 2026-09-03
+
+### Configuration and the one-file default-branch change
+
+Repository **secret** `CLEANUP_INVOKE_KEY` and **variable** `CLEANUP_FN_URL`
+created; **`CLEANUP_MODE` left unset**. Configuration deliberately preceded the
+workflow reaching `main`, so no window existed in which a live scheduled workflow
+lacked its credential.
+
+PR **#1**, `chore/cleanup-scheduler` -> `main`, merged at **`6e600c9`**. Verified
+independently of the PR: the **entire** diff from the previous `main` is
+`A .github/workflows/membership-cleanup.yml`, and the blob is **byte-identical**
+(`6b3f9ec`) to the reviewed and locally-tested file. **No Phase 3 history reached
+`main`.**
+
+**Verified in the blob ON `main`**, not in a working copy: triggers `schedule` +
+`workflow_dispatch`; cron `17 3 * * *`; **dispatch inputs null** with **zero
+`inputs.` references**, so there is no second route to execute; unset
+`CLEANUP_MODE` resolves to `dry_run`; `execute` is an explicit opt-in case; UUID
+redaction present; non-200 fails the run; `permissions: contents: read`.
+
+### GitHub run #1 — manual dispatch
+
+Success. Trigger `workflow_dispatch`, resolved mode **`dry_run`**, response
+`ok:true, mode:dry_run, claimed:false, deleted:false, identities:0, results:[]`,
+**no production UUID in the output**.
+
+### Independent production verification — SCORED ON THE DATABASE
+
+**Every field byte-identical to the baseline captured before the dispatch:**
+users/posts/comments/follows **17 / 101 / 5 / 9**; storage **15 / 3**;
+`connected_attachments` **31**; directory **17**; `pending_cleanup_at`
+**`2026-11-01 15:16:44+00`**; `cleanup_completed_at` **NULL**;
+`cleanup_claimed_at` `2026-09-03 08:14:36` — **no new lease**;
+`membership.updated_at` `08:14:37`; `renewal_info_signed_date` `08:14:36.792`;
+conflicts **0**; enforcement **true + active**; `pg_cron` **0**.
+
+**Two of those are load-bearing and are not count checks.**
+`renewal_info_signed_date` unchanged proves **no Apple call was made** — any live
+read moves it. `membership.updated_at` unchanged proves **no write occurred**.
+Together they establish the dry run's non-mutating claim **from the database
+side**, independently of what the worker or the workflow reported.
+
+**A2-c PASSES. A2 CLOSES.** The daily schedule is live at 03:17 UTC and resolves
+to `dry_run`; it can delete nothing while `CLEANUP_MODE` is unset. `pg_cron`
+remains **0** — the scheduler is outside the database, so U4's `A57f` is
+unaffected.
+
+### A LOCAL GIT INCIDENT DURING THIS STEP, RECORDED BECAUSE THE LESSON IS REUSABLE
+
+The account holder's own push/PR left this working copy checked out on
+`chore/cleanup-scheduler`. I did not re-check the branch before committing, and
+`git add -A` on a branch carrying **`main`'s** `.gitignore` swept up 249 paths
+that the feature branch correctly ignores — Xcode `build/` output, `xcuserdata`,
+Supabase CLI cache, regenerated test `.work/` scratch, and **`supabase/.env`,
+which contains `SERVICE_ROLE_KEY`**.
+
+**Nothing was pushed and nothing left the machine** — the commit was unreachable
+from every remote ref, confirmed against live `ls-remote` output before any
+recovery action. It was discarded by moving the branch pointer back to
+`origin/chore/cleanup-scheduler`, which deletes nothing from disk.
+
+**Three lessons, and the middle one generalises furthest:**
+
+1. **`git add -A` is unsafe on any branch whose `.gitignore` differs from the one
+   the working tree was built under.** The same tree is "clean" on one branch and
+   full of committable junk on another.
+2. **A verification loop that cannot fail is worse than none.** My first check
+   used `git rev-parse "<ref>:<path>"` to test file existence and reported every
+   file as present — because `rev-parse` **echoes unmatched input** instead of
+   failing, so the `|| echo ABSENT` fallback never fired. It produced a confident,
+   uniform, entirely wrong answer, caught only because a second count disagreed.
+   **`git cat-file -e` is the correct existence test**, and two methods
+   disagreeing is a result, not noise.
+3. **Re-read the branch immediately before committing**, not merely after
+   switching.
