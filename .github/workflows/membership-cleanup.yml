@@ -111,13 +111,49 @@ jobs:
 
           BODY=$(printf '{"mode":"%s","limit":25}' "$MODE")
 
+          # ------------------------------------------------ DIAGNOSTIC, U7e A3
+          #
+          # ADDED 2026-09-03 AFTER RUN #2 REPORTED mode: execute IN ITS SUMMARY
+          # WHILE THE WORKER ANSWERED dry_run. Every artefact was verified
+          # byte-correct -- this workflow on main, the deployed bundle, and the
+          # worker's own parsing, which was reproduced locally accepting
+          # execute from exactly this body. The one datum that would have
+          # settled it was never captured, because this job logged the RESPONSE
+          # and never the REQUEST.
+          #
+          # THIS IS A DIAGNOSTIC, NOT A FIX. Nothing about the behaviour is
+          # changed; the run is simply made able to explain itself.
+          #
+          # NO SECRET IS PRINTED AND NO SHELL TRACING IS ENABLED. The body
+          # carries only mode and limit. `set -x` is deliberately NOT used --
+          # it would echo the Authorization header and with it the invocation
+          # key.
+          echo "resolved MODE=[$MODE]"
+          echo "request BODY=[$BODY]"
+          echo "request BODY bytes=${#BODY}"
+
           # Capture status and body separately so a non-200 is a hard failure
           # rather than something to read past.
-          HTTP=$(curl -sS --max-time 300 -o /tmp/cleanup-response.json -w '%{http_code}' \
+          #
+          # size_upload IS THE THIRD DATUM AND THE ONLY ONE THAT ANSWERS "did
+          # curl actually SEND that body". Echoing $BODY proves what the shell
+          # variable holds; it says nothing about what left the process. If
+          # uploaded_bytes matches the body length, the payload genuinely went
+          # on the wire and curl/-d semantics are EXCLUDED as the cause. If it
+          # is 0 or mismatched, the fault is local to this step and there is no
+          # need to suspect GitHub, the network or Supabase at all.
+          METRICS=$(curl -sS --max-time 300 -o /tmp/cleanup-response.json \
+                   -w '%{http_code} %{size_upload}' \
                    -X POST "$FN_URL" \
                    -H "Authorization: Bearer ${INVOKE_KEY}" \
                    -H 'content-type: application/json' \
                    -d "$BODY")
+          HTTP=${METRICS%% *}
+          UPLOADED=${METRICS##* }
+          echo "uploaded_bytes=$UPLOADED (expected ${#BODY})"
+          if [ "$UPLOADED" != "${#BODY}" ]; then
+            echo "::warning::curl uploaded $UPLOADED bytes but the body is ${#BODY} -- the request payload is the fault, not the worker"
+          fi
 
           # UUIDs are redacted before anything reaches the run log. Production
           # identifiers are kept out of this repository by standing rule, and a
