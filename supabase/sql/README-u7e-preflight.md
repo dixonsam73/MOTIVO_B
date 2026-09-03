@@ -406,13 +406,27 @@ U6 untouched, C-58 not started, no cleanup fixture manufactured.
 
 | # | Act | Effect | Reversal |
 |---|---|---|---|
-| **A1** | Set the Supabase secret **`CLEANUP_INVOKE_KEY`** to a freshly generated value, then **redeploy** `membership_cleanup_v1` | The worker accepts the new key and **stops accepting the service role key** | Redeploy the previous version |
-| **A2** | Set repository variable **`CLEANUP_FN_URL`**, add repository secret **`CLEANUP_INVOKE_KEY`**, and merge the workflow to the **default branch** | The daily schedule begins, in **`dry_run`** — deletion structurally impossible | Disable the workflow, or delete the secret |
+| **A1.1** | Set the Supabase secret **`CLEANUP_INVOKE_KEY`** to a freshly generated value | Nothing yet — the deployed worker does not read it | Overwrite or delete the secret |
+| **A1.2** | **Redeploy** `membership_cleanup_v1` | The worker accepts the new key and **stops accepting the service role key** | Redeploy the previous version |
+| **A1.3** | Verify the production authorisation boundary | — | — |
+| **A2** | Set repository variable **`CLEANUP_FN_URL`**, add repository secret **`CLEANUP_INVOKE_KEY`**, and put the workflow on the **default branch** | The daily schedule begins, in **`dry_run`** — deletion structurally impossible | Disable the workflow, or delete the secret |
 | **A3** | Set repository variable **`CLEANUP_MODE = execute`** | Unattended execute becomes live | Unset the variable — back to `dry_run`, no commit or redeploy |
 
-**A1 MUST PRECEDE A2.** Between the redeploy and the secret being set, the worker
-refuses **every** caller — which is the fail-closed behaviour L-13…L-16 measured,
-and it means a partially-completed activation cannot leave the endpoint open.
+**ORDER CORRECTED 2026-09-03, BECAUSE THIS SECTION CONTRADICTED ITSELF.** The
+table said *"set the secret … then redeploy"* while the paragraph beneath it said
+*"between the redeploy and the secret being set, the worker refuses every
+caller"* — describing the **opposite** order, and describing a window that must
+not be created at all.
+
+**THE SECRET IS SET FIRST, AND THE REDEPLOY SECOND.** In that order there is no
+window in which a redeployed worker expects a key that does not exist. The
+reverse order would produce a live endpoint refusing **every** caller until the
+secret landed — fail-closed, so not dangerous, but a self-inflicted outage on the
+destructive path and exactly the kind of avoidable state a sequencing note exists
+to prevent.
+
+**A1 MUST COMPLETE BEFORE A2.** GitHub must never hold a credential the worker
+does not yet accept.
 
 **GITHUB RUNS SCHEDULED WORKFLOWS ONLY FROM THE DEFAULT BRANCH.** The file is on
 `feature/solo-connected`, so **the cron cannot fire at all until it is merged**.

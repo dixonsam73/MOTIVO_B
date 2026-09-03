@@ -25,7 +25,8 @@
 #   2. the repository secret CLEANUP_INVOKE_KEY must exist -- without it the job
 #      fails loudly and calls nothing;
 #   3. the repository variable CLEANUP_MODE must be set to "execute" -- it
-#      DEFAULTS TO dry_run, which the worker cannot delete from.
+#      DEFAULTS TO dry_run, which the worker cannot delete from. THIS IS THE ONLY
+#      CONTROL: manual workflow_dispatch obeys it too, and offers no override.
 #
 # Kill switches, either of which is immediate and neither of which touches
 # membership state: disable this workflow, or delete the secret.
@@ -42,14 +43,12 @@ on:
     # is preferred over weekly for MONITORING: a broken job is discovered a day
     # later rather than a week later.
     - cron: "17 3 * * *"
+  # MANUAL DISPATCH TAKES NO MODE INPUT, DELIBERATELY. Corrected 2026-09-03: it
+  # previously offered a per-run `mode` choice, which was a SECOND route to
+  # destructive execution that bypassed the repository variable. Manual and
+  # scheduled invocation now obey exactly the same control, so there is ONE
+  # answer to "can this delete anything", and it is CLEANUP_MODE.
   workflow_dispatch:
-    inputs:
-      mode:
-        description: "Override for this run only (does not change the schedule)"
-        required: false
-        default: "dry_run"
-        type: choice
-        options: [dry_run, execute]
 
 concurrency:
   # A second run can never overlap the first. The worker's one-hour lease already
@@ -68,23 +67,27 @@ jobs:
       - name: Resolve mode
         id: mode
         env:
-          # DEFAULTS TO dry_run WHEN THE VARIABLE IS UNSET. Activation step 3 is
-          # setting it to "execute"; until then a scheduled run cannot delete.
-          SCHEDULED_MODE: ${{ vars.CLEANUP_MODE }}
-          DISPATCH_MODE: ${{ inputs.mode }}
+          # THE ONLY CONTROL. Scheduled and manual runs read the same repository
+          # variable, and there is no input, no override and no second path.
+          # Unset, or anything that is not exactly "execute", means dry_run --
+          # so the failure direction of a typo, a cleared variable or a
+          # half-finished configuration is always the harmless one.
+          CLEANUP_MODE: ${{ vars.CLEANUP_MODE }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            MODE="${DISPATCH_MODE:-dry_run}"
-          else
-            MODE="${SCHEDULED_MODE:-dry_run}"
-          fi
+          MODE="${CLEANUP_MODE:-dry_run}"
           case "$MODE" in
-            dry_run|execute) ;;
-            *) echo "::error::CLEANUP_MODE must be dry_run or execute, got '$MODE'"; exit 1 ;;
+            execute) ;;
+            dry_run|"") MODE="dry_run" ;;
+            *)
+              # Fail rather than silently coercing an unrecognised value: a
+              # variable someone MEANT to be "execute" and mistyped should be
+              # visible, not quietly downgraded to a no-op that looks healthy.
+              echo "::error::CLEANUP_MODE must be 'dry_run' or 'execute', got '$MODE'"
+              exit 1 ;;
           esac
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "Running in mode: $MODE"
+          echo "Running in mode: $MODE (from repository variable CLEANUP_MODE)"
 
       - name: Invoke membership_cleanup_v1
         env:
