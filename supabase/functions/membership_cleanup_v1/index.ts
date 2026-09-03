@@ -212,85 +212,12 @@ Deno.serve(async (req) => {
     return json(401, { error: "cleanup invocation credential required" });
   }
 
-  // ===================================================== TEMPORARY DIAGNOSTIC
-  //
-  // ADDED 2026-09-03. REMOVE ONCE THE INVOCATION-PATH DISCREPANCY IS SETTLED --
-  // see the removal plan in supabase/sql/README-u7e-preflight.md.
-  //
-  // WHY IT EXISTS. A GitHub-originated run logged `resolved MODE=[execute]`, the
-  // exact 29-byte body, and `uploaded_bytes=29`, received HTTP 200, and this
-  // function answered `dry_run`. The identical body sent by hand to the identical
-  // URL with the identical credential answered `execute`. Every artefact either
-  // side has been verified byte-correct, so the remaining question is the one
-  // thing nothing could observe: WHAT THE HANDLER ACTUALLY RECEIVES. size_upload
-  // counts bytes handed to a socket, not bytes delivered to this code.
-  //
-  // The body is now read ONCE as text so it can be measured before parsing.
-  // Behaviour is unchanged: an empty or unparseable body still yields {} and
-  // therefore dry_run, exactly as `req.json()` in a try/catch did.
-  const rawBody = await req.text().catch(() => "");
-  const rawBytes = new TextEncoder().encode(rawBody).length;
-  const rawSha = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(rawBody))
-    .then((d) => Array.from(new Uint8Array(d)).map((b) => b.toString(16).padStart(2, "0")).join(""));
-
   let body: Record<string, unknown>;
-  try { body = rawBody ? JSON.parse(rawBody) : {}; } catch { body = {}; }
-
-  // NOTHING SENSITIVE LEAVES THIS FUNCTION. The raw body is never echoed -- only
-  // its length and its SHA-256, which are discriminating against fingerprints
-  // computed in advance and reveal nothing about content. The mode field is
-  // echoed pre-normalisation ONLY when it matches a strict conservative pattern,
-  // so an arbitrary caller-supplied string can never be reflected back.
-  const rawModeField = typeof body.mode === "string" ? body.mode : null;
-  const modeFieldSafe = rawModeField === null
-    ? null
-    : (/^[A-Za-z0-9_-]{0,20}$/.test(rawModeField) ? rawModeField : "<non-conforming>");
-  // STRUCTURAL METADATA ONLY -- extended 2026-09-03 after the first diagnostic
-  // showed the handler receiving 83 bytes with no mode field and no content-type,
-  // while the runner logged a 29-byte body and uploaded_bytes=29.
-  //
-  // NOTHING HERE CAN CARRY A VALUE. Header NAMES without their values; the URL
-  // PATHNAME with query and fragment discarded; whether the body parsed and what
-  // JSON type it is; and top-level KEY NAMES only, each admitted solely if it
-  // matches a conservative pattern. No header value, no body content and no
-  // property value is ever reflected.
-  let parsedType: string | null = null;
-  let topKeys: string[] | null = null;
-  try {
-    const v = rawBody ? JSON.parse(rawBody) : undefined;
-    if (v !== undefined) {
-      parsedType = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
-      if (parsedType === "object") {
-        topKeys = Object.keys(v as Record<string, unknown>).sort()
-          .map((k) => /^[A-Za-z0-9_.-]{1,40}$/.test(k) ? k : "<non-conforming>");
-      }
-    }
-  } catch { parsedType = "unparseable"; }
-
-  const diag = {
-    raw_bytes: rawBytes,
-    raw_sha256: rawSha,
-    mode_field: modeFieldSafe,
-    mode_field_type: typeof body.mode,
-    header_content_type: req.headers.get("content-type"),
-    header_content_length: req.headers.get("content-length"),
-    // The highest-value datum: whose request is this? A curl invocation carries
-    // accept/user-agent/content-type; a platform-originated one looks different.
-    header_names: [...req.headers.keys()].sort(),
-    method: req.method,
-    url_path: new URL(req.url).pathname,
-    parsed_type: parsedType,
-    top_level_keys: topKeys,
-  };
+  try { body = await req.json(); } catch { body = {}; }
 
   // DRY RUN IS THE DEFAULT. Destructive execution requires naming itself, so a
   // replayed or malformed invocation previews instead of destroying. This
   // remains true after U7e: the scheduler must name the mode in its own body.
-  //
-  // UNCHANGED BY THE DIAGNOSTIC. The normalisation below, the authority gate and
-  // the caller authentication above are all exactly as they were; the diagnostic
-  // only observes, and it observes AFTER authentication so an unauthenticated
-  // caller learns nothing at all.
   const mode: Mode = body.mode === "execute" ? "execute" : "dry_run";
   const limit = Number.isFinite(body.limit) ? Math.max(1, Number(body.limit)) : 25;
   const only = body.user_id ? String(body.user_id) : null;
@@ -370,7 +297,6 @@ Deno.serve(async (req) => {
       ok: true, mode, claimed: false, deleted: false,
       identities: results.length, results,
       note: "dry_run is non-mutating and acquires no lease.",
-      diag,
     });
   }
 
@@ -555,5 +481,5 @@ Deno.serve(async (req) => {
     }
   }
 
-  return json(200, { ok: true, mode, identities: results.length, results, diag });
+  return json(200, { ok: true, mode, identities: results.length, results });
 });
