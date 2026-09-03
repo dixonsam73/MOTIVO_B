@@ -556,15 +556,36 @@ Measured, not assumed: the file contains **zero** references to repo code — no
 HTTPS call to an endpoint that is already deployed. **It therefore applies
 cleanly to `main` on its own and behaves identically there.**
 
-### The finding that makes A2 smaller than planned
+### THE "FINDING THAT MAKES A2 SMALLER" WAS WRONG — CORRECTED 2026-09-03
 
-**`workflow_dispatch` runs from ANY branch containing the workflow file. Only the
-`schedule` trigger is restricted to the default branch.**
+**This section previously claimed:**
 
-So the entire workflow path — the secret, the URL variable, the credential, the
-invocation, the redaction, the summary — **can be verified by manual dispatch on
-`feature/solo-connected`, with nothing on `main` at all.** The merge then has to
-prove only one remaining thing: that the cron fires.
+> *"`workflow_dispatch` runs from ANY branch containing the workflow file. Only
+> the `schedule` trigger is restricted to the default branch. So the entire
+> workflow path can be verified by manual dispatch on `feature/solo-connected`,
+> with nothing on `main` at all."*
+
+**THE FIRST SENTENCE IS HALF TRUE AND THE CONCLUSION DRAWN FROM IT IS FALSE.**
+GitHub registers the `workflow_dispatch` **event** only from a workflow file
+present on the **default branch**. Until the file is on `main` the workflow is not
+dispatchable at all — it does not appear in the Actions UI and the API's
+`POST /actions/workflows/{id}/dispatches` has nothing to address. **Once it IS on
+the default branch, dispatch may then select any branch**, which is the true half
+that the false conclusion was built on.
+
+**Verified against this repository:** `origin/main` contains **0** workflow files,
+so no dispatch of `membership-cleanup.yml` is currently possible from any branch.
+
+**CONSEQUENCE: A2.1 AND A2.2 INVERT.** The one-file PR to `main` is not the last
+step of A2 that a green dispatch unlocks — it is the **first**, and it is the
+precondition for any dispatch at all. **The "verify everything before touching
+`main`" sequence is not available**, and no amount of care in ordering the other
+steps recovers it.
+
+**What does NOT change:** the merge is still **one self-contained CI file** from a
+branch cut off `main`, never the 311-commit working branch; the schedule still
+resolves to **`dry_run`** while `CLEANUP_MODE` is unset, so the file being on
+`main` cannot delete anything; and both kill switches remain.
 
 ### Proposed A2, in two parts
 
