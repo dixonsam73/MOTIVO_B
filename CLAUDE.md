@@ -2483,6 +2483,8 @@ preference for a different design.
 `docs/architecture.md` — the four data domains, plus designed-but-parked work.
 `docs/audit-findings.md` — finding register (IDs C-n client, B-n backend).
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
+`docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
+**PLANNED, NOT IMPLEMENTED.**
 
 ---
 
