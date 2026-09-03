@@ -19,6 +19,10 @@ HERE="supabase/tests/u7"
 WORK="$HERE/.work/e2e"
 PORT="${U7_E2E_PORT:-9181}"; STUB_PORT="${U7_STUB_PORT:-9182}"
 NAME="u7_e2e_$$"; STUB="u7_stub_$$"
+# U7e: the worker now accepts ONLY the dedicated invocation key. Presenting the
+# service role key here would return 401, so this suite carries the same
+# stand-in key the auth probe uses.
+CK="u7e-test-invoke-key-0123456789abcdef"
 : "${DOCKER_HOST:=unix://$HOME/.colima/default/docker.sock}"; export DOCKER_HOST
 
 PASS=0; FAIL=0
@@ -57,6 +61,7 @@ docker run -d --name "$STUB" --network "$NET" -p "$STUB_PORT:9000" -v "$PWD/$WOR
   "$IMAGE" start --main-service /probe/stub --port 9000 >/dev/null || exit 1
 docker run -d --name "$NAME" --network "$NET" -p "$PORT:9000" -v "$PWD/$WORK:/probe:ro" \
   -e "SUPABASE_URL=http://$KONG:8000" -e "SERVICE_ROLE_KEY=$SR" -e "ANON_KEY=$AK" \
+  -e "CLEANUP_INVOKE_KEY=$CK" \
   -e "APPLE_API_BASE_URL_SANDBOX=http://$STUB:9000" \
   -e "APPLE_API_BASE_URL_PRODUCTION=http://$STUB:9000" \
   -e "APPLE_IAP_KEY_ID=TESTKEYID" -e "APPLE_IAP_ISSUER_ID=test-issuer" \
@@ -67,7 +72,7 @@ docker run -d --name "$NAME" --network "$NET" -p "$PORT:9000" -v "$PWD/$WORK:/pr
 for _ in $(seq 1 40); do sleep 2; curl -s --max-time 5 "http://127.0.0.1:$STUB_PORT/__calls" >/dev/null 2>&1 && break; done
 plan()  { curl -s -X POST "http://127.0.0.1:$STUB_PORT/__control" -H 'content-type: application/json' -d "$1" >/dev/null; }
 calls() { curl -s "http://127.0.0.1:$STUB_PORT/__calls"; }
-run()   { curl -s --max-time 180 -X POST "http://127.0.0.1:$PORT/" -H "Authorization: Bearer $SR" -H 'content-type: application/json' -d "$1"; }
+run()   { curl -s --max-time 180 -X POST "http://127.0.0.1:$PORT/" -H "Authorization: Bearer $CK" -H 'content-type: application/json' -d "$1"; }
 
 echo; echo "U7c end-to-end — the real worker, real storage, programmable Apple"; echo
 

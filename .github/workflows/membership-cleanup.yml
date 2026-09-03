@@ -1,0 +1,149 @@
+# Études — unattended expiry cleanup (U7e).
+#
+# WHAT THIS IS. One scheduled HTTPS POST to the already-deployed
+# membership_cleanup_v1 Edge Function. There is no logic here and there must
+# never be any: every decision about WHO is eligible, whether Apple still
+# authorises deletion, and what gets removed lives in the worker and in the
+# database. This file is a timer with a credential.
+#
+# WHY NOT pg_cron. The ratified constraint is that no service-role credential may
+# be stored in, or readable from, PostgreSQL. pg_cron + pg_net requires the key
+# to be readable from inside the database -- including via Supabase Vault, whose
+# decrypted view is exactly the property being excluded. An external scheduler
+# keeps the credential outside the database entirely.
+#
+# THE CREDENTIAL IS NARROW BY DESIGN. CLEANUP_INVOKE_KEY can do one thing: ask
+# this worker to run. It is NOT the Supabase service role key, which is authority
+# over the whole project and which the worker no longer accepts from outside.
+#
+# ACTIVATION IS A PRODUCTION ACT, NOT A MERGE. Three independent things must all
+# be true before this can delete anything, and each is a deliberate step:
+#
+#   1. this file must be on the DEFAULT branch  -- GitHub runs scheduled
+#      workflows only from the default branch, so on a feature branch the cron
+#      never fires at all;
+#   2. the repository secret CLEANUP_INVOKE_KEY must exist -- without it the job
+#      fails loudly and calls nothing;
+#   3. the repository variable CLEANUP_MODE must be set to "execute" -- it
+#      DEFAULTS TO dry_run, which the worker cannot delete from.
+#
+# Kill switches, either of which is immediate and neither of which touches
+# membership state: disable this workflow, or delete the secret.
+
+name: Membership expiry cleanup
+
+on:
+  schedule:
+    # 03:17 UTC daily. Deliberately not on the hour: scheduled workflows are
+    # best-effort and GitHub delays runs clustered on round times.
+    #
+    # DAILY IS AMPLE AND THE REASON IS NOT TIMELINESS. The quarantine is 60 days,
+    # so at most ~24h of latency on a ~1,440h fuse, in the safe direction. Daily
+    # is preferred over weekly for MONITORING: a broken job is discovered a day
+    # later rather than a week later.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Override for this run only (does not change the schedule)"
+        required: false
+        default: "dry_run"
+        type: choice
+        options: [dry_run, execute]
+
+concurrency:
+  # A second run can never overlap the first. The worker's one-hour lease already
+  # makes overlap safe; this makes it impossible, which is cheaper than relying
+  # on the lease for something the scheduler can simply not do.
+  group: membership-cleanup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve mode
+        id: mode
+        env:
+          # DEFAULTS TO dry_run WHEN THE VARIABLE IS UNSET. Activation step 3 is
+          # setting it to "execute"; until then a scheduled run cannot delete.
+          SCHEDULED_MODE: ${{ vars.CLEANUP_MODE }}
+          DISPATCH_MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            MODE="${DISPATCH_MODE:-dry_run}"
+          else
+            MODE="${SCHEDULED_MODE:-dry_run}"
+          fi
+          case "$MODE" in
+            dry_run|execute) ;;
+            *) echo "::error::CLEANUP_MODE must be dry_run or execute, got '$MODE'"; exit 1 ;;
+          esac
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "Running in mode: $MODE"
+
+      - name: Invoke membership_cleanup_v1
+        env:
+          INVOKE_KEY: ${{ secrets.CLEANUP_INVOKE_KEY }}
+          FN_URL: ${{ vars.CLEANUP_FN_URL }}
+          MODE: ${{ steps.mode.outputs.mode }}
+        run: |
+          set -euo pipefail
+
+          # ACTIVATION STEP 2 NOT DONE -> FAIL LOUDLY. Silence is the failure mode
+          # this whole unit is most exposed to, so an unconfigured job must be
+          # noisy rather than quietly successful.
+          if [ -z "${INVOKE_KEY:-}" ]; then
+            echo "::error::CLEANUP_INVOKE_KEY is not set. The scheduler is NOT activated; nothing was invoked."
+            exit 1
+          fi
+          if [ -z "${FN_URL:-}" ]; then
+            echo "::error::CLEANUP_FN_URL repository variable is not set. Nothing was invoked."
+            exit 1
+          fi
+
+          BODY=$(printf '{"mode":"%s","limit":25}' "$MODE")
+
+          # Capture status and body separately so a non-200 is a hard failure
+          # rather than something to read past.
+          HTTP=$(curl -sS --max-time 300 -o /tmp/cleanup-response.json -w '%{http_code}' \
+                   -X POST "$FN_URL" \
+                   -H "Authorization: Bearer ${INVOKE_KEY}" \
+                   -H 'content-type: application/json' \
+                   -d "$BODY")
+
+          # UUIDs are redacted before anything reaches the run log. Production
+          # identifiers are kept out of this repository by standing rule, and a
+          # CI log is close enough to it to deserve the same treatment.
+          sed -E 's/[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}/<uuid>/g' \
+            /tmp/cleanup-response.json > /tmp/cleanup-redacted.json || true
+
+          echo "HTTP $HTTP"
+          echo "--- response (uuids redacted) ---"
+          cat /tmp/cleanup-redacted.json || true
+          echo
+
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::membership_cleanup_v1 returned HTTP $HTTP"
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Membership expiry cleanup"
+            echo ""
+            echo "- mode: \`${{ steps.mode.outputs.mode }}\`"
+            echo "- trigger: \`${{ github.event_name }}\`"
+            echo ""
+            echo "Response (uuids redacted):"
+            echo ""
+            echo '```json'
+            cat /tmp/cleanup-redacted.json 2>/dev/null || echo '(no response captured)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

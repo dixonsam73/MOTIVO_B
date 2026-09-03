@@ -1,7 +1,20 @@
-# U7e — SCHEDULER SCOPE AND PREFLIGHT. NOTHING BUILT, NOTHING ACTIVATED. 2026-09-03
+# U7e — SCHEDULER. IMPLEMENTED LOCALLY, NOT ACTIVATED. 2026-09-03
 
-**No scheduler exists. `pg_cron` is 0 in production. No workflow file has been
-created. Nothing in this document has been implemented.**
+**ACCEPTED WITH FIVE DECISIONS, 2026-09-03, AND NOW IMPLEMENTED LOCALLY.**
+`pg_cron` is still 0 in production. No production secret exists, the worker has
+**not** been redeployed, and the workflow is on a **feature branch**, where
+GitHub never runs a schedule. Nothing is activated.
+
+**The four ratified decisions that changed this plan:**
+
+1. **G7 is the named deferred operational verification**, not a closure blocker,
+   and its stale `allowlisted` wording is corrected **with the superseded text
+   preserved** — §1 and `docs/qa-plan.md` G7.
+2. **`membership_cleanup_v1` accepts ONLY `CLEANUP_INVOKE_KEY` from outside.**
+   The service role key is **no longer accepted** — §2.
+3. **GitHub Actions daily is accepted for launch**, with its 60-day inactivity
+   auto-disable recorded as an **operational risk**, not designed around — §6.
+4. **The finished state is `mode: execute`, not a permanent dry run** — §7.
 
 ---
 
@@ -80,9 +93,9 @@ A scheduler holding the **service-role key** holds a credential that can do
 **anything** in the project. For invoking one endpoint that is far more authority
 than the job needs.
 
-**Recommendation: a dedicated `CLEANUP_INVOKE_KEY` secret, accepted by the worker
-alongside the service-role key**, so the scheduler's store holds a credential
-whose entire capability is *"ask the cleanup worker to run"*.
+**RATIFIED AND IMPLEMENTED: `CLEANUP_INVOKE_KEY` is the ONLY externally accepted
+credential. The service role key is refused.** The preflight proposed accepting
+both; the decision went further, and further is right.
 
 ```ts
 const ok = (!!presented) && (
@@ -100,12 +113,23 @@ guards above are for. **`auth-probe.sh` gains cases for: invoke key correct →
 200; invoke key wrong → 401; invoke key absent from the environment while a
 caller presents anything → 401/closed.**
 
-**Cost, stated plainly:** this changes the deployed worker's authorisation path
-and requires a redeploy plus a re-run of the auth probe. **The alternative — put
-the service-role key in the scheduler and change no code — is available and
-acceptable**, and it is the right choice if you would rather not touch that path
-again. **The trade is blast radius versus not editing an audited security
-boundary.** I recommend the narrower key; the decision is yours.
+**BE PRECISE ABOUT WHAT REFUSING `service_role` BUYS, BECAUSE IT IS EASY TO
+OVERCLAIM — and this sentence is the one to re-read before anyone cites this
+design as a protection it is not.**
+
+**It does NOT protect the data from a service-role holder.** Anyone with that key
+can delete the same posts, rows and storage objects directly, and nothing at this
+layer could prevent that. What it buys is narrower and still real:
+
+- **The scheduler holds a credential that can do nothing else.** This is the
+  primary win, and it comes from the dedicated key existing.
+- **No other tool or script that happens to carry `service_role` can trigger an
+  unattended destructive run by accident.** A single-purpose door for a
+  single-purpose job.
+
+**Cost, paid:** the deployed worker's authorisation path changed, so it needs a
+redeploy and the probe re-run. Both are done locally; the redeploy is a listed
+production activation step.
 
 ---
 
@@ -220,58 +244,104 @@ watching**, and that is the whole risk this unit introduces.
 **Therefore, and this is a real risk boundary rather than copied U6 ritual:**
 
 ```
-U7e-1   activate the schedule in mode "dry_run"     -> destruction IMPOSSIBLE
-        proves: the cron fires, the credential works, the worker is reachable,
-                the output is what a scheduled run looks like
+U7e-1   schedule live with CLEANUP_MODE unset -> dry_run   destruction IMPOSSIBLE
+        proves: the cron fires, the credential authenticates, the worker is
+                reachable, and the scheduled output is what it should be
    ⛔   separately authorised
-U7e-2   flip the workflow body to mode "execute"    -> unattended destruction live
+U7e-2   set repository variable CLEANUP_MODE = execute     unattended execute live
 ```
+
+**The two are separated by a repository VARIABLE, not by a code change**, so
+neither activation nor rollback needs a commit, a redeploy, or a merge. Unsetting
+`CLEANUP_MODE` returns the schedule to `dry_run` immediately.
 
 **A dry-run schedule cannot delete anything** — the worker's `dry_run` path makes
 no Apple call, takes no lease and writes nothing, proven in production on
 2026-09-02. So U7e-1 tests **the entire scheduler** — timing, credential,
 reachability, logging — with the destructive capability structurally absent.
 
-**A further consequence worth deciding deliberately:** if `execute` is live before
-2026-11-01, **the first-ever production deletion happens unattended, with nobody
-watching.** That is a poor first run for the most irreversible path in the system.
-**Recommendation: keep the schedule on `dry_run` until G7 has been performed once
-MANUALLY and scored**, then flip to `execute`. G7 then remains a supervised run
-and the scheduler inherits a path already proven in production.
+### DECISION 4 — THE FINISHED STATE IS `execute`. MY RECOMMENDATION WAS OVERRULED, AND CORRECTLY
+
+**This section previously concluded:**
+
+> *"Recommendation: keep the schedule on `dry_run` until G7 has been performed
+> once MANUALLY and scored, then flip to `execute`."*
+
+**RATIFIED 2026-09-03: dry-run is an ACTIVATION AND VERIFICATION STEP, not a
+resting state.** Once the invocation and configuration are verified, U7e's
+intended final state is `mode: execute`. Leaving a finished product parked in a
+mode that cannot do its job, waiting on a calendar, is not a safety measure — it
+is an unfinished deployment.
+
+**The justification is the architecture already demonstrated in production, not
+optimism.** `execute` mode **cannot** authorise cleanup from a stale or
+operator-written timestamp: it must refresh Apple, apply canonical state through
+the writer, and re-evaluate authority first. That is exactly what happened on
+2026-09-03 — a manual `execute` on a deliberately-advanced schedule **refused**,
+and the reconciliation overwrote the artificial value with Apple's own derived
+one. **An unattended `execute` today has no genuinely due identity to act on, and
+could not manufacture one.**
+
+**The residual — that the first production deletion would then be unattended —
+is real, accepted, and bounded:** it applies to one disposable beta identity whose
+blast radius is already measured and authorised, and G7 remains the scored
+observation whenever it lands. **It is not a reason to ship a scheduler that
+cannot run.**
 
 ---
 
-## 8. PREDICTION-FIRST ACCEPTANCE
+## 8. PREDICTION-FIRST ACCEPTANCE — COMMITTED BEFORE IMPLEMENTATION
 
-### Verifiable immediately (U7e-1, dry-run schedule)
+### 8a. LOCAL, verifiable now (this unit)
+
+| ID | Prediction | Measured |
+|---|---|---|
+| **L-1** | no header → 401 | **401** |
+| **L-2** | empty bearer → 401 | **401** |
+| **L-3** | anon key → 401 | **401** |
+| **L-4** | junk bearer → 401 | **401** |
+| **L-5** | cleanup key **+1 char** → 401 | **401** |
+| **L-6** | cleanup key **−1 char** → 401 | **401** |
+| **L-7** | a wholly wrong secret → 401 | **401** |
+| **L-8** | **the SERVICE ROLE key → 401** — the inversion, and the point of the change | **401** |
+| **L-9** | a genuine signed user JWT → 401 | **401** |
+| **L-10** | the correct cleanup key → **200** (not vacuously refusing) | **200** |
+| **L-11** | scheme prefix optional, as `appstore_reconcile_v1` | **200** |
+| **L-12** | `GET` → 405 | **405** |
+| **L-13** | key **UNSET**, correct key presented → **401** fail closed | **401** |
+| **L-14** | key **UNSET**, **empty** credential → 401 (two empties never match) | **401** |
+| **L-15** | key UNSET, no header → 401 | **401** |
+| **L-16** | key UNSET, service role presented → 401 | **401** |
+| **L-17** | the full worker e2e still passes under the new credential | **75/75** |
+| **L-18** | the workflow YAML parses, has exactly one daily schedule, a concurrency group and read-only permissions | **parses; `17 3 * * *`; group `membership-cleanup`; `contents: read`** |
+| **L-19** | `pg_cron` remains **0**; U4's `A57f` still passes | **0, passes** |
+
+### 8b. PRODUCTION, at activation (each step human-authorised)
 
 | ID | Prediction |
 |---|---|
-| **S-1** | The workflow fires within its scheduled window; the run log records a **200** |
-| **S-2** | A scheduled `dry_run` returns `identities: 0` while nothing is due — **the correct no-op** |
-| **S-3** | **Zero** `cleanup_claimed_at` set, **zero** `cleanup_completed_at`, and every global count unchanged across a week of scheduled runs |
-| **S-4** | With the secret removed, the run gets **401** and **fails loudly** |
-| **S-5** | With the workflow disabled, **no invocation occurs** |
-| **S-6** | `pg_cron` remains **0** — the scheduler is outside the database, asserted, so U4's `A57f` **still passes unchanged** |
-| **S-7** | If the narrower credential is adopted: correct invoke key → 200; wrong → 401; **absent from the environment → fails closed**, never a trivial match |
-| **S-8** | Device A's schedule remains `2026-11-01 15:16:44+00` throughout, untouched by any scheduled dry run |
+| **S-1** | Redeployed worker: correct invoke key → **200**; service role key → **401**; no header → **401** |
+| **S-2** | With the workflow on the default branch and the secret set, the schedule **fires within its window** and logs **HTTP 200** |
+| **S-3** | A scheduled `dry_run` returns `identities: 0` while nothing is due — the correct no-op |
+| **S-4** | Across scheduled runs: **zero** `cleanup_claimed_at`, **zero** `cleanup_completed_at`, every global count unchanged |
+| **S-5** | Secret removed → the run **fails loudly**, calls nothing |
+| **S-6** | `CLEANUP_MODE` unset → the run uses **`dry_run`**, never execute |
+| **S-7** | Workflow disabled → **no invocation** |
+| **S-8** | Device A's schedule stays `2026-11-01 15:16:44+00` throughout |
+| **S-9** | `pg_cron` remains **0** — the scheduler is outside the database |
+| **S-10** | With `CLEANUP_MODE=execute` and nothing due, a scheduled run **still deletes nothing** — the authority path refuses, exactly as it did manually on 2026-09-03 |
 
-### Must wait for the first naturally due identity — G7, earliest 2026-11-01
+### 8c. G7 — deferred, owned, dated (earliest 2026-11-01)
 
 | ID | Prediction |
 |---|---|
-| **S-9** | An `execute` run on a genuinely matured quarantine performs the cleanup and matches a prediction **committed before it** |
-| **S-10** | The retention half holds in production — retained comment, directory row, `display_name`, `auth.users`, `membership`, `membership_binding` |
-| **S-11** | `cleanup_completed_at` set, `pending_cleanup_at` NULL, lease cleared, no orphaned object |
-| **S-12** | Third-party blast radius zero |
+| **G7-1** | An `execute` run on a genuinely matured quarantine performs the cleanup and matches a prediction **committed before it** |
+| **G7-2** | Retention holds in production — retained comment, directory row, `display_name`, `auth.users`, `membership`, `membership_binding` |
+| **G7-3** | `cleanup_completed_at` set, `pending_cleanup_at` NULL, lease cleared, no orphaned object |
+| **G7-4** | Third-party blast radius zero |
 
-**S-9 to S-12 are G7. They are deferred, owned and dated — not blockers.**
-
-**Unchanged and still honestly unexercised:** F-2, F-4, F-5 (storage-failure
-paths). The 2026-09-03 refusal supplied no evidence for them, because no removal
-was attempted. **No fault-injection machinery will be added for them.**
-
----
+**F-2, F-4 and F-5 remain honestly unexercised.** No fault-injection machinery
+will be added for them.
 
 ## 9. U7 AND PHASE 3 CLOSURE CRITERIA
 
@@ -281,7 +351,7 @@ was attempted. **No fault-injection machinery will be added for them.**
 2. ✅ The worker deployed, its authorisation boundary measured in production.
 3. ✅ Destructive behaviour verified locally against the full retention matrix — **75/75**.
 4. ✅ **The authority path verified in production against genuine Apple**, including a correct refusal.
-5. ⬜ **A scheduler running unattended, verified in `dry_run` (U7e-1).**
+5. ⬜ **A scheduler running unattended and verified in production (U7e).**
 
 **PHASE 3 CLOSES CARRYING EXACTLY ONE NEW OBLIGATION: G7** — the supervised
 production destructive run on a naturally matured quarantine, owner U7, earliest
@@ -312,3 +382,49 @@ refused on 2026-09-03.
 
 No workflow file, no secret, no schedule, no worker change, no `pg_cron`.
 U6 untouched, C-58 not started, no cleanup fixture manufactured.
+
+---
+
+## 12. LOCAL IMPLEMENTATION RESULT — 2026-09-03
+
+**Implemented locally. Not deployed, not activated, no production secret created.**
+
+| Suite | Result |
+|---|---|
+| **u7 `auth-probe.sh`** | **16 / 0** — the full matrix in §8a |
+| **u7 `e2e-worker.sh`** | **75 / 0** — unchanged under the new credential |
+| u7 `acceptance-primitive.sh` / `acceptance-bornlapsed.sh` | 47 / 0 · 20 / 0 |
+| u3 · u6a · u6b · u5 client-structural | 91 / 0 · 3 / 0 · 64 / 0 · 60 / 0 |
+| u4 full (modules · acceptance · e2e) | 73 / 0 · 99 / 0 · 43 / 0 — **ALL GREEN** |
+| u5 full | **ALL GREEN** |
+| Workflow YAML | parses; one daily schedule `17 3 * * *`; concurrency group; `contents: read` |
+| `pg_cron` | **0** — U4 `A57f` unchanged |
+
+**19 of 19 local predictions (L-1 … L-19) matched. Nothing was repaired forward.**
+
+### The three activation steps, each requiring human authorisation
+
+| # | Act | Effect | Reversal |
+|---|---|---|---|
+| **A1** | Set the Supabase secret **`CLEANUP_INVOKE_KEY`** to a freshly generated value, then **redeploy** `membership_cleanup_v1` | The worker accepts the new key and **stops accepting the service role key** | Redeploy the previous version |
+| **A2** | Set repository variable **`CLEANUP_FN_URL`**, add repository secret **`CLEANUP_INVOKE_KEY`**, and merge the workflow to the **default branch** | The daily schedule begins, in **`dry_run`** — deletion structurally impossible | Disable the workflow, or delete the secret |
+| **A3** | Set repository variable **`CLEANUP_MODE = execute`** | Unattended execute becomes live | Unset the variable — back to `dry_run`, no commit or redeploy |
+
+**A1 MUST PRECEDE A2.** Between the redeploy and the secret being set, the worker
+refuses **every** caller — which is the fail-closed behaviour L-13…L-16 measured,
+and it means a partially-completed activation cannot leave the endpoint open.
+
+**GITHUB RUNS SCHEDULED WORKFLOWS ONLY FROM THE DEFAULT BRANCH.** The file is on
+`feature/solo-connected`, so **the cron cannot fire at all until it is merged**.
+That is a real third gate, and it is also the trap: anyone waiting for a schedule
+that is not on `main` will wait forever with no error to read.
+
+### Operational risk, recorded rather than engineered around
+
+**GitHub disables scheduled workflows after 60 days of repository inactivity** —
+the same order as the quarantine, with an invisible symptom: content that should
+have been cleaned up quietly persists, and nothing breaks. **Accepted for launch
+on the ratified decision not to build a second scheduler platform to eliminate
+it.** The mitigation is that the job **fails loudly** on any non-200 and writes a
+run summary, so its liveness is observable to anyone who looks — and the honest
+statement is that **someone must look.**

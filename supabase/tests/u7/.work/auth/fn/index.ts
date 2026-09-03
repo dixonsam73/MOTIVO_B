@@ -174,11 +174,42 @@ Deno.serve(async (req) => {
   if (req.method !== "POST") return json(405, { error: "method not allowed" });
 
   const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+
+  // SERVICE_ROLE is the function's INTERNAL credential for talking to its own
+  // database. It is NOT the caller's credential and is never compared against
+  // anything presented from outside -- see the authorisation block below.
   const SERVICE_ROLE = Deno.env.get("SERVICE_ROLE_KEY")!;
 
+  // ============================================================ AUTHORISATION
+  //
+  // THE DEDICATED INVOCATION KEY, AND NOTHING ELSE. Changed 2026-09-03 (U7e).
+  // This function previously accepted the service role key, matching
+  // appstore_reconcile_v1. It no longer does, and the divergence is deliberate.
+  //
+  // WHY: the scheduler must hold a credential to invoke this endpoint, and the
+  // service role key is authority over the ENTIRE project. Handing that to CI so
+  // it can make one POST is granting everything to obtain one thing. A dedicated
+  // key whose only capability is "ask the cleanup worker to run" is the narrow
+  // credential the job actually needs.
+  //
+  // BE PRECISE ABOUT WHAT REFUSING service_role DOES AND DOES NOT BUY, because
+  // it is easy to overclaim. Anyone holding the service role key can already
+  // delete these posts, rows and storage objects directly -- refusing it here
+  // does NOT protect the data from them, and nothing could. What it buys is
+  // narrower and still real: the SCHEDULER holds a key that can do nothing else,
+  // and no other tool or script that happens to carry service_role can trigger
+  // an unattended destructive run by accident.
+  //
+  // FAIL CLOSED ON A MISSING KEY. Three independent guards, and the middle one is
+  // the one that matters: if CLEANUP_INVOKE_KEY is unset the expression is false
+  // for EVERY caller, so an unconfigured deployment refuses everything rather
+  // than comparing two empty strings and admitting anyone.
+  const INVOKE_KEY = Deno.env.get("CLEANUP_INVOKE_KEY") ?? "";
   const presented = (req.headers.get("Authorization") ?? "").replace(/^Bearer\s+/i, "");
-  if (!presented || !secretEquals(presented, SERVICE_ROLE)) {
-    return json(401, { error: "service role credential required" });
+  if (!presented || !INVOKE_KEY || !secretEquals(presented, INVOKE_KEY)) {
+    // Never echo either value, and never say WHICH guard failed.
+    console.error("[U7] cleanup invocation refused");
+    return json(401, { error: "cleanup invocation credential required" });
   }
 
   let body: Record<string, unknown>;
