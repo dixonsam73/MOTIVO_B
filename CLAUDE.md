@@ -14,6 +14,46 @@ Baseline verified at migration: Debug and Release both compile clean
 
 ---
 
+# PHASE 3 IS CLOSED — 2026-09-03. UNATTENDED EXPIRY CLEANUP IS LIVE
+
+**U3, U4, U5, U6 and U7 are all complete and in production.** Membership is
+**established** authoritatively (U5), **enforced** durably (U6), and now
+**collected** unattended (U7) under a live Apple authority check.
+`CLEANUP_MODE = execute` is set; the daily 03:17 UTC job invokes
+`membership_cleanup_v1` v6. The full record is
+`supabase/sql/README-u7e-closure.md`.
+
+**ARMING ENABLED A CAPABILITY; IT DID NOT SCHEDULE A DELETION.** Two gates
+survive it. Candidate selection is empty until **2026-11-01**, and every
+candidate still needs a successful live Apple read applied through the canonical
+writer before `membership_cleanup_authorised_v1` will authorise. **That is
+measured, not argued:** on 2026-09-03 a manual `execute` against a
+deliberately-advanced schedule **REFUSED**, and the reconciliation overwrote the
+artificial value with Apple's own derived date. **`pending_cleanup_at` SELECTS;
+it never AUTHORISES**, and an operator writing it by hand cannot change that.
+
+**NOTHING HAS EVER BEEN DELETED BY THE WORKER.** Production is byte-identical to
+its pre-U7 state — 17 identities, 101 posts, 5 comments, 9 follows, 15 attachment
+objects — and `renewal_info_signed_date` has never moved on a scheduled run.
+
+**FOUR OBLIGATIONS ARE CARRIED, NONE OWNERLESS:** **G7** (first naturally matured
+production cleanup, owner U7, earliest 2026-11-01 — its only precondition now is
+elapsed time), **C-31** (Production Billing Grace), **B-34** (shadow telemetry
+blind to denied writes — an observability limitation, never a correctness
+defect), and **Gate 6 part 3** on B-11 (production GRANT at the first real
+subscription). **Phase 3 is allowed to close carrying these**, by the project's
+own rule that forcing an obligation to fit a phase boundary is the opposite of
+the discipline that says no obligation may be ownerless.
+
+**KILL SWITCHES, none of which touch membership state:** unset `CLEANUP_MODE`
+(back to `dry_run`), disable the workflow, delete the GitHub secret, or delete
+the Supabase `CLEANUP_INVOKE_KEY` (the worker then refuses every caller,
+fail-closed). **None of them undoes a completed deletion** — there is no backup
+of Domain 3 content.
+
+**THE HISTORICAL RECORD BELOW REMAINS ACCURATE AS OF ITS OWN DATES AND IS NOT
+REWRITTEN.**
+
 # PHASE 3 — SETTLED LIFECYCLE ARCHITECTURE
 
 **Approved and frozen 2026-08-16, before any implementation.** Phase 3 makes
