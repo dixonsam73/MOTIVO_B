@@ -2485,6 +2485,16 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u3-noop.md` — **P4-U3 IS A MEASURED NO-OP, 2026-09-04 — the
+PREDICTED SUCCESSFUL OUTCOME, not a skipped unit.** Private rows were **zero at
+the U1 baseline and zero immediately pre-U3**, measured three ways including a
+`GROUP BY` over the whole column domain, so there were **no explicit ids
+eligible for purge, zero DELETE statements issued and zero rows deleted**. The
+zero is now **defended** rather than merely observed — U2b, U2c and U2s close the
+creating mechanism at three layers. **`UPDATE → false` remains deliberately
+possible** as the transient fail-safe for unshare reconciliation (C-61). **This
+is NOT a claim that production has never held private rows** — `posts` has no
+audit column, and F-1's withdrawal of that claim stands.
 `docs/phase-4-u2s-acceptance.md` — **P4-U2s IS LIVE IN PRODUCTION, 2026-09-04.
 SHARED-ONLY IS NOW SERVER-ENFORCED.** `posts_insert_owner` gained one top-level
 conjunct, `AND (is_public = true)`; deployed `with_check` md5
