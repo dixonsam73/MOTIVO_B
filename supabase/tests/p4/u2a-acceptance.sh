@@ -77,11 +77,15 @@ is U2a-10 "$(code $PRDV 'shouldPublish:\s*visibility')" "0" "PRDV still does NOT
 
 # ============ U2c / U2s NOT implemented; deletion semantics NOT touched
 is U2a-11 "$(code $BS 'loadIncludedAttachments')" "2" "BackendShim attachment path untouched"
-is U2a-12 "$(git diff --name-only f12330e -- 'MOTIVO/*.swift' | wc -l | tr -d ' ')" "1" \
-  "exactly ONE swift file changed since the U1 baseline"
-is U2a-13 "$(git diff --name-only f12330e -- 'MOTIVO/PublishService.swift' | wc -l | tr -d ' ')" "1" \
+# PINNED TO U2a's OWN COMMIT RANGE. These asserted "since the U1 baseline",
+# which was only true while U2a was the tip -- U2a-2 legitimately touches three
+# files, so as written they would have decayed into permanent noise. The claim
+# worth keeping is historical and exact: U2a ITSELF changed one Swift file.
+is U2a-12 "$(git diff --name-only f12330e..9f1498e -- 'MOTIVO/*.swift' | wc -l | tr -d ' ')" "1" \
+  "U2a itself changed exactly ONE swift file"
+is U2a-13 "$(git diff --name-only f12330e..9f1498e -- 'MOTIVO/PublishService.swift' | wc -l | tr -d ' ')" "1" \
   "and that file is PublishService.swift"
-is U2a-14 "$(git diff --name-only f12330e -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
+is U2a-14 "$(git diff --name-only f12330e..9f1498e -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
   "no migration, function or schema file changed (U2s not implemented)"
 
 # ============ fail-closed deletion semantics unchanged in BackendShim

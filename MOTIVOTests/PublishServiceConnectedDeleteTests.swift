@@ -185,7 +185,13 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
     /// content becomes invisible. Under U2b, if the delete fails, it stays
     /// VISIBLE. That is a privacy regression on the failure path, not merely
     /// residue.
-    func testFailedUnshareLeavesRowStillPublic_C61() async throws {
+    /// RE-EXPRESSED BY P4-U2a-2. It used to assert the DEFECT -- that a failed
+    /// unshare left the row `is_public = true`. C-61 is now fixed by
+    /// demote-then-delete, so the same fixture must leave the row PRIVATE.
+    /// The historical assertion is deliberately inverted rather than deleted:
+    /// this is the test that measured C-61, and it is now the test that measures
+    /// its repair.
+    func testFailedUnshareLeavesRowPrivateNotPublic_C61Fixed() async throws {
         try skipUnlessLocalStack()
 
         let postID = UUID()
@@ -206,9 +212,11 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
 
         let stillExists = await Self.postExists(postID)
         let stillPublic = await Self.postIsPublic(postID)
-        XCTAssertTrue(stillExists, "C-61: the row survives (fail-closed, correct)")
-        XCTAssertEqual(stillPublic, true,
-                       "C-61: AND IT IS STILL PUBLIC — followers can still see content the member unshared")
+        XCTAssertTrue(stillExists, "the row survives — fail-closed, because the object could not be removed")
+        XCTAssertEqual(stillPublic, false,
+                       "C-61 FIXED: the row is now PRIVATE, so nothing the member withdrew stays visible")
+        XCTAssertTrue(SessionSyncQueue.shared.items.contains { $0.id == postID && $0.op == .unshare },
+                      "C-61 FIXED: and the .unshare intent is retained so it converges later")
     }
 
     // MARK: - F. TODAY's unshare (the pre-U2b baseline C-61 is measured against)
@@ -312,7 +320,10 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
     /// path nothing is enqueued at all, so an offline unshare leaves NO durable
     /// intent and NOTHING retries it. Runs against today's code because U2a
     /// already made this branch reachable.
-    func testUnsharePathLeavesNoDurableIntentWhenOffline() async throws {
+    /// RE-EXPRESSED BY P4-U2a-2. It used to assert that the unshare path
+    /// enqueued NOTHING, which was the measurement that blocked U2b. The path
+    /// now persists an `.unshare` intent before trusting the network.
+    func testOfflineUnshareNowLeavesADurableIntent() async throws {
         try skipUnlessLocalStack()
 
         let postID = UUID()
@@ -330,8 +341,8 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         )
         await Self.settle()
 
-        XCTAssertTrue(SessionSyncQueue.shared.items.isEmpty,
-                      "H: NOTHING is enqueued on the unshare path — no durable intent exists")
+        XCTAssertTrue(SessionSyncQueue.shared.items.contains { $0.id == postID && $0.op == .unshare },
+                      "P4-U2a-2: an .unshare intent IS now persisted before the network is trusted")
 
         // Reconnect and flush: there is simply nothing to converge.
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
@@ -339,10 +350,10 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         await Self.settle()
 
         let stillExists = await Self.postExists(postID)
-        let stillPublic = await Self.postIsPublic(postID)
-        XCTAssertTrue(stillExists, "H: the row is still there after reconnect + flush")
-        XCTAssertEqual(stillPublic, true,
-                       "H: AND STILL PUBLIC — no mechanism retried the unshare")
+        XCTAssertFalse(stillExists,
+                       "P4-U2a-2: reconnect + flush ALONE converges to removal — the queue retried it")
+        XCTAssertFalse(SessionSyncQueue.shared.items.contains { $0.id == postID },
+                       "P4-U2a-2: and the intent is dequeued only after the row is gone")
     }
 
     // MARK: - C. .backendPreview still reaches deletion (expansion, not replacement)

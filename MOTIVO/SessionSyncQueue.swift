@@ -30,6 +30,21 @@ public final class SessionSyncQueue: ObservableObject {
 
     private var isFactoryResetting: Bool = false
 
+    /// C-61 / P4-U2a-2. WHAT THIS QUEUE ITEM ASKS FOR.
+    ///
+    /// The queue used to mean exactly one thing -- "publish this" -- so an
+    /// UNSHARE could only ever be an immediate, fire-and-forget network call
+    /// with no durable intent behind it. Measured: an offline unshare left
+    /// nothing on disk and nothing retried it, so the post stayed PUBLIC.
+    ///
+    /// `.unshare` gives the withdrawal the same durability the publish already
+    /// had: persisted to the same file, drained by the same `flushNow`, retried
+    /// by the same launch/foreground trigger. No parallel subsystem.
+    public enum PostOp: String, Codable {
+        case publish
+        case unshare
+    }
+
     public struct PostPublishPayload: Codable, Identifiable {
       public let id: UUID            // == postID
       public let sessionID: UUID?
@@ -49,6 +64,12 @@ public final class SessionSyncQueue: ObservableObject {
       public let notes: String?
       public let areNotesPrivate: Bool
 
+      /// C-61. DEFAULTS TO `.publish` EVERYWHERE, which is what makes every
+      /// queue file written before this change decode unchanged and keep its
+      /// original meaning. See `init(from:)` below -- the synthesised decoder
+      /// would have thrown on the missing key.
+      public let op: PostOp
+
       public init(
           id: UUID,
           sessionID: UUID?,
@@ -62,7 +83,8 @@ public final class SessionSyncQueue: ObservableObject {
           effort: Int?,
           isPublic: Bool = true,
           notes: String? = nil,
-          areNotesPrivate: Bool = false
+          areNotesPrivate: Bool = false,
+          op: PostOp = .publish
       ) {
           self.id = id
           self.sessionID = sessionID
@@ -77,6 +99,32 @@ public final class SessionSyncQueue: ObservableObject {
           self.isPublic = isPublic
           self.notes = notes
           self.areNotesPrivate = areNotesPrivate
+          self.op = op
+      }
+
+      /// BACKWARD COMPATIBILITY IS THE WHOLE REASON THIS EXISTS. A synthesised
+      /// `Codable` conformance treats `op` as required and would throw
+      /// `keyNotFound` on every item written before P4-U2a-2 -- which
+      /// `load(from:)` would then hand to its legacy `[UUID]` fallback, and
+      /// failing that would propagate, silently discarding a queue of real
+      /// pending publishes. Decoding it as optional-with-default is what keeps
+      /// an existing file meaning exactly what it meant before.
+      public init(from decoder: Decoder) throws {
+          let c = try decoder.container(keyedBy: CodingKeys.self)
+          id = try c.decode(UUID.self, forKey: .id)
+          sessionID = try c.decodeIfPresent(UUID.self, forKey: .sessionID)
+          sessionTimestamp = try c.decodeIfPresent(Date.self, forKey: .sessionTimestamp)
+          title = try c.decodeIfPresent(String.self, forKey: .title)
+          durationSeconds = try c.decodeIfPresent(Int.self, forKey: .durationSeconds)
+          activityType = try c.decodeIfPresent(String.self, forKey: .activityType)
+          activityDetail = try c.decodeIfPresent(String.self, forKey: .activityDetail)
+          instrumentLabel = try c.decodeIfPresent(String.self, forKey: .instrumentLabel)
+          mood = try c.decodeIfPresent(Int.self, forKey: .mood)
+          effort = try c.decodeIfPresent(Int.self, forKey: .effort)
+          isPublic = try c.decodeIfPresent(Bool.self, forKey: .isPublic) ?? true
+          notes = try c.decodeIfPresent(String.self, forKey: .notes)
+          areNotesPrivate = try c.decodeIfPresent(Bool.self, forKey: .areNotesPrivate) ?? false
+          op = try c.decodeIfPresent(PostOp.self, forKey: .op) ?? .publish
       }
     }
 
@@ -110,6 +158,24 @@ public final class SessionSyncQueue: ObservableObject {
                 payload.notes != nil ||
                 payload.areNotesPrivate != false
 
+            // C-61 / P4-U2a-2. LAST INTENT WINS ACROSS OPERATIONS.
+            //
+            // The merge below was written when every item meant "publish", so
+            // its only question was which VISIBILITY to keep. It cannot answer
+            // "publish or unshare?", and letting it try would resolve a
+            // re-share after a withdrawal -- or a withdrawal after a re-share --
+            // by a rule written for a different question entirely.
+            //
+            // When the operation changes, the NEWER item replaces the older one
+            // outright. Only when both items agree on the operation does the
+            // original visibility merge still apply.
+            if payload.op != existing.op {
+                items[index] = payload
+                persist()
+                BackendLogger.notice("Queue intent replaced • postID=\(payload.id.uuidString) • \(existing.op.rawValue)→\(payload.op.rawValue)")
+                return
+            }
+
             let mergedIsPublic: Bool = {
                 if payload.isPublic == false { return false }          // explicit private always wins
                 if payloadHasMetadata { return true }                 // explicit metadata payload can set public
@@ -129,7 +195,8 @@ public final class SessionSyncQueue: ObservableObject {
                 effort: payload.effort ?? existing.effort,
                 isPublic: mergedIsPublic,
                 notes: payload.notes ?? existing.notes,
-                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate)
+                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate),
+                op: payload.op
             )
             items[index] = merged
             persist()
@@ -173,6 +240,27 @@ public final class SessionSyncQueue: ObservableObject {
 
         if mode == .backendPreview || mode == .backendConnected {
             for payload in items {
+                // C-61 / P4-U2a-2. An .unshare converges to REMOVAL and is
+                // dequeued only once the row is confirmed absent; anything else
+                // stays queued for the next launch/foreground flush. The
+                // .publish path below is untouched.
+                if payload.op == .unshare {
+                    let unshare = await BackendEnvironment.shared.publish.unsharePost(payload.id)
+                    switch unshare {
+                    case .success:
+                        NSLog("[SessionSyncQueue] unshare converged • postID=%@", payload.id.uuidString)
+                        BackendLogger.notice("Unshare converged • postID=\(payload.id.uuidString)")
+                        self.dequeue(postID: payload.id)
+                    case .failure(let error):
+                        // DELIBERATELY NO RETRY CAP AND NO BACKOFF. Abandoning
+                        // an owed privacy withdrawal after N attempts is the
+                        // wrong failure; the item stays until it converges.
+                        NSLog("[SessionSyncQueue] unshare pending • postID=%@ • error=%@", payload.id.uuidString, String(describing: error))
+                        BackendLogger.notice("Unshare pending • postID=\(payload.id.uuidString) • \(error.localizedDescription)")
+                    }
+                    continue
+                }
+
                 let result = await BackendEnvironment.shared.publish.uploadPost(payload)
                 switch result {
                 case .success:

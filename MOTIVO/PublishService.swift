@@ -185,6 +185,21 @@ final class PublishService: ObservableObject {
                 } else {
                     SessionSyncQueue.shared.enqueue(postID: sessionID)
                 }
+            } else {
+                // C-61 / P4-U2a-2. Same durable withdrawal as the payload path
+                // below -- this legacy entry point must not be the one that
+                // silently loses an unshare.
+                SessionSyncQueue.shared.enqueue(
+                    SessionSyncQueue.PostPublishPayload(
+                        id: sessionID,
+                        sessionID: sessionID,
+                        sessionTimestamp: nil, title: nil, durationSeconds: nil,
+                        activityType: nil, activityDetail: nil, instrumentLabel: nil,
+                        mood: nil, effort: nil, isPublic: false,
+                        notes: nil, areNotesPrivate: false,
+                        op: .unshare
+                    )
+                )
             }
 
             // Flush now – will upload in backendPreview and skip in localSimulation per existing semantics.
@@ -293,6 +308,34 @@ final class PublishService: ObservableObject {
                       effectivePayload.areNotesPrivate ? "true" : "false")
 
                 SessionSyncQueue.shared.enqueue(effectivePayload)
+            } else {
+                // C-61 / P4-U2a-2. PERSIST THE WITHDRAWAL BEFORE TRUSTING THE
+                // NETWORK.
+                //
+                // This branch used to enqueue nothing and fire a one-shot
+                // delete whose result both call sites discarded. Measured: an
+                // offline unshare left NO durable intent, nothing retried it,
+                // and the post stayed public indefinitely -- while the same
+                // action today converges, purely because the shipping call
+                // sites still hard-code `shouldPublish: true` and therefore go
+                // through the queue.
+                //
+                // Enqueuing first gives the withdrawal that same durability:
+                // the file survives termination, and the existing
+                // launch/foreground flush (MOTIVOApp:330 → :379) retries it.
+                // The immediate flush below is only an optimisation -- THE
+                // QUEUE IS THE GUARANTEE.
+                SessionSyncQueue.shared.enqueue(
+                    SessionSyncQueue.PostPublishPayload(
+                        id: payload.id,
+                        sessionID: payload.sessionID,
+                        sessionTimestamp: nil, title: nil, durationSeconds: nil,
+                        activityType: nil, activityDetail: nil, instrumentLabel: nil,
+                        mood: nil, effort: nil, isPublic: false,
+                        notes: nil, areNotesPrivate: false,
+                        op: .unshare
+                    )
+                )
             }
 
 

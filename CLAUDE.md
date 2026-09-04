@@ -2485,6 +2485,14 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2a2-acceptance.md` — **P4-U2a-2 / C-61 RESOLVED 2026-09-04.**
+The unshare is now a DURABLE INTENT in the existing queue: `op` discriminator
+defaulted to `.publish` so legacy files decode, demote-then-delete, dequeue only
+on confirmed removal, no retry cap. **Read §2 before touching Storage error
+handling:** an ABSENT object returns `NoSuchKey`, a PRESENT-but-unpermitted one
+returns `AccessDenied` — they are distinct, which is why fail-closed survives —
+and the HTTP status is 400 with the 404 in the BODY. A prediction of this unit
+was wrong and is corrected there.
 `docs/phase-4-u2a2-durability.md` — **U2a-2 REVISED, 2026-09-04, NOT
 IMPLEMENTED.** Today an unshare ENQUEUES (because the literals are still `true`),
 and the queue is a file drained on every foreground — so an offline unshare

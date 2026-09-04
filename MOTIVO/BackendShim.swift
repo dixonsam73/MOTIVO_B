@@ -276,6 +276,8 @@ public final class BackendFeedStore: ObservableObject {
 public protocol BackendPublishService {
     func uploadPost(_ payload: SessionSyncQueue.PostPublishPayload) async -> Result<Void, Error>
     func deletePost(_ postID: UUID) async -> Result<Void, Error>
+    /// C-61 / P4-U2a-2: demote to private, then delete. See the HTTP service.
+    func unsharePost(_ postID: UUID) async -> Result<Void, Error>
     func updatePost(_ postID: UUID) async -> Result<Void, Error>
     func fetchFeed(scope: String) async -> Result<Void, Error>
     func fetchAllOwnerPostsForAnalytics(ownerUserID: String, pageSize: Int) async -> Result<[BackendPost], Error>
@@ -465,10 +467,48 @@ private struct PostAttachmentsRow: Decodable {
         case .success:
             return .success(())
         case .failure(let e):
+            // C-61 / P4-U2a-2. AN OBJECT THAT IS ALREADY GONE IS A SUCCESS.
+            //
+            // Without this, a retry after a PARTIAL deletion re-attempts the
+            // objects it already removed, fails on the first of them, and can
+            // never converge -- a poison item retried on every foreground for
+            // ever.
+            //
+            // THE STATUS CODE IS 400, NOT 404. Measured on the local stack:
+            // deleting an absent object answers HTTP 400 with the 404 in the
+            // BODY -- {"statusCode":"404","error":"not_found","code":"NoSuchKey"}.
+            // A rule written against the HTTP status would never fire.
+            //
+            // This necessarily also treats RLS-denial, a wrong bucket and a
+            // missing Authorization header as success, because Storage returns
+            // the IDENTICAL response for all of them. That is acceptable here
+            // only because `unsharePost` demotes FIRST: a broken session or a
+            // row we do not own fails at the PATCH, before anything
+            // destructive runs.
+            if Self.isAlreadyAbsent(e) {
+                return .success(())
+            }
             return .failure(e)
         }
     }
 
+    /// True when Storage is telling us the object is not there.
+    static func isAlreadyAbsent(_ error: Error) -> Bool {
+        guard let ne = error as? NetworkManager.NetworkError,
+              case .httpError(let status, let body) = ne else { return false }
+        if status == 404 { return true }
+        guard let body else { return false }
+        return body.contains("NoSuchKey")
+            || body.contains("\"statusCode\":\"404\"")
+            || body.localizedCaseInsensitiveContains("not_found")
+    }
+
+
+    @MainActor
+    public func unsharePost(_ postID: UUID) async -> Result<Void, Error> {
+        await BackendDiagnostics.shared.simulatedCall("PublishService.unsharePost", meta: ["postID": postID.uuidString])
+        return .success(())
+    }
 
     @MainActor
     public func updatePost(_ postID: UUID) async -> Result<Void, Error> {
@@ -1519,9 +1559,72 @@ func patchPostAttachments(postID: UUID, refs: [[String: String]]) async -> Resul
         case .success:
             return .success(())
         case .failure(let e):
+            // C-61 / P4-U2a-2. ALREADY GONE IS SUCCESS -- see
+            // SimulatedPublishService.isAlreadyAbsent for the measurement. The
+            // status is 400 with the 404 in the BODY, so a rule written against
+            // the HTTP status would never fire, and a retry after a PARTIAL
+            // deletion could never converge.
+            if SimulatedPublishService.isAlreadyAbsent(e) {
+                return .success(())
+            }
             return .failure(e)
         }
     }
+
+    /// C-61 / P4-U2a-2. THE DURABLE WITHDRAWAL: DEMOTE, THEN DELETE.
+    ///
+    /// Ordering is the whole point and it is not cosmetic.
+    ///
+    /// 1. `is_public = false` FIRST. Nothing on the unshare path used to write
+    ///    that column at all -- `patchPostMetadata`'s only caller lives inside
+    ///    `uploadPost`, which never runs here -- so a failed deletion left the
+    ///    post PUBLICLY VISIBLE while the member believed it withdrawn. Demoting
+    ///    first means the worst outcome of any later failure is a private row.
+    ///
+    /// 2. It also acts as an AUTHORISATION PROBE. Storage answers the same
+    ///    "NoSuchKey" for an absent object, an RLS denial and a missing token,
+    ///    so deletion cannot tell those apart. Because the PATCH runs first, a
+    ///    broken session or a row we do not own fails before anything
+    ///    destructive is attempted.
+    ///
+    /// 3. Then the existing `deletePost`, unchanged: objects first, fail-closed,
+    ///    then the row.
+    ///
+    /// The caller dequeues only on `.success`, so every failure keeps the intent
+    /// queued for the next launch/foreground flush.
+    @MainActor
+    public func unsharePost(_ postID: UUID) async -> Result<Void, Error> {
+        guard let apiKey = BackendConfig.apiToken, !apiKey.isEmpty else {
+            return .failure(NSError(domain: "Backend", code: 1, userInfo: [NSLocalizedDescriptionKey: "Missing API key"]))
+        }
+
+        let patchPath = "rest/v1/posts?id=eq.\(postID.uuidString)"
+        let headers: [String: String] = [
+            "apikey": apiKey,
+            "Content-Type": "application/json",
+            "Prefer": "return=minimal"
+        ]
+        let body: [String: Any] = ["is_public": false]
+        guard let jsonData = try? JSONSerialization.data(withJSONObject: body, options: []) else {
+            return .failure(NSError(domain: "Backend", code: 3, userInfo: [NSLocalizedDescriptionKey: "Could not encode demotion"]))
+        }
+
+        let demote = await NetworkManager.shared.request(
+            path: patchPath,
+            method: "PATCH",
+            query: nil,
+            jsonBody: jsonData,
+            headers: headers
+        )
+
+        if case .failure(let e) = demote {
+            NSLog("[HTTPBackendPublishService] unshare demote FAILED • %@ | error=%@", postID.uuidString, String(describing: e))
+            return .failure(e)
+        }
+
+        return await deletePost(postID)
+    }
+
 
 
     @MainActor
