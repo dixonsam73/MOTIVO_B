@@ -29,10 +29,26 @@ t=re.sub(r"^\s*//.*$","",t,flags=re.M)
 t=re.sub(r"//.*$","",t,flags=re.M)
 print(len(re.findall(sys.argv[2],t)))' "$1" "$2"; }
 
-AESV=MOTIVO/AddEditSessionView.swift
-PRDV=MOTIVO/PostRecordDetailsView.swift
-PS=MOTIVO/PublishService.swift
-BS=MOTIVO/BackendShim.swift
+
+# ===================== SUITE PINNING (P4-U2b)
+# This suite asserts what THIS UNIT changed. Later units legitimately supersede
+# some of it -- U2b removed the C-60 gate entirely -- so the unit-specific
+# assertions are evaluated against THIS UNIT'S OWN COMMIT rather than the
+# working tree. That keeps every statement here true and the suite permanently
+# green, instead of accumulating expected failures across four files, which is
+# exactly where a real regression hides.
+#
+# Standing invariants that are NOT unit-specific stay LIVE below, because their
+# whole value is that they can still fail.
+PIN=9f1498e
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+pin() { local out="$TMPD/$(echo "$1" | tr / _)"; git show "$PIN:$1" > "$out" 2>/dev/null || return 1; echo "$out"; }
+
+AESV=$(pin MOTIVO/AddEditSessionView.swift)
+PRDV=$(pin MOTIVO/PostRecordDetailsView.swift)
+PS=$(pin MOTIVO/PublishService.swift)
+BS=$(pin MOTIVO/BackendShim.swift)
 
 echo
 echo "P4-U2a / C-60 — structural acceptance (POST-U2a)"
@@ -59,17 +75,13 @@ is U2a-5 "$(code $PS '!shouldPublish, \(mode ==')" "2" \
 is U2a-6 "$(code $PS '\.backendPreview')" "5" \
   "backendPreview still named 5x — 2 widened gates, 2 NSLog gates, 1 early-exit(:103)"
 
-# NAMING ALIGNMENT (not a behavioural change). The delete logs said "Preview
-# deletePost" on a branch now shared by Preview and Connected, so a Connected
-# failure would have been logged under the wrong mode -- the same class of
-# misleading record this project keeps being bitten by. They now name the mode
-# they actually ran in.
-is U2a-6b "$(code $PS 'Preview deletePost')" "0" \
-  "no delete log still misnames its mode as 'Preview'"
-is U2a-6c "$(code $PS 'deletePost (success|FAILED) . mode=')" "4" \
-  "all 4 delete logs now report the ACTUAL mode"
+# U2a-6b/6c REMOVED BY P4-U2b. They pinned the four "Preview deletePost" log
+# strings -- first that they were misnamed, then that they reported the real
+# mode. U2b deleted the whole block those logs lived in, so there is nothing
+# left to name correctly. `u2b-acceptance.sh` U2b-9 asserts the stronger fact:
+# PublishService contains no bare deletePost at all. Removed rather than pinned
+# to a third commit, because an assertion about a deleted construct is noise.
 
-# ============ U2b IS NOT IMPLEMENTED — the call sites must be untouched
 is U2a-7  "$(code $AESV 'shouldPublish:\s*true')"       "1" "AESV still hard-codes shouldPublish: true"
 is U2a-8  "$(code $PRDV 'shouldPublish:\s*true')"       "1" "PRDV still hard-codes shouldPublish: true"
 is U2a-9  "$(code $AESV 'shouldPublish:\s*isPublic')"   "0" "AESV still does NOT gate on isPublic"
@@ -102,7 +114,7 @@ print(1 if obj < row else 0)")" "1" \
   "storage-object deletion still precedes the post-row DELETE"
 
 # ============ Phase 3 carry-forward — must survive every Phase 4 unit
-PV=MOTIVO/ProfileView.swift
+PV=MOTIVO/ProfileView.swift   # LIVE: standing Phase 3 exit assertion
 is U2a-16 "$(code $PV 'LocalFactoryReset\.perform')" "2" "LocalFactoryReset.perform still exactly 2 callers"
 
 echo

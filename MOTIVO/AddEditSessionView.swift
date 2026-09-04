@@ -2075,13 +2075,23 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                     areNotesPrivate: areNotesPrivate_edit
                 )
 
-                // Publish and visibility are separate concepts:
-                // - shouldPublish controls existence (publish vs unpublish/delete)
-                // - payload.isPublic controls follower visibility.
+                // P4-U2b. SHARED-ONLY UPLOADS. `shouldPublish` controls EXISTENCE
+                // on the server and `isPublic` controls follower visibility, and
+                // they are now the same answer -- because invariant 2 says if
+                // nobody else can see it, it does not belong on Supabase.
+                //
+                // This was `shouldPublish: true` from ec75a3c (2026-01-30) until
+                // now, so EVERY saved session reached the server and the Share
+                // toggle only set a column. A Thought -- `isPublic` is
+                // unconditionally false in thought mode -- went up too.
+                //
+                // `false` is not "do nothing": it enqueues an `op: .unshare`
+                // that demotes then deletes, and converges across offline and
+                // restarts. See C-60 and C-61.
                 PublishService.shared.publish(
                     payload: payload,
                     objectID: s.objectID,
-                    shouldPublish: true
+                    shouldPublish: isPublic
                 )
             }
 

@@ -26,12 +26,28 @@ t=re.sub(r"^\s*//.*$","",t,flags=re.M)
 t=re.sub(r"//.*$","",t,flags=re.M)
 print(len(re.findall(sys.argv[2],t)))' "$1" "$2"; }
 
-SSQ=MOTIVO/SessionSyncQueue.swift
-BS=MOTIVO/BackendShim.swift
-PS=MOTIVO/PublishService.swift
-AESV=MOTIVO/AddEditSessionView.swift
-PRDV=MOTIVO/PostRecordDetailsView.swift
-PV=MOTIVO/ProfileView.swift
+
+# ===================== SUITE PINNING (P4-U2b)
+# This suite asserts what THIS UNIT changed. Later units legitimately supersede
+# some of it -- U2b removed the C-60 gate entirely -- so the unit-specific
+# assertions are evaluated against THIS UNIT'S OWN COMMIT rather than the
+# working tree. That keeps every statement here true and the suite permanently
+# green, instead of accumulating expected failures across four files, which is
+# exactly where a real regression hides.
+#
+# Standing invariants that are NOT unit-specific stay LIVE below, because their
+# whole value is that they can still fail.
+PIN=145ddfd
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+pin() { local out="$TMPD/$(echo "$1" | tr / _)"; git show "$PIN:$1" > "$out" 2>/dev/null || return 1; echo "$out"; }
+
+SSQ=MOTIVO/SessionSyncQueue.swift            # LIVE: the queue contract must not regress
+BS=MOTIVO/BackendShim.swift                  # LIVE: demote-then-delete must not regress
+PS=$(pin MOTIVO/PublishService.swift)        # pinned: U2b removed the C-60 gate
+AESV=$(pin MOTIVO/AddEditSessionView.swift)  # pinned: U2a2-16/18 assert "U2b not started"
+PRDV=$(pin MOTIVO/PostRecordDetailsView.swift)
+PV=MOTIVO/ProfileView.swift                  # LIVE: standing Phase 3 exit assertion
 
 echo
 echo "P4-U2a-2 / C-61 — structural acceptance"

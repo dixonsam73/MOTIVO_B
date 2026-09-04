@@ -205,31 +205,23 @@ final class PublishService: ObservableObject {
             // Flush now – will upload in backendPreview and skip in localSimulation per existing semantics.
             await SessionSyncQueue.shared.flushNow()
 
-            // C-60, P4-U2a. THIS GATE USED TO NAME .backendPreview ALONE, SO AN
-            // UN-SHARE DELETED NOTHING IN CONNECTED MODE. Production runs
-            // .backendConnected (AppModeManager:51), so the delete was
-            // unreachable for every real member while the publish half was
-            // mode-complete (SessionSyncQueue:174). BackendEnvironment.publish
-            // already routed BOTH modes to the real service (BackendShim:2144);
-            // only these two predicates were never widened.
+            // C-60 / C-61 / P4-U2b. THE IMMEDIATE DELETE THAT USED TO SIT HERE
+            // IS GONE, AND ITS JOB IS ALREADY DONE ONE LINE ABOVE.
             //
-            // This is an EXPANSION of the legitimate delete mode, not a
-            // replacement: .backendPreview must keep reaching deletion.
-            // Deletion itself is unchanged and stays fail-closed -- every
-            // referenced storage object must be removed before the post row
-            // (BackendShim:1414-1419).
-            let mode = BackendEnvironment.shared.mode
-            let hasBaseURL = (NetworkManager.shared.baseURL != nil)
-            let configured = BackendConfig.isConfigured
-            if !shouldPublish, (mode == .backendPreview || mode == .backendConnected) && hasBaseURL && configured {
-                let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
-                switch result {
-                case .success:
-                    NSLog("[PublishService] deletePost success • mode=%@ → %@", String(describing: mode), sessionID.uuidString)
-                case .failure(let error):
-                    NSLog("[PublishService] deletePost FAILED • mode=%@ → %@ | error=%@", String(describing: mode), sessionID.uuidString, String(describing: error))
-                }
-            }
+            // `flushNow()` is AWAITED above, and for an `op: .unshare` item it
+            // runs `unsharePost`: demote `is_public` to false, then delete the
+            // objects and the row, dequeuing only once the row is confirmed
+            // absent. The immediate best-effort attempt has therefore already
+            // happened by the time control reaches here.
+            //
+            // What stood here was a bare `deletePost` with NO demotion -- not
+            // merely a duplicate of that attempt but a DIFFERENTLY SHAPED one,
+            // and the missing demotion is precisely the defect C-61 recorded.
+            // Two unshare semantics in parallel is the thing to avoid.
+            //
+            // Immediacy is preserved by the awaited flush; durability -- across
+            // offline, process death, cold launch and foreground -- remains the
+            // persisted queue.
 
             if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
                 NSLog("[PublishService] Preview enqueue + flush for published session → %@", sessionID.uuidString)
@@ -341,18 +333,23 @@ final class PublishService: ObservableObject {
 
             await SessionSyncQueue.shared.flushNow()
 
-            let mode = BackendEnvironment.shared.mode
-            let hasBaseURL = (NetworkManager.shared.baseURL != nil)
-            let configured = BackendConfig.isConfigured
-            if !shouldPublish, (mode == .backendPreview || mode == .backendConnected) && hasBaseURL && configured {
-                let result = await BackendEnvironment.shared.publish.deletePost(payload.id)
-                switch result {
-                case .success:
-                    NSLog("[PublishService] deletePost success • mode=%@ → %@", String(describing: mode), payload.id.uuidString)
-                case .failure(let error):
-                    NSLog("[PublishService] deletePost FAILED • mode=%@ → %@ | error=%@", String(describing: mode), payload.id.uuidString, String(describing: error))
-                }
-            }
+            // C-60 / C-61 / P4-U2b. THE IMMEDIATE DELETE THAT USED TO SIT HERE
+            // IS GONE, AND ITS JOB IS ALREADY DONE ONE LINE ABOVE.
+            //
+            // `flushNow()` is AWAITED above, and for an `op: .unshare` item it
+            // runs `unsharePost`: demote `is_public` to false, then delete the
+            // objects and the row, dequeuing only once the row is confirmed
+            // absent. The immediate best-effort attempt has therefore already
+            // happened by the time control reaches here.
+            //
+            // What stood here was a bare `deletePost` with NO demotion -- not
+            // merely a duplicate of that attempt but a DIFFERENTLY SHAPED one,
+            // and the missing demotion is precisely the defect C-61 recorded.
+            // Two unshare semantics in parallel is the thing to avoid.
+            //
+            // Immediacy is preserved by the awaited flush; durability -- across
+            // offline, process death, cold launch and foreground -- remains the
+            // persisted queue.
 
             if shouldPublish && (BackendEnvironment.shared.mode == .backendPreview) {
                 NSLog("[PublishService] Preview enqueue + flush for published session → %@", payload.id.uuidString)

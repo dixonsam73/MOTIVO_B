@@ -1830,10 +1830,14 @@ var body: some View {
                         isPublic: visibility
                     )
 
+                    // P4-U2b. SHARED-ONLY UPLOADS -- see AddEditSessionView for
+                    // the full reasoning. `visibility` is this view's Share
+                    // toggle and is what `payload.isPublic` already carries, so
+                    // existence and visibility now give the same answer.
                     PublishService.shared.publish(
                         payload: payload,
                         objectID: s.objectID,
-                        shouldPublish: true
+                        shouldPublish: visibility
                     )
                     FeedInteractionStore.markForPublish(sid)
                 } else {

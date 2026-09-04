@@ -2485,6 +2485,13 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2b-acceptance.md` — **P4-U2b COMPLETE 2026-09-04. SHARED-ONLY
+UPLOADS ARE LIVE IN THE CLIENT.** Both call sites now pass `shouldPublish:
+isPublic`, so a Share-OFF save and a Thought create **no server row**, and the
+redundant bare `deletePost` is gone — the queue's demote-then-delete is the only
+unshare semantics. **U2s is NOT started, so no old-client durability is claimed:
+a pre-U2b build can still create a private row.** Also records the suite-pinning
+policy and a planned positive control that could not be obtained (§4.1).
 `docs/phase-4-u2a2-acceptance.md` — **P4-U2a-2 / C-61 RESOLVED 2026-09-04.**
 The unshare is now a DURABLE INTENT in the existing queue: `op` discriminator
 defaulted to `.publish` so legacy files decode, demote-then-delete, dequeue only
