@@ -1,9 +1,11 @@
 # PHASE 4 — SHARED-ONLY ARCHITECTURE. SCOPE RECORD.
 
-**Status: SCOPE APPROVED. P4-U1 COMPLETE 2026-09-04. NO IMPLEMENTATION UNIT HAS
-BEGUN.** U1 is a measurement unit and mutated nothing — its evidence is
-`docs/phase-4-u1-baseline.md`. **U2a/C-60, U2b, U2c, U2s, U3, U4, U5, U6, U7 and
-U8 have not started**: no client code, SQL, policy, production row or storage
+**Status: SCOPE APPROVED. P4-U1 AND P4-U2a COMPLETE 2026-09-04.** U1 measured
+and mutated nothing (`docs/phase-4-u1-baseline.md`); **U2a fixed C-60** — two
+predicates in `PublishService`, verified against a faithful local reproduction
+with the pre-fix run failing as the discriminator, zero production delta
+(`docs/phase-4-u2a-acceptance.md`). **U2b, U2c, U2s, U3, U4, U5, U6, U7 and U8
+have not started**: no client code, SQL, policy, production row or storage
 object has been changed by this phase. This document is the durable record of
 what Phase 4 is agreed to contain, in the same form as Phase 3's U0.
 
@@ -334,10 +336,11 @@ is not evidence of that fact.**
 
 The core of the phase. Three sub-units, in this order:
 
-- **U2a — fix the delete gating (F-3).** Make the unshare path delete in
-  `.backendConnected`, not only `.backendPreview`. Verify against a real
-  unshare before anything else changes. **This is the precondition for U2b being
-  safe rather than harmful.**
+- **U2a — fix the delete gating (F-3). COMPLETE 2026-09-04**, C-60 Resolved.
+  `docs/phase-4-u2a-acceptance.md`. As scoped: make the unshare path delete in
+  `.backendConnected`, not only `.backendPreview`; verify against a real unshare
+  before anything else changes. **This was the precondition for U2b being safe
+  rather than harmful**, and it is now met.
 - **U2b — make publish conditional.** `shouldPublish: isPublic` at both call
   sites, restoring the pre-`ec75a3c` semantics now that its motivating defect is
   independently fixed. Editing a shared session to unshared must delete the row

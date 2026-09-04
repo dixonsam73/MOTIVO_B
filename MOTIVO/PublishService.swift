@@ -190,11 +190,23 @@ final class PublishService: ObservableObject {
             // Flush now – will upload in backendPreview and skip in localSimulation per existing semantics.
             await SessionSyncQueue.shared.flushNow()
 
-            // Preserve delete behavior in backend preview when unpublishing.
+            // C-60, P4-U2a. THIS GATE USED TO NAME .backendPreview ALONE, SO AN
+            // UN-SHARE DELETED NOTHING IN CONNECTED MODE. Production runs
+            // .backendConnected (AppModeManager:51), so the delete was
+            // unreachable for every real member while the publish half was
+            // mode-complete (SessionSyncQueue:174). BackendEnvironment.publish
+            // already routed BOTH modes to the real service (BackendShim:2144);
+            // only these two predicates were never widened.
+            //
+            // This is an EXPANSION of the legitimate delete mode, not a
+            // replacement: .backendPreview must keep reaching deletion.
+            // Deletion itself is unchanged and stays fail-closed -- every
+            // referenced storage object must be removed before the post row
+            // (BackendShim:1414-1419).
             let mode = BackendEnvironment.shared.mode
             let hasBaseURL = (NetworkManager.shared.baseURL != nil)
             let configured = BackendConfig.isConfigured
-            if !shouldPublish, (mode == .backendPreview) && hasBaseURL && configured {
+            if !shouldPublish, (mode == .backendPreview || mode == .backendConnected) && hasBaseURL && configured {
                 let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
                 switch result {
                 case .success:
@@ -289,7 +301,7 @@ final class PublishService: ObservableObject {
             let mode = BackendEnvironment.shared.mode
             let hasBaseURL = (NetworkManager.shared.baseURL != nil)
             let configured = BackendConfig.isConfigured
-            if !shouldPublish, (mode == .backendPreview) && hasBaseURL && configured {
+            if !shouldPublish, (mode == .backendPreview || mode == .backendConnected) && hasBaseURL && configured {
                 let result = await BackendEnvironment.shared.publish.deletePost(payload.id)
                 switch result {
                 case .success:

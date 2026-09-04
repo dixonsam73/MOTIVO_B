@@ -2485,6 +2485,12 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2a-acceptance.md` — **P4-U2a / C-60, COMPLETE 2026-09-04.** Two
+predicates in `PublishService` (`:209`, `:304`) so an un-share reaches deletion
+in `.backendConnected`, not only `.backendPreview`. **The behavioural suite was
+run against the PRE-fix code and failed** — that discriminator is what makes it
+evidence. Fail-closed intact; zero production delta; **not device-verified in
+production and cannot be until U2b**.
 `docs/phase-4-u1-baseline.md` — **P4-U1 measurement baseline, captured
 2026-09-04 at `78e2002` before any Phase 4 change.** The pre-change production
 numbers, B-8's reference-set method, the 16-assertion structural baseline, and
