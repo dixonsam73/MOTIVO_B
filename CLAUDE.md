@@ -2485,6 +2485,15 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-ca-residue-cleanup-acceptance.md` — **THE SIX LIVE
+`connected_attachments` ROWS ARE CLEARED, 2026-09-04.** B-22's deliberately
+retained residue (29 both-parties-deleted + 1 live-sender), **identified by the
+account holder as test debris — evidence the database cannot supply** — and
+cleared by explicit id after confirming the producing mechanism is already fixed
+(`delete_account_v1` deletes both sides). **An explicit later disposition on new
+evidence, NOT a claim that B-22 was wrong.** `connected_attachments` 31 → 25, all
+soft-deleted; dangling 5 → 0; objects 11 → 10. **U4's one unmet criterion is now
+satisfied here, not backdated.**
 `docs/phase-4-u4-acceptance.md` — **P4-U4 / B-8 COMPLETE 2026-09-04. 4 orphaned
 Storage objects deleted by explicit path; unreferenced 4 → 0, referenced still
 11, no row deleted.** **It also corrects U1: the four were DIRECT-SEND objects
