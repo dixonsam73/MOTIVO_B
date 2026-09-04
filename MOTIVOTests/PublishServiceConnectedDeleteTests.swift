@@ -102,6 +102,8 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         createdObjectPaths = []
         createdPostIDs = []
         NetworkManager.shared.setBearerToken(nil)
+        NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
+        SessionSyncQueue.shared.clear()
         UserDefaults.standard.removeObject(forKey: "supabaseUserID_v1")
         setBackendMode(.localSimulation)
         try await super.tearDown()
@@ -243,6 +245,104 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         XCTAssertTrue(stillExists, "today: the row survives as residue")
         XCTAssertEqual(nowPublic, false,
                        "today: BUT it is demoted to private, so followers cannot see it")
+    }
+
+    // MARK: - G/H. OFFLINE DURABILITY — the property U2b would lose
+
+    /// A dead loopback port. Non-nil, so every mode/config gate still passes and
+    /// the request genuinely fails at the transport, which is what "offline"
+    /// looks like to this code.
+    private static let offlineURL = URL(string: "http://127.0.0.1:1")!
+
+    /// G. TODAY: an offline unshare is DURABLY QUEUED and converges on reconnect
+    /// with no further user action. This is the eventual-delivery property that
+    /// exists only because the shipping call sites hard-code `shouldPublish: true`.
+    func testTodaysOfflineUnshareIsQueuedAndConvergesOnReconnect() async throws {
+        try skipUnlessLocalStack()
+
+        let postID = UUID()
+        let objectPath = "users/\(Self.ownerUID)/\(postID.uuidString)/\(UUID().uuidString).jpg"
+        try await makeFixture(postID: postID, objectPath: objectPath, owner: Self.ownerUID)
+        let prePublic = await Self.postIsPublic(postID)
+        XCTAssertEqual(prePublic, true, "precondition: shared")
+
+        setBackendMode(.backendConnected)
+        SessionSyncQueue.shared.clear()
+
+        // --- go offline, then unshare exactly as the shipping app does today
+        NetworkManager.shared.baseURL = Self.offlineURL
+        await PublishService.shared.publish(
+            payload: Self.payload(postID, isPublic: false),
+            objectID: try throwawayObjectID(),
+            shouldPublish: true
+        )
+        await Self.settle()
+
+        let queuedWhileOffline = SessionSyncQueue.shared.items.contains { $0.id == postID }
+        XCTAssertTrue(queuedWhileOffline,
+                      "G: the unshare intent must be DURABLY QUEUED while offline")
+
+        // DURABLE ACROSS PROCESS DEATH, not merely in memory: the queue is a
+        // file the initialiser reads back. Asserting the FILE is what makes
+        // "survives termination" evidence rather than inference.
+        let queueFile = FileManager.default
+            .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("MOTIVO", isDirectory: true)
+            .appendingPathComponent("SessionSyncQueue_v1.json")
+        let onDisk = (try? String(contentsOf: queueFile, encoding: .utf8)) ?? ""
+        XCTAssertTrue(onDisk.localizedCaseInsensitiveContains(postID.uuidString),
+                      "G: the intent is PERSISTED TO DISK at \(queueFile.lastPathComponent)")
+        let publicWhileOffline = await Self.postIsPublic(postID)
+        XCTAssertEqual(publicWhileOffline, true, "G: server not yet updated while offline")
+
+        // --- connectivity returns; the user does NOT edit the session again.
+        //     This is the foreground flush (MOTIVOApp:379).
+        NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
+        await SessionSyncQueue.shared.flushNow()
+        await Self.settle()
+
+        let convergedPublic = await Self.postIsPublic(postID)
+        let drained = !SessionSyncQueue.shared.items.contains { $0.id == postID }
+        XCTAssertEqual(convergedPublic, false,
+                       "G: CONVERGENCE — the demotion is delivered on reconnect with no further user action")
+        XCTAssertTrue(drained, "G: and the queue item is drained")
+    }
+
+    /// H. THE REGRESSION U2b WOULD INTRODUCE: on the `shouldPublish == false`
+    /// path nothing is enqueued at all, so an offline unshare leaves NO durable
+    /// intent and NOTHING retries it. Runs against today's code because U2a
+    /// already made this branch reachable.
+    func testUnsharePathLeavesNoDurableIntentWhenOffline() async throws {
+        try skipUnlessLocalStack()
+
+        let postID = UUID()
+        let objectPath = "users/\(Self.ownerUID)/\(postID.uuidString)/\(UUID().uuidString).jpg"
+        try await makeFixture(postID: postID, objectPath: objectPath, owner: Self.ownerUID)
+
+        setBackendMode(.backendConnected)
+        SessionSyncQueue.shared.clear()
+
+        NetworkManager.shared.baseURL = Self.offlineURL
+        await PublishService.shared.publish(
+            payload: Self.payload(postID, isPublic: false),
+            objectID: try throwawayObjectID(),
+            shouldPublish: false
+        )
+        await Self.settle()
+
+        XCTAssertTrue(SessionSyncQueue.shared.items.isEmpty,
+                      "H: NOTHING is enqueued on the unshare path — no durable intent exists")
+
+        // Reconnect and flush: there is simply nothing to converge.
+        NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
+        await SessionSyncQueue.shared.flushNow()
+        await Self.settle()
+
+        let stillExists = await Self.postExists(postID)
+        let stillPublic = await Self.postIsPublic(postID)
+        XCTAssertTrue(stillExists, "H: the row is still there after reconnect + flush")
+        XCTAssertEqual(stillPublic, true,
+                       "H: AND STILL PUBLIC — no mechanism retried the unshare")
     }
 
     // MARK: - C. .backendPreview still reaches deletion (expansion, not replacement)

@@ -2485,6 +2485,13 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2a2-durability.md` — **U2a-2 REVISED, 2026-09-04, NOT
+IMPLEMENTED.** Today an unshare ENQUEUES (because the literals are still `true`),
+and the queue is a file drained on every foreground — so an offline unshare
+**converges with no further user action**. Both directions are measured. **U2b
+plus an immediate-only demote/delete would destroy that**, and would leave B/C
+settling permanently on a private row, which Phase 4 forbids. Fix: extend the
+EXISTING queue with an operation kind; dequeue only when the row is gone.
 `docs/phase-4-u2b-blocked-c61.md` — **U2b IS BLOCKED, 2026-09-04, and the
 `shouldPublish` literals are UNCHANGED.** C-61: on the unshare path nothing ever
 writes `is_public` (`patchPostMetadata` has one caller, inside `uploadPost`,
