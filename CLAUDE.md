@@ -2485,6 +2485,13 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2b-device-handoff.md` — **THE DEVICE A PROCEDURE. U2b IS
+IMPLEMENTATION-COMPLETE / DEVICE-VERIFICATION-PENDING and must NOT be called
+closed until this has been run.** Deferred, not waived: Device A's Sandbox
+entitlement is expired (client expected **Solo**), and `connected_member()` is
+**false** under active U6b enforcement with zero Production membership rows — so
+a sandbox resubscribe **alone is insufficient**. **Enforcement is deliberately
+not being weakened, and membership state not manufactured, for a test.**
 `docs/phase-4-u2b-acceptance.md` — **P4-U2b COMPLETE 2026-09-04. SHARED-ONLY
 UPLOADS ARE LIVE IN THE CLIENT.** Both call sites now pass `shouldPublish:
 isPublic`, so a Share-OFF save and a Thought create **no server row**, and the

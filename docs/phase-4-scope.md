@@ -517,6 +517,20 @@ production is readable read-only via single-statement `supabase db query --linke
    upload behaviour.
 7. **`LocalFactoryReset.perform` still has exactly two callers.** This is a Phase
    3 exit assertion that Phase 4 must not break.
+8. **U2b'S DEVICE VERIFICATION IS EXECUTED — DEFERRED, NOT WAIVED.** U2b is
+   **implementation-complete / device-verification-pending** and **must not be
+   called formally closed** until `docs/phase-4-u2b-device-handoff.md` has been
+   run successfully on Device A. **Measured blockers, 2026-09-04, none of them a
+   U2b defect:** Device A's Sandbox entitlement is **expired**, so the client is
+   expected to be in **Solo** and the publish path unreachable;
+   `connected_member()` is **false** for the only membership row
+   (`sandbox_only`, zero Production rows) under **active U6b enforcement**, so
+   `posts.insert` would be denied; and **a sandbox resubscription alone would
+   therefore be insufficient**, because it restores the client to Connected
+   while leaving the server predicate false. **We are deliberately NOT weakening
+   production enforcement, and NOT manufacturing membership state, to satisfy a
+   test.** The obligation is satisfied when Device A next legitimately has a
+   testable Connected path.
 
 **Explicitly NOT an exit condition: "every pre-U2 build has been retired."**
 Under §2a it is not needed — the invariant is enforced where it can be measured
