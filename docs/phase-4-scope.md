@@ -532,6 +532,13 @@ production is readable read-only via single-statement `supabase db query --linke
    test.** The obligation is satisfied when Device A next legitimately has a
    testable Connected path.
 
+   **U2s's PRODUCTION AUTHENTICATED BEHAVIOURAL OBSERVATION IS CARRIED HERE
+   TOO.** The guard is deployed and structurally verified, and its full A/B/C/D/E
+   matrix is proven against a byte-identical local policy — but **no genuine
+   production JWT is obtainable without Device A / SIWA** (17 Apple-only
+   identities, zero passwords; `service_role` bypasses RLS). **U2s must not be
+   described as behaviourally verified in production until this run happens.**
+
 **Explicitly NOT an exit condition: "every pre-U2 build has been retired."**
 Under §2a it is not needed — the invariant is enforced where it can be measured
 rather than assumed of a set of personal devices. **Had Option B been adopted it

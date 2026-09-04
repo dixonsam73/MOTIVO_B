@@ -1,7 +1,24 @@
 # P4-U2s — SERVER-SIDE SHARED-ONLY INSERT INVARIANT. ACCEPTANCE.
 
 **Applied to production 2026-09-04. Prediction and preflight committed
-beforehand at `6f6a3c0`.**
+beforehand at `6f6a3c0`; deployed checkpoint `4febb8b`.**
+
+## STATUS — RECORD IT IN EXACTLY THESE FOUR PARTS
+
+1. **Production policy deployment is COMPLETE and INDEPENDENTLY STRUCTURALLY
+   VERIFIED** — the deployed `with_check` was re-read after the apply and is
+   byte-exact (`md5 fb1873d10077148c59180ec7d45edbcb`).
+2. **The full authenticated behavioural matrix (A/B/C/D/E) is PROVEN against the
+   FAITHFUL, BYTE-IDENTICAL local policy through PostgREST**, with genuine
+   `authenticated`-role JWTs.
+3. **Production authenticated behavioural observation is DEFERRED**, because no
+   genuine production JWT is currently obtainable without Device A / Sign in with
+   Apple — all 17 production identities are Apple-only with zero passwords, and
+   `service_role` bypasses RLS.
+4. **That observation is carried into the existing Device A Phase 4 exit
+   verification** (exit condition 8) **and MUST NOT be claimed now.** U2s is not
+   "behaviourally verified in production"; it is deployed, structurally verified,
+   and behaviourally verified against a faithful reproduction.
 
 **The invariant now achieved:**
 
