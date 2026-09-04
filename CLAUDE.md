@@ -2485,6 +2485,25 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u1-baseline.md` — **P4-U1 measurement baseline, captured
+2026-09-04 at `78e2002` before any Phase 4 change.** The pre-change production
+numbers, B-8's reference-set method, the 16-assertion structural baseline, and
+the predictions U2/U2s/U3 are scored against. **U2s's invariant test CANNOT be
+run with `supabase db query --linked`** — `cli_login_postgres` holds `bypassrls`,
+so every attempt would pass regardless of the policy while writing the forbidden
+row. It goes through PostgREST with a real JWT.
+`docs/phase-4-scope.md` — Phase 4 scope record. **SCOPED AND CORRECTED
+2026-09-04, NOT STARTED.** Read it before touching the publish path. It measures
+**101 posts, all public, zero private, at that baseline** — so "purge historic
+unshared rows" has no population to purge at the measurement. **That is a claim
+about the present population and NOT about history:** `posts` has no audit
+column and no history table exists, so a private row created and later deleted
+would leave no trace, and an earlier revision's "never exercised" claim is
+withdrawn. It also records **C-60** (un-share does not delete in
+`.backendConnected`, so reverting `shouldPublish: true` naively creates
+permanent invisible residue) and the **durability decision**: one clause on
+`posts_insert_owner` makes shared-only server-enforced, which covers the Storage
+objects too because the post row is written before them.
 
 ---
 
