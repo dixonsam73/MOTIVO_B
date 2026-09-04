@@ -118,12 +118,19 @@ carries no identity.
 | `8bbe612d` | 4 | pdf | 2026-08-14 | 54,338 |
 | `fe3cdd49` | 4 | pdf | 2026-08-15 | 148,684 |
 
-**All four are 4-segment paths**, i.e. the
-`users/<uid>/<postID>/<attachmentID>.<ext>` shape that
-`BackendShim.storageObjectPath` produces — so all four are **post attachments
-that lost their reference**, which is B-8's exact stated mechanism, rather than
-direct-send (`connected_attachments`) residue. **This is a shape observation and
-not a cause**; establishing why each lost its reference is U4's job, not U1's.
+**CORRECTED 2026-09-04 BY U4 — THIS PARAGRAPH WAS WRONG AND IS KEPT WITH ITS
+ERROR VISIBLE.** It originally read: *"All four are 4-segment paths, i.e. the
+`users/<uid>/<postID>/<attachmentID>.<ext>` shape … so all four are post
+attachments that lost their reference, which is B-8's exact stated mechanism,
+rather than direct-send (`connected_attachments`) residue."*
+
+**Segment 3 of all four is the literal string `connected`**, so all four are
+**DIRECT-SEND objects** (`users/<uid>/connected/<assetID>.<ext>`,
+`ConnectedAttachmentSharing:213`) — not post attachments
+(`users/<uid>/<postID>/<attachmentID>.<ext>`, `BackendShim:1191`). **Both shapes
+have four segments, which is exactly why a segment COUNT cannot tell them
+apart.** The count was right; the characterisation was inferred from it and was
+not. See `docs/phase-4-u4-acceptance.md` §1.
 
 Total orphaned: **518,152 bytes**.
 

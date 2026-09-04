@@ -2485,6 +2485,18 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u4-acceptance.md` — **P4-U4 / B-8 COMPLETE 2026-09-04. 4 orphaned
+Storage objects deleted by explicit path; unreferenced 4 → 0, referenced still
+11, no row deleted.** **It also corrects U1: the four were DIRECT-SEND objects
+(`users/<uid>/connected/<assetID>`), not post attachments — both shapes have four
+segments, so a segment COUNT could not tell them apart.** **B-8's guard was
+applied on TWO keys** (`storage_path` and `asset_id`, the latter with no
+`deleted_at` filter) plus a full-text scan; liveness never from the path prefix.
+**A verification method was itself wrong** — an HTTP `GET` returned 200 after a
+successful DELETE, so the run stopped itself; `storage.objects` is the
+authority. **5 dangling references remain — all live `connected_attachments`
+rows pointing at missing objects.** That is the INVERSE of B-8, pre-exists U4,
+and needs its own decision.
 `docs/phase-4-u3-noop.md` — **P4-U3 IS A MEASURED NO-OP, 2026-09-04 — the
 PREDICTED SUCCESSFUL OUTCOME, not a skipped unit.** Private rows were **zero at
 the U1 baseline and zero immediately pre-U3**, measured three ways including a
