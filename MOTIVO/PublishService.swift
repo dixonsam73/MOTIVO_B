@@ -210,9 +210,9 @@ final class PublishService: ObservableObject {
                 let result = await BackendEnvironment.shared.publish.deletePost(sessionID)
                 switch result {
                 case .success:
-                    NSLog("[PublishService] Preview deletePost success → %@", sessionID.uuidString)
+                    NSLog("[PublishService] deletePost success • mode=%@ → %@", String(describing: mode), sessionID.uuidString)
                 case .failure(let error):
-                    NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", sessionID.uuidString, String(describing: error))
+                    NSLog("[PublishService] deletePost FAILED • mode=%@ → %@ | error=%@", String(describing: mode), sessionID.uuidString, String(describing: error))
                 }
             }
 
@@ -305,9 +305,9 @@ final class PublishService: ObservableObject {
                 let result = await BackendEnvironment.shared.publish.deletePost(payload.id)
                 switch result {
                 case .success:
-                    NSLog("[PublishService] Preview deletePost success → %@", payload.id.uuidString)
+                    NSLog("[PublishService] deletePost success • mode=%@ → %@", String(describing: mode), payload.id.uuidString)
                 case .failure(let error):
-                    NSLog("[PublishService] Preview deletePost failed → %@ | error=%@", payload.id.uuidString, String(describing: error))
+                    NSLog("[PublishService] deletePost FAILED • mode=%@ → %@ | error=%@", String(describing: mode), payload.id.uuidString, String(describing: error))
                 }
             }
 

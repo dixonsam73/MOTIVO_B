@@ -88,6 +88,11 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         BackendConfig.apiToken = Self.anonKey
         NetworkManager.shared.baseURL = URL(string: Self.baseURLString)
         NetworkManager.shared.setBearerToken(Self.mintJWT(sub: Self.ownerUID))
+        // uploadPost gates on AuthManager.canonicalBackendUserID() and returns
+        // "Missing owner user id" before it ever reaches the network. Without
+        // this the Share-ON / demote cases pass or fail for the wrong reason --
+        // which is exactly what happened on this suite's first attempt.
+        UserDefaults.standard.set(Self.ownerUID, forKey: "supabaseUserID_v1")
     }
 
     override func tearDown() async throws {
@@ -97,6 +102,7 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         createdObjectPaths = []
         createdPostIDs = []
         NetworkManager.shared.setBearerToken(nil)
+        UserDefaults.standard.removeObject(forKey: "supabaseUserID_v1")
         setBackendMode(.localSimulation)
         try await super.tearDown()
     }
@@ -165,6 +171,80 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
                       "B: FAIL-CLOSED — the post row must NOT be deleted when its object could not be")
     }
 
+    // MARK: - E. C-61 — a FAILED unshare-delete leaves the row PUBLICLY VISIBLE
+
+    /// This is the measurement behind C-61, and it is the reason U2b is blocked.
+    /// The fail-closed branch (case B) correctly preserves the row -- but the row
+    /// it preserves still carries `is_public = true`, because the only writer of
+    /// that column is `patchPostMetadata`, whose single caller sits inside
+    /// `uploadPost`, which never runs on the `shouldPublish == false` path.
+    ///
+    /// TODAY (pre-U2b) an unshare PATCHes the row to is_public=false and the
+    /// content becomes invisible. Under U2b, if the delete fails, it stays
+    /// VISIBLE. That is a privacy regression on the failure path, not merely
+    /// residue.
+    func testFailedUnshareLeavesRowStillPublic_C61() async throws {
+        try skipUnlessLocalStack()
+
+        let postID = UUID()
+        let foreignPath = "users/\(Self.otherUID)/\(UUID().uuidString)/\(UUID().uuidString).jpg"
+        try await makeFixture(postID: postID, objectPath: foreignPath, owner: Self.ownerUID,
+                              uploadAs: Self.otherUID)
+
+        let prePublic = await Self.postIsPublic(postID)
+        XCTAssertEqual(prePublic, true, "precondition: the post is shared")
+
+        setBackendMode(.backendConnected)
+        await PublishService.shared.publish(
+            payload: Self.payload(postID),
+            objectID: try throwawayObjectID(),
+            shouldPublish: false
+        )
+        await Self.settle()
+
+        let stillExists = await Self.postExists(postID)
+        let stillPublic = await Self.postIsPublic(postID)
+        XCTAssertTrue(stillExists, "C-61: the row survives (fail-closed, correct)")
+        XCTAssertEqual(stillPublic, true,
+                       "C-61: AND IT IS STILL PUBLIC — followers can still see content the member unshared")
+    }
+
+    // MARK: - F. TODAY's unshare (the pre-U2b baseline C-61 is measured against)
+
+    /// The shipping behaviour: `shouldPublish: true` is hard-coded, so an
+    /// unshare enqueues with `isPublic == false`, `uploadPost` runs, and
+    /// `patchPostMetadata` DEMOTES the row. The content becomes invisible even
+    /// though the row survives.
+    ///
+    /// This is the comparison that makes C-61 a REGRESSION rather than merely a
+    /// gap: today the failure mode is residue, under U2b it is exposure.
+    func testTodaysUnshareDemotesRowToPrivate() async throws {
+        try skipUnlessLocalStack()
+
+        let postID = UUID()
+        let objectPath = "users/\(Self.ownerUID)/\(postID.uuidString)/\(UUID().uuidString).jpg"
+        try await makeFixture(postID: postID, objectPath: objectPath, owner: Self.ownerUID)
+
+        let prePublic = await Self.postIsPublic(postID)
+        XCTAssertEqual(prePublic, true, "precondition: the post is shared")
+
+        setBackendMode(.backendConnected)
+        // Exactly what the shipping call sites do today: publish anyway, and let
+        // is_public carry the visibility.
+        await PublishService.shared.publish(
+            payload: Self.payload(postID, isPublic: false),
+            objectID: try throwawayObjectID(),
+            shouldPublish: true
+        )
+        await Self.settle()
+
+        let stillExists = await Self.postExists(postID)
+        let nowPublic = await Self.postIsPublic(postID)
+        XCTAssertTrue(stillExists, "today: the row survives as residue")
+        XCTAssertEqual(nowPublic, false,
+                       "today: BUT it is demoted to private, so followers cannot see it")
+    }
+
     // MARK: - C. .backendPreview still reaches deletion (expansion, not replacement)
 
     func testPreviewModeStillDeletes() async throws {
@@ -222,11 +302,11 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         try await Self.adminInsertPost(postID, owner: owner, objectPath: objectPath)
     }
 
-    private static func payload(_ id: UUID) -> SessionSyncQueue.PostPublishPayload {
+    private static func payload(_ id: UUID, isPublic: Bool = true) -> SessionSyncQueue.PostPublishPayload {
         SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: nil, title: nil,
             durationSeconds: nil, activityType: nil, activityDetail: nil,
-            instrumentLabel: nil, mood: nil, effort: nil
+            instrumentLabel: nil, mood: nil, effort: nil, isPublic: isPublic
         )
     }
 
@@ -323,6 +403,17 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
             throw NSError(domain: "fixture", code: code, userInfo: [
                 NSLocalizedDescriptionKey: "object upload failed \(code): \(String(data: data, encoding: .utf8) ?? "")"])
         }
+    }
+
+    /// Reads is_public off the surviving row. Evidence for C-61: a failed
+    /// unshare-delete leaves the row PUBLIC, not merely present.
+    private static func postIsPublic(_ id: UUID) async -> Bool? {
+        let req = request("rest/v1/posts?id=eq.\(id.uuidString)&select=is_public", "GET")
+        let (code, data) = await send(req)
+        guard code == 200,
+              let rows = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]],
+              let first = rows.first else { return nil }
+        return first["is_public"] as? Bool
     }
 
     private static func postExists(_ id: UUID) async -> Bool {

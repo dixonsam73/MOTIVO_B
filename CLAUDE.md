@@ -2485,6 +2485,15 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2b-blocked-c61.md` — **U2b IS BLOCKED, 2026-09-04, and the
+`shouldPublish` literals are UNCHANGED.** C-61: on the unshare path nothing ever
+writes `is_public` (`patchPostMetadata` has one caller, inside `uploadPost`,
+which needs `shouldPublish == true`), so a FAILED delete would leave the post
+**publicly visible** while the member believes it withdrawn. Measured both ways
+on the local stack — today the same action demotes the row to private, so U2b
+would REGRESS the failure path. Smallest repair: **demote, then delete.**
+`publishedURIs` is NOT the mechanism; its only reader is the Feed filter for
+non-owned sessions.
 `docs/phase-4-u2a-acceptance.md` — **P4-U2a / C-60, COMPLETE 2026-09-04.** Two
 predicates in `PublishService` (`:209`, `:304`) so an un-share reaches deletion
 in `.backendConnected`, not only `.backendPreview`. **The behavioural suite was

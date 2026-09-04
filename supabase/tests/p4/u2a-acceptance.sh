@@ -59,12 +59,15 @@ is U2a-5 "$(code $PS '!shouldPublish, \(mode ==')" "2" \
 is U2a-6 "$(code $PS '\.backendPreview')" "5" \
   "backendPreview still named 5x — 2 widened gates, 2 NSLog gates, 1 early-exit(:103)"
 
-# The delete logs still say "Preview ... " and now fire in CONNECTED mode too.
-# Deliberately NOT changed here: U2a's constraint is the smallest change that
-# makes the path reachable, and U2b reopens this file. Pinned so that U2b has to
-# address it consciously rather than inherit a log that misnames its own mode.
-is U2a-6b "$(code $PS 'Preview deletePost')" "4" \
-  "the 4 misnamed 'Preview deletePost' logs are still present — U2b owns them"
+# NAMING ALIGNMENT (not a behavioural change). The delete logs said "Preview
+# deletePost" on a branch now shared by Preview and Connected, so a Connected
+# failure would have been logged under the wrong mode -- the same class of
+# misleading record this project keeps being bitten by. They now name the mode
+# they actually ran in.
+is U2a-6b "$(code $PS 'Preview deletePost')" "0" \
+  "no delete log still misnames its mode as 'Preview'"
+is U2a-6c "$(code $PS 'deletePost (success|FAILED) . mode=')" "4" \
+  "all 4 delete logs now report the ACTUAL mode"
 
 # ============ U2b IS NOT IMPLEMENTED — the call sites must be untouched
 is U2a-7  "$(code $AESV 'shouldPublish:\s*true')"       "1" "AESV still hard-codes shouldPublish: true"
