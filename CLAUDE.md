@@ -2485,6 +2485,14 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2c-acceptance.md` — **P4-U2c COMPLETE 2026-09-04, ZERO
+PRODUCTION CODE.** The attachment-upload invariant is guaranteed by topology:
+the only door into Storage for a post attachment is inside `uploadPost`,
+`uploadPost` has ONE caller, and it sits behind an `.unshare`
+guard-and-`continue`. The `op` boundary alone is **not** sufficient — `.publish`
++ `isPublic:false` is representable — and what closes it is that both call sites
+pass the **same identifier** to `isPublic:` and `shouldPublish:`. Asserted, and
+proven non-vacuous by reverting U2b and watching it fail.
 `docs/phase-4-u2b-device-handoff.md` — **THE DEVICE A PROCEDURE. U2b IS
 IMPLEMENTATION-COMPLETE / DEVICE-VERIFICATION-PENDING and must NOT be called
 closed until this has been run.** Deferred, not waived: Device A's Sandbox

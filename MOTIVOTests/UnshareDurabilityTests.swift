@@ -309,6 +309,42 @@ final class UnshareDurabilityTests: XCTestCase {
         XCTAssertTrue(SessionSyncQueue.shared.items.contains { $0.id == id }, "and the item is retained")
     }
 
+    // MARK: - P4-U2c. An .unshare REMOVES attachments and uploads nothing
+
+    /// The fourth distinction U2c must draw: an unshare of a post that still
+    /// carries attachment refs must delete those objects and must never invoke
+    /// the upload path. The structural half -- that the upload door is inside
+    /// `uploadPost`, which `.unshare` never reaches -- is pinned by
+    /// `u2c-acceptance.sh`; this is the behavioural half.
+    func testUnshareRemovesAttachmentsAndUploadsNothing() async throws {
+        try skipUnlessLocalStack()
+        let id = UUID()
+        let objA = "users/\(Self.ownerUID)/\(id.uuidString)/\(UUID().uuidString).jpg"
+        let objB = "users/\(Self.ownerUID)/\(id.uuidString)/\(UUID().uuidString).jpg"
+        try await Self.upload(objA)
+        try await Self.upload(objB)
+        objectPaths.append(contentsOf: [objA, objB])
+        postIDs.append(id)
+        try await Self.insertPost(id, objects: [objA, objB])
+
+        let beforeA = await Self.objectExists(objA)
+        let beforeB = await Self.objectExists(objB)
+        XCTAssertTrue(beforeA && beforeB, "precondition: both objects are on Storage")
+
+        SessionSyncQueue.shared.enqueue(Self.payload(id, op: .unshare, isPublic: false))
+        await SessionSyncQueue.shared.flushNow()
+        await Self.settle()
+
+        let afterA = await Self.objectExists(objA)
+        let afterB = await Self.objectExists(objB)
+        let row = await Self.exists(id)
+        XCTAssertFalse(afterA, "unshare deletes the first attachment object")
+        XCTAssertFalse(afterB, "…and the second")
+        XCTAssertFalse(row, "…and the row")
+        XCTAssertFalse(SessionSyncQueue.shared.items.contains { $0.id == id },
+                       "…and dequeues, having uploaded nothing")
+    }
+
     // MARK: - Helpers
 
     private func makeFixture(_ id: UUID, _ object: String) async throws {
