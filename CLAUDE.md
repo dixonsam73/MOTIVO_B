@@ -2485,6 +2485,15 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2c-amendment-acceptance.md` — **U2c COMPLETION AMENDMENT,
+2026-09-04. THE FORBIDDEN STATE IS NOW UNREPRESENTABLE.** `op` is DERIVED from
+`isPublic` and has no initialiser parameter, so `.publish + isPublic:false`
+**does not compile** (discriminator: `error: extra argument 'op' in call`), and
+`init(from:)` normalises a contradictory file to the SAFE reading `.unshare`.
+**One declared migration:** a legacy queued item with `isPublic:false` now
+converges to DELETION rather than demotion. **Read §5 before touching the
+queue** — three tests that asserted the pre-amendment world were re-expressed,
+and two now assert something stronger.
 `docs/phase-4-u2c-acceptance.md` — **P4-U2c COMPLETE 2026-09-04, ZERO
 PRODUCTION CODE.** The attachment-upload invariant is guaranteed by topology:
 the only door into Storage for a post attachment is inside `uploadPost`,

@@ -26,12 +26,21 @@ t=re.sub(r"^\s*//.*$","",t,flags=re.M)
 t=re.sub(r"//.*$","",t,flags=re.M)
 print(len(re.findall(sys.argv[2],t)))' "$1" "$2"; }
 
-AESV=MOTIVO/AddEditSessionView.swift
-PRDV=MOTIVO/PostRecordDetailsView.swift
-PS=MOTIVO/PublishService.swift
-BS=MOTIVO/BackendShim.swift
-SSQ=MOTIVO/SessionSyncQueue.swift
-PV=MOTIVO/ProfileView.swift
+# ===================== SUITE PINNING (see u2a-acceptance for the policy)
+# U2b's own commit. P4-U2c's amendment removed the `op:` parameter that U2b-13
+# counts, so that assertion is pinned to where it is true. The live guard on the
+# current contract is u2c-acceptance U2c-15..20.
+PIN=c92065e
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+pin() { local out="$TMPD/$(echo "$1" | tr / _)"; git show "$PIN:$1" > "$out" 2>/dev/null || return 1; echo "$out"; }
+
+AESV=MOTIVO/AddEditSessionView.swift         # LIVE: the U2b call-site flips
+PRDV=MOTIVO/PostRecordDetailsView.swift      # LIVE: the U2b call-site flips
+PS=$(pin MOTIVO/PublishService.swift)        # pinned: U2c removed the op: argument
+BS=MOTIVO/BackendShim.swift                  # LIVE: the upload choke point
+SSQ=MOTIVO/SessionSyncQueue.swift            # LIVE: one uploadPost invocation
+PV=MOTIVO/ProfileView.swift                  # LIVE: standing Phase 3 exit assertion
 
 echo
 echo "P4-U2b — shared-only uploads, structural acceptance"
@@ -42,8 +51,10 @@ is U2b-1 "$(code $AESV 'shouldPublish:\s*isPublic')"   "1" "AESV now gates exist
 is U2b-2 "$(code $PRDV 'shouldPublish:\s*visibility')" "1" "PRDV now gates existence on visibility"
 is U2b-3 "$(code $AESV 'shouldPublish:\s*true')"       "0" "no hard-coded true left in AESV"
 is U2b-4 "$(code $PRDV 'shouldPublish:\s*true')"       "0" "no hard-coded true left in PRDV"
-is U2b-5 "$(git diff --name-only 145ddfd -- 'MOTIVO/*.swift' | wc -l | tr -d ' ')" "3" \
-  "exactly three swift files changed since U2a-2"
+# Bounded to U2b's OWN range. Open-ended "since U2a-2" was true only while U2b
+# was the tip; the U2c amendment legitimately touches a fourth file.
+is U2b-5 "$(git diff --name-only 145ddfd..c92065e -- 'MOTIVO/*.swift' | wc -l | tr -d ' ')" "3" \
+  "U2b itself changed exactly three swift files"
 
 # ===================== THE STRUCTURAL HALF OF THE ATTACHMENT CLAIM
 # The behavioural suite proves the gate (no row, no .publish item). These two

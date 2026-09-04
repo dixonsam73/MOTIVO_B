@@ -64,10 +64,19 @@ public final class SessionSyncQueue: ObservableObject {
       public let notes: String?
       public let areNotesPrivate: Bool
 
-      /// C-61. DEFAULTS TO `.publish` EVERYWHERE, which is what makes every
-      /// queue file written before this change decode unchanged and keep its
-      /// original meaning. See `init(from:)` below -- the synthesised decoder
-      /// would have thrown on the missing key.
+      /// C-61 / P4-U2c. DERIVED FROM `isPublic`, NEVER SUPPLIED BY A CALLER.
+      ///
+      /// `op` and `isPublic` are the SAME BIT and always were: `.publish` means
+      /// the post must exist AND be visible -- a private post must not exist at
+      /// all (invariant 2) -- and `.unshare` means it must not exist, so its
+      /// visibility is meaningless. The forbidden state `.publish` +
+      /// `isPublic == false` is exactly the case where two redundant fields
+      /// disagree, and it would have reached `uploadPost`, writing a private row
+      /// AND uploading its attachments.
+      ///
+      /// There is therefore no `op:` initialiser parameter. The contradiction is
+      /// not merely unlikely, it does not compile. `init(from:)` below closes
+      /// the same hole for a file on disk.
       public let op: PostOp
 
       public init(
@@ -83,8 +92,7 @@ public final class SessionSyncQueue: ObservableObject {
           effort: Int?,
           isPublic: Bool = true,
           notes: String? = nil,
-          areNotesPrivate: Bool = false,
-          op: PostOp = .publish
+          areNotesPrivate: Bool = false
       ) {
           self.id = id
           self.sessionID = sessionID
@@ -99,7 +107,8 @@ public final class SessionSyncQueue: ObservableObject {
           self.isPublic = isPublic
           self.notes = notes
           self.areNotesPrivate = areNotesPrivate
-          self.op = op
+          // DERIVED. See the `op` declaration above.
+          self.op = isPublic ? .publish : .unshare
       }
 
       /// BACKWARD COMPATIBILITY IS THE WHOLE REASON THIS EXISTS. A synthesised
@@ -124,7 +133,26 @@ public final class SessionSyncQueue: ObservableObject {
           isPublic = try c.decodeIfPresent(Bool.self, forKey: .isPublic) ?? true
           notes = try c.decodeIfPresent(String.self, forKey: .notes)
           areNotesPrivate = try c.decodeIfPresent(Bool.self, forKey: .areNotesPrivate) ?? false
-          op = try c.decodeIfPresent(PostOp.self, forKey: .op) ?? .publish
+          // P4-U2c. NORMALISE, because removing the initialiser parameter
+          // cannot police a file on disk -- a legacy queue file, or a
+          // hand-edited one, can still assert the contradiction.
+          //
+          // A CONTRADICTION RESOLVES TO THE SAFE READING, NEVER TO "UPLOAD IT".
+          //
+          //   no op, isPublic true/absent -> .publish   (unchanged)
+          //   no op, isPublic FALSE       -> .unshare   (migration, below)
+          //   op present and agreeing      -> as written
+          //   op publish + isPublic false  -> .unshare   (the contradiction)
+          //
+          // THE MIGRATION IS A DELIBERATE BEHAVIOUR CHANGE. A legacy item with
+          // isPublic:false meant "publish this and demote it to private" -- the
+          // pre-U2b Share-OFF behaviour. It now converges to DELETION instead,
+          // which is the member's original Share-OFF intent under Phase 4's rule
+          // that private content does not belong on Supabase, and is strictly
+          // safer than leaving a private row. Decoding it as `.publish` would
+          // either upload a private row or stick in the queue for ever.
+          let declared = try c.decodeIfPresent(PostOp.self, forKey: .op)
+          op = (isPublic == false) ? .unshare : (declared ?? .publish)
       }
     }
 
@@ -193,10 +221,11 @@ public final class SessionSyncQueue: ObservableObject {
                 instrumentLabel: payload.instrumentLabel ?? existing.instrumentLabel,
                 mood: payload.mood ?? existing.mood,
                 effort: payload.effort ?? existing.effort,
+                // `op` is derived from this, so the two can no longer be
+                // recombined into a contradiction here either.
                 isPublic: mergedIsPublic,
                 notes: payload.notes ?? existing.notes,
-                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate),
-                op: payload.op
+                areNotesPrivate: (payload.notes != nil ? payload.areNotesPrivate : existing.areNotesPrivate)
             )
             items[index] = merged
             persist()

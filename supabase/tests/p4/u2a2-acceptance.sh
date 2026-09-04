@@ -42,7 +42,13 @@ TMPD=$(mktemp -d)
 trap 'rm -rf "$TMPD"' EXIT
 pin() { local out="$TMPD/$(echo "$1" | tr / _)"; git show "$PIN:$1" > "$out" 2>/dev/null || return 1; echo "$out"; }
 
-SSQ=MOTIVO/SessionSyncQueue.swift            # LIVE: the queue contract must not regress
+# WAS LIVE. P4-U2c's amendment deliberately replaced the contract these assert:
+# `op` is now DERIVED from `isPublic` and has no initialiser parameter, and the
+# decoder normalises instead of plainly defaulting. U2a2-4/5 remain TRUE OF
+# U2a-2 and are pinned to its commit. The LIVE guard has not been dropped -- it
+# MOVED to u2c-acceptance U2c-15..20 plus the behavioural decoder test, which
+# assert the current, stronger contract.
+SSQ=$(pin MOTIVO/SessionSyncQueue.swift)
 BS=MOTIVO/BackendShim.swift                  # LIVE: demote-then-delete must not regress
 PS=$(pin MOTIVO/PublishService.swift)        # pinned: U2b removed the C-60 gate
 AESV=$(pin MOTIVO/AddEditSessionView.swift)  # pinned: U2a2-16/18 assert "U2b not started"

@@ -94,7 +94,13 @@ final class UnshareDurabilityTests: XCTestCase {
     /// decoder would throw `keyNotFound` on every entry; `load(from:)` would
     /// then fall through its legacy `[UUID]` branch and, failing that,
     /// propagate — silently discarding a queue of real pending publishes.
-    func testLegacyQueueFileDecodesAsPublish() throws {
+    /// RE-EXPRESSED BY THE P4-U2c AMENDMENT. It used to assert that EVERY
+    /// legacy entry defaults to `.publish`. That is now true only of entries
+    /// that were public: an entry with `isPublic: false` meant "publish and
+    /// demote to private", and it migrates to `.unshare` so it converges to
+    /// deletion instead -- the member's original Share-OFF intent under Phase
+    /// 4's rule. The migration is asserted here rather than left implicit.
+    func testLegacyQueueFileDecodesWithPrivateEntriesMigrated() throws {
         let legacy = """
         [{"id":"\(UUID().uuidString)","isPublic":true,"areNotesPrivate":false},
          {"id":"\(UUID().uuidString)","isPublic":false,"areNotesPrivate":false,"title":"old"}]
@@ -102,8 +108,42 @@ final class UnshareDurabilityTests: XCTestCase {
         let data = Data(legacy.utf8)
         let decoded = try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self, from: data)
         XCTAssertEqual(decoded.count, 2, "legacy file must still decode")
-        XCTAssertTrue(decoded.allSatisfy { $0.op == .publish },
-                      "every legacy entry must default to .publish — its original meaning")
+        XCTAssertEqual(decoded[0].op, .publish, "a legacy PUBLIC entry keeps its original meaning")
+        XCTAssertEqual(decoded[1].op, .unshare,
+                       "a legacy PRIVATE entry migrates to .unshare — it converges to deletion")
+    }
+
+    // MARK: - 1b. P4-U2c: the decoder normalises a contradictory file
+
+    /// Removing the `op:` initialiser parameter cannot police a file on disk.
+    /// These are the four decode cases, and the contradiction must resolve to
+    /// the SAFE reading -- never to "upload it".
+    func testDecoderNormalisesContradictoryQueueFile() throws {
+        func decode(_ json: String) throws -> SessionSyncQueue.PostPublishPayload {
+            try JSONDecoder().decode([SessionSyncQueue.PostPublishPayload].self,
+                                     from: Data("[\(json)]".utf8))[0]
+        }
+        let id = UUID().uuidString
+
+        // no op, isPublic true/absent -> .publish (unchanged from before)
+        XCTAssertEqual(try decode(#"{"id":"\#(id)","isPublic":true,"areNotesPrivate":false}"#).op, .publish)
+        XCTAssertEqual(try decode(#"{"id":"\#(id)","areNotesPrivate":false}"#).op, .publish)
+
+        // no op, isPublic FALSE -> .unshare. THE DELIBERATE MIGRATION: a legacy
+        // item meaning "publish and demote to private" now converges to
+        // deletion, which is the member's original Share-OFF intent.
+        XCTAssertEqual(try decode(#"{"id":"\#(id)","isPublic":false,"areNotesPrivate":false}"#).op, .unshare,
+                       "legacy private item migrates to .unshare, not .publish")
+
+        // op present and agreeing -> as written
+        XCTAssertEqual(try decode(#"{"id":"\#(id)","isPublic":true,"areNotesPrivate":false,"op":"publish"}"#).op, .publish)
+        XCTAssertEqual(try decode(#"{"id":"\#(id)","isPublic":false,"areNotesPrivate":false,"op":"unshare"}"#).op, .unshare)
+
+        // THE CONTRADICTION -> the safe reading
+        let contradictory = try decode(#"{"id":"\#(id)","isPublic":false,"areNotesPrivate":false,"op":"publish"}"#)
+        XCTAssertEqual(contradictory.op, .unshare,
+                       "a file asserting .publish + isPublic:false must decode as .unshare, never as publish")
+        XCTAssertFalse(contradictory.isPublic, "…and isPublic stays false")
     }
 
     // MARK: - 2. Last intent wins, BOTH directions
@@ -136,7 +176,7 @@ final class UnshareDurabilityTests: XCTestCase {
 
         // --- offline unshare
         NetworkManager.shared.baseURL = Self.offlineURL
-        await PublishService.shared.publish(payload: Self.payload(id, op: .publish, isPublic: false),
+        await PublishService.shared.publish(payload: Self.payload(id, op: .unshare, isPublic: false),
                                             objectID: try throwawayObjectID(), shouldPublish: false)
         await Self.settle()
 
@@ -353,12 +393,18 @@ final class UnshareDurabilityTests: XCTestCase {
         try await Self.insertPost(id, objects: [object])
     }
 
+    /// P4-U2c: `op` is DERIVED from `isPublic` and can no longer be passed.
+    /// The helper keeps its shape so the call sites still read as intent, and
+    /// asserts the two agree -- a test that asked for `.publish` while passing
+    /// `isPublic: false` is asking for the state this amendment abolished.
     private static func payload(_ id: UUID, op: SessionSyncQueue.PostOp, isPublic: Bool)
     -> SessionSyncQueue.PostPublishPayload {
-        SessionSyncQueue.PostPublishPayload(
+        XCTAssertEqual(op, isPublic ? .publish : .unshare,
+                       "a test may not ask for a contradictory payload")
+        return SessionSyncQueue.PostPublishPayload(
             id: id, sessionID: id, sessionTimestamp: nil, title: nil, durationSeconds: nil,
             activityType: nil, activityDetail: nil, instrumentLabel: nil, mood: nil, effort: nil,
-            isPublic: isPublic, notes: nil, areNotesPrivate: false, op: op)
+            isPublic: isPublic, notes: nil, areNotesPrivate: false)
     }
 
     private func throwawayObjectID() throws -> NSManagedObjectID {

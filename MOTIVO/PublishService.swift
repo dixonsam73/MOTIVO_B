@@ -195,9 +195,11 @@ final class PublishService: ObservableObject {
                         sessionID: sessionID,
                         sessionTimestamp: nil, title: nil, durationSeconds: nil,
                         activityType: nil, activityDetail: nil, instrumentLabel: nil,
-                        mood: nil, effort: nil, isPublic: false,
-                        notes: nil, areNotesPrivate: false,
-                        op: .unshare
+                        mood: nil, effort: nil,
+                        // `isPublic: false` IS the unshare intent now -- `op` is
+                        // derived from it and cannot be passed. P4-U2c.
+                        isPublic: false,
+                        notes: nil, areNotesPrivate: false
                     )
                 )
             }
@@ -323,9 +325,11 @@ final class PublishService: ObservableObject {
                         sessionID: payload.sessionID,
                         sessionTimestamp: nil, title: nil, durationSeconds: nil,
                         activityType: nil, activityDetail: nil, instrumentLabel: nil,
-                        mood: nil, effort: nil, isPublic: false,
-                        notes: nil, areNotesPrivate: false,
-                        op: .unshare
+                        mood: nil, effort: nil,
+                        // `isPublic: false` IS the unshare intent now -- `op` is
+                        // derived from it and cannot be passed. P4-U2c.
+                        isPublic: false,
+                        notes: nil, areNotesPrivate: false
                     )
                 )
             }

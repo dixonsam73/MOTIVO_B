@@ -228,7 +228,16 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
     ///
     /// This is the comparison that makes C-61 a REGRESSION rather than merely a
     /// gap: today the failure mode is residue, under U2b it is exposure.
-    func testTodaysUnshareDemotesRowToPrivate() async throws {
+    /// RE-EXPRESSED BY THE P4-U2c AMENDMENT, AND IT NOW ASSERTS SOMETHING
+    /// STRONGER. It used to document the PRE-U2b world: a payload with
+    /// `isPublic: false` published with `shouldPublish: true` demoted the row
+    /// and kept it. That combination is the state the amendment abolished --
+    /// `op` is derived from `isPublic`, so such a payload IS an unshare.
+    ///
+    /// What it proves now: **the payload's privacy wins over a contradictory
+    /// caller.** Asking to publish something marked private removes it; it does
+    /// not leave a private row, and it certainly does not leave a public one.
+    func testPrivatePayloadUnsharesEvenWhenCallerAsksToPublish() async throws {
         try skipUnlessLocalStack()
 
         let postID = UUID()
@@ -249,10 +258,8 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         await Self.settle()
 
         let stillExists = await Self.postExists(postID)
-        let nowPublic = await Self.postIsPublic(postID)
-        XCTAssertTrue(stillExists, "today: the row survives as residue")
-        XCTAssertEqual(nowPublic, false,
-                       "today: BUT it is demoted to private, so followers cannot see it")
+        XCTAssertFalse(stillExists,
+                       "a private payload REMOVES the row even though the caller passed shouldPublish: true")
     }
 
     // MARK: - G/H. OFFLINE DURABILITY — the property U2b would lose
@@ -265,7 +272,13 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
     /// G. TODAY: an offline unshare is DURABLY QUEUED and converges on reconnect
     /// with no further user action. This is the eventual-delivery property that
     /// exists only because the shipping call sites hard-code `shouldPublish: true`.
-    func testTodaysOfflineUnshareIsQueuedAndConvergesOnReconnect() async throws {
+    /// RE-EXPRESSED BY THE P4-U2c AMENDMENT. Its original subject -- the
+    /// pre-U2b demote-and-keep path -- no longer exists. The durability property
+    /// it measured is unchanged and is asserted here in its current form: an
+    /// offline private-payload save is persisted and converges on reconnect
+    /// with no further user action. Its historical result is recorded in
+    /// docs/phase-4-u2a2-durability.md.
+    func testOfflinePrivatePayloadIsQueuedAndConvergesOnReconnect() async throws {
         try skipUnlessLocalStack()
 
         let postID = UUID()
@@ -309,11 +322,11 @@ final class PublishServiceConnectedDeleteTests: XCTestCase {
         await SessionSyncQueue.shared.flushNow()
         await Self.settle()
 
-        let convergedPublic = await Self.postIsPublic(postID)
+        let convergedExists = await Self.postExists(postID)
         let drained = !SessionSyncQueue.shared.items.contains { $0.id == postID }
-        XCTAssertEqual(convergedPublic, false,
-                       "G: CONVERGENCE — the demotion is delivered on reconnect with no further user action")
-        XCTAssertTrue(drained, "G: and the queue item is drained")
+        XCTAssertFalse(convergedExists,
+                       "CONVERGENCE — delivered on reconnect with no further user action")
+        XCTAssertTrue(drained, "and the queue item is drained")
     }
 
     /// H. THE REGRESSION U2b WOULD INTRODUCE: on the `shouldPublish == false`

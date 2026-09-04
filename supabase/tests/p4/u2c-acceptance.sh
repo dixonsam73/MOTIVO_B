@@ -140,6 +140,25 @@ for i,l in enumerate(t):
 else: print('nomatch')")" "1" \
   "…and it is inside #if DEBUG, so it is not compiled into Release"
 
+# ============ 5b. P4-U2c AMENDMENT — THE FORBIDDEN STATE IS UNREPRESENTABLE
+# U2c-1..12 prove the upload door has one entrance behind an .unshare guard, and
+# U2c-9/10 prove the two shipping call sites do not construct `.publish` +
+# isPublic:false. NEITHER proves the combination cannot REACH the door. These do:
+# `op` is derived from `isPublic`, so the contradiction has no initialiser to
+# come through, and the decoder normalises the on-disk case.
+is U2c-15 "$(code $SSQ 'op: PostOp = \.publish')" "0" \
+  "the memberwise init no longer takes an op: parameter"
+is U2c-16 "$(code $SSQ 'self\.op = isPublic \? \.publish : \.unshare')" "1" \
+  "…op is DERIVED from isPublic instead"
+is U2c-17 "$(code $SSQ 'public let op: PostOp')" "1" \
+  "…and op is a let, so it cannot be reassigned afterwards"
+is U2c-18 "$(code $SSQ 'op = \(isPublic == false\) \? \.unshare : \(declared \?\? \.publish\)')" "1" \
+  "the decoder normalises a contradictory file to the SAFE reading"
+is U2c-19 "$(( $(code $SSQ 'op: \.') + $(code MOTIVO/PublishService.swift 'op: \.') + $(code $AESV 'op: \.') + $(code $PRDV 'op: \.') ))" "0" \
+  "NO production site passes op: at all"
+is U2c-20 "$(code $SSQ 'mergedIsPublic')" "2" \
+  "the merge computes visibility once and lets op follow — it cannot recombine them"
+
 # ============ 6. STANDING INVARIANTS
 is U2c-13 "$(code $PV 'LocalFactoryReset\.perform')" "2" \
   "LocalFactoryReset.perform still exactly 2 callers"
