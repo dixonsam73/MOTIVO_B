@@ -2485,6 +2485,19 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u2s-acceptance.md` — **P4-U2s IS LIVE IN PRODUCTION, 2026-09-04.
+SHARED-ONLY IS NOW SERVER-ENFORCED.** `posts_insert_owner` gained one top-level
+conjunct, `AND (is_public = true)`; deployed `with_check` md5
+`fb1873d10077148c59180ec7d45edbcb`, byte-exact to the rehearsed local policy.
+**It is a PEER of `enforcement_gate`, not nested inside it** — the gate returns
+true when U6b enforcement is off, so a nested clause would evaporate with the
+kill switch. **No UPDATE restriction** (C-61: demotion must stay possible).
+**The schema default is still `false`, deliberately** — the guard rejects the
+resulting value, so an omitted column is refused too. **Production behavioural
+testing was impossible for me** (all 17 identities are Apple-only, zero
+passwords; `service_role` bypasses RLS) so A/B/C/D/E ran on the byte-identical
+local stack and production got structural verification; the behavioural half
+folds into U2b's outstanding Device A run.
 `docs/phase-4-u2c-amendment-acceptance.md` — **U2c COMPLETION AMENDMENT,
 2026-09-04. THE FORBIDDEN STATE IS NOW UNREPRESENTABLE.** `op` is DERIVED from
 `isPublic` and has no initialiser parameter, so `.publish + isPublic:false`

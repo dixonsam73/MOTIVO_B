@@ -55,6 +55,13 @@ AESV=$(pin MOTIVO/AddEditSessionView.swift)  # pinned: U2a2-16/18 assert "U2b no
 PRDV=$(pin MOTIVO/PostRecordDetailsView.swift)
 PV=MOTIVO/ProfileView.swift                  # LIVE: standing Phase 3 exit assertion
 
+# P4-U2s LEGITIMATELY FALSIFIES THIS. It asserts "U2s has not started", which
+# was true of this unit and is now false. Pinned to this unit's own commit per
+# the policy in u2a-acceptance. The LIVE guard did not disappear -- u2s-acceptance
+# asserts the STRONGER fact: the privacy conjunct IS deployed.
+PINNED_POLICIES="$TMPD/policies.json"
+git show 145ddfd:supabase/schema/policies.json > "$PINNED_POLICIES"
+
 echo
 echo "P4-U2a-2 / C-61 — structural acceptance"
 echo
@@ -102,10 +109,10 @@ is U2a2-16 "$(code $AESV 'shouldPublish:\s*true')"              "1" "AESV litera
 is U2a2-17 "$(code $PRDV 'shouldPublish:\s*true')"              "1" "PRDV literal UNCHANGED — U2b not started"
 is U2a2-18 "$(code $AESV 'shouldPublish:\s*isPublic')"          "0" "AESV still does not gate on isPublic"
 is U2a2-19 "$(code $BS 'loadIncludedAttachments')"              "2" "attachment path untouched — U2c not started"
-is U2a2-20 "$(git diff --name-only f12330e -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
+is U2a2-20 "$(git diff --name-only f12330e..145ddfd -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
   "no migration/function/schema change — U2s not started"
 is U2a2-21 "$(python3 -c "
-import json;p=json.load(open('supabase/schema/policies.json'))
+import json;p=json.load(open('$PINNED_POLICIES'))
 r=[x for x in p if x['policyname']=='posts_insert_owner'][0]
 print(1 if 'is_public' in (r['with_check'] or '') else 0)")" "0" \
   "posts_insert_owner still has NO is_public predicate"

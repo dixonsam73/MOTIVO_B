@@ -207,7 +207,7 @@
     "roles": "{authenticated}",
     "schemaname": "public",
     "tablename": "posts",
-    "with_check": "(( SELECT enforcement_gate('posts.insert'::text) AS enforcement_gate) AND (owner_user_id = auth.uid()))"
+    "with_check": "(( SELECT enforcement_gate('posts.insert'::text) AS enforcement_gate) AND (owner_user_id = auth.uid()) AND (is_public = true))"
   },
   {
     "cmd": "SELECT",

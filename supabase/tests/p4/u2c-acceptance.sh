@@ -23,6 +23,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/../../.."
 
+TMPD=$(mktemp -d)
+trap 'rm -rf "$TMPD"' EXIT
+
 PASS=0; FAIL=0
 ok()  { printf "  \033[32mPASS\033[0m  %-9s %s\n" "$1" "$2"; PASS=$((PASS+1)); }
 bad() { printf "  \033[31mFAIL\033[0m  %-9s %s\n" "$1" "$2"; FAIL=$((FAIL+1)); }
@@ -61,6 +64,13 @@ AESV=MOTIVO/AddEditSessionView.swift
 PRDV=MOTIVO/PostRecordDetailsView.swift
 PV=MOTIVO/ProfileView.swift
 DVV=MOTIVO/DebugViewerView.swift
+
+# P4-U2s LEGITIMATELY FALSIFIES THIS. It asserts "U2s has not started", which
+# was true of this unit and is now false. Pinned to this unit's own commit per
+# the policy in u2a-acceptance. The LIVE guard did not disappear -- u2s-acceptance
+# asserts the STRONGER fact: the privacy conjunct IS deployed.
+PINNED_POLICIES="$TMPD/policies.json"
+git show 85d1884:supabase/schema/policies.json > "$PINNED_POLICIES"
 
 echo
 echo "P4-U2c — attachment-upload privacy invariant"
@@ -163,7 +173,7 @@ is U2c-20 "$(code $SSQ 'mergedIsPublic')" "2" \
 is U2c-13 "$(code $PV 'LocalFactoryReset\.perform')" "2" \
   "LocalFactoryReset.perform still exactly 2 callers"
 is U2c-14 "$(python3 -c "
-import json;p=json.load(open('supabase/schema/policies.json'))
+import json;p=json.load(open('$PINNED_POLICIES'))
 r=[x for x in p if x['policyname']=='posts_insert_owner'][0]
 print(1 if 'is_public' in (r['with_check'] or '') else 0)")" "0" \
   "posts_insert_owner still has NO is_public guard — U2s not started"

@@ -42,6 +42,13 @@ BS=MOTIVO/BackendShim.swift                  # LIVE: the upload choke point
 SSQ=MOTIVO/SessionSyncQueue.swift            # LIVE: one uploadPost invocation
 PV=MOTIVO/ProfileView.swift                  # LIVE: standing Phase 3 exit assertion
 
+# P4-U2s LEGITIMATELY FALSIFIES THIS. It asserts "U2s has not started", which
+# was true of this unit and is now false. Pinned to this unit's own commit per
+# the policy in u2a-acceptance. The LIVE guard did not disappear -- u2s-acceptance
+# asserts the STRONGER fact: the privacy conjunct IS deployed.
+PINNED_POLICIES="$TMPD/policies.json"
+git show c92065e:supabase/schema/policies.json > "$PINNED_POLICIES"
+
 echo
 echo "P4-U2b — shared-only uploads, structural acceptance"
 echo
@@ -85,10 +92,10 @@ is U2b-12 "$(code $PS 'flushNow')"           "3" "all three flush sites intact (
 is U2b-13 "$(code $PS 'op: \.unshare')"      "2" "…and both still persist the intent first (durability preserved)"
 
 # ===================== U2c and U2s ARE NOT STARTED
-is U2b-14 "$(git diff --name-only f12330e -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
+is U2b-14 "$(git diff --name-only f12330e..c92065e -- supabase/migrations supabase/functions supabase/schema | wc -l | tr -d ' ')" "0" \
   "no migration/function/schema change — U2s not started"
 is U2b-15 "$(python3 -c "
-import json;p=json.load(open('supabase/schema/policies.json'))
+import json;p=json.load(open('$PINNED_POLICIES'))
 r=[x for x in p if x['policyname']=='posts_insert_owner'][0]
 print(1 if 'is_public' in (r['with_check'] or '') else 0)")" "0" \
   "posts_insert_owner has NO is_public guard — U2b claims no old-client durability"
