@@ -1,13 +1,14 @@
-# P4-U7 / C-58 — IMPLEMENTED AND LOCALLY VERIFIED. NOT YET DEPLOYED
+# P4-U7 / C-58 — LIVE IN PRODUCTION, 2026-09-05
 
 **Prediction `cac7d5b`, committed before any mutation.**
 Accepted checkpoints: client `7744027`, server `dfba1d8`, U6 `8aaced4`.
 
-**PRODUCTION IS UNCHANGED — verified read-only after the work:**
-`get_account_directory_by_user_ids` is still `d0d1322e926fa0c9c385c6272395c207`
-with `has_follow_scope = false`. The apply file is
-`supabase/sql/2026-09-05-u7-c58-follow-scoped-attribution.sql` and awaits an
-explicit decision to run it.
+**DEPLOYED TO PRODUCTION 2026-09-05** from
+`supabase/sql/2026-09-05-u7-c58-follow-scoped-attribution.sql`, executed manually
+by the account holder. Deployment prediction `08e719f`, committed before the run.
+**Every prediction matched and nothing was repaired forward.** §8 is the
+production evidence; it was gathered independently rather than read off the
+apply's own output.
 
 ---
 
@@ -141,7 +142,6 @@ disguise.
 
 ## 6. WHAT THIS DOES NOT DO
 
-- **Not deployed to production.** Local only.
 - **Does not broaden discovery.** `search_account_directory` is untouched; a
   lapsed member stays undiscoverable (`U7-C3`/`C4`, `U7-E8`).
 - **Does not weaken the membership model.** No policy changed (`U7-E7`), grants
@@ -152,6 +152,77 @@ disguise.
 
 ---
 
+## 8. PRODUCTION DEPLOYMENT — INDEPENDENTLY VERIFIED
+
+**The apply reported one row matching every predicted value. That is not the
+evidence** — a procedure whose success is reported by the thing being asked to
+act is unverified. Everything below was read back from production separately.
+
+### Structure
+
+| check | predicted | **production** |
+|---|---|---|
+| `get_account_directory_by_user_ids` def md5 | `48e7f743196e3ed43438ce0a8c449ea6` | **matches** |
+| grants anon / authenticated / service_role | `f/t/f` | **`f/t/f`** |
+| SECURITY DEFINER, `search_path=public` | unchanged | **unchanged** |
+| follow scope present | true | **true** |
+| G10 subject predicate | false | **false** |
+| source mentions `requested` | false | **false** |
+| `search_account_directory` def md5 | `077f73f28c5d5c477635c9878a35d790` | **unchanged** |
+
+**The md5 is byte-exact to the locally rehearsed function**, and the local stack
+had been confirmed byte-identical to production beforehand — so production
+received exactly the rehearsed text, not merely something equivalent.
+
+**Snapshot recapture: ONE line, in ONE file.** `functions.json`, exactly one
+definition changed (`d0d1322e…` → `48e7f743…`), **zero functions added, zero
+removed**, and the other nine snapshot files untouched.
+
+### Behaviour, on real production rows — no fixture was created
+
+UUIDs as `md5[0:8]`. Every viewer below is genuinely unentitled
+(`connected_member` false).
+
+| # | case | viewer → subject | before | **after** |
+|---|---|---|---|---|
+| 1 | approved follow, follower resolves followed | `41aacc65` → `daed2252` | **0** | **1** |
+| 2 | approved follow, **reverse** direction | `daed2252` → `41aacc65` | — | **1** |
+| 3 | **stranger**, zero relationship rows | `41aacc65` → `64ffb132` | 0 | **0** |
+| 4 | **`requested` only** (1 requested, 0 approved) | `1fbf664a` → `965caeff` | 0 | **0** |
+| 5 | discovery by exact display name | `41aacc65` searching a name it **can now attribute** | 0 | **0** |
+
+**Case 1 is C-58 closing on the exact pair used for the pre-deployment
+baseline** — the same viewer and subject that returned 0 before the run.
+
+**Case 5 is the sharpest result.** The same viewer resolves that subject's
+identity through the attribution RPC **and still cannot discover them by name**.
+Attribution widened; discoverability did not (D-7 / B-15).
+
+**Cases 3 and 4 are the discriminators in production**, not merely locally.
+Without them, case 1 would have been equally satisfied by ungating the RPC — the
+global fix the register rejects.
+
+### Census — unchanged on every measure
+
+identities **17**, directory rows **17**, membership **1**, binding **1**,
+follows **9** (4 approved + 5 requested), posts **101**, comments **5**,
+attachment objects **10**, avatar objects **3**, `follows` policies **4**,
+enforcement **true**, `u6b_bound_at` **still set**.
+
+### THE ONE CHECK THAT COULD NOT BE MADE, RECORDED AS A LIMIT
+
+**"Entitled viewer → lapsed author remains unchanged" is NOT verified in
+production, because there are ZERO entitled identities.** Grandfathering is
+retired and the single `membership` row is Sandbox, so `connected_member` is
+false for all 17. **Stated before the run, not after.**
+
+It rests on three things instead: the local rehearsal (`U7-D1`, and U6b's own
+`G1`), the byte-identical function text, and the structural fact that the gate
+remains the **untouched first disjunct** — an entitled viewer short-circuits
+before the new clause is ever evaluated. **Not folded into a pass.**
+
+---
+
 ## 7. REMAINING PHASE 4 OBLIGATIONS
 
 - **P4-U8** — **D-1**, **D-2** (expected to *dissolve* under U2, not to be
@@ -159,4 +230,4 @@ disguise.
   disclosure alignment**.
 - **The physical-device QA pass**, carrying **U2b's** and **C-34's** device
   verification.
-- **This unit's production deployment.**
+

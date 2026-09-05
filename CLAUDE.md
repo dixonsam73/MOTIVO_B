@@ -2497,8 +2497,18 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
-`docs/phase-4-u7-acceptance.md` — **P4-U7 / C-58 IMPLEMENTED AND LOCALLY
-VERIFIED 2026-09-05, NOT DEPLOYED.** A lapsed viewer can now resolve the
+`docs/phase-4-u7-acceptance.md` — **P4-U7 / C-58 IS LIVE IN PRODUCTION,
+2026-09-05.** Deployed md5 `48e7f743196e3ed43438ce0a8c449ea6`, byte-exact to the
+rehearsed local function; snapshot delta is ONE line in ONE file, zero functions
+added or removed; census unchanged on every measure. **Verified on REAL
+production rows with no fixture created:** an unentitled viewer now resolves an
+approved follow in BOTH directions (0→1 on the same pair used for the baseline),
+while a stranger and a `requested`-only relationship both still resolve to
+NOTHING. **The sharpest result: that same viewer still cannot DISCOVER by exact
+display name the subject it can now attribute** — attribution widened,
+discoverability did not. **One check is recorded as UNVERIFIABLE rather than
+passed** — "entitled viewer → lapsed author unchanged" cannot be tested in
+production because there are ZERO entitled identities. A lapsed viewer can now resolve the
 identity behind a follow relationship they already hold and may remove. One
 extra DISJUNCT on `get_account_directory_by_user_ids`, keyed on an **APPROVED**
 follow in either direction. **`approved` NOT "any row the viewer can see":** the
