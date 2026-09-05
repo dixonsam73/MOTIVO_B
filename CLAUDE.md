@@ -2497,6 +2497,25 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-device-qa-acceptance.md` — **PHASE 4 PHYSICAL-DEVICE QA,
+2026-09-05. TWO PASSES, TWO DEFERRALS.** Device A, Release, fresh build, signed
+in as `64ffb132` (`steveckeabuo`) with Connected engaged via a **Sandbox**
+subscription — so `connected_member` stayed **false** and **enforcement was
+neither weakened nor bypassed**. **U7/C-58 PASSES ON HARDWARE:** Followers and
+Following both rendered "Samuel Dixon" by real name, not `User • <suffix>`, for
+an UNENTITLED viewer under live enforcement. **The counterparty was established
+READ-ONLY as `1fbf664a`/`samueldixon`, not inferred from the screen** — the name
+on screen was the thing under test, so it could not also be the evidence of whose
+name it was; exactly one directory row matches, so no confusion was possible.
+**Samuel rendered as INITIALS, not a photo** — avatar reads are gated, so this is
+attribution without discoverability, observed. **C-34 CLIENT-PLUMBING SMOKE
+PASSES** — 17 wired call sites, never previously run on any device, no crash or
+broken row. **NOT CLAIMED: C-34 avatar replacement / cache invalidation** — no
+avatar was replaced (storage INSERT is gated), and since C-34 fixes a CACHING
+defect the only settling observation is a replacement under an unchanged key
+propagating to another member. **U2b/U2s share/unshare device verification stays
+DEFERRED** — `posts` INSERT and SELECT are both gated and all 17 identities are
+unentitled.
 `docs/phase-4-u7-acceptance.md` — **P4-U7 / C-58 IS LIVE IN PRODUCTION,
 2026-09-05.** Deployed md5 `48e7f743196e3ed43438ce0a8c449ea6`, byte-exact to the
 rehearsed local function; snapshot delta is ONE line in ONE file, zero functions
