@@ -84,6 +84,54 @@ evidence; it is only that the NULL case did not break on hardware.
 
 ---
 
+## 4b. FIND PEOPLE RETURNS NOTHING — VERIFIED, AND THE INTERPRETATION IS NARROWED
+
+**Observed on device:** Find People returns no results for several known beta
+testers by name, while Samuel Dixon continues to resolve by real name in
+Followers/Following.
+
+**Reproduced server-side as the EXACT device identity**, not inferred: searching
+`'Samuel'` as `64ffb132` returns **0**.
+
+**The offered interpretation — "this confirms the U7 boundary, discovery stays
+gated for the unentitled viewer" — is consistent with the observation but is NOT
+established by it, because the result is OVER-DETERMINED.** Reading the deployed
+`search_account_directory`, **two independent and individually sufficient
+predicates** are both false here:
+
+| predicate | why it is false | whose axis |
+|---|---|---|
+| `(select enforcement_gate('rpc.search_account_directory'))` | the viewer is unentitled | **viewer** |
+| `((select not enforcement_active()) or ad.entitled_until > now())` — **D-U6-1** | **all 17 directory rows have `entitled_until` NULL** with enforcement active | **subject** |
+
+**So an ENTITLED viewer would also have seen zero results**, because every
+subject is filtered out. There is no entitled identity in production, so the two
+causes cannot be separated by any observation available to us.
+
+**And it is not "nothing matched":** evaluating the token predicate alone, the
+searched terms match real rows — `Samuel` 1, `Steve` 1, `Nixey` 2, `nix` 2 —
+while **0** rows pass the subject filter for any term. The names are there; both
+gates independently exclude them.
+
+### What IS confirmed, stated at the strength the evidence supports
+
+1. **The architectural separation is real and was observed on hardware:**
+   attribution resolves (`get_account_directory_by_user_ids` has **no**
+   subject-side filter, G10) while discovery returns nothing (`search_...`
+   carries one, D-U6-1). Two RPCs, two behaviours, same viewer, same moment.
+2. **D-U6-1 is what the observation most strongly demonstrates** — *a lapsed
+   member becomes undiscoverable*. Every production identity is lapsed, so every
+   one is undiscoverable, which is exactly the designed outcome.
+
+### What is NOT confirmed
+
+**That the VIEWER gate is what produced the zero.** It is one of two sufficient
+causes and the observation cannot distinguish them. **Recorded as such rather
+than folded into the U7 pass**, whose evidence is §3 — the positive resolution —
+and which does not depend on this at all.
+
+---
+
 ## 5. NOT CLAIMED — AND THE DISTINCTION IS THE POINT
 
 **C-34 avatar replacement and cache invalidation are NOT device-verified.**

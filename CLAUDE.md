@@ -2515,7 +2515,14 @@ avatar was replaced (storage INSERT is gated), and since C-34 fixes a CACHING
 defect the only settling observation is a replacement under an unchanged key
 propagating to another member. **U2b/U2s share/unshare device verification stays
 DEFERRED** — `posts` INSERT and SELECT are both gated and all 17 identities are
-unentitled.
+unentitled. **A "Find People returns nothing" observation is recorded with its
+interpretation NARROWED:** it is consistent with the U7 boundary but does NOT
+establish it, because the zero is **over-determined** — the viewer gate AND
+D-U6-1's subject filter are both false, since **all 17 directory rows carry
+`entitled_until` NULL**, so an ENTITLED viewer would have seen zero too. The
+terms do match real rows (Samuel 1, Nixey 2), so it is not "nothing matched".
+What IS confirmed is the architectural separation — attribution resolves with no
+subject filter (G10) while discovery does not (D-U6-1) — and D-U6-1 itself.
 `docs/phase-4-u7-acceptance.md` — **P4-U7 / C-58 IS LIVE IN PRODUCTION,
 2026-09-05.** Deployed md5 `48e7f743196e3ed43438ce0a8c449ea6`, byte-exact to the
 rehearsed local function; snapshot delta is ONE line in ONE file, zero functions
