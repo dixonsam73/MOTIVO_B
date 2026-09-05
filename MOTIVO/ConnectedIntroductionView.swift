@@ -110,7 +110,7 @@ struct ConnectedIntroductionView: View {
             Text("Connected gives you a place to share ideas, find inspiration, and stay connected with the people you make music with.")
                 .connectedBody()
 
-            Text("You decide what to share, and what remains private.")
+            Text("You decide what to share, and what remains private. Sessions are shared with your followers by default — you can turn sharing off for any session, or make private the default in your profile.")
                 .connectedBody()
         }
         .editorialMargins()

@@ -689,11 +689,20 @@ private var sessionSetupSection: some View {
 
 
                   if appModeManager.canShowConnectedAccountManagement {
-                 Toggle("Default to Private Posts", isOn: $defaultPrivacy)
-                    .tint(Theme.Colors.accent)
+                 VStack(alignment: .leading, spacing: 4) {
+                     Toggle("Default to Private Posts", isOn: $defaultPrivacy)
+                        .tint(Theme.Colors.accent)
+                        .frame(minHeight: 44, alignment: .center)
+                        .font(Theme.Text.body)
+
+                     // D-1: the default is ON for sharing, and nothing said so.
+                     // Describes what the toggle does, without overstating --
+                     // Thoughts START private but remain shareable by choice.
+                     Text("When on, new sessions start with sharing off. Thoughts always start private. You can change sharing for any individual session.")
+                        .font(.footnote)
+                        .foregroundStyle(Theme.Colors.secondaryText)
+                 }
                     .padding(.vertical, Theme.Spacing.s)
-                    .frame(minHeight: 44, alignment: .center)
-                    .font(Theme.Text.body)
                     .overlay(alignment: .bottom) {
                         quietDivider()
                     }

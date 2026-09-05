@@ -18,7 +18,7 @@ struct AboutEtudesView: View {
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
-                        Text("Études is private by default. If you choose to enable Études Connected, sharing remains entirely intentional. There are no public counts, rankings or popularity systems.")
+                        Text("Études is private by default — nothing leaves your device unless you enable Études Connected. In Connected, sessions are shared with your followers by default; you can turn sharing off for any session, or make private the default in Profile → Default to Private Posts. There are no public counts, rankings or popularity systems.")
                             .font(Theme.Text.body)
                             .foregroundStyle(Theme.Colors.secondaryText)
 
@@ -52,7 +52,7 @@ struct AboutEtudesView: View {
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 
-                    Text("In Études Connected, you control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default and can be included individually when publishing.")
+                    Text("In Études Connected, you control sharing for each session. Notes and attachments can remain personal even when a session is shared. Attachments are private by default and can be included individually when publishing. Thoughts start private, though you can choose to share one.")
                         .font(Theme.Text.body)
                         .foregroundStyle(Theme.Colors.secondaryText)
 

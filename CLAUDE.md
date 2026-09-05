@@ -2497,6 +2497,24 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-u8-acceptance.md` — **P4-U8 COMPLETE 2026-09-05. COPY AND
+DISCLOSURE ALIGNMENT, ZERO BEHAVIOUR CHANGE.** **D-2 IS DISSOLVED WITH ZERO
+CODE**, on two independent grounds: an unshared session produces no server row at
+all, AND private notes on a *shared* session are **force-cleared to NULL** by
+`patchPostMetadata` rather than merely omitted — the second is the one easy to
+miss, because D-2 as written concerns only unshared sessions. **D-1's copy now
+ships:** measured `isPublic = isThoughtMode ? false :
+!fetchDefaultPostingIsPrivate()` with `defaultPrivacy` false, so **a session
+defaults to Share ON** — About and Explore Connected now say so and name
+Profile → Default to Private Posts, and the toggle explains itself. **READ §3
+BEFORE TOUCHING THIS COPY: "Thoughts are never shared" is FALSE.** The Share
+toggle at `AddEditSessionView:1123` is guarded by `canShareWithFollowers` and NOT
+by `!isThoughtMode`, so Thoughts DEFAULT to private but remain shareable;
+`U8-A1` forbids the phrase in source. `docs/app-store-privacy-disclosures.md`
+maps every disclosure to code or schema and records that **no third-party
+analytics/advertising/crash SDK exists** — but **the ASC labels have NOT been
+entered**, which stays a Phase 4 exit obligation. **C-32 is NOT closed** — its
+Phase 4 half (accuracy) is done; the joint customer-facing rewrite is RC's.
 `docs/phase-4-device-qa-acceptance.md` — **PHASE 4 PHYSICAL-DEVICE QA,
 2026-09-05. TWO PASSES, TWO DEFERRALS.** Device A, Release, fresh build, signed
 in as `64ffb132` (`steveckeabuo`) with Connected engaged via a **Sandbox**
