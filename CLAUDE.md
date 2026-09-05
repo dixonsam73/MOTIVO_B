@@ -2497,6 +2497,23 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-u7-acceptance.md` — **P4-U7 / C-58 IMPLEMENTED AND LOCALLY
+VERIFIED 2026-09-05, NOT DEPLOYED.** A lapsed viewer can now resolve the
+identity behind a follow relationship they already hold and may remove. One
+extra DISJUNCT on `get_account_directory_by_user_ids`, keyed on an **APPROVED**
+follow in either direction. **`approved` NOT "any row the viewer can see":** the
+latter would borrow its safety from `follows_insert_requester` staying gated, and
+if that gate ever went it would become a self-serve UUID→identity oracle — B-5's
+exact hazard. An approved row cannot be manufactured by an unentitled viewer
+because approval is a gated UPDATE by the *other* party, so the safety is
+intrinsic. **Requests keep the fallback, deliberately** — a lapsed viewer cannot
+approve anyway. G10, D-7/B-15 discovery, grants and every policy are unchanged;
+the kill switch restores the pre-U7 world. **IT ALSO REPAIRS A B-23 FIDELITY
+DEFECT: U5's server half was applied to production from `supabase/sql/` and
+NEVER ADDED TO `supabase/migrations/`**, so `db reset --local` rebuilt RPCs with
+SIX columns against production's seven — every local rehearsal of those objects
+was a rehearsal of the wrong object. Caught by an apply that failed locally while
+being correct against production. **Read §2 before widening this disjunct.**
 `docs/phase-4-u6-acceptance.md` — **P4-U6 / C-51 DISCHARGED 2026-09-05,
 VERIFIED BY FAULT INJECTION, ZERO PRODUCTION CHANGE.** A shared publish queued
 before a container rotation still uploads its media after it. The fault is the
