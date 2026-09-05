@@ -142,10 +142,18 @@ final class SharedOnlyUploadTests: XCTestCase {
     /// prove capability first -- same fixture, Share ON, object must appear --
     /// and the control FAILED: the post row was created with `attachments: []`,
     /// so `loadIncludedAttachments` returned nothing for a Core Data fixture
-    /// whose privacy flag, file and relationship all verified correct. The cause
-    /// was not established and is NOT claimed to be a product defect; it is an
-    /// unreproduced difference between this fixture and a real session. The
-    /// vacuous negative was removed rather than kept as if it had passed.
+    /// whose privacy flag, file and relationship all verified correct.
+    ///
+    /// **THE CAUSE IS NOW ESTABLISHED -- P4-U6, 2026-09-05 -- AND IT WAS THIS
+    /// FIXTURE, NOT THE PRODUCT.** It set `kind: "photo"`; `AttachmentKind` is
+    /// audio|video|image|file|pdf, and `contentType(for:ext:)` maps anything
+    /// unrecognised to `application/octet-stream`, which the attachments bucket
+    /// refuses with 415 InvalidMimeType. `uploadPost` then returned failure and
+    /// the row kept its default empty `attachments`. Production carries the
+    /// SAME `allowed_mime_types`, so the local stack was faithful throughout.
+    /// The `kind` is corrected above; the sentence it replaces read *"The cause
+    /// was not established and is NOT claimed to be a product defect"*, which
+    /// was the right disposition on the evidence then available.
     /// **U2c owns the direct attachment-path assertion.**
     func testIncludedAttachmentShareOffReachesNoUploadPath() async throws {
         try skipUnlessLocalStack()
@@ -236,7 +244,10 @@ final class SharedOnlyUploadTests: XCTestCase {
         let att = NSEntityDescription.insertNewObject(forEntityName: "Attachment", into: ctx)
         att.setValue(attID, forKey: "id")
         att.setValue(fileURL.path, forKey: "fileURL")
-        att.setValue("photo", forKey: "kind")
+        // "image", NOT "photo" -- see the header note. `AttachmentKind` has no
+        // "photo" case, and an unrecognised kind uploads as octet-stream, which
+        // the bucket refuses.
+        att.setValue("image", forKey: "kind")
         att.setValue(Date(), forKey: "createdAt")
         att.setValue(false, forKey: "isThumbnail")
         att.setValue(session, forKey: "session")

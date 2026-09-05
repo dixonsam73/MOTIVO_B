@@ -2497,6 +2497,21 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-u6-acceptance.md` — **P4-U6 / C-51 DISCHARGED 2026-09-05,
+VERIFIED BY FAULT INJECTION, ZERO PRODUCTION CHANGE.** A shared publish queued
+before a container rotation still uploads its media after it. The fault is the
+rotation itself — the persisted `fileURL`'s container UUID is replaced between
+enqueue and flush while the bytes stay put — and the member never touches the
+session again, so the editor's self-healing save cannot run. **The POSITIVE
+CONTROL FAILED FIRST and that is the unit's real finding:** the fixture set
+`kind: "photo"`, `AttachmentKind` has no such case, so `contentType` produced
+`application/octet-stream`, which the bucket refuses with **415
+InvalidMimeType** — `uploadPost` failed and the row kept its DEFAULT empty
+`attachments`. **`attachments: []` never meant "the selection was empty"**; it
+is also the column default. Production carries the IDENTICAL
+`allowed_mime_types`, so the local stack was faithful and **the product is
+correct** — this closes the cause `SharedOnlyUploadTests` had left
+unestablished. **Read §4 before trusting any attachment fixture.**
 `docs/phase-4-u5-client-acceptance.md` — **C-34 CLIENT HALF COMPLETE
 2026-09-05.** A directory avatar replaced under the SAME key now propagates: the
 pipeline drops its caches when the observed `avatar_version` changes. **The
