@@ -135,6 +135,40 @@ backfill.
 `p4/u1..u2s` suites unchanged; **`u6b/acceptance.sh` U6b-G2/G3 must still pass**,
 because the floor did not move.
 
+## 5a. TWO CLIENT FINDINGS THAT ENLARGE §4 — REPORTED, NOT ABSORBED
+
+**Found while sizing the client work, after this prediction's §4 was written.
+§4 is left as committed; these correct it.**
+
+**(i) `.task(id:)` MUST CARRY THE VERSION TOO, and §4 did not say so.** Every
+render site is `.task(id: key)`. The key never changes on a replacement, so the
+task **never re-runs** and the view holds the stale image in `@State` as well as
+in the shared cache — which is exactly what the register says makes the feed row
+the worst site. **Invalidating the cache alone therefore cannot fix it.** The
+version must reach `.task(id:)`, not merely the fetch.
+
+**(ii) THE CACHE-KEY FORMAT IS DUPLICATED IN EIGHT PLACES OUTSIDE THE PIPELINE** —
+`"avatars|\(key)"` appears in `ContentViewSessionRow:488`, `ProfileView:1515`,
+`ContentViewRemotePostRowTwin:553`, `ProfilePeekView:504`,
+`BackendSessionDetailView:423`, `PracticeTimerView:1200`, `AuthManager:404`,
+`ContentView:616`. **Two of them are INVALIDATION sites** (`ProfileView:1515`,
+`AuthManager:404`), so changing the format without changing all eight in lockstep
+would **silently stop the owner's own invalidation working**.
+
+**Consequence for the design: DO NOT change the cache-key format.** Instead the
+pipeline invalidates the existing entry when the supplied version differs from
+the one it last saw for that key, and `fetchAvatarImageIfNeeded` takes
+`version: String? = nil` so the eight duplicated sites and any call site without
+a version are untouched.
+
+**(iii) ONLY THE DIRECTORY-SOURCED SITES NEED IT.** The nine fetch sites split in
+two: **other members' avatars** from `DirectoryAccount` (feed row, People,
+comments, peek, session detail) — which is what C-34 is about — and **the
+viewer's OWN avatar** from `auth.backendAvatarKey` (both toolbars, the owner
+branch of the session row, ProfileView), where the owner's device already
+invalidates explicitly. **The owner-side sites keep passing nothing and behave
+exactly as today.**
+
 ## 6. OUT OF SCOPE
 
 **C-34's TTL half remains Phase 5.** **U6 not begun.** No membership state, no
