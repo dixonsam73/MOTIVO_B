@@ -32,6 +32,7 @@ policy and the description, not in the labels.
 | **User Content → Photos or Videos** | Yes | **No** | App Functionality | image/video attachments **explicitly included** in a shared session; images/videos **sent directly** to another member; **the profile avatar image**; and **generated thumbnail images of score PDFs** in a shared post |
 | **User Content → Audio Data** | Yes | **No** | App Functionality | audio attachments explicitly included in a shared session, and audio sent directly to another member |
 | **User Content → Other User Content** | Yes | **No** | App Functionality | shared-session `title`, `notes` (only when not marked private), `activity_type`, `activity_detail`, `instrument_label`, `mood`, `effort`; comments and directed replies; profile `location` free text and `instruments`; follow relationships; **PDF documents sent directly to another member** |
+| **User Content → Emails or Text Messages** | Yes | **No** | App Functionality | **Private directed communication — see §1c.** Comment `body` text with its author, named recipient and unread state; and the direct-send envelope (sender, recipient(s), attachment name, filename, mime type, byte/page count, delivery and read timestamps). **No subject line and no composed message text exists on the direct-send path** |
 | **Identifiers → User ID** | Yes | **No** | App Functionality | Supabase `auth.users` id / Apple `sub` |
 | **Purchases → Purchase History** | Yes | **No** | App Functionality | `membership` / `membership_binding` — Apple `originalTransactionId`, product id, status, renewal and expiry dates, `appAccountToken` |
 | **Usage Data → Product Interaction** | Yes | **No** | App Functionality | `shadow_enforcement_stat` — user id, which surface was consulted, which entitlement clause decided, bucketed by hour. **79 rows live in production**, so it is genuinely collected |
@@ -44,7 +45,6 @@ policy and the description, not in the labels.
 | **Health & Fitness** | **No HealthKit import.** `mood` and `effort` are practice self-ratings, not health measurements |
 | **Financial Info** | Apple handles payment; the app never sees card or payment data. Purchase *history* is declared above — payment info is not collected |
 | **Contacts** | no Contacts framework |
-| **User Content → Emails or Text Messages** | **Checked and deliberately excluded.** Comments carry `recipient_user_id` and unread tracking, which is messaging-shaped — but the product has **no inbox, no messages and no DM surface**; the UI is "Reply", "Reply to", "Respond to all commenters". It is post commentary with directed replies, so it is **Other User Content**. Declaring this category would overstate what the app does |
 | **Browsing History / Search History** | directory search terms are **never persisted** — `search_account_directory` writes nothing |
 | **Device ID / Advertising Data** | none |
 | **Crash Data / Performance Data** | **no crash, analytics, advertising or attribution SDK exists in the source** — searched, not assumed |
@@ -84,6 +84,94 @@ descriptions declared, each mapping to attachment capture or selection.
    Messages* — see the exclusion table for the reasoning.
 
 ---
+
+## 1c. `Emails or Text Messages` — RE-EXAMINED, AND MY EARLIER EXCLUSION WAS WRONG
+
+**Determination: DECLARE IT.** Apple's guidance covers in-app private
+messaging, including non-SMS, and Études has two surfaces that qualify.
+
+### THE CORRECTION — I read the UI instead of the policy
+
+An earlier revision of this document excluded the category, reasoning that
+comments were *"post commentary with directed replies"* visible to approved
+followers. **That was wrong, and the mechanism matters more than the verdict:
+I inferred visibility from UI wording ("Reply", "Respond to all commenters")
+without reading the policy.** The deployed policy says otherwise:
+
+```
+post_comments_select_visible:
+  (auth.uid() = author_user_id)
+  OR (enforcement_gate('post_comments.select')
+      AND (auth.uid() = owner_user_id OR auth.uid() = recipient_user_id))
+```
+
+**A comment is visible ONLY to its author, the post owner, and the named
+recipient — never to followers at large.** It carries a text `body`, a sender
+(`author_user_id`), a named recipient (`recipient_user_id`), and unread tracking
+(`has_unread_private_comments`, `get_unread_private_comment_groups`). **That is
+private, directed, text-bodied communication between named individuals.**
+
+### The direct-send path qualifies too, on structure rather than on text
+
+`connected_attachments`, examined by interaction rather than terminology:
+
+| Apple's elements | Études |
+|---|---|
+| sender | `sender_user_id` |
+| recipients | `recipient_user_id`, one row per chosen person (individually or via an Ensemble) |
+| private to the recipient | RLS `connected_attachments_select_recipient` |
+| a received list | `fetchReceived()` — an inbox in function, not in name |
+| read state | `viewed_at`, `markViewed`, plus `saved_to_scores_at` |
+| contents | the file, plus a sender-influenced `attachment_name` / `filename` |
+| **subject line / composed body** | **NONE — `deliver(_ reference:, to recipientUserIDs:)` takes no text, and no field exists to write one** |
+
+**The absence of a typed message body does not exempt it.** Apple's category
+enumerates "sender, recipients, and contents", and all three are present and
+private. The narrower reading — that this is file transfer rather than
+messaging — is arguable, but **under-declaring is the worse error**, and the
+comment surface qualifies on its own regardless.
+
+### The narrowest accurate description
+
+**Under this category Études collects:** the text `body` of a comment together
+with its author, named recipient, post context and unread state; and, for a
+direct send, the sender, each recipient, the attachment name and filename, mime
+type, byte and page counts, and delivery/read timestamps.
+
+**Études does NOT collect any subject line, and collects no composed message
+text on the direct-send path, because the feature provides no way to write
+one.** The transferred file's own bytes remain declared under Photos or Videos,
+Audio Data, or Other User Content — this category covers the private-delivery
+envelope and the comment text, not a second copy of the media.
+
+**Ordinary session content, profile fields and follow relationships stay under
+Other User Content** — they are not directed communication.
+
+---
+
+## 1d. MEASURED RETENTION, AND THE HOSTING REGION
+
+**Measured, not read from prose.**
+
+| table | deletion path found | retention |
+|---|---|---|
+| `membership` | **none** — no `pg_cron`, no deployed function DELETEs it, and the U7 cleanup worker does not touch it | **indefinite** |
+| `membership_binding` | **none**, same three checks | **indefinite** |
+| `shadow_enforcement_stat` | **none**, same three checks | **indefinite** |
+
+**The only removal path for all three is the `auth.users` FK cascade** —
+`confdeltype = 'c'` on each — i.e. **explicit account deletion**. Ordinary
+expiry retains them, exactly as the retention matrix specifies for the first
+two.
+
+**`shadow_enforcement_stat` is the finding worth flagging:** it is
+**user-linked telemetry with no retention limit and no mention in the retention
+matrix**, which was written before it existed. 79 rows today. **A policy
+claiming any bounded retention for it would be false as things stand.**
+
+**Hosting region — authoritative, from `supabase projects list`:**
+**`eu-central-1`** (AWS Frankfurt, EU), project created 2025-12-30,
+PostgreSQL 17.6.
 
 ## 2. WHAT NEVER LEAVES THE DEVICE
 
@@ -162,24 +250,21 @@ minimum content the verified architecture requires; the wording is a later step.
 
 **Six. Each is a genuine choice, not a gap in the investigation.**
 
-1. **Is the profile `location` free-text field declared as Coarse Location?**
-   Engineering fact: it is **user-typed text**, never derived from location
-   services, and no location permission is requested. **Recommendation: declare
-   under Other User Content, not Location** — Apple's Location categories
-   describe location-services data. A stricter reading treats any location
-   *about the user* as Location. **This is a legal call, and it is the single
-   most consequential label decision here.**
-2. **`Product Interaction` purpose — App Functionality or Analytics?**
-   `shadow_enforcement_stat` exists to operate and verify access control, not to
-   study behaviour. **Recommendation: App Functionality.** Adding Analytics is
-   defensible and is the more conservative option.
-3. **Retention periods.** The 60-day quarantine is architectural, but nothing
-   defines how long `membership`, `membership_binding` or
-   `shadow_enforcement_stat` are kept. **The policy will have to state
-   something.**
-4. **Naming Supabase as processor, and the hosting region.** Required by most
-   privacy regimes; the region is an account fact I have not read and should not
-   guess.
+1. ~~Profile `location` as Coarse Location?~~ **DECIDED 2026-09-05 — stays
+   Other User Content.** It is manually entered profile content; Études does not
+   obtain or derive device location. **Do not declare Precise or Coarse
+   Location.**
+2. ~~`Product Interaction` purpose?~~ **DECIDED 2026-09-05 — App Functionality
+   ONLY, not Analytics.** Its purpose is entitlement and enforcement operation,
+   not evaluation of user behaviour.
+3. **Retention periods — now MEASURED as indefinite** (§1d). The 60-day
+   quarantine governs Domain 3 content; `membership`, `membership_binding` and
+   `shadow_enforcement_stat` are kept until account deletion. **The policy must
+   either state that honestly or a limit must be introduced** — the second is a
+   product change, not a copy change.
+4. ~~Hosting region unknown.~~ **MEASURED: `eu-central-1` (AWS Frankfurt, EU).**
+   What remains is the *decision* to name Supabase as processor and to state the
+   region publicly.
 5. **Contact route** for privacy enquiries — an address or form on `etudes.app`.
 6. **Age policy, governing law and change-notification wording.**
 
