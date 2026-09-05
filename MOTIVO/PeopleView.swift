@@ -262,7 +262,8 @@ struct PeopleView: View {
                         userID: senderID,
                         overrideDisplayName: acct?.displayName ?? "Connected musician",
                         overrideSubtitle: attachment.attachmentName ?? attachment.filename,
-                        overrideAvatarKey: acct?.avatarKey
+                        overrideAvatarKey: acct?.avatarKey,
+                        overrideAvatarVersion: acct?.avatarVersion
                     ) {
                         ReceivedConnectedAttachmentDetailView(attachment: attachment)
                     } trailing: {
@@ -289,7 +290,8 @@ struct PeopleView: View {
                     userID: share.ownerUserID,
                     overrideDisplayName: acct?.displayName ?? "Shared post",
                     overrideSubtitle: "Shared a post",
-                    overrideAvatarKey: acct?.avatarKey
+                    overrideAvatarKey: acct?.avatarKey,
+                    overrideAvatarVersion: acct?.avatarVersion
                 ) {
                     SharedPostDetailHost(
                         share: share,
@@ -349,7 +351,8 @@ struct PeopleView: View {
                     userID: authorID,
                     overrideDisplayName: acct?.displayName,
                     overrideSubtitle: subtitle,
-                    overrideAvatarKey: acct?.avatarKey
+                    overrideAvatarKey: acct?.avatarKey,
+                    overrideAvatarVersion: acct?.avatarVersion
                 ) {
                     ResponsesCommentsHost(
                         postID: group.postID,
@@ -435,7 +438,8 @@ struct PeopleView: View {
                     userID: userID,
                     overrideDisplayName: acct?.displayName,
                     overrideSubtitle: acct?.accountID.map { "@\($0)" },
-                    overrideAvatarKey: acct?.avatarKey
+                    overrideAvatarKey: acct?.avatarKey,
+                    overrideAvatarVersion: acct?.avatarVersion
                 ) {
                     ProfilePeekView(
                         ownerID: userID,
@@ -443,6 +447,7 @@ struct PeopleView: View {
                         directoryAccountID: acct?.accountID,
                         directoryLocation: acct?.location,
                         directoryAvatarKey: acct?.avatarKey,
+                        directoryAvatarVersion: acct?.avatarVersion,
                         directoryInstruments: acct?.instruments,
                     )
                 } trailing: {
@@ -548,7 +553,8 @@ struct PeopleView: View {
                         userID: acct.userID,
                         overrideDisplayName: acct.displayName,
                         overrideSubtitle: acct.accountID.map { "@\($0)" },
-                        overrideAvatarKey: acct.avatarKey
+                        overrideAvatarKey: acct.avatarKey,
+                        overrideAvatarVersion: acct.avatarVersion
                     ) {
                         ProfilePeekView(
                             ownerID: acct.userID,
@@ -556,6 +562,7 @@ struct PeopleView: View {
                             directoryAccountID: acct.accountID,
                             directoryLocation: acct.location,
                             directoryAvatarKey: acct.avatarKey,
+                            directoryAvatarVersion: acct.avatarVersion,
                             directoryInstruments: acct.instruments,
                         )
                     }

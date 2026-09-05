@@ -56,6 +56,8 @@ struct ProfilePeekView: View {
     let directoryAccountID: String?
     let directoryLocation: String?
     let directoryAvatarKey: String?
+    /// C-34: `account_directory.avatar_version`.
+    let directoryAvatarVersion: String?
     let directoryInstruments: [String]?
 
 
@@ -102,12 +104,13 @@ struct ProfilePeekView: View {
     @FetchRequest private var ownerSessions: FetchedResults<Session>
     @FetchRequest private var ownerInstruments: FetchedResults<UserInstrument>
 
-    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil, directoryInstruments: [String]? = nil) {
+    init(ownerID: String, directoryDisplayName: String? = nil, directoryAccountID: String? = nil, directoryLocation: String? = nil, directoryAvatarKey: String? = nil, directoryAvatarVersion: String? = nil, directoryInstruments: [String]? = nil) {
         self.ownerID = ownerID
         self.directoryDisplayName = directoryDisplayName
         self.directoryAccountID = directoryAccountID
         self.directoryLocation = directoryLocation
         self.directoryAvatarKey = directoryAvatarKey
+        self.directoryAvatarVersion = directoryAvatarVersion
         self.directoryInstruments = directoryInstruments
         // fetch sessions for this owner (lightweight)
         let sReq = NSFetchRequest<Session>(entityName: "Session")
@@ -143,6 +146,7 @@ struct ProfilePeekView: View {
                             ProfileAvatar(ownerID: ownerID,
                                           displayName: displayName(ownerID),
                                           directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                          directoryAvatarVersion: (isOwner ? nil : directoryAvatarVersion),
                                           directoryInstruments: nil)
                                 .frame(width: 44, height: 44)
                                 .clipShape(Circle())
@@ -185,6 +189,7 @@ struct ProfilePeekView: View {
                                 ProfileAvatar(ownerID: ownerID,
                                               displayName: displayName(ownerID),
                                               directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                          directoryAvatarVersion: (isOwner ? nil : directoryAvatarVersion),
                                               directoryInstruments: nil)
                                     .frame(width: 44, height: 44)
                                     .clipShape(Circle())
@@ -318,6 +323,7 @@ struct ProfilePeekView: View {
                         ownerID: ownerID,
                         displayName: displayName(ownerID),
                         directoryAvatarKey: (isOwner ? nil : directoryAvatarKey),
+                                          directoryAvatarVersion: (isOwner ? nil : directoryAvatarVersion),
                         directoryInstruments: nil
                     )
                     .frame(width: 260, height: 260)
@@ -493,6 +499,8 @@ private struct ProfileAvatar: View {
     let ownerID: String
     let displayName: String
     let directoryAvatarKey: String?
+    /// C-34: `account_directory.avatar_version`.
+    var directoryAvatarVersion: String? = nil
     let directoryInstruments: [String]?
 
     #if canImport(UIKit)
@@ -535,13 +543,15 @@ private struct ProfileAvatar: View {
             #endif
         }
         #if canImport(UIKit)
-        .task(id: key) {
+        // C-34: version is part of the identity.
+        .task(id: "\(key)|\(directoryAvatarVersion ?? "")") {
             guard !key.isEmpty else {
                 remoteAvatar = nil
                 return
             }
-            if RemoteAvatarImageCache.get(cacheKey) != nil { return }
-            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key) {
+            // C-34: pre-check removed — see BackendSessionDetailView.
+            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(
+                avatarKey: key, version: directoryAvatarVersion) {
                 remoteAvatar = ui
             }
         }

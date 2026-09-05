@@ -2497,6 +2497,19 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-u5-client-acceptance.md` — **C-34 CLIENT HALF COMPLETE
+2026-09-05.** A directory avatar replaced under the SAME key now propagates: the
+pipeline drops its caches when the observed `avatar_version` changes. **The
+cache key is deliberately NOT versioned** — `"avatars|<key>"` is built in ten
+places and THREE are owner-side invalidation helpers with identical bodies, so
+a versioned key would have left the owner's own explicit invalidation dropping
+an entry nothing reads, failing silently. **A second staleness path was found
+during implementation and was NOT in the prediction:** three of the five
+directory sites pre-checked the image cache *before* the pipeline that performs
+invalidation, so the unit would have been inert at three of five sites while
+every unit test passed. Removed. **Four owner-side sites are deliberately
+untouched** — `version:` is optional so they compile unchanged. **Not
+device-verified**, and TTL stays Phase 5.
 `docs/phase-4-ca-residue-cleanup-acceptance.md` — **THE SIX LIVE
 `connected_attachments` ROWS ARE CLEARED, 2026-09-04.** B-22's deliberately
 retained residue (29 both-parties-deleted + 1 live-sender), **identified by the

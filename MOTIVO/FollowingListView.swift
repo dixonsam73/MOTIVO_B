@@ -134,7 +134,8 @@ struct FollowingListView: View {
             userID: userID,
             overrideDisplayName: account?.displayName,
             overrideSubtitle: account?.accountID.map { "@\($0)" },
-            overrideAvatarKey: account?.avatarKey
+            overrideAvatarKey: account?.avatarKey,
+            overrideAvatarVersion: account?.avatarVersion
         ) {
             ProfilePeekView(
                 ownerID: userID,
@@ -142,6 +143,7 @@ struct FollowingListView: View {
                 directoryAccountID: account?.accountID,
                 directoryLocation: account?.location,
                 directoryAvatarKey: account?.avatarKey,
+                directoryAvatarVersion: account?.avatarVersion,
                 directoryInstruments: account?.instruments,
             )
         }
@@ -445,7 +447,8 @@ private struct EnsembleEditorView: View {
                 userID: userID,
                 overrideDisplayName: account?.displayName,
                 overrideSubtitle: account?.accountID.map { "@\($0)" },
-                overrideAvatarKey: account?.avatarKey
+                overrideAvatarKey: account?.avatarKey,
+                overrideAvatarVersion: account?.avatarVersion
             ) {
                 EmptyView()
             }

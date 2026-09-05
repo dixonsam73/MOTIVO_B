@@ -29,6 +29,8 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
     let overrideDisplayName: String?
     let overrideSubtitle: String?
     let overrideAvatarKey: String?
+    /// C-34: `account_directory.avatar_version`.
+    let overrideAvatarVersion: String?
     let destination: () -> Destination
     let trailing: () -> Trailing
 
@@ -39,6 +41,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         overrideDisplayName: String? = nil,
         overrideSubtitle: String? = nil,
         overrideAvatarKey: String? = nil,
+        overrideAvatarVersion: String? = nil,
         @ViewBuilder destination: @escaping () -> Destination,
         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
     ) {
@@ -46,6 +49,7 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
         self.overrideDisplayName = overrideDisplayName
         self.overrideSubtitle = overrideSubtitle
         self.overrideAvatarKey = overrideAvatarKey
+        self.overrideAvatarVersion = overrideAvatarVersion
         self.destination = destination
         self.trailing = trailing
     }
@@ -142,13 +146,15 @@ struct PeopleUserRow<Destination: View, Trailing: View>: View {
                         .foregroundStyle(Theme.Colors.secondaryText)
                 )
                 .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                .task(id: trimmedAvatarKey ?? "") {
+                // C-34: version is part of the identity.
+                .task(id: "\(trimmedAvatarKey ?? "")|\(overrideAvatarVersion ?? "")") {
                     // UI-only: reuse existing signed-URL + cache pipeline (no refactors / new services).
                     guard let key = trimmedAvatarKey else {
                         if remoteAvatarImage != nil { remoteAvatarImage = nil }
                         return
                     }
-                    let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key)
+                    let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(
+                        avatarKey: key, version: overrideAvatarVersion)
                     if Task.isCancelled { return }
                     remoteAvatarImage = img
                 }

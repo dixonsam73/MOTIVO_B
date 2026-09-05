@@ -445,7 +445,9 @@ struct BackendSessionDetailView: View {
             }
             .frame(width: 32, height: 32)
             .clipShape(Circle())
-            .task(id: avatarKey) {
+            // C-34: version is part of the identity — avatar_key does not change
+            // on a replacement, so without it this .task never re-runs.
+            .task(id: "\(avatarKey)|\(directoryAccount?.avatarVersion ?? "")") {
                 guard !viewerIsOwner else {
                     remoteAvatar = nil
                     return
@@ -454,8 +456,12 @@ struct BackendSessionDetailView: View {
                     remoteAvatar = nil
                     return
                 }
-                if RemoteAvatarImageCache.get(cacheKey) != nil { return }
-                if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: avatarKey) {
+                // C-34: the pre-check is REMOVED. It read the cache before the
+                // pipeline could invalidate it, so a version bump would have
+                // returned the stale image and never reached the refetch. The
+                // pipeline already returns a valid cached entry itself.
+                if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(
+                    avatarKey: avatarKey, version: directoryAccount?.avatarVersion) {
                     remoteAvatar = ui
                 }
             }

@@ -937,12 +937,17 @@ return AnyView(
                             .foregroundStyle(Theme.Colors.secondaryText)
                     )
                     .overlay(Circle().stroke(Color.secondary.opacity(0.18), lineWidth: 0.5))
-                    .task(id: avatarKey ?? "") {
+                    // C-34: the version is part of the task identity, because
+                    // avatar_key does NOT change on a replacement — without it
+                    // this .task never re-runs and the stale image survives in
+                    // @State as well as in the cache.
+                    .task(id: "\(avatarKey ?? "")|\(directoryAccount?.avatarVersion ?? "")") {
                         guard let key = avatarKey else {
                             if remoteAvatarImage != nil { remoteAvatarImage = nil }
                             return
                         }
-                        let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key)
+                        let img = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(
+                            avatarKey: key, version: directoryAccount?.avatarVersion)
                         if Task.isCancelled { return }
                         remoteAvatarImage = img
                     }

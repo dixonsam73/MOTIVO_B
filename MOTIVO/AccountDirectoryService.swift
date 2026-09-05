@@ -66,12 +66,20 @@ public struct DirectoryAccount: Codable, Identifiable, Hashable {
     public let avatarKey: String?
     public let instruments: [String]?
 
+    /// C-34 / P4-U5. Server-stamped whenever `avatar_key` is TARGETED by an
+    /// update — including a replacement that writes the identical key, which is
+    /// the case a value-change trigger would miss. It is a CACHE-IDENTITY hint
+    /// and nothing else: it never reaches a storage request, and NULL is a valid
+    /// value that every pre-U5 row still carries.
+    public let avatarVersion: String?
+
     public enum CodingKeys: String, CodingKey {
         case userID = "user_id"
         case accountID = "account_id"
         case displayName = "display_name"
         case location = "location"
         case avatarKey = "avatar_key"
+        case avatarVersion = "avatar_version"
         case instruments = "instruments"
     }
 }
@@ -458,7 +466,11 @@ public final class AccountDirectoryService {
                                           displayName: displayName,
                                           location: sanitizedLocation(location),
                                           avatarKey: existing?.avatarKey,
-                                          instruments: instruments ?? existing?.instruments)
+                                          instruments: instruments ?? existing?.instruments,
+                                          // Profile edits do not touch avatar_key, so the server does not
+                                          // re-stamp; carrying the value forward keeps this merge from
+                                          // inventing an invalidation.
+                                          avatarVersion: existing?.avatarVersion)
             await cache.setMany([merged])
             await BackendFeedStore.shared.mergeDirectoryAccounts([userID: merged])
             return .success(())
@@ -506,7 +518,13 @@ public final class AccountDirectoryService {
                                                displayName: existing.displayName,
                                                location: existing.location,
                                                avatarKey: avatarKey,
-                                               instruments: existing.instruments)
+                                               instruments: existing.instruments,
+                                               // Carried forward, not invented: the SERVER stamps the new
+                                               // version and this device learns it on its next directory
+                                               // read. The owner's own avatar renders from
+                                               // auth.backendAvatarKey and invalidates explicitly, so it
+                                               // does not depend on this value.
+                                               avatarVersion: existing.avatarVersion)
                 await cache.setMany([updated])
                 await BackendFeedStore.shared.mergeDirectoryAccounts([uid: updated])
             }

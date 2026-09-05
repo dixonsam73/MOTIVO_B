@@ -378,7 +378,8 @@ private struct ConnectedAttachmentShareFlow: View {
                 userID: userID,
                 overrideDisplayName: account?.displayName ?? "Connected musician",
                 overrideSubtitle: account?.accountID.map { "@\($0)" },
-                overrideAvatarKey: account?.avatarKey
+                overrideAvatarKey: account?.avatarKey,
+                overrideAvatarVersion: account?.avatarVersion
             ) {
                 EmptyView()
             } trailing: {

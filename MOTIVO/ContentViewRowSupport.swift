@@ -841,7 +841,8 @@ struct ShareToFollowerSheet: View {
                                     userID: followerID,
                                     overrideDisplayName: acct?.displayName ?? "User",
                                     overrideSubtitle: acct?.accountID.map { "@\($0)" },
-                                    overrideAvatarKey: acct?.avatarKey
+                                    overrideAvatarKey: acct?.avatarKey,
+                                    overrideAvatarVersion: acct?.avatarVersion
                                 ) {
                                     EmptyView()
                                 }

@@ -511,6 +511,7 @@ struct RemotePostRowTwin: View {
                 directoryAccountID: acct?.accountID,
                 directoryLocation: acct?.location,
                 directoryAvatarKey: acct?.avatarKey,
+                directoryAvatarVersion: acct?.avatarVersion,
                 directoryInstruments: acct?.instruments
             )
                 .environment(\.managedObjectContext, ctx)
@@ -545,6 +546,9 @@ private struct DirectoryAvatarCircle: View {
     let ownerID: String
     let displayName: String
     let directoryAvatarKey: String?
+    /// C-34: `account_directory.avatar_version`. Defaulted so call sites that pass
+    /// no avatar (or the owner's own key) need no change.
+    var directoryAvatarVersion: String? = nil
 
     @State private var remoteAvatar: UIImage? = nil
 
@@ -568,13 +572,17 @@ private struct DirectoryAvatarCircle: View {
                 }
             }
         }
-        .task(id: key) {
+        // C-34: version is part of the identity, and the cache pre-check is
+        // REMOVED — it read the cache before the pipeline could invalidate it, so
+        // a replacement would have returned the stale image for the life of this
+        // long-lived feed row, which is the worst site in the register.
+        .task(id: "\(key)|\(directoryAvatarVersion ?? "")") {
             guard !key.isEmpty else {
                 remoteAvatar = nil
                 return
             }
-            if RemoteAvatarImageCache.get(cacheKey) != nil { return }
-            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(avatarKey: key) {
+            if let ui = await RemoteAvatarPipeline.fetchAvatarImageIfNeeded(
+                avatarKey: key, version: directoryAvatarVersion) {
                 remoteAvatar = ui
             }
         }

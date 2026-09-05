@@ -87,7 +87,8 @@ struct FollowersListView: View {
                                     userID: userID,
                                     overrideDisplayName: acct?.displayName,
                                     overrideSubtitle: acct?.accountID.map { "@\($0)" },
-                                    overrideAvatarKey: acct?.avatarKey
+                                    overrideAvatarKey: acct?.avatarKey,
+                                    overrideAvatarVersion: acct?.avatarVersion
                                 ) {
                                     ProfilePeekView(
                                         ownerID: userID,
@@ -95,6 +96,7 @@ struct FollowersListView: View {
                                         directoryAccountID: acct?.accountID,
                                         directoryLocation: acct?.location,
                                         directoryAvatarKey: acct?.avatarKey,
+                                        directoryAvatarVersion: acct?.avatarVersion,
                                         directoryInstruments: acct?.instruments,
                                     )
                                 }

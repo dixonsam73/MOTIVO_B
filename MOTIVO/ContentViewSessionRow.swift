@@ -882,6 +882,7 @@ struct SessionRow: View {
                 directoryAccountID: acct?.accountID,
                 directoryLocation: acct?.location,
                 directoryAvatarKey: acct?.avatarKey,
+                directoryAvatarVersion: acct?.avatarVersion,
                 directoryInstruments: acct?.instruments
             )
                 .environment(\.managedObjectContext, ctx)

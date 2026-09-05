@@ -664,16 +664,67 @@ enum RemoteAvatarImageCache {
 }
 #endif
 
+/// C-34 / P4-U5. WHICH AVATAR VERSION THIS PROCESS HAS ALREADY APPLIED, PER KEY.
+///
+/// WHY A REGISTRY AND NOT A PARAMETER THREADED THROUGH THE VIEWS. Passing a
+/// version beside every avatar key would have meant 25 call-site edits across 8
+/// files, and **a missed one fails silently as a stale avatar** — which is
+/// indistinguishable from the defect this exists to fix. There is no compile
+/// error and no test failure for the site you forget. One lookup path cannot be
+/// missed.
+///
+/// The key already encodes the subject (`users/<uid>/avatar.jpg`), so it is a
+/// sufficient index on its own.
+actor RemoteAvatarVersionRegistry {
+    static let shared = RemoteAvatarVersionRegistry()
+
+    private var applied: [String: String] = [:]
+
+    /// Records `version` for `key` and reports whether the caches must be
+    /// dropped first.
+    ///
+    /// FIRST SIGHT RETURNS FALSE ON PURPOSE. Nothing is cached under a key the
+    /// process has never fetched, so invalidating would be a no-op that merely
+    /// looked meaningful — and returning true would make every first render
+    /// appear to be an invalidation.
+    func shouldInvalidate(key: String, version: String?) -> Bool {
+        let incoming = version ?? ""
+        guard let previous = applied[key] else {
+            applied[key] = incoming
+            return false
+        }
+        guard previous != incoming else { return false }
+        applied[key] = incoming
+        return true
+    }
+
+    func resetForFactoryReset() { applied.removeAll() }
+}
+
 enum RemoteAvatarPipeline {
     /// Returns a decoded UIImage for a directory avatar, using shared signed URL + image caches.
     /// - Parameters:
     ///   - avatarKey: path within 'avatars' bucket (e.g. users/<uid>/avatar.jpg)
     ///   - expiresInSeconds: signed URL TTL (default mirrors remote attachment TTL used elsewhere)
-    static func fetchAvatarImageIfNeeded(avatarKey: String, expiresInSeconds: Int = 300) async -> UIImage? {
+    /// - Parameter version: `account_directory.avatar_version` for this key, when the
+    ///   caller has it. **Optional so the four owner-side callers, which invalidate
+    ///   explicitly, stay unchanged.** It is a cache-identity hint only and NEVER
+    ///   reaches the storage request.
+    static func fetchAvatarImageIfNeeded(avatarKey: String, version: String? = nil, expiresInSeconds: Int = 300) async -> UIImage? {
         let trimmed = avatarKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
+        // THE CACHE-KEY FORMAT IS DELIBERATELY UNCHANGED. It is built in eight
+        // other places, two of them the owner's own invalidation sites
+        // (ProfileView, AuthManager); folding a version into the string would
+        // have silently stopped those working. The version drops the entry
+        // instead of renaming it.
         let cacheKey = "avatars|\(trimmed)"
+
+        if await RemoteAvatarVersionRegistry.shared.shouldInvalidate(key: trimmed, version: version) {
+            RemoteAvatarImageCache.invalidate(cacheKey)
+            await RemoteAvatarSignedURLCache.shared.invalidate(cacheKey)
+        }
 
         #if canImport(UIKit)
         if let cached = RemoteAvatarImageCache.get(cacheKey) {
