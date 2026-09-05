@@ -672,6 +672,27 @@
     "public_execute": false
   },
   {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "tg_stamp_avatar_version",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "tg_stamp_avatar_version",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "tg_stamp_avatar_version",
+    "public_execute": false
+  },
+  {
     "can_execute": true,
     "direct_execute": true,
     "grantee": "anon",

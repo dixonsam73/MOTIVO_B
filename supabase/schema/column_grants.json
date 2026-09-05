@@ -96,6 +96,54 @@
     "table_name": "account_directory"
   },
   {
+    "column_name": "avatar_version",
+    "grantee": "authenticated",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "authenticated",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "authenticated",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "authenticated",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "service_role",
+    "privilege_type": "INSERT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "service_role",
+    "privilege_type": "REFERENCES",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "service_role",
+    "privilege_type": "SELECT",
+    "table_name": "account_directory"
+  },
+  {
+    "column_name": "avatar_version",
+    "grantee": "service_role",
+    "privilege_type": "UPDATE",
+    "table_name": "account_directory"
+  },
+  {
     "column_name": "display_name",
     "grantee": "authenticated",
     "privilege_type": "INSERT",

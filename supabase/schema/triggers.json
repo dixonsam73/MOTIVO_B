@@ -1,5 +1,11 @@
 [
   {
+    "definition": "CREATE TRIGGER tg_directory_avatar_version BEFORE UPDATE OF avatar_key ON public.account_directory FOR EACH ROW EXECUTE FUNCTION tg_stamp_avatar_version()",
+    "on_table": "account_directory",
+    "tgenabled": "O",
+    "tgname": "tg_directory_avatar_version"
+  },
+  {
     "definition": "CREATE TRIGGER tg_directory_entitled_until BEFORE INSERT OR UPDATE ON public.account_directory FOR EACH ROW EXECUTE FUNCTION tg_set_entitled_until()",
     "on_table": "account_directory",
     "tgenabled": "O",

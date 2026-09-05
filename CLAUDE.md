@@ -2485,6 +2485,18 @@ preference for a different design.
 `docs/qa-plan.md` — manual QA, used at each phase gate and for the RC.
 `docs/pricing-launch-model.md` — pricing and the Founding 500 launch model.
 **PLANNED, NOT IMPLEMENTED.**
+`docs/phase-4-u5-acceptance.md` — **P4-U5 SERVER HALF LIVE 2026-09-05; CLIENT
+HALF NOT WRITTEN, so C-34 is NOT yet fixed on device.** **B-15 was DISPOSED ON
+MEASUREMENT, not implemented** — 2 characters is already the smallest
+product-valid floor (production carries a 2-character display name), exhaustive
+2- and 3-char sweeps both reach 17/17, and the surviving concern is re-filed as
+**B-37**. **`LIMIT 20` is NOT a security control** — that phrasing is withdrawn.
+**C-34's signal is deployed:** `avatar_version` + a `BEFORE UPDATE OF avatar_key`
+trigger — measured to fire on a same-value PATCH and NOT on unrelated edits —
+returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
+**A defect I introduced was caught by the snapshot:** the new trigger function
+inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
+fixed, and the trigger re-tested afterwards.
 `docs/phase-4-ca-residue-cleanup-acceptance.md` — **THE SIX LIVE
 `connected_attachments` ROWS ARE CLEARED, 2026-09-04.** B-22's deliberately
 retained residue (29 both-parties-deleted + 1 live-sender), **identified by the

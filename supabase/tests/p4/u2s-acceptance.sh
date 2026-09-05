@@ -74,8 +74,12 @@ import json
 p=json.load(open('supabase/schema/policies.json'))
 print(sum(1 for x in p if x['tablename']=='posts'))")" "4" \
   "posts still carries exactly 4 policies"
-is U2s-11 "$(git diff --name-only 6f6a3c0 -- supabase/schema | wc -l | tr -d ' ')" "1" \
-  "exactly one snapshot file changed since the U2s prediction"
+# BOUNDED TO U2s'S OWN RANGE. Open-ended "since the U2s prediction" was true only
+# while U2s was the tip; P4-U5 legitimately adds avatar_version, a trigger and two
+# RPC signatures to the snapshot. The claim worth keeping is historical and exact:
+# U2s ITSELF moved one snapshot file.
+is U2s-11 "$(git diff --name-only 6f6a3c0..4febb8b -- supabase/schema | wc -l | tr -d ' ')" "1" \
+  "U2s itself changed exactly one snapshot file"
 
 # ============ standing invariant
 is U2s-12 "$(python3 -c "
