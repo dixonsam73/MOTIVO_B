@@ -2082,8 +2082,19 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
                 //
                 // This was `shouldPublish: true` from ec75a3c (2026-01-30) until
                 // now, so EVERY saved session reached the server and the Share
-                // toggle only set a column. A Thought -- `isPublic` is
-                // unconditionally false in thought mode -- went up too.
+                // toggle only set a column. A Thought went up too.
+                //
+                // CORRECTED 2026-09-05 (P4-U8). That sentence used to read
+                // "`isPublic` is unconditionally false in thought mode", which
+                // describes the INITIALISER, not the state. `:1829` sets it
+                // false FOR A THOUGHT, and the Share toggle is still offered --
+                // Thoughts are DEFAULT-private, deliberately, not structurally
+                // private. Read literally, the old wording invites someone to
+                // "simplify" by removing the toggle, which would delete an
+                // intended capability: a Thought is a diary entry by default,
+                // and the owner may deliberately publish one (an update, a gig,
+                // an instrument for sale). See "Thoughts" under Settled
+                // decisions in CLAUDE.md.
                 //
                 // `false` is not "do nothing": it enqueues an `op: .unshare`
                 // that demotes then deletes, and converges across offline and

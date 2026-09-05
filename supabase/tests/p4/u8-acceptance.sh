@@ -57,8 +57,13 @@ has U8-C3 "Études is private by default" "$A" "Études PROPER is private by def
 # new Text view; anything touching control flow, persistence or the network
 # would make this something other than what it claims to be.
 echo; echo "-- D  copy only --"
-is U8-D1 "$(git diff --name-only 57ab5fa -- MOTIVO/ | grep -v -E 'AboutEtudesView|ConnectedIntroductionView|ProfileView' | wc -l | tr -d ' ')" "0" \
-  "only the three copy files changed under MOTIVO/"
+is U8-D1 "$(git diff --name-only 57ab5fa -- MOTIVO/ | grep -v -E 'AboutEtudesView|ConnectedIntroductionView|ProfileView|AddEditSessionView' | wc -l | tr -d ' ')" "0" \
+  "only the three copy files plus AddEditSessionView changed under MOTIVO/"
+# AddEditSessionView is in that list ONLY for a corrected comment. Assert that,
+# rather than trusting the file list -- a comment-only claim is exactly the kind
+# that rots.
+is U8-D1b "$(git diff -U0 57ab5fa -- MOTIVO/AddEditSessionView.swift | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | sed -E 's/^[+-][[:space:]]*//' | grep -vE '^(//|$)' | wc -l | tr -d ' ')" "0" \
+  "…and AddEditSessionView's diff is COMMENT-ONLY — no code line added or removed"
 is U8-D2 "$(git diff 57ab5fa -- MOTIVO/ | grep -E '^[+-]' | grep -v -E '^(\+\+\+|---)' | grep -cE '(await|URLSession|NetworkManager|\.save\(|UserDefaults|isPublic *=|shouldPublish)')" "0" \
   "no added or removed line touches network, persistence or the sharing flag"
 is U8-D3 "$(git diff --name-only 57ab5fa -- supabase/ | grep -v 'tests/p4/u8' | wc -l | tr -d ' ')" "0" \
@@ -67,6 +72,31 @@ is U8-D4 "$(git diff --name-only 57ab5fa -- MOTIVOTests/ | wc -l | tr -d ' ')" "
   "no test was altered to accommodate the copy"
 
 # ===== 5. THE DISCLOSURE ARTEFACT
+# ===== THE THOUGHTS PRODUCT DECISION, MADE EXECUTABLE
+#
+# Settled 2026-09-05: a Thought is a diary entry, so Share INITIALISES OFF -- but
+# the owner may deliberately publish one. Default-private, NOT structurally
+# private. Both halves are pinned, because either could be "simplified" away.
+echo; echo "-- F  Thoughts: default-private AND shareable --"
+AE=MOTIVO/AddEditSessionView.swift
+is U8-F1 "$(grep -c 'isPublic = isThoughtMode ? false :' "$AE")" "1" \
+  "Share INITIALISES OFF for a Thought"
+is U8-F2 "$(python3 -c "
+import re,sys
+t=open('$AE').read()
+t=re.sub(r'^\s*//.*$','',t,flags=re.M)
+i=t.find('Toggle(\"\", isOn: \$isPublic)')
+seg=t[:i]
+print('guarded' if re.search(r'if !isThoughtMode \{[^}]*$', seg) else 'offered')")" "offered" \
+  "…and the toggle is still OFFERED in Thought mode (not structurally private)"
+is U8-F3 "$(grep -c 'shouldPublish: isPublic' "$AE")" "1" \
+  "…so a Thought the owner DOES share reaches the publish path unguarded"
+# NOT a "must not contain" assertion: the house convention is to QUOTE the
+# superseded sentence rather than delete it, so the old phrase legitimately
+# survives inside the correction. Assert the correction instead.
+has U8-F4 "Thoughts are DEFAULT-private, deliberately, not structurally" "$AE" \
+  "the comment now states the product decision rather than describing the initialiser as the state"
+
 echo; echo "-- E  the App Store disclosure content exists and is honest about its status --"
 D=docs/app-store-privacy-disclosures.md
 has U8-E1 "not legal advice" "$D" "the document does not present itself as legal advice"

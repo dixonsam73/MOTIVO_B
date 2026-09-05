@@ -2497,6 +2497,21 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-4-exit-assessment.md` — **PHASE 4 IS IMPLEMENTATION-COMPLETE AND
+EXIT-INCOMPLETE. IT IS NOT CLOSED, 2026-09-05.** All eight units are implemented
+and accepted; **conditions 2, 6's ASC half and 8 are OUTSTANDING**, plus the
+carried **C-34 avatar-replacement device verification**. **The criteria forbid
+closure in their own words** — condition 8 reads *"DEFERRED, NOT WAIVED"* and
+*"must not be called formally closed"* — so nothing here is a judgement layered
+on top. **Conditions 2 and 8 share ONE measured cause:** `posts` INSERT and
+SELECT are both gated, enforcement is live, and all 17 identities are
+unentitled — so **a single legitimate Connected path on Device A would discharge
+2, 4's production half, 8 and C-34 together**. Condition 6's remainder is an
+**account-holder action in App Store Connect** that no part of this work can
+perform. **Two standing suites report failures at HEAD and NEITHER is a
+regression** — `u1-baseline` and `u5-client-acceptance` are pinned to their own
+baselines and pass 16/16 and 30/30 against their own commits; neither was
+weakened.
 `docs/phase-4-u8-acceptance.md` — **P4-U8 COMPLETE 2026-09-05. COPY AND
 DISCLOSURE ALIGNMENT, ZERO BEHAVIOUR CHANGE.** **D-2 IS DISSOLVED WITH ZERO
 CODE**, on two independent grounds: an unshared session produces no server row at
@@ -2741,6 +2756,18 @@ These are interaction principles rather than architectural invariants.
   required by surviving recipient references.
 - Notes and each attachment keep independent privacy controls within a shared
   session. Only explicitly included components upload.
+- **Thoughts are DEFAULT-private and user-shareable — settled 2026-09-05.** A
+  Thought is primarily a diary/journal entry, so **Share initialises OFF**. The
+  owner may **deliberately** enable Share to publish one — a general update, a
+  gig announcement, an instrument for sale, or another non-practice post.
+  **Thoughts are therefore NOT structurally private and must never be described
+  as "never shared."** Current behaviour matches and no implementation change
+  was required; it is pinned by `U8-F1`/`F2`/`F3` — Share initialises off
+  (`AddEditSessionView:1829`), the toggle is still OFFERED in Thought mode
+  (`:1123` is guarded by `canShareWithFollowers`, **not** `!isThoughtMode`), and
+  a shared Thought reaches `publish(…, shouldPublish: isPublic)` unguarded.
+  **Do not "simplify" by removing the toggle** — that would delete an intended
+  capability.
 - "Share with followers" defaults ON. This is intentional, chosen from
   TestFlight evidence that the opposite default produced empty feeds. Users
   have a persistent "Default to Private Posts" preference. Copy must describe
