@@ -100,8 +100,8 @@ has U8-F4 "Thoughts are DEFAULT-private, deliberately, not structurally" "$AE" \
 echo; echo "-- E  the App Store disclosure content exists and is honest about its status --"
 D=docs/app-store-privacy-disclosures.md
 has U8-E1 "not legal advice" "$D" "the document does not present itself as legal advice"
-has U8-E2 "nothing has been entered" "$D" "…and does not claim the ASC labels were applied"
-has U8-E3 "Used for tracking (as Apple defines it): NO" "$D" "tracking is answered explicitly"
+has U8-E2 "Nothing has been entered" "$D" "…and does not claim the ASC labels were applied"
+has U8-E3 "is NO for every declared type" "$D" "tracking is answered explicitly"
 has U8-E4 "Solo, nothing leaves the device at all" "$D" "the controlling fact is stated first"
 hasnt U8-E5 'Connected is private by default' "$D" "the disclosure does not misdescribe the default either"
 
