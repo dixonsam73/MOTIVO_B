@@ -37,15 +37,20 @@ decoded (`AccountDirectoryService`, the vestigial half filed as **C-41**).
 **So the discovery opt-out is mostly built and entirely dormant.** The work is to
 *use* the column, not to add one.
 
-### THE HAZARD, STATED LOUDLY
+### THE 9/8 SPLIT IS AN ARTEFACT, NOT A PREFERENCE — MEASURED 2026-09-06
 
-**Eight existing members carry `lookup_enabled = false` and are nevertheless
-fully discoverable today, because nothing reads the column.** Wiring it up
-naively would **silently remove eight real members from search** — a behaviour
-change nobody asked for, arriving as a side effect of a children's feature.
+**No user has ever chosen a `lookup_enabled` value, because no control exists to
+choose one** (C-41: the client plumbing is vestigial and read-only).
 
-**Whatever CP does with this column must decide those eight rows explicitly, by
-id, and never by predicate sweep** (B-22's rule).
+The split tracks **account age**, not intent: every identity whose last session
+is 2026-07-01 or later is `true`; every identity before 2026-06-16 is `false`
+(one boundary case, `felixbloxsom`). That is the signature of a **changed column
+default**, not of seventeen privacy decisions.
+
+**So preserving these values carries no privacy meaning at all**, and the
+"eight members would silently vanish from search" hazard **disappears entirely
+under the reset in §2b** — only two rows survive, both `true`, both the
+developer's own.
 
 **B-2's withdrawal reasoning no longer blocks this.** B-2 was withdrawn because
 gating *both* directory RPCs on the column would blank names and avatars for
@@ -53,6 +58,76 @@ existing followers. **U7 proved the two RPCs are independently gateable** —
 attribution has no subject-side filter (G10) and discovery does. **A
 discovery-only clause on `search_account_directory` alone does not touch
 attribution**, which is exactly the objection that killed B-2.
+
+---
+
+## 2b. CONTROLLED PRE-RELEASE RESET — MEASURED, NOT YET PERFORMED
+
+**The production population is entirely pre-release beta/test data with no
+continuity expectation.** Dormancy is measured on `max(auth.sessions.updated_at)`
+per user — **B-35's rule, never `last_sign_in_at`** — and only two identities
+have been active since 2026-08-30. The rest range from 2026-03-26 to 2026-08-12.
+
+### RETAIN — TWO IDENTITIES, AND THE SECOND IS NOT OPTIONAL
+
+| keep | md5[0:8] | why |
+|---|---|---|
+| `samueldixon` | `1fbf664a` | the active development identity; **holds the only retained avatar**, which C-34's replacement test needs |
+| `steveckeabuo` | `64ffb132` | **Device A's own beta-burner identity — not a third-party tester** |
+
+**RETAINING THE SECOND IDENTITY IS A DEPENDENCY, NOT SENTIMENT.** Phase 4's
+outstanding exit conditions **2** and **8**, and **C-34's avatar verification**,
+each require **two Connected identities with an approved follow between them** —
+one member sharing or changing an avatar, another observing it. **A single
+identity cannot exercise any of them.** This pair is exactly what made the
+2026-09-05 U7 device verification possible, and their **mutual approved follow**
+must be retained with them.
+
+**Deleting it would destroy the fixture Phase 4 still needs and force it to be
+rebuilt by hand.**
+
+### THE MEASURED BLAST RADIUS
+
+| | retain | delete |
+|---|---|---|
+| identities | **2** | **15** |
+| posts | 7 | **94** |
+| comments | **5 — all of them** | **0** |
+| follows | 2 (the mutual pair) | 7 |
+| avatars | 1 | 2 |
+
+**All five comments sit wholly inside the keep set**, so **B-19's
+retained-comment question never arises** — there is no comment authored by a
+deleted identity on a surviving post, and none addressed to one. That is the
+single largest source of deletion complexity, and it is absent.
+
+`connected_attachments` holds 25 rows, all soft-deleted (the 2026-09-04
+cleanup); attachment objects total 10.
+
+**Nothing has been deleted.** When it is, it must be **by explicit id, with a
+prediction committed first** — B-22's rule and this project's standing practice.
+
+---
+
+## 2c. WHAT THE RESET SIMPLIFIES
+
+**Materially, and in the schema rather than merely in the data:**
+
+1. **`age_band` can be `NOT NULL` from the start.** With two surviving rows, both
+   under the developer's control, there is **no backfill, no nullable column, and
+   no unknown-band population**. Without the reset the column must be nullable
+   and every read site must implement fail-private.
+2. **"Unknown fails private" stops being a migration surface** and becomes what
+   it should be — a **runtime rule for the sign-up window only**, before the
+   directory row exists.
+3. **`lookup_enabled` needs no data decision.** No 8-row disposition, no
+   by-id sweep, no risk of silently unlisting a real member.
+4. **Migration option (a) — "prompt everyone at next launch" — collapses to
+   two accounts the developer already controls**, so no prompting machinery,
+   no gating-until-answered logic, and no partially-migrated state.
+
+**This is the difference between a migration and a clean start.** The strongest
+argument for the reset is that it removes work, not that it tidies data.
 
 ---
 
@@ -119,28 +194,27 @@ trade-off between minimisation and accuracy and must be decided explicitly.
 
 ---
 
-## 6. MIGRATION AND DEFAULT SEMANTICS — THE HARD PART
+## 6. DEFAULT SEMANTICS — NO LONGER A MIGRATION PROBLEM
 
-**Every existing account has no age band.** Three options, and the choice is a
-product decision:
+**Superseded by §2b/§2c.** An earlier revision of this document called migration
+*"the hard part"* and set out three options for handling accounts with no age
+band. **Under the reset that question does not arise**: two identities survive,
+both the developer's own, and both are set explicitly.
 
-| option | effect | cost |
-|---|---|---|
-| **(a) Prompt everyone at next launch; Connected gated until answered** | No unknown-band accounts ever exist | one-time friction for all members |
-| (b) Unknown → treat as 18+, prompt later | preserves current behaviour | **leaves a window in which an existing under-18 has Share ON** |
-| (c) Unknown → treat as under-18 until answered | safest for children | **flips existing adults to Share OFF and undiscoverable** — a regression |
+**What remains is FUTURE-PRODUCT CORRECTNESS, which is a different thing and is
+not negotiable:**
 
-**Recommendation: (a).** Production holds **17 pre-release beta identities and no
-public customers**, so the friction is nearly free *now* and becomes expensive
-the moment the app is released. **This is the strongest argument for doing CP
-before public release rather than after.**
+| rule | where enforced |
+|---|---|
+| **unknown age fails private** | runtime, during the sign-up window before a band is stored — **not** a migration path |
+| **13–17: Share default OFF, discovery default OFF** | client default derived from the server-side band; discovery clause server-side |
+| **18+ retains the intended adult defaults** | unchanged — D-1 survives for adults |
+| **under 13 cannot enable Connected** | sign-up refuses before any identity or directory row is created |
+| **attribution independent of discoverability** | `get_account_directory_by_user_ids` gains **no** clause — G10, U7 |
 
-**Separately and explicitly: the 8 `lookup_enabled = false` rows** must be
-dispositioned by id — either reset to `true` (restoring today's observable
-behaviour before the column becomes live) or confirmed as intended. **Not a
-predicate sweep.**
-
----
+**Keep the two apart deliberately.** Beta-data migration compatibility is
+disposable; the five rules above are permanent product behaviour and must be
+asserted by tests regardless of what the beta population looked like.
 
 ## 7. TESTS AND RELEASE GATES
 
@@ -183,12 +257,22 @@ predicate sweep.**
 
 ---
 
-## 9. DEPENDENCIES AND SEQUENCING
+## 9. DEPENDENCY-ORDERED IMPLEMENTATION PLAN
 
-- **Blocks public release.** It does not block Phase 4's remaining exit
-  conditions, which are unrelated.
-- **Should precede public release**, per §6 — the migration is cheap now.
-- **Depends on U7** having separated attribution from discovery. Before U7 this
-  design was not cleanly available.
-- **The privacy policy stays a DRAFT** and `etudes.app/privacy` is not published.
-  **The ASC labels stay entered-but-unpublished.**
+**Six units. Nothing implemented. Each ends in a committed prediction, a
+verification and a stop, as every unit in this project has.**
+
+| # | unit | depends on | notes |
+|---|---|---|---|
+| **CP-0** | **Pre-release reset** — delete 15 dormant beta identities and their server-side data by **explicit id**; retain `1fbf664a` and `64ffb132` and their mutual approved follow | nothing | Prediction committed **before** any deletion. **Ordering is now free** because the Phase 4 fixture is retained — had only one identity survived, CP-0 would have had to wait for conditions 2 and 8 |
+| **CP-1** | **Schema** — `age_band` `NOT NULL`; `lookup_enabled` default and semantics settled | CP-0 (that is what makes `NOT NULL` possible without backfill) | No data decisions left after CP-0 |
+| **CP-2** | **Server** — discovery clause on `search_account_directory` **only** | CP-1 | **Must not touch `get_account_directory_by_user_ids`** — G10 / U7. Its acceptance suite re-asserts the U7 invariant |
+| **CP-3** | **Client** — band question at sign-up; Share default derived from the band; discoverability control (revives C-41); neutral just-in-time explanation; no nudging | CP-1, CP-2 | `defaultPrivacy` is **local Core Data**, so the under-18 default must derive from the **server-side** band or it will not follow the user across devices |
+| **CP-4** | **DPIA and legal confirmations** | CP-1..CP-3 designs settled enough to assess | Runs **in parallel**; **blocks release, not implementation** |
+| **CP-5** | **Publish** — resolve `[AGE]`, publish `etudes.app/privacy`, then publish the ASC labels | CP-4 | **Policy first, ASC second** — the URL must resolve before the labels go live |
+
+**Relationship to Phase 4:** CP does **not** block Phase 4's remaining exit
+conditions, and Phase 4 does not block CP. **Both block public release.** CP-0
+retains the fixture conditions 2, 8 and C-34 need, so neither workstream has to
+wait for the other.
+
