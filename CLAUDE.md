@@ -2497,6 +2497,21 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
+`docs/phase-5-scope.md` — **PHASE 5 UNIT ORDER, 2026-09-06. NOT STARTED.**
+Carries the **children's privacy workstream CP-0…CP-5** (moved here, NOT Phase 4)
+alongside the existing 19 Phase 5 register rows and the playback-speed work.
+**The critical ordering is CP-1 DESIGN → CP-0 reset → CP-1 APPLY → CP-2 → CP-3**
+— the design comes first because it is what establishes that a clean population
+makes `age_band NOT NULL` achievable without backfill; **the reset is justified
+by the design, not the reverse.** **CP-0 is a PRODUCTION MUTATION** needing a
+fresh prediction and census immediately before execution — the `d5d6d27` census
+is dated and must not be reused as authority. **THE RETAINED-PAIR GUARD:**
+`samueldixon` and `steveckeabuo` and their mutual follow must not be touched by
+CP-0 until Phase 4's outstanding physical-device verification is explicitly
+dispositioned — they are the ONLY fixture that can exercise conditions 2 and 8
+and C-34's avatar test, which need two identities with an approved follow.
+**C-41 is revived by CP-3, not deleted** — the vestigial `lookup_enabled` column
+turns out to be the discovery opt-out the children's work needs.
 `docs/phase-4-exit-assessment.md` — **PHASE 4 IS IMPLEMENTATION-COMPLETE AND
 EXIT-INCOMPLETE. IT IS NOT CLOSED, 2026-09-05.** All eight units are implemented
 and accepted; **conditions 2, 6's ASC half and 8 are OUTSTANDING**, plus the
@@ -2834,11 +2849,15 @@ before moving on. Six bounded, separately reviewable phases — not one rewrite.
 4. **Shared-only architecture** — shared-only uploads; remove the accidental
    analytics mirror; purge historic unshared rows; align onboarding, settings
    and App Store privacy disclosures.
-5. **Remaining client fixes** — duplicate Score adoption; staged-video work if
-   measurement justifies it; playback rate (AttachmentViewerView only, local
-   and remote audio/video, discrete 50/75/100%, pitch preserved, no looping,
-   no PracticeTimerView changes, no MediaTrimView carry-over, TestFlight soak);
-   accessibility and polish.
+5. **Children's privacy, then remaining client fixes** — **the children's
+   privacy workstream CP-0…CP-5 now belongs to Phase 5** (13–17 Connected
+   support: age band, under-18 Share and discovery defaults OFF, DPIA and the
+   legal/publication gate). Plus the existing backlog: duplicate Score
+   adoption; staged-video work if measurement justifies it; playback rate
+   (AttachmentViewerView only, local and remote audio/video, discrete
+   50/75/100%, pitch preserved, no looping, no PracticeTimerView changes, no
+   MediaTrimView carry-over, TestFlight soak); accessibility and polish.
+   **See `docs/phase-5-scope.md` for the unit order.**
 6. **Cleanup** — obsolete backend code, AVFoundation deprecation sweep,
    architectural leftovers.
 
