@@ -1,5 +1,19 @@
 # P5-B / CP-1 — DESIGN, REVISION 2. 2026-09-06
 
+**AMENDED 2026-09-06 — REVISION 3, ON REVIEW OF r2. Three changes, all
+tightenings, none reversing an accepted Apple finding:**
+
+1. **§7.4 rewritten.** Declined sharing is no longer settled as a product rule.
+   CP-1 now states only an **eligibility** fact and hands retry, wording and
+   jurisdictional variation to P5-G/product.
+2. **§7.3 replaced by §7.3′.** The protective downgrade is **generalised beyond
+   `lookup_enabled`**, and it **no longer destroys preference history** — r2's
+   "force false and clear `lookup_changed_at`" is withdrawn. A three-layer model
+   replaces it, and **`follow_requests_enabled` joins the set** on a measurement
+   r2 did not have.
+3. **§2 gains INVARIANT CP-OS-1** — the iOS-26 gate is now precise about
+   *continued* use, not only joining.
+
 **SUPERSEDES `docs/phase-5-b-cp1-design.md` (r1) ON THE AGE-DECLARATION
 MECHANISM ONLY.** r1 is retained, banner-marked, and still carries the four
 measured facts and the storage design that survive unchanged.
@@ -117,6 +131,44 @@ under the user's control — the opposite of raising the floor.
 **On older iOS, "Explore Connected" states plainly that Connected requires iOS 26
 or later.** Solo is untouched, unrestricted, and never asks anything.
 
+### 2.1 INVARIANT CP-OS-1 — the gate is on CONNECTED, not on JOINING
+
+> **Connected requires iOS 26.0 or later AT ALL TIMES, not only at the moment of
+> joining. On a supported OS below 26, the app presents SOLO, under the standing
+> non-destructive semantics: local journal, Scores, media, profile and settings
+> untouched; the Connected identity retained; nothing deleted; nothing scheduled
+> for cleanup.**
+
+**The choice is made now, deliberately, while it is free** — there are no shipped
+members, so no behaviour is being taken away from anyone.
+
+**Why continued use is gated too, and not only the join.** The weaker rule —
+"join on 26, keep it anywhere" — is reachable in practice: a restore onto an
+older device, or a second, older device on the same Apple Account. On such a
+device:
+
+- **`activeParentalControls` cannot be read at all.** It is device state
+  available only through this framework, so Études could not know whether
+  **`communicationLimits`** applies to a minor — and Études has directed comments
+  and direct attachment sending (§8). **That is a live safety gap on the exact
+  surfaces the control governs, not an edge case.**
+- **Reconciliation cannot run**, so the protective adult→teen downgrade of §7.3′
+  could never be detected on that device. A design whose safety rests on
+  reconciliation must not run where reconciliation cannot.
+
+**It costs nothing and it reuses proven machinery.** "Connected withdrawn,
+identity and local data retained" is not new behaviour to build: it is exactly
+the lapse path already implemented and device-verified under C-1/C-26, where a
+genuine expiry withdrew Connected and deleted nothing. **CP-OS-1 adds an input to
+that decision; it does not add a mechanism.**
+
+**FLAGGED FOR P5-G/PRODUCT, NOT ENGINEERING:** a member who subscribes on iOS 26
+and later runs a sub-26 device would be **billed while Connected is
+unavailable**. Joining already requires 26, so this cannot arise at purchase —
+only afterwards. **What the product owes that member (guidance, a prompt to
+manage the subscription, or nothing) is a commercial and legal decision**, and
+CP-1 does not take it.
+
 ---
 
 ## 3. WHERE THE REQUEST HAPPENS — SOLO IS NEVER ASKED
@@ -156,14 +208,27 @@ Connected join flow, not the app**.
 
 ```sql
 create table public.account_privacy (
-  user_id            uuid primary key
-                       references auth.users(id) on delete cascade,
-  age_band           text        not null,
-  lookup_enabled     boolean     not null,
-  band_updated_at    timestamptz not null default now(),
-  lookup_changed_at  timestamptz,
+  user_id                       uuid primary key
+                                  references auth.users(id) on delete cascade,
+  age_band                      text        not null,
+  band_updated_at               timestamptz not null default now(),
+
+  -- Preference 1: discoverability.
+  lookup_enabled                boolean     not null,
+  lookup_set_under_band         text        not null,
+  lookup_changed_at             timestamptz,          -- null while still the initial default
+
+  -- Preference 2: may strangers request to follow. LIVE -- see 7.3'.
+  follow_requests_enabled       boolean     not null,
+  follow_requests_set_under_band text       not null,
+  follow_requests_changed_at    timestamptz,
+
   constraint age_band_values
-    check (age_band in ('band_13_17', 'band_18_plus'))
+    check (age_band in ('band_13_17', 'band_18_plus')),
+  constraint lookup_set_under_band_values
+    check (lookup_set_under_band in ('band_13_17', 'band_18_plus')),
+  constraint follow_requests_set_under_band_values
+    check (follow_requests_set_under_band in ('band_13_17', 'band_18_plus'))
 );
 ```
 
@@ -273,47 +338,133 @@ success is never permanent authority.
 Accept. Write `age_band` and `band_updated_at`. **Touch no preference** — the
 initial-defaults separation holds exactly as in r1 §6.
 
-### 7.3 `band_18_plus` → `band_13_17` — THE PROTECTIVE DIRECTION
+### 7.3′ `band_18_plus` → `band_13_17` — THE PROTECTIVE DIRECTION, GENERALISED
 
-**This can genuinely happen**, by at least four routes: the person corrects
-their range in Settings; a guardian changes it; *Share Age Range again* returns a
-corrected value; or **a different iCloud account is now signed in on the device**
-(§9).
+**r2's rule is WITHDRAWN.** It forced `lookup_enabled := false` and **cleared
+`lookup_changed_at`**, which destroyed preference history, and it addressed only
+one of the three pieces of state that carry child-safety consequences.
 
-**Rule: accept it, and re-apply the teen defaults — including forcing
-`lookup_enabled := false` and clearing `lookup_changed_at`.**
+**This can genuinely happen**, by at least four routes: the person corrects their
+range in Settings; a guardian changes it; *Share Age Range again* returns a
+corrected value; or **a different iCloud account is signed in on the device**
+(§9.2).
 
-**THIS IS A DELIBERATE, NARROW EXCEPTION TO "NEVER OVERWRITE A PREFERENCE", AND
-IT IS RECORDED AS AN EXCEPTION RATHER THAN ALLOWED TO ERODE THE RULE.** The
-reasoning: a discoverability preference expressed while classified as an adult
-was expressed under a classification now known to be wrong. The Children's Code's
-Standard 7 expects a child's data to be visible to others **only if the child
-changes the setting** — and a setting inherited from a mistaken adult
-classification is not a change the child made. The member may of course turn it
-back on, deliberately, which is precisely what Standard 7 contemplates.
+#### The three layers, kept strictly apart
 
-**The exception is bounded in three ways:** it fires only on an
-adult→teen transition, it only ever moves the preference to the *more* protective
-value, and it never fires on the teen→adult direction. **A downgrade must never
-silently widen exposure and this rule cannot do so.**
+| layer | where it lives | who writes it | destroyed on downgrade? |
+|---|---|---|---|
+| **Persisted user preference** | the stored column / local `Profile` | only an explicit user action | **NEVER** |
+| **Initial default** | materialised into the preference once, at creation, from the band | `account_privacy_upsert_v1` on first insert | never rewritten |
+| **Effective child-safety override** | **computed at read time, stored nowhere** | nobody — it is a function | n/a |
 
-### 7.4 Decline, error or unavailability AFTER a band exists
+**The override may only ever make behaviour MORE protective, and it is never
+written back.** That is what lets preference history survive a downgrade
+untouched while effective behaviour is unquestionably child-safe.
 
-**Never revokes an existing band, and never disables Connected for an existing
-member.** A `.declinedSharing`, a `.notAvailable`, a thrown error or an
-unreachable API leaves `account_privacy` exactly as it is.
+#### The rule
 
-**The reasoning is this project's own, twice over.** Absence of fresh evidence is
-not evidence of change — the same principle that makes "absence of a membership
-record can never schedule cleanup" structural. And a decline is a *reversible*
-signal about a *client-side* read, so under invariant 3 it may withdraw nothing
-irreversible. The persisted band is already the protective record; discarding it
-would move the member from a known-safe classification to an unknown one, which
-is strictly worse.
+Each preference records **the band in force when it was last written**:
 
-**Decline blocks JOINING. It never unmakes a member.**
+```
+effective(pref) = pref
+              AND NOT (current_band = 'band_13_17'
+                       AND pref_set_under_band = 'band_18_plus')
+```
 
----
+**A permissive choice made while classified as an adult does not carry into a
+child classification.** Standard 7 expects a child's data to be visible to others
+**only if the child changes the setting**, and a setting inherited from a
+mistaken adult classification is not a change the child made. The member may set
+it again as a teen, which updates `pref_set_under_band` and makes it take effect
+— which is precisely what Standard 7 contemplates.
+
+**Nothing is cleared, nothing is overwritten, and the history remains
+auditable.** A later teen→adult reclassification restores the adult-set
+preference automatically, because the override simply stops applying. **Under r2's
+withdrawn rule that value would have been gone for good.**
+
+#### The complete set of state returned to child-safe defaults
+
+| # | state | kind | on downgrade |
+|---|---|---|---|
+| **1** | **`lookup_enabled`** — discoverability | server preference | override → **not discoverable** |
+| **2** | **`follow_requests_enabled`** — may strangers request to follow | server preference | override → **requests closed** |
+| **3** | **Share default posture** | local `Profile.defaultPrivacy` | override → **default OFF** |
+
+**(2) IS NEW IN r3 AND RESTS ON A MEASUREMENT r2 DID NOT HAVE.** `lookup_enabled`
+has **zero** references anywhere in the deployed schema, but
+**`follow_requests_enabled` is LIVE**: `follow_requests_open(target_user_id)`
+reads it, and the **`follows_insert_requester` INSERT policy calls that
+function**. It genuinely gates who may create a follow request — a **contact
+vector into a minor**, and therefore squarely in scope. r2 treated the two
+columns as equivalent; they are not.
+
+**A HAZARD IN THAT FUNCTION, RECORDED AND DELIBERATELY NOT FIXED HERE:**
+`follow_requests_open` ends `coalesce(..., true)` — **a missing directory row
+falls through to PERMISSIVE**. That is the same shape as the D4 defect this
+design is otherwise built to avoid. It is safe today only because a member with
+no directory row is not discoverable and so is hard to address. **Changing it
+would alter behaviour for every identity with no directory row and is not a CP-1
+change**; it is recorded here so it is found deliberately rather than
+rediscovered.
+
+**(3) settles the Share posture.** For `band_13_17` the Share default is **OFF**,
+and per the settled product decision it is **not user-configurable at the default
+level** — the per-session Share toggle remains fully available, so a teen may
+still deliberately share. `Profile.defaultPrivacy` is **preserved untouched** and
+simply does not apply while the band is `band_13_17`; it applies again if the
+member is later classified adult.
+
+**The asymmetry with discovery is inherited, not invented:** the settled
+decisions say *"Share default OFF"* and *"discovery default OFF (independently
+opt-in)"*. Discovery is opt-in for teens; the Share **default** is not. **If
+product wants a teen-configurable Share default, that is a P5-G/product change,
+not an engineering one.**
+
+#### What is deliberately NOT reverted, and why
+
+- **Existing published posts are NOT retroactively unshared.** They were the
+  member's deliberate act; Études has **no public feed**, so they are visible only
+  to **already-approved followers**; and retroactively destroying a member's own
+  published record would cut against the fundamental rule that no Connected or
+  membership action deletes the local journal or the member's work.
+- **Existing approved follows are NOT severed.** Severing established
+  relationships is destructive and irreversible.
+
+**BOTH ARE FLAGGED FOR P5-G.** They are judgements about what a child-protective
+regime owes retrospectively, and that is a legal determination. **CP-1 states
+what it does and does not do, and does not pretend the question is closed.**
+
+### 7.4′ DECLINE, ERROR OR UNAVAILABILITY — AN ELIGIBILITY FACT ONLY
+
+**r2 settled this as a product rule. That was out of CP-1's remit and is
+withdrawn.** CP-1 states only the engineering invariant:
+
+> **A `.declinedSharing` response, a thrown error, an unavailable service, or a
+> range whose lower bound is insufficient (§5) DOES NOT ESTABLISH CONNECTED
+> ELIGIBILITY. No Connected identity and no `account_privacy` row is created,
+> and no existing row is created, promoted or modified.**
+
+**Stated as create/promote/modify — not as "blocks" or "refuses forever".** The
+same sentence therefore covers both directions without smuggling in a product
+decision: nothing is brought into existence, and **nothing existing is destroyed
+or demoted either**. An established member who later declines keeps their band,
+because a decline is an absence of fresh evidence, not evidence of change — the
+same principle that makes "absence of a membership record can never schedule
+cleanup" structural, and consistent with invariant 3, since a client-side read
+may not drive an irreversible change.
+
+**EXPLICITLY NOT SETTLED BY CP-1, and owned by P5-G / product / legal:**
+
+- whether the UI offers a **retry**, and how many times;
+- the **wording** shown after a decline;
+- whether a decline is **remembered locally** or re-asked each time;
+- whether **any jurisdiction** requires different handling — including whether a
+  decline may be refused as an answer at all, given Apple's documented behaviour
+  that **declining is impossible in regulated regions**;
+- whether a decline by an **established** member has any product consequence.
+
+**CP-1 must not be read as having decided any of these.**
 
 ## 8. `activeParentalControls` — FLAGGED, DELIBERATELY NOT DESIGNED HERE
 
@@ -426,11 +577,11 @@ apply.**
 
 | surface | predicted |
 |---|---|
-| `columns` | **+5** (`account_privacy`) — one fewer than r1, provenance dropped |
-| `constraints` | **+3** — pkey, FK to `auth.users`, `age_band_values` |
+| `columns` | **+9** (`account_privacy`) — provenance dropped, but r3 adds a second preference and a `set_under_band` per preference (7.3′) |
+| `constraints` | **+5** — pkey, FK to `auth.users`, and three band-value checks |
 | `rls_enabled` | **+1**, with **zero policies** (U3 pattern) |
-| `functions` | **+3 new** (`upsert_v1`, `set_lookup_v1`, `self_v1`), **1 MODIFIED** (`search_account_directory`) |
-| `function_grants` | **+3**, `authenticated` only |
+| `functions` | **+4 new** (`upsert_v1`, `set_lookup_v1`, `set_follow_requests_v1`, `self_v1`), **2 MODIFIED** — `search_account_directory` **and `follow_requests_open`**, which must now apply the 7.3′ override |
+| `function_grants` | **+4**, `authenticated` only |
 | `triggers` | **+1** on `account_directory` (band-precondition, r1 §3.2) |
 | `table_grants` / `column_grants` | **ZERO** — all revoked per U3 |
 
@@ -477,12 +628,23 @@ Materially larger than under r1, and all of it is legal rather than engineering:
    `.significantAppChangeRequiresParentalConsent` (**PermissionKit**) apply to
    Études, and **what counts as a significant update** for a product that adds
    social features incrementally.
-5. **Consent revocation** — what happens when a guardian withdraws sharing, given
-   §7.4 says it never unmakes a member. **That is an engineering rule with a
-   legal premise, and P5-G owns the premise.**
-6. **Lawful basis for children's processing**, carried unchanged from the
+5. **Consent revocation and decline** — §7.4′ says nothing is created, promoted,
+   modified or destroyed. **P5-G owns the premise**, plus the whole product
+   surface CP-1 deliberately left open: retry, wording, local memory of a
+   decline, and jurisdictional variation — including Apple's documented
+   behaviour that **declining is impossible in regulated regions**.
+6. **Retrospective reach of a protective downgrade** — §7.3′ does **not**
+   retroactively unshare existing posts or sever existing approved follows.
+   **Whether a child-protective regime requires either is a legal judgement.**
+7. **Teen-configurable Share defaults** — §7.3′ follows the settled decision that
+   the Share *default* is OFF and not user-configurable for `band_13_17`, while
+   discovery is opt-in. **If that asymmetry is wrong, it is a product change.**
+8. **CP-OS-1's billing edge** — a member subscribed on iOS 26 who later runs a
+   sub-26 device is billed while Connected is unavailable (§2.1).
+9. **Lawful basis for children's processing**, carried unchanged from the
    existing scope.
-7. **The iCloud/Études subject mismatch** (§9.2).
+10. **The iCloud/Études subject mismatch** (§9.2) — **carried as an explicit DPIA
+    residual**, not closable by this API.
 
 ## 11.5 SANDBOX ACCEPTANCE CASES
 
@@ -527,22 +689,38 @@ the only way to assert an absence.**
 
 | # | scenario | how | predicted outcome |
 |---|---|---|---|
-| **S-B1** | **declined sharing** | *Age Range for Apps* → **Never Share** | `.declinedSharing` → join **refused**, **nothing stored** |
+| **S-B1** | **declined sharing at join** | *Age Range for Apps* → **Never Share** | `.declinedSharing` → **Connected eligibility not established; no identity, no row** (§7.4′). **UI retry/wording is NOT scored here — P5-G/product** |
 | **S-B2** | **Ask First, then decline** | *Ask First* + decline at the prompt | as S-B1 |
 | **S-B3** | **API error / unavailable** | airplane mode; no Sandbox account | throws → join refused, nothing stored. **Must not crash and must not fall through to an adult default** |
 | **S-B4** | **ageing 13–17 → 18+** | switch case S-A3 → S-A4, then *Share Age Range again* | band updated; **`lookup_enabled` UNCHANGED** (§7.2) |
-| **S-B5** | **protective downgrade 18+ → 13–17** | switch S-A4 → S-A2 | band updated; **`lookup_enabled` FORCED false**, `lookup_changed_at` cleared (§7.3) |
-| **S-B6** | **decline AFTER a band exists** | establish S-A4, then *Never Share* | **band retained, member stays Connected** (§7.4) |
+| **S-B5** | **protective downgrade 18+ → 13–17** | set discovery ON and follow-requests ON as an adult, then switch S-A4 → S-A2 | band updated; **stored preferences UNCHANGED and still `true`**; **effective discovery and follow-requests both false**; Share default OFF (§7.3′) |
+| **S-B5b** | **downgrade then teen re-affirms** | after S-B5, turn discovery on again | `lookup_set_under_band` becomes `band_13_17`; **effective discovery true** — Standard 7's "only if the child changes the setting" |
+| **S-B5c** | **downgrade then re-upgrade** | after S-B5, switch back to S-A4 | **the adult-set preferences apply again with no rewrite**, because the override merely stops applying. **Falsifies r2's withdrawn rule, which would have destroyed them** |
+| **S-B5d** | **follow request against a downgraded member** | S-B5 state, second identity attempts a follow request | **refused by `follows_insert_requester`** via `follow_requests_open` (§7.3′) |
+| **S-B6** | **decline AFTER a band exists** | establish S-A4, then *Never Share* | **nothing created, promoted, modified or destroyed** — band retained, member stays Connected (§7.4′) |
 | **S-B7** | **`communicationLimits` active** | a case reporting it | directed-send affordances withheld client-side (§8) |
 | **S-B8** | **consent revocation** | *Manage* → *Revoke App Consent* → bundle id | `RESCIND_CONSENT` lands `not_applicable` / `"appData notification"`; **membership unchanged** (§8.5) |
-| **S-B9** | **iOS < 26** | any pre-26 device | Solo fully functional; **Explore Connected shows the requirement notice** (§2) |
+| **S-B9** | **iOS < 26, never joined** | any pre-26 device | Solo fully functional; **Explore Connected shows the requirement notice** (§2) |
+| **S-B9b** | **CP-OS-1: established member on iOS < 26** | join on 26+, then run the same account on a pre-26 device | **Connected UNAVAILABLE, app presents Solo**; local journal, Scores, media and profile **untouched**; identity **retained**; **nothing deleted and nothing scheduled** (§2.1) |
 | **S-B10** | **Solo never asks** | fresh install, stay in Solo | **no age request is made at all** — assert by absence of the prompt and of any API call (§3) |
 
-**S-B5 and S-B6 are the two most valuable cases**, because they exercise the two
-rules that were *decided* rather than *observed*: the deliberate exception to
-"never overwrite a preference", and the rule that a decline never unmakes a
-member. **Neither can be established by reading the API documentation**, since
-both are Études policy, so both must be behaviourally observed.
+**S-B5c IS THE SINGLE MOST VALUABLE CASE IN THE SET.** It is the one that
+**discriminates r3's override model from r2's withdrawn rule**: under r2 the
+adult-set preferences were destroyed on downgrade, so a re-upgrade could not
+restore them. If S-B5c shows them restored with no rewrite, the three-layer
+model is doing exactly what it claims. **A test that only ever downgrades cannot
+tell the two designs apart.**
+
+**S-B5, S-B5d and S-B6 matter for the same reason**: they exercise rules that
+were *decided* rather than *observed* — the child-safety override, its reach into
+the live follow-request gate, and the rule that a decline creates, promotes,
+modifies and destroys nothing. **None can be established by reading Apple's
+documentation**, because all are Études policy, so all must be behaviourally
+observed.
+
+**S-B9b is the CP-OS-1 acceptance** and it must be scored on **non-destruction**
+as much as on unavailability: the interesting failure is not "Connected still
+worked" but "something was deleted on the way to Solo".
 
 **S-B10 is an assertion of an absence** and needs a discriminator: a build that
 requests at launch would pass every other case here. It should be scored by
