@@ -50,7 +50,7 @@ product work. **Nothing below is implemented.**
 | # | unit | what | depends on |
 |---|---|---|---|
 | ~~**P5-A**~~ | **C-14** | **COMPLETE 2026-09-06 — 8 lines in `FollowStore` only.** The premise was wrong: **all 38 `AuthManager` sites are `#if DEBUG`, so it contributed ZERO shipping sites**, and the handles half had **no shipping instance at all**. Six assertions scored against a prediction committed before mutation; discriminator proven non-vacuous against pre-fix code; verified in the built Release binary as well as the tree. **Not device-verified.** Filed **C-62** on the way past | **none** — was small, and should not ship alongside a published privacy policy. **NOT a CP dependency** |
-| **P5-B** | **CP-1 — design** | design and predict the clean schema and semantics: `age_band` **NOT NULL**, `lookup_enabled` default and meaning | **none.** Its purpose is to design the clean state that CP-0 makes possible, so it **must not depend on CP-0** |
+| **P5-B** | **CP-1 — design** | **DESIGNED, HELD FOR REVIEW 2026-09-06 — REVISION 2.** **The product-owned self-declaration assumption is SUPERSEDED** by Apple's first-party **`DeclaredAgeRange`** framework (iOS 26+): `requestAgeRange(ageGates: 13, 18)`, which can be guardian-declared or ID/payment-`confirmed` and which **handles ageing itself**. `docs/phase-5-b-cp1-design-r2.md` is authoritative; `-design.md` (r1) is retained and banner-marked for the parts that survive. **NO fallback self-declaration** — Connected join is gated on iOS 26 instead, which costs nothing because Études has never shipped. `account_privacy` survives and now stores **less**: two bands, **no provenance** | **none** |
 | **P5-C** | 🔴 **CP-0 — reset** | delete **15** dormant beta identities **by explicit id**; retain the two development identities and their mutual follow | P5-B accepted; **retained-pair guard** above |
 | **P5-D** | 🔴 **CP-1 — apply** | apply the schema designed in P5-B, against the clean population | P5-C |
 | **P5-E** | 🔴 **CP-2 — server** | discovery clause on **`search_account_directory` only** | P5-D |
@@ -63,6 +63,38 @@ product work. **Nothing below is implemented.**
 | **P5-L** | **Investigations** | **C-37**, **C-39**, **C-40**, **C-42**, **C-47**, **C-62** — all *Unverified*; each needs measurement **before** any fix. **C-62** was filed by P5-A: `PublishService:294` logs a session **title** in Release. It is **user content, not identity**, so it was deliberately NOT folded into C-14, and its **severity is unassigned** because the evidence establishes only that the value is written, never that any read path surfaces it | none |
 | **P5-M** | **Product** | **playback-speed control** (AttachmentViewerView only, local and remote audio/video, discrete 50/75/100%, pitch preserved, no looping, no `PracticeTimerView` changes, no `MediaTrimView` carry-over, TestFlight soak) · **C-3** staged-video work **only if measurement justifies it** | none |
 | **P5-N** | **Accessibility & polish** | **C-11** VoiceOver mislabel, and remaining polish | none |
+
+### CP-1's AGE MECHANISM IS NOW APPLE'S, NOT ÉTUDES' — 2026-09-06
+
+**Recorded because the superseded assumption is invisible once the design reads
+naturally.** Every CP document before this date assumed Études would ask its own
+age question and store a self-declared band. **Apple's `DeclaredAgeRange`
+(iOS 26+) replaces that**, and the replacement is better on the axes that
+matter: the declaration may be **guardian-declared** or **`confirmed`** by
+credit card or government ID, and **Apple owns ageing across range boundaries**,
+deliberately lagging disclosure to the anniversary of the original declaration so
+a birth date is never revealed.
+
+**Three consequences that change other units:**
+
+- **P5-F (CP-3) no longer builds an age question or a promotion control.** It
+  requests, derives and reconciles.
+- **A new entitlement and Xcode capability** (`com.apple.developer.declared-age-range`)
+  is a **project-file and provisioning change**, which on this project means the
+  Release signing path is re-checked before anything is believed.
+- **P5-G grows.** `activeParentalControls.communicationLimits`,
+  `requiredRegulatoryFeatures`, PermissionKit and consent revocation are all now
+  live questions. See `-design-r2.md` §11.
+
+**One thing did NOT change, and it is the load-bearing half:** the storage
+design. `account_privacy` separate and server-authoritative, absence
+fail-protective with no `'unknown'` value, `lookup_enabled` a stored preference
+rather than effective visibility, profile publication never mutating it, and
+initial defaults separated from later choices — all survive, with **one
+deliberate exception** for the protective adult→teen downgrade.
+
+**CP-0's justification is unchanged by this and remains corrected:** it is data
+minimisation and legacy-row reduction, **not** making `NOT NULL` achievable.
 
 ### The critical ordering point
 

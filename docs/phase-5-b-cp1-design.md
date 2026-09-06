@@ -1,3 +1,27 @@
+# ⚠️ SUPERSEDED IN PART — READ `docs/phase-5-b-cp1-design-r2.md` FIRST. 2026-09-06
+
+**This is revision 1. Its AGE-DECLARATION MECHANISM is superseded** by
+investigation of Apple's first-party **`DeclaredAgeRange`** framework (iOS 26+),
+which r1 did not know about. **r1 assumed the age question had to be
+product-owned and self-declared, and that assumption no longer holds.**
+
+**SUPERSEDED HERE:** §3.1's Études-owned age question and its placement; §3.3's
+retry semantics insofar as they concern asking our own question; §7 entirely
+(promotion is Apple's, not ours); §2.1's provenance columns; §9's predictions.
+
+**STILL CURRENT AND NOT RESTATED IN r2 — this is why r1 is retained:** §1's four
+measured facts, **especially §1.3's three-layer `lookupEnabled: true` hazard**
+and §1.4's client-writability finding; §2's four-ground rejection of
+`account_directory` as the owner; §4.2's measured three Share-default windows;
+§5's preference-vs-effective-visibility definition and its ordering constraint;
+§6's initial-defaults separation; §8's honest correction to CP-0's stated
+justification.
+
+**Retained rather than rewritten**, per this project's standing practice that a
+superseded record keeps its own dates and reasoning.
+
+---
+
 # P5-B / CP-1 — DESIGN. 2026-09-06
 
 **DESIGN ONLY. NOTHING IMPLEMENTED, NOTHING DEPLOYED, NO PRODUCTION MUTATION.**
