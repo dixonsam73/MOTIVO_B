@@ -317,6 +317,14 @@ under review; **it is not published, and `etudes.app` has not been modified.**
 **Condition 6 must NOT be marked complete until that URL resolves to a published
 policy and the ASC configuration is published.**
 
+**AND THIS MAPPING MUST BE RE-DERIVED BEFORE THAT HAPPENS.** It was derived
+against the **Phase 4 build**. The Phase 5 children's-privacy workstream
+introduces a **server-side age band** — new collection — and changes privacy and
+discoverability defaults. **At P5-H the complete shipped data flow must be
+re-checked against Apple's taxonomy and this document updated**, before either
+`etudes.app/privacy` or the ASC labels are published. **Do not treat "already
+entered" as evidence of "still correct".**
+
 The customer-facing wording of the App Store description and the in-app
 About/Explore copy is **C-32, jointly owned with RC**. U8 has made the in-app
 copy *accurate*; final polish is RC's.

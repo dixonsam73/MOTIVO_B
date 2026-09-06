@@ -2511,7 +2511,19 @@ CP-0 until Phase 4's outstanding physical-device verification is explicitly
 dispositioned — they are the ONLY fixture that can exercise conditions 2 and 8
 and C-34's avatar test, which need two identities with an approved follow.
 **C-41 is revived by CP-3, not deleted** — the vestigial `lookup_enabled` column
-turns out to be the discovery opt-out the children's work needs.
+turns out to be the discovery opt-out the children's work needs. **TWO
+CLARIFICATIONS ADDED 2026-09-06.** (1) **P5-H must RE-DERIVE the ASC mapping,
+not merely publish it** — the nine entered categories were derived against the
+PHASE 4 build, and CP introduces a server-side age band plus changed defaults;
+"already entered" is not evidence of "still correct". (2) **P5-B must settle
+CREATION SEMANTICS for `age_band NOT NULL`** — `auth.users` and the directory row
+are created at DIFFERENT moments (`AuthManager:596` guards the upsert on a
+non-empty display name, an observed production state), so the band must be known
+before that upsert or supplied atomically with it. **AND `AuthManager:618` calls
+`upsertSelfRow` with `lookupEnabled: true` HARD-CODED, so every profile publish
+would silently overwrite an under-18 member's discoverability-off preference —
+the same shape as U2b's `shouldPublish: true` literal. CP-3 cannot work until
+that literal is addressed.**
 `docs/phase-4-exit-assessment.md` — **PHASE 4 IS IMPLEMENTATION-COMPLETE AND
 EXIT-INCOMPLETE. IT IS NOT CLOSED, 2026-09-05.** All eight units are implemented
 and accepted; **conditions 2, 6's ASC half and 8 are OUTSTANDING**, plus the

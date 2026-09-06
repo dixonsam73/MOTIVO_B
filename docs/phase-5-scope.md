@@ -62,6 +62,62 @@ population makes `age_band NOT NULL` achievable without backfill. **The reset is
 justified by the design, not the reverse.** Applying the schema then happens
 against the population the reset produced.
 
+### CLARIFICATION 1 — P5-H MUST RE-DERIVE THE ASC MAPPING, NOT MERELY PUBLISH IT
+
+**The nine categories currently entered in App Store Connect were derived
+against the PHASE 4 BUILD. CP changes the shipped data flow**, so they must not
+be assumed still sufficient.
+
+**After P5-F and the P5-G legal/DPIA review, and BEFORE publishing either
+`etudes.app/privacy` or the ASC labels:**
+
+1. **Re-check the complete shipped data flow against Apple's taxonomy** — CP
+   introduces a **server-side age band**, which is new collection, and changes
+   privacy and discoverability defaults.
+2. **Update `docs/app-store-privacy-disclosures.md`** as necessary, including
+   whether the age band sits under an existing category or requires a new one.
+3. **Only then publish** — policy first, ASC second.
+
+**The final privacy policy must additionally describe:** the age-band data,
+**why** it is collected, its **retention and deletion**, and the **distinct
+13–17 privacy defaults**.
+
+**Do not treat "the labels are already entered" as evidence they are still
+correct.** They were correct for a build that no longer describes the product.
+
+### CLARIFICATION 2 — P5-B MUST SETTLE CREATION SEMANTICS FOR `age_band NOT NULL`
+
+**A `NOT NULL` column cannot be designed against a server state that must
+transiently be null. P5-B must determine explicitly where the age-band question
+occurs relative to creation of the Connected identity and the directory row.**
+
+**Two measured facts the design must accommodate:**
+
+1. **The identity and the directory row are created at DIFFERENT moments.**
+   `AuthManager` publishes the directory row through
+   `AccountDirectoryService.upsertSelfRow` **guarded on a non-empty display
+   name** (`:596`). A sign-in with no local profile name therefore mints
+   `auth.users` and **never creates a directory row** — an observed production
+   state, not a hypothetical (the 2026-08-15 identity, and an earlier one).
+   **So "the account exists" and "the directory row exists" are not the same
+   event**, and an `age_band NOT NULL` on `account_directory` must be known
+   **before** that upsert, or supplied **atomically with it**.
+
+2. **`upsertSelfRow` is called with `lookupEnabled: true` HARD-CODED**
+   (`AuthManager:618`). **Every profile publish rewrites discoverability to
+   true.** Left alone, this would **silently overwrite an under-18 member's
+   discoverability-off preference on the next profile publish** — the same shape
+   as the `shouldPublish: true` literal U2b had to remove. **CP-3 cannot work
+   until this literal is addressed**, and P5-B's design must say what replaces
+   it.
+
+**The principle to preserve:** **no unresolved-age account may accidentally
+receive adult privacy defaults.** Acceptable designs are (a) the band is
+established **before** first identity/directory creation, or (b) creation is
+**atomic with** the band. A design that creates the row first and fills the band
+later reintroduces exactly the unknown-age window the `NOT NULL` column exists
+to prevent.
+
 ### What gates release
 
 **P5-A through P5-H gate release. P5-I through P5-N do not** — they are quality

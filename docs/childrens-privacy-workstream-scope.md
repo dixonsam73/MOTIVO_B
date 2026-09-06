@@ -42,10 +42,19 @@ decoded (`AccountDirectoryService`, the vestigial half filed as **C-41**).
 **No user has ever chosen a `lookup_enabled` value, because no control exists to
 choose one** (C-41: the client plumbing is vestigial and read-only).
 
-The split tracks **account age**, not intent: every identity whose last session
-is 2026-07-01 or later is `true`; every identity before 2026-06-16 is `false`
-(one boundary case, `felixbloxsom`). That is the signature of a **changed column
-default**, not of seventeen privacy decisions.
+**The mechanism is now measured, not inferred.** An earlier revision of this
+document reasoned that the split "tracks account age… the signature of a changed
+column default". The actual cause is more specific and more consequential:
+**`AuthManager:618` calls `upsertSelfRow` with `lookupEnabled: true`
+HARD-CODED**, so **every profile publish from a current build writes `true`**.
+The eight `false` rows simply predate that path. Either way it is not a
+preference — but the mechanism matters, because:
+
+**THIS LITERAL WOULD SILENTLY DEFEAT CP-3.** An under-18 member who sets
+discoverability off would have it **rewritten to `true` on their next profile
+publish**. It is the same shape as the `shouldPublish: true` literal U2b had to
+remove, and **CP-3 cannot work until it is addressed** — see
+`docs/phase-5-scope.md`, Clarification 2.
 
 **So preserving these values carries no privacy meaning at all**, and the
 "eight members would silently vanish from search" hazard **disappears entirely
