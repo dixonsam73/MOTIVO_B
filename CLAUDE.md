@@ -166,8 +166,17 @@ remains deferred to the first genuine App Store subscription after public releas
 ENFORCED.** `shadow_observe` returns `true` on every path and swallows its own
 write failure, so no request's outcome changed — a property of the code, proven
 by G4-S2 comparing row counts with the observer attached and detached.
-**`shadow_enforcement_stat` holds zero rows, zero privilege for every client
-role, and RLS is on.** The record is `supabase/sql/README-u6a-deployment.md`.
+**`shadow_enforcement_stat` held zero rows AT U6a DEPLOY, and has zero privilege
+for every client role, with RLS on.** The record is
+`supabase/sql/README-u6a-deployment.md`.
+
+**THE ZERO IS HISTORICAL AND IS NOT CURRENT AUTHORITY — corrected 2026-09-06.**
+The table has since accumulated real observations: **79 rows immediately before
+CP-0, and 75 after it** (4 belonged to deleted identities and went by FK
+cascade). **The privilege and RLS half of the sentence remains current and was
+re-verified; only the row count is dated.** Do not cite this zero as a
+present-day baseline — it describes the instant of deployment, which is exactly
+what made it meaningful then and misleading now.
 
 **Every predicted number matched production and nothing was repaired forward.**
 Structural delta 10 of 10 — columns 130, constraints 67, functions 24 with 9
@@ -231,11 +240,31 @@ measurement.** The full rollback was rehearsed end to end locally and its proof 
 not that the DROPs succeeded: **B-23 returned GATE MET on the rolled-back
 instance**, which is structural identity with live production.
 
-**`supabase db query` is SINGLE-STATEMENT.** It reaches production and its role
-holds write as well as read — that is how the whole read-only pre-flight was done
-— but it refuses more than one statement. Enough for the ten structural queries,
-never enough for a migration. **The gap between "there is no path" and "the path
-is single-statement" is where somebody improvises.**
+**`supabase db query` is SINGLE-STATEMENT — SUPERSEDED 2026-09-06, SEE BELOW.
+The paragraph is preserved because its reasoning still holds.** It reaches
+production and its role holds write as well as read — that is how the whole
+read-only pre-flight was done — but it refuses more than one statement. Enough
+for the ten structural queries, never enough for a migration. **The gap between
+"there is no path" and "the path is single-statement" is where somebody
+improvises.**
+
+**CORRECTED 2026-09-06 AT CLI 2.113.0: IT IS NOT SINGLE-STATEMENT.** Measured
+during CP-0: it **accepts a full multi-statement submission**, executes **every**
+statement, and **returns only the LAST statement's rows** — so
+`begin; …; commit; select …` runs as written, with the verification `select`
+last so it is the row that comes back. **CP-0's whole transaction ran this way.**
+
+**Two properties established by probe BEFORE the destructive run, not assumed.**
+A `raise exception` inside the submission **aborts the WHOLE thing** — the
+statement after `commit` did **not** execute — so guards are real rather than
+decorative. And **the process exit code is `0` even then**: the failure appears
+only as an error object in the response body. **Never score one of these calls on
+its exit status.**
+
+**The old claim is preserved rather than deleted because its closing sentence is
+the durable part**, and it now cuts the other way: an operator who believes there
+is no multi-statement path will improvise one — through Studio, where a
+submission can fail in a way that *"reads exactly like success"*.
 
 ### What U6a does NOT do
 
