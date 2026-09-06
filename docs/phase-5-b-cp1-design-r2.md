@@ -399,14 +399,27 @@ function**. It genuinely gates who may create a follow request — a **contact
 vector into a minor**, and therefore squarely in scope. r2 treated the two
 columns as equivalent; they are not.
 
-**A HAZARD IN THAT FUNCTION, RECORDED AND DELIBERATELY NOT FIXED HERE:**
-`follow_requests_open` ends `coalesce(..., true)` — **a missing directory row
-falls through to PERMISSIVE**. That is the same shape as the D4 defect this
-design is otherwise built to avoid. It is safe today only because a member with
-no directory row is not discoverable and so is hard to address. **Changing it
-would alter behaviour for every identity with no directory row and is not a CP-1
-change**; it is recorded here so it is found deliberately rather than
-rediscovered.
+**A HAZARD IN THAT FUNCTION — NOW A HARD CP-2 REQUIREMENT, NOT AN INCIDENTAL
+FINDING.** `follow_requests_open` ends `coalesce(..., true)`, so **a missing or
+unresolved row falls through to PERMISSIVE**. That is the same shape as the D4
+defect this design is otherwise built to avoid.
+
+**It is tolerable today only because there are no minors.** Once minors are
+supported, an identity whose row is missing or whose state is unresolved would
+have follow requests **open by default** — a contact vector into a possible minor,
+resolved permissively by absence. **That is exactly the failure direction CP
+exists to eliminate.**
+
+> **REQUIREMENT CP-2-R1 — BINDING ON P5-E.** `follow_requests_open` must be
+> changed so that a missing or unresolved row resolves **closed**, never open.
+> It is **not** optional, **not** deferred to a later tidy-up, and it appears in
+> CP-2's predicted surface and acceptance criteria (§10.1, §11.5) rather than as
+> a note.
+
+**It carries a behaviour change that must be predicted, not discovered:** every
+identity with no `account_directory` row moves from *follow-requests open* to
+*follow-requests closed*. At the CP-0 population that is a small, enumerable set,
+and P5-E must **count it before applying** and state the number.
 
 **(3) settles the Share posture.** For `band_13_17` the Share default is **OFF**,
 and per the settled product decision it is **not user-configurable at the default
@@ -431,9 +444,19 @@ not an engineering one.**
 - **Existing approved follows are NOT severed.** Severing established
   relationships is destructive and irreversible.
 
-**BOTH ARE FLAGGED FOR P5-G.** They are judgements about what a child-protective
-regime owes retrospectively, and that is a legal determination. **CP-1 states
-what it does and does not do, and does not pretend the question is closed.**
+**BOTH ARE EXPLICITLY OPEN, AND NEITHER RETENTION NOR DESTRUCTIVE ROLLBACK IS
+YET DEFINED AS CORRECT.** The paragraph above describes **what the CP-1
+mechanism does not currently reach** — it is a statement of scope, **not a
+finding that retention is the right answer**. A child-protective regime might
+require retrospective unsharing, or might not; that is a legal determination
+about what such a regime owes retrospectively, and **P5-G/DPIA owns it
+outright**.
+
+**Do not read "not reverted" as "settled as retained."** If P5-G determines that
+existing posts or approved follows must be withdrawn on a protective downgrade,
+that is a **new unit with its own prediction**, and it is a destructive path, so
+it would carry the full ceremony this project applies to those. **CP-1 neither
+implements nor forecloses it.**
 
 ### 7.4′ DECLINE, ERROR OR UNAVAILABILITY — AN ELIGIBILITY FACT ONLY
 
@@ -653,13 +676,18 @@ Age Assurance**, with Developer Mode enabled and a Sandbox Apple Account signed
 in. Apple exposes **six** fixed test cases; Études' own cases add the ones Apple
 does not simulate.
 
-**RIG PRECONDITION, and it is not yet established.** Sandbox age-assurance
-testing was introduced in **iOS/iPadOS 26.2** (reported by Apple's developer
-news, not by the framework reference — treat as reported, and confirm before
-planning a run). **The iOS versions on Device A (SD beta burner, iPhone 16e) and
-Device B (SD iPhone, iPhone 17 Pro) are NOT recorded anywhere in this
-repository and must be measured before any run is scheduled.** Anything below
-26.2 makes every case below unrunnable.
+**RIG PRECONDITION — A LATER TEST-RIG MATTER, AND EXPLICITLY NOT A BLOCKER TO
+CP-0.** Sandbox age-assurance testing was introduced in **iOS/iPadOS 26.2**
+(reported by Apple's developer news, not by the framework reference — treat as
+reported, and confirm before planning a run). **The iOS versions on Device A
+(SD beta burner, iPhone 16e) and Device B (SD iPhone, iPhone 17 Pro) are NOT
+recorded anywhere in this repository and must be measured before any run is
+scheduled.** Anything below 26.2 makes the cases below unrunnable.
+
+**This gates P5-F acceptance, not P5-C or P5-D.** CP-0 deletes dormant beta
+identities and CP-1's apply is pure DDL; **neither touches the Declared Age Range
+path**, so neither is held up by a device that cannot yet simulate an age
+range.
 
 **Anything involving Connected join must run on Release**, per the standing rule
 that Debug's bundle id is unknown to App Store Connect.
