@@ -23,6 +23,21 @@ collection to be occasional and not part of the app's primary functionality, and
 Connected sharing is neither. The Solo/Connected split belongs in the privacy
 policy and the description, not in the labels.
 
+### ENTERED IN APP STORE CONNECT 2026-09-06 — SAVED, **NOT PUBLISHED**
+
+**All nine types below are configured in ASC with, for every one:**
+**Purpose = App Functionality ONLY · Linked to the user = Yes · Used for
+tracking = No.** Every other ASC data type is left unselected.
+
+**The Purpose is narrowed from what this document previously allowed.** An
+earlier revision called Analytics "defensible" for Product Interaction. **App
+Functionality only is the entered and settled position** — `shadow_enforcement_stat`
+operates access control rather than evaluating behaviour.
+
+**THE REMAINING ASC BLOCKER IS THE PRIVACY POLICY URL**, which is mandatory once
+collection is declared and is currently blank. Intended value:
+`https://etudes.app/privacy`. **Nothing is published until it is set.**
+
 ### Declared
 
 | Apple data type | Linked to user | Used for tracking | Purpose | The Études data that causes the declaration |
@@ -246,6 +261,22 @@ minimum content the verified architecture requires; the wording is a later step.
 
 ---
 
+## 5b. FACTS ESTABLISHED FOR THE POLICY — AND FOUR THAT ARE NOT
+
+**Searched the repository, Info.plist, build settings and Supabase project
+configuration, 2026-09-06.**
+
+| point | finding |
+|---|---|
+| **Controller identity** | **NOT established by project records.** The only trace of "SD Songs" anywhere is the bundle identifier `com.sdsongs.etudes`. **No company name, number, registered address or copyright string exists** in the repo or in production configuration. **A bundle id is not evidence of a legal entity.** The intended controller is **SD Songs Ltd**, confirmed by the account holder; **company number and registered office remain to be supplied** |
+| **Privacy contact route** | **NONE EXISTS.** No `mailto:`, no support address, and **no reference to `etudes.app` anywhere in the app**. Intended: `privacy@etudes.app` — **requires setup and verification before publication** |
+| **Age gate** | **NONE.** No age gate and no date-of-birth collection anywhere |
+| **Self-serve data export** | **NONE.** Profile editing and in-app account deletion exist; there is no export feature, so access and portability requests must be handled manually |
+| **Hosting region** | **`eu-central-1`** (AWS Frankfurt, EU) — authoritative, from `supabase projects list` |
+| **Processors established** | **Supabase** (hosting/processing) and **Apple** (Sign in with Apple, subscription purchases and status) |
+
+---
+
 ## 6. REQUIRES A PRODUCT OR LEGAL DECISION — NOT DETERMINABLE FROM THE CODE
 
 **Six. Each is a genuine choice, not a gap in the investigation.**
@@ -275,9 +306,16 @@ changes one selection.
 
 ## 7. OUTSTANDING — NOT DONE BY THIS UNIT
 
-**Applying these labels in App Store Connect is an account-holder action.**
-**Nothing has been entered, and no policy has been drafted or published.** Both
-remain Phase 4 exit obligations (condition 6).
+**The nine data-label selections are ENTERED AND SAVED in App Store Connect as
+of 2026-09-06, and are NOT PUBLISHED.**
+
+**Condition 6 now has exactly ONE remaining item: the Privacy Policy URL.** It is
+mandatory in ASC once collection is declared, it is currently blank, and the
+intended value is `https://etudes.app/privacy`. The policy text is drafted and
+under review; **it is not published, and `etudes.app` has not been modified.**
+
+**Condition 6 must NOT be marked complete until that URL resolves to a published
+policy and the ASC configuration is published.**
 
 The customer-facing wording of the App Store description and the in-app
 About/Explore copy is **C-32, jointly owned with RC**. U8 has made the in-app

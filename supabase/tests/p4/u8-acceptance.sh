@@ -100,7 +100,11 @@ has U8-F4 "Thoughts are DEFAULT-private, deliberately, not structurally" "$AE" \
 echo; echo "-- E  the App Store disclosure content exists and is honest about its status --"
 D=docs/app-store-privacy-disclosures.md
 has U8-E1 "not legal advice" "$D" "the document does not present itself as legal advice"
-has U8-E2 "Nothing has been entered" "$D" "…and does not claim the ASC labels were applied"
+# The risk this guards MOVED on 2026-09-06: the nine labels are now entered in
+# ASC, so "nothing has been entered" is false. What must not be claimed now is
+# that they are PUBLISHED, or that condition 6 is done.
+has U8-E2 "SAVED, **NOT PUBLISHED**" "$D" "…records the ASC labels as entered but NOT published"
+has U8-E2b "must NOT be marked complete" "$D" "…and does not treat condition 6 as complete"
 has U8-E3 "is NO for every declared type" "$D" "tracking is answered explicitly"
 has U8-E4 "Solo, nothing leaves the device at all" "$D" "the controlling fact is stated first"
 hasnt U8-E5 'Connected is private by default' "$D" "the disclosure does not misdescribe the default either"
