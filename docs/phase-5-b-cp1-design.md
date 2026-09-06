@@ -203,6 +203,51 @@ must remember; with it, it is a rule the database enforces.
 
 **It has a declared consequence for legacy rows** — see §8.3.
 
+### 3.3 Partial, abandoned and retried onboarding
+
+**Every interruption point resolves to a safe state, and none leaves state that
+must be cleaned up.** Enumerated against the sequence in 3.1:
+
+| interrupted at | server state | discoverable? | Share default | recovery |
+|---|---|---|---|---|
+| band answered, SIWA cancelled | **nothing** — the answer was only in memory | n/a, no identity | n/a | asked again next time; no orphan |
+| under-13 answered | **nothing**, and no SIWA was attempted | n/a | n/a | refusal is terminal for Connected; Solo unaffected |
+| SIWA succeeded, `create_v1` failed | `auth.users` row, **no `account_privacy` row** | **no** — §4.1 `EXISTS` is false, and §3.2's trigger refuses a directory row | **OFF** — no confirmed band | re-asked on next launch/foreground |
+| band written, binding failed | band row | no directory row yet | OFF until band is read back | ordinary U5f retry; band is reused, **not re-asked** |
+| band written, purchase abandoned | band row, no membership | no | per band | Connected simply inactive; band persists for a later join |
+| band written, `AppSetUpView` abandoned | band row, **no directory row** | no | per band | the measured no-display-name path (1.1), already safe |
+
+**The row that matters is the third**, because it is the only one that leaves an
+authenticated identity in an unresolved-age state. It is safe on both axes
+simultaneously and by two independent mechanisms — the `EXISTS` clause and the
+`BEFORE INSERT` trigger — so it needs no compensating cleanup and no timeout.
+
+**Recovery is a self-healing check, not a repair.** The client, on finding an
+authenticated Connected identity whose `account_privacy_self_v1()` returns no
+row, re-asks the band before permitting any Connected surface. This deliberately
+copies **U5f's attestation invariant**: it runs at launch and on foreground, it
+is **never gated on Connected mode already being active**, and a previous
+success is not permanent authority. The reasoning is identical — the member the
+mechanism exists to rescue is precisely the one whose Connected state is
+incomplete, so gating the rescue on completeness would make it unreachable.
+
+**Retry is safe by construction, not by the client being careful.**
+`account_privacy_create_v1` is insert-if-absent and returns the surviving row
+(§2.2), so a retry after an ambiguous network failure — the case where the write
+landed but the response was lost — **returns the existing band rather than
+writing a second one or overwriting the first**. The client therefore never has
+to decide whether its previous attempt succeeded, which is the decision it is
+least equipped to make.
+
+**One consequence to accept knowingly:** a member who declares a band and
+abandons before purchasing has a durable declaration and no membership. **That
+row is not garbage-collected**, deliberately — deleting it would mean re-asking a
+returning member their age, and a band is exactly the kind of state the expiry
+matrix already says to retain, for the same reason `membership_binding` is
+retained: destroying it makes the returning member's path worse, never safer.
+
+---
+
 ---
 
 ## 4. NO INTERVAL OF ADULT DEFAULTS — THE PROOF, IN TWO HALVES
