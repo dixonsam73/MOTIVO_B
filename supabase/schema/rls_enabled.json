@@ -7,6 +7,11 @@
   {
     "rls_enabled": true,
     "rls_forced": false,
+    "table_name": "account_privacy"
+  },
+  {
+    "rls_enabled": true,
+    "rls_forced": false,
     "table_name": "connected_attachments"
   },
   {

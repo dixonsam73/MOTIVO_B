@@ -1,5 +1,89 @@
 [
   {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "account_privacy_self_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "account_privacy_self_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_self_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "account_privacy_set_follow_requests_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "account_privacy_set_follow_requests_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_set_follow_requests_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "account_privacy_set_lookup_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "account_privacy_set_lookup_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_set_lookup_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "account_privacy_upsert_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": true,
+    "direct_execute": true,
+    "grantee": "authenticated",
+    "proname": "account_privacy_upsert_v1",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_upsert_v1",
+    "public_execute": false
+  },
+  {
     "can_execute": true,
     "direct_execute": true,
     "grantee": "anon",
@@ -627,6 +711,27 @@
     "direct_execute": false,
     "grantee": "service_role",
     "proname": "search_account_directory",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "tg_account_directory_requires_band",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "tg_account_directory_requires_band",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "tg_account_directory_requires_band",
     "public_execute": false
   },
   {

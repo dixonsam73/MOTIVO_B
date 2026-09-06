@@ -30,6 +30,36 @@
     "table_name": "account_directory"
   },
   {
+    "conname": "account_privacy_pkey",
+    "contype": "p",
+    "definition": "PRIMARY KEY (user_id)",
+    "table_name": "account_privacy"
+  },
+  {
+    "conname": "account_privacy_user_id_fkey",
+    "contype": "f",
+    "definition": "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE",
+    "table_name": "account_privacy"
+  },
+  {
+    "conname": "age_band_values",
+    "contype": "c",
+    "definition": "CHECK ((age_band = ANY (ARRAY['band_13_17'::text, 'band_18_plus'::text])))",
+    "table_name": "account_privacy"
+  },
+  {
+    "conname": "follow_requests_set_under_band_values",
+    "contype": "c",
+    "definition": "CHECK ((follow_requests_set_under_band = ANY (ARRAY['band_13_17'::text, 'band_18_plus'::text])))",
+    "table_name": "account_privacy"
+  },
+  {
+    "conname": "lookup_set_under_band_values",
+    "contype": "c",
+    "definition": "CHECK ((lookup_set_under_band = ANY (ARRAY['band_13_17'::text, 'band_18_plus'::text])))",
+    "table_name": "account_privacy"
+  },
+  {
     "conname": "connected_attachments_asset_recipient_unique",
     "contype": "u",
     "definition": "UNIQUE (asset_id, recipient_user_id)",
