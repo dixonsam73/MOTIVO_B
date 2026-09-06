@@ -1,3 +1,16 @@
+// CHANGE-ID: 20260906_C14_FollowStoreRedactUserIDs
+// SCOPE: C-14 / P5-A — the eight NSLog call sites in this file logged a backend
+//        user ID as a %@ argument. The event is kept and the identifier is
+//        replaced with a literal <redacted>; the %@ specifier is removed
+//        together with its argument, since a specifier left without one would
+//        be a format-string defect. `<redacted>` contains no `%`, so it cannot
+//        itself be read as a specifier.
+//        Redaction on device is a DEFAULT, not a guarantee — a logging
+//        configuration profile can disable it — so the identifier is not
+//        written at all rather than written and relied upon to stay hidden.
+//        DEBUG-only logging elsewhere is deliberately untouched.
+// SEARCH-TOKEN: 20260906_C14_FollowStoreRedactUserIDs
+
 // CHANGE-ID: 20260221_141120_FollowInfraFixBrace_88710f8d
 // SCOPE: Fix FollowStore compile error (removeFollower inserted inside declineFollow) — restore correct method scope and access control.
 // SEARCH-TOKEN: 20260221_141120_FollowInfraFixBrace_88710f8d
@@ -198,7 +211,7 @@ public final class FollowStore: ObservableObject {
         // Local simulation: requesting to follow someone is an OUTGOING request.
         outgoingRequests.insert(targetUserID)
         save()
-        NSLog("[FollowStore] request → %@", targetUserID)
+        NSLog("[FollowStore] request → <redacted>")
         return .requested
     }
 
@@ -221,7 +234,7 @@ public final class FollowStore: ObservableObject {
         requests.remove(requesterUserID)
         following.insert(requesterUserID)
         save()
-        NSLog("[FollowStore] approve ← %@", requesterUserID)
+        NSLog("[FollowStore] approve ← <redacted>")
         return .following
     }
 
@@ -253,7 +266,7 @@ public final class FollowStore: ObservableObject {
         // Local simulation: declining removes an INCOMING request.
         requests.remove(requesterUserID)
         save()
-        NSLog("[FollowStore] decline ← %@", requesterUserID)
+        NSLog("[FollowStore] decline ← <redacted>")
         return .none
     }
 
@@ -287,7 +300,7 @@ public final class FollowStore: ObservableObject {
         if followers.contains(id) {
             followers.remove(id)
             save()
-            NSLog("[FollowStore] removeFollower ← %@", id)
+            NSLog("[FollowStore] removeFollower ← <redacted>")
             return true
         }
 
@@ -313,7 +326,7 @@ public final class FollowStore: ObservableObject {
         // If we unfollow in local sim, also clear any outgoing request record to keep UI coherent.
         outgoingRequests.remove(targetUserID)
         save()
-        NSLog("[FollowStore] unfollow × %@", targetUserID)
+        NSLog("[FollowStore] unfollow × <redacted>")
         return .none
     }
 
@@ -365,7 +378,7 @@ extension FollowStore {
         reqs.insert(targetUserID)
         UserDefaults.standard.set(Array(reqs), forKey: _requestsKey)
         load()
-        NSLog("[FollowStore] simulateRequestFollow → %@", targetUserID)
+        NSLog("[FollowStore] simulateRequestFollow → <redacted>")
         return .requested
     }
 
@@ -379,7 +392,7 @@ extension FollowStore {
         load()
         UserDefaults.standard.set(Array(fol), forKey: _followingKey)
         load()
-        NSLog("[FollowStore] simulateAcceptFollow ← %@", requesterUserID)
+        NSLog("[FollowStore] simulateAcceptFollow ← <redacted>")
         return .following
     }
 
@@ -390,7 +403,7 @@ extension FollowStore {
         UserDefaults.standard.set(Array(fol), forKey: _followingKey)
         load()
         load()
-        NSLog("[FollowStore] simulateUnfollow × %@", targetUserID)
+        NSLog("[FollowStore] simulateUnfollow × <redacted>")
         return .none
     }
 

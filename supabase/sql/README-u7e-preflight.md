@@ -613,6 +613,21 @@ is an environment limitation rather than a credential problem, and `fetch` works
 normally. **A2.1 requires these to be on the remote**, so pushing them is the
 account holder's step.
 
+**CORRECTED 2026-09-06 — ALL FOUR ARE ON THE REMOTE, AND THE ORIGINAL TEXT ABOVE
+IS PRESERVED RATHER THAN REWRITTEN.** Established from **fetched remote
+authority**, not from a local tracking ref: after `git fetch origin`,
+`origin/feature/solo-connected` is **`5cfcd58`**, and `4383144`, `e30b189`,
+`90fb6b6` and `1e9db64` are each an **ancestor** of it. The account holder's step
+was taken; the paragraph above describes the state on its own date and is no
+longer current.
+
+**The distinction that makes this worth recording: a local `origin/…` ref is a
+CACHE, not authority.** It can equal `HEAD` because a fetch confirmed a push, or
+because nobody has fetched since the branch moved. Only a fetch immediately
+before the comparison tells the two apart — which is exactly why a handover
+into 2026-09-06 still carried "7 commits are UNPUSHED" for commits that were
+already on the remote.
+
 ---
 
 ## 15. STOPPED AFTER A1

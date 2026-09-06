@@ -12,6 +12,17 @@ product work. **Nothing below is implemented.**
 
 ## 1. STATUS BOUNDARIES — KEPT EXPLICIT
 
+- **REPOSITORY STATE, established 2026-09-06 from FETCHED REMOTE AUTHORITY.**
+  After `git fetch origin`, `origin/feature/solo-connected` was **`5cfcd58`**,
+  equal to `HEAD`, **0 ahead / 0 behind** — measured *before* P5-A's first
+  commit. **Nothing was outstanding to push.** A handover into this date
+  asserted "7 commits are UNPUSHED"; every one of them (`8df9cc9` through
+  `5cfcd58`) was already an ancestor of the remote branch, as were the four
+  named in `supabase/sql/README-u7e-preflight.md` §14, now corrected in place.
+  **A local `origin/...` ref is a cache, not authority** — it equals `HEAD` both
+  when a push landed and when nobody has fetched since — so re-establish it with
+  a fetch rather than reading the stale ref or trusting a handover.
+
 - **Phase 4 is IMPLEMENTATION-COMPLETE and EXIT-INCOMPLETE.** Conditions **2**,
   **6** (ASC privacy-label half) and **8** are outstanding, plus the carried
   **C-34 avatar-replacement device verification**. Nothing in Phase 5 changes
@@ -38,7 +49,7 @@ product work. **Nothing below is implemented.**
 
 | # | unit | what | depends on |
 |---|---|---|---|
-| **P5-A** | **C-14** | stop logging backend user IDs and handles via `NSLog` in release builds | **none** — small, and should not ship alongside a published privacy policy. **NOT a CP dependency** |
+| ~~**P5-A**~~ | **C-14** | **COMPLETE 2026-09-06 — 8 lines in `FollowStore` only.** The premise was wrong: **all 38 `AuthManager` sites are `#if DEBUG`, so it contributed ZERO shipping sites**, and the handles half had **no shipping instance at all**. Six assertions scored against a prediction committed before mutation; discriminator proven non-vacuous against pre-fix code; verified in the built Release binary as well as the tree. **Not device-verified.** Filed **C-62** on the way past | **none** — was small, and should not ship alongside a published privacy policy. **NOT a CP dependency** |
 | **P5-B** | **CP-1 — design** | design and predict the clean schema and semantics: `age_band` **NOT NULL**, `lookup_enabled` default and meaning | **none.** Its purpose is to design the clean state that CP-0 makes possible, so it **must not depend on CP-0** |
 | **P5-C** | 🔴 **CP-0 — reset** | delete **15** dormant beta identities **by explicit id**; retain the two development identities and their mutual follow | P5-B accepted; **retained-pair guard** above |
 | **P5-D** | 🔴 **CP-1 — apply** | apply the schema designed in P5-B, against the clean population | P5-C |
@@ -49,7 +60,7 @@ product work. **Nothing below is implemented.**
 | **P5-I** | **C-34 — TTL half** | avatar cache TTL; completes the work whose version-signal half shipped in Phase 4 | none |
 | **P5-J** | **Correctness / safety** | **C-6** `fatalError` on store load · **C-16** `try!` on directory creation · **C-20** main-actor isolation · **C-21** discarded status reads | none |
 | **P5-K** | **Behavioural defects** | **C-43** one unfollow destroys both directions · **C-10** `.file` uploads as octet-stream and is rejected · **C-27** location does not carry to Solo · **C-56** Core Data fetches inside `body` · **C-50** idle lock mid-recording · **C-5** duplicate Score adoption | none |
-| **P5-L** | **Investigations** | **C-37**, **C-39**, **C-40**, **C-42**, **C-47** — all *Unverified*; each needs measurement **before** any fix | none |
+| **P5-L** | **Investigations** | **C-37**, **C-39**, **C-40**, **C-42**, **C-47**, **C-62** — all *Unverified*; each needs measurement **before** any fix. **C-62** was filed by P5-A: `PublishService:294` logs a session **title** in Release. It is **user content, not identity**, so it was deliberately NOT folded into C-14, and its **severity is unassigned** because the evidence establishes only that the value is written, never that any read path surfaces it | none |
 | **P5-M** | **Product** | **playback-speed control** (AttachmentViewerView only, local and remote audio/video, discrete 50/75/100%, pitch preserved, no looping, no `PracticeTimerView` changes, no `MediaTrimView` carry-over, TestFlight soak) · **C-3** staged-video work **only if measurement justifies it** | none |
 | **P5-N** | **Accessibility & polish** | **C-11** VoiceOver mislabel, and remaining polish | none |
 
@@ -132,6 +143,11 @@ sits first; it is **not** a dependency of any CP unit.
 **All 19 Phase 5 register rows are placed:** C-34 (TTL half), C-37, C-39, C-40,
 C-27, C-3 (fix half), C-20, C-21, C-5, C-6, C-10, C-11, C-14, C-16, C-50, C-47,
 C-43, C-42, C-56.
+
+**C-62 was added on 2026-09-06 by P5-A and is placed in P5-L**, so the count is
+now **20 rows, one of them (C-14) Resolved**. It is called out here rather than
+folded silently into the 19, because **a row filed by a unit is exactly the kind
+of thing a later reader assumes was always there**.
 
 **Plus two things that exist outside the register and are easy to lose:**
 

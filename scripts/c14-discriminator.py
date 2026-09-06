@@ -14,13 +14,17 @@ Detection rules, stated so they are auditable rather than hidden in a regex:
   * A site is DEBUG-ONLY if it lies inside a `#if DEBUG` region. The `#else`
     branch of such a region is treated as SHIPPING.
   * An IDENTIFIER ARGUMENT is an argument expression naming a backend USER
-    identifier, handle, display name or email. Two match rules, because a
-    single one produced false positives:
-      - NAMED_IDENT_ARGS match as a token anywhere in the expression. These
-        names are specific enough that a substring match cannot be a content id.
+    identifier, handle, display name or email. Two match rules, because one
+    rule produced BOTH false positives and false negatives:
+      - IDENT_NAME_RE matches a WHOLE identifier token whose NAME is
+        user-identifier-shaped. A fixed token list was tried first and missed
+        `currentUserID`; an UNANCHORED pattern then matched `uuidString` via
+        `uid` and flagged thirteen post-id sites. It is anchored for that
+        reason -- both failures are recorded in the prediction document.
       - EXACT_IDENT_ARGS must be the WHOLE argument expression. `id` is here
         because a token match flagged `payload.id.uuidString` -- a POST id, not
-        a user id. Content identifiers are out of C-14's scope.
+        a user id. Content identifiers are out of C-14's scope, and `postID`
+        does not match IDENT_NAME_RE either.
   * `ownerKey` is DELIBERATELY EXCLUDED from the identifier set and counted
     separately as A3b. Its only writer, PublishService.setOwnerKey, has only
     DEBUG-only callers (DebugViewerView), so in a Release build `ownerKey`
@@ -33,10 +37,20 @@ import os, re, sys
 ROOT = "MOTIVO"
 
 # Argument expressions that carry a backend user identifier / handle / name / email.
-NAMED_IDENT_ARGS = {
-    "targetUserID", "requesterUserID", "userID", "userId", "user_id",
-    "uid", "backendUserID", "appleUserID", "displayName", "handle", "email",
-}
+# Matched against a WHOLE identifier token, not as a substring. Anchoring is
+# load-bearing: an unanchored `uid` matched `uuidString`, flagging thirteen
+# POST-id sites as user identifiers.
+IDENT_NAME_RE = re.compile(
+    r"^(?:.*user_?id"        # targetUserID, requesterUserID, currentUserID
+    r"|uid"                  # exactly `uid`, never a substring
+    r"|.*display_?name"
+    r"|.*handle"
+    r"|.*e[-_]?mail"
+    r"|requester\w*"
+    r"|.*follower_?id"
+    r"|.*apple_?user\w*)$",
+    re.I,
+)
 
 # Must be the ENTIRE argument expression -- see the module docstring.
 EXACT_IDENT_ARGS = {"id"}
@@ -130,12 +144,12 @@ def arg_exprs(call):
     return args
 
 
-def has_ident(call, named, exact=frozenset()):
+def has_ident(call, name_re, exact=frozenset()):
     for a in arg_exprs(call):
         if a.strip() in exact:
             return True
         for tok in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", a):
-            if tok in named:
+            if name_re.match(tok):
                 return True
     return False
 
@@ -150,11 +164,14 @@ def main():
     targets = [s for s in sites
                if any(ev in s["call"] for ev in TARGET_EVENTS)]
 
-    a1 = sum(1 for s in targets if has_ident(s["call"], NAMED_IDENT_ARGS, EXACT_IDENT_ARGS))
+    a1 = sum(1 for s in targets if has_ident(s["call"], IDENT_NAME_RE, EXACT_IDENT_ARGS))
     a2 = len({ev for ev in TARGET_EVENTS
               for s in targets if ev in s["call"]})
-    a3a = sum(1 for s in ship if has_ident(s["call"], NAMED_IDENT_ARGS, EXACT_IDENT_ARGS))
-    a3b = sum(1 for s in ship if has_ident(s["call"], OWNERKEY_ARGS))
+    a3a = sum(1 for s in ship if has_ident(s["call"], IDENT_NAME_RE, EXACT_IDENT_ARGS))
+    a3b = sum(1 for s in ship if any(
+        t in OWNERKEY_ARGS
+        for a in arg_exprs(s["call"])
+        for t in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", a)))
     a4 = len(debug)
     a5 = len(ship)
 
@@ -175,7 +192,7 @@ def main():
     if a3a:
         print("\nsites still passing an identifier argument:")
         for s in ship:
-            if has_ident(s["call"], NAMED_IDENT_ARGS, EXACT_IDENT_ARGS):
+            if has_ident(s["call"], IDENT_NAME_RE, EXACT_IDENT_ARGS):
                 print("  %s:%d  %s" % (s["file"], s["line"], s["call"][:110]))
 
 
