@@ -185,14 +185,73 @@ content.**
 `AuthManager:611` non-refreshing. (A) makes this unnecessary; it removes the
 coupling.
 
+### 7.1 LOAD-BEARING CLARIFICATION — Samuel, 2026-09-07, BINDING
+
+**`Already Used` / superseded-refresh-token handling must be a reconciliation
+OUTCOME, not a boolean success/sign-out choice.**
+
+1. **Newer usable persisted session exists** → adopt/recover it; **do not sign
+   out.**
+2. **No newer usable session exists** → **do not pretend authentication
+   succeeded**; withdraw the local Connected identity using the existing
+   non-user-initiated path (**`clearConnectedIdentity`**), **not `signOut()`**.
+3. **Genuinely terminal credential failure** → follow the intended terminal-auth
+   path, but **still respect the existing invariant that non-user-initiated auth
+   loss must not delete user-authored local content.**
+
+**`signOut()` is user-destructive in this codebase** because it removes the
+namespaced attachment-title mappings. **The current refresh-failure path calling
+it is a SEPARATE DEFECT from the token-rotation loop and must not survive the
+fix.**
+
+**Regression coverage must include:**
+
+- superseded token + newer persisted session → **recover**;
+- superseded token + no newer session → **Connected identity withdrawn without
+  user-data deletion**;
+- **no non-user-initiated refresh-failure path reaches destructive `signOut()`.**
+
+**Then implement the already-scoped session-management fix ONLY. Do not resume
+device acceptance until Debug/Release and tests are green.**
+
+#### 7.1a TWO ADJUSTMENTS TO THE ABOVE — read before implementing
+
+**(i) THERE IS A FOURTH OUTCOME AND OMITTING IT WOULD BE A REGRESSION.** The
+three above are a classification of *terminal-ness*. They do not cover
+**offline/transient transport failure**, which is a distinct axis and is
+**already handled correctly today**: `refreshSupabaseSession`'s catch calls
+`isOfflineOrTransientNetworkError(error)` and, when true, **returns `false`
+having withdrawn nothing** (`AuthManager:891-896`). An implementer folding
+offline into case 2 or 3 would **withdraw the Connected identity on every
+foreground in flight mode** — strictly worse than today.
+
+**So the disposition is FOUR-WAY:** `recoverWithNewerSession` ·
+`withdrawIdentity` · `terminal` · **`ignore` (offline/transient, unchanged)**.
+That predicate already exists and its comment states the rule — *"We must not
+treat offline / transient transport failures as auth invalidation"* — so this is
+**preservation, not new work.**
+
+**(ii) CASES 2 AND 3 CONVERGE ON THE SAME PRIMITIVE TODAY, AND THAT IS STATED
+RATHER THAN DISGUISED.** Given the invariant in case 3, a terminal credential
+failure **also** withdraws via `clearConnectedIdentity` — so 2 and 3 currently
+differ in **diagnosis and logging, not in behaviour**. Keep them distinct
+anyway: they are different facts about the world (*"we could not confirm"* vs
+*"the credential is dead"*), and collapsing them now would make any future
+divergence a rewrite. **Do NOT invent a behavioural difference to justify the
+split** — if a fix appears to need one, that is a new decision, not an
+implementation detail.
+
 ## 8. REQUIRED REGRESSION TESTS (land WITH the fix; coverage today is ZERO)
 
-1. **`refreshFailureDisposition(_:) -> {retryWithNewerToken, withdrawIdentity, ignore}`**
-   — a three-way classification, not a boolean, because the boolean is what
-   forced the false choice between "carry on" and "destroy everything":
-   - "Already Used" 400 → **`retryWithNewerToken`** (*fails today; this is the bug*)
-   - `URLError.notConnectedToInternet` → **`ignore`**
-   - genuine `invalid_grant` / revoked → **`withdrawIdentity`**
+1. **`refreshFailureDisposition(_:) -> {recoverWithNewerSession, withdrawIdentity, terminal, ignore}`**
+   — see §7.1/§7.1a. **Four-way, not a boolean**, because the boolean is what
+   forced the false choice between "carry on" and "destroy everything", and
+   because a three-way that drops `ignore` would withdraw the identity while
+   merely offline:
+   - "Already Used" 400 → **`recoverWithNewerSession`** (*fails today; this is the bug*)
+   - `URLError.notConnectedToInternet` → **`ignore`** (**must stay** — correct today)
+   - genuine `invalid_grant` / revoked → **`terminal`**
+   - reconciled, nothing newer → **`withdrawIdentity`**
 2. **No path from a refresh failure calls `signOut()`** — assert
    `clearConnectedIdentity` is the withdrawal primitive, so attachment titles
    survive (invariant 1).
