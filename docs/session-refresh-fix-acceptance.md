@@ -21,6 +21,25 @@ Device A: **34 rotations in 20.5 s**. It closed only for the fresh identity
 because `lastHydratedDirectoryUserID` is assigned **only in the row-exists
 branch**, and `96a3cb7b` has no directory row.
 
+**THE MEASURED LOOP ENTRY IS `AuthManager:595`, NOT `:611`.** The handover named
+`AccountPrivacyService.fetchSelf` at `:611` as the edge CP-3 added. That call is
+real, but it sits in the **row-exists** branch of
+`hydrateDirectoryStateFromBackend` — and the identity that actually looped has
+**no directory row**, so it takes the `guard let row else` branch and never
+reaches `:611` at all. The edge it does take is:
+
+```
+hydrateDirectoryStateFromBackend  (row == nil)
+  └─ ensureAgeBandEstablished          AuthManager:595
+       └─ AccountPrivacyService.fetchSelf   AuthManager:177
+            └─ preflight → ensureValidBackendSession → refreshSupabaseSession
+```
+
+**Both doors reach the same loop, so the diagnosis and the fix are unaffected**
+— which is precisely why the wrong one could stand unchallenged. Recorded
+because a future reader checking `:611` on a no-row identity would find the
+cited call unreachable and could conclude the loop was never real.
+
 **(ii) THE CONTENT-LOSS DEFECT, WHICH IS THE WORSE ONE.** The failure branch was
 a **boolean** — offline, or `signOut()`. `signOut()` removes the per-user
 attachment **title** mappings: content the user typed. So a *superseded* refresh
