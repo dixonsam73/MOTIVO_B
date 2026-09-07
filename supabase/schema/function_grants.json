@@ -3,6 +3,48 @@
     "can_execute": false,
     "direct_execute": false,
     "grantee": "anon",
+    "proname": "account_privacy_discoverable",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "account_privacy_discoverable",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_discoverable",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
+    "proname": "account_privacy_requests_open",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "authenticated",
+    "proname": "account_privacy_requests_open",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "service_role",
+    "proname": "account_privacy_requests_open",
+    "public_execute": false
+  },
+  {
+    "can_execute": false,
+    "direct_execute": false,
+    "grantee": "anon",
     "proname": "account_privacy_self_v1",
     "public_execute": false
   },
