@@ -202,3 +202,57 @@ failed, and certainly not passed.
 
 **Gate (C), the refresh↔hydration cycle, remains unreachable in Solo and is
 NOT addressed by any of this.**
+
+## 6.2 THE ZERO IS NOW ATTRIBUTED — P3 IS A MEASURED PASS. 20:57 UTC
+
+One further foreground:
+
+| | before | after |
+|---|---|---|
+| `account_privacy_self_v1` PostgREST calls | 8 | **9** |
+| `9c5385f6` refresh tokens | 39 | **39** |
+
+**The chain is closed, and every link is verified in source rather than
+assumed.** `AccountPrivacyService.call` runs `preflight` **first** and returns
+early on its failure (`AccountPrivacyService.swift:100`), so the RPC is
+unreachable unless preflight succeeded — and preflight *is*
+`ensureValidBackendSession` → `refreshSupabaseSession`.
+
+```
+RPC executed (8 → 9)
+  ⟹ preflight PASSED
+      ⟹ ensureValidBackendSession returned true
+          ⟹ refreshSupabaseSession was ENTERED and returned true
+              ∧ no new token
+                  ⟹ it returned true WITHOUT ROTATING
+```
+
+**Only the expiry gate returns true without rotating.** The one other
+non-rotating success, `.recoverWithNewerSession`, requires a thrown error *and*
+`persisted != attempted` — impossible when nothing rotated. So the early return
+is the only path that fits.
+
+**Pre-fix, this same foreground would have rotated once.** The zero is therefore
+the gate working, not the path being skipped. **P3 PASSES AS MEASURED.**
+
+### It also retires the build-identity caveat
+
+Step 1 warned there is no way to tell which commit is installed — both
+configurations report `1.0 (131)` and `devicectl` exposes no hash. **The
+behaviour settles it after the fact:** "RPC executed **and** no rotation" is not
+producible by the pre-fix binary, which rotated unconditionally on every entry.
+The installed build is the fixed one, established by measurement rather than by
+trusting the install step.
+
+## 6.3 WHAT IS STILL NOT ESTABLISHED
+
+- **Gate (C), the refresh↔hydration cycle, is untested on hardware.** It cannot
+  close in Solo, and reaching it needs an entitlement (§9 prohibits). Gate (A)
+  passing says nothing about it.
+- **Directory-publication ordering** remains blocked for the same reason —
+  `scheduleDirectoryHydrationIfNeeded` returns early on `isConnected`.
+- **A deviation was observed and is NOT chased:** after `.returning` sign-in the
+  app landed on **PracticeTimerView**, not Profile. That is `ProfileView:1975`'s
+  gate branch, which returns early, so the `.returning` unwind at `:2005` never
+  ran despite being the branch this path's comments describe. Cosmetic, no
+  bearing on any measurement here, and recorded rather than fixed.
