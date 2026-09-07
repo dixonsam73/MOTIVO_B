@@ -400,3 +400,68 @@ when the client considers itself Connected, so a rise proves Connected mode and
 a flat count proves Solo — settling cause 1 without relying on a screenshot.
 `account_directory` SELECT rising with INSERT flat separates causes 3 and 4 from
 cause 2.
+
+---
+
+# 9. T3 — 21:54:46 UTC. §7.2 IS CONFIRMED BY MEASUREMENT
+
+Deltas across one foreground, T2 21:53:08 → T3 21:54:46:
+
+| counter | T2 | T3 | Δ | what it proves |
+|---|---|---|---|---|
+| `posts` SELECT | 19855 | **19858** | **+3** | **the feed was fetched ⇒ the client IS in Connected mode**, and `ensureValidSession` returned **true** (the fetch sits behind `guard ok`) |
+| `account_privacy_self_v1` | 15 | **16** | +1 | the recovery coordinator ran |
+| **`account_directory` SELECT** | 3347 | **3347** | **+0** | **hydration did NOT run** — `fetchSelfRow` is its first act |
+| `account_directory` INSERT | 2795 | **2795** | +0 | no publish |
+| `9c5385f6` tokens | 40 | **40** | **+0** | no rotation — the gate held |
+
+## 9.1 THE CHAIN IS CLOSED
+
+```
+feed fetched          ⟹ Connected mode, and ensureValidSession returned TRUE
+tokens flat           ⟹ refreshSupabaseSession took the EXPIRY-GATE EARLY RETURN
+directory SELECT flat ⟹ hydration was never scheduled
+```
+
+**A foreground in Connected mode, with a valid token, does not schedule
+directory hydration.** That is exactly the regression described in §7.2, now
+measured rather than argued — and it is mine. **Cause 1 is excluded by the same
+data** (the client is provably Connected), and causes 2, 3 and 4 are excluded
+for this foreground because hydration never began.
+
+**Cause 5 — a stuck in-flight claim — is NOT the explanation for T3**, since the
+schedule was never reached: without a rotation, `scheduleDirectoryHydrationIfNeeded`
+is not called at all. It remains unexcluded for the 21:50:33 event.
+
+## 9.2 WHAT HAPPENED AT 21:50:33 IS STILL UNRESOLVED, AND MY BASELINE IS WHY
+
+At 21:50:33 a rotation *did* occur, so hydration *was* scheduled. It may have
+run and been suppressed at the band check (cause 2) or failed its directory read
+(cause 3) — `privacy_rpc` 13 → 15 is consistent with that — or been blocked by a
+stuck claim (cause 5).
+
+**I cannot separate them, because I captured `dir_select` for the first time at
+21:53, AFTER that event.** A directory read at 21:50:33 is already inside the
+3347. That is a measurement failure on my part, not an ambiguity in the system.
+
+## 9.3 THE RUN CANNOT PROGRESS ON THIS BINARY
+
+Hydration is scheduled only by a **rotating** refresh, and the token minted at
+21:50:33 stays valid until **~22:49**. Until then **every** foreground, and
+**every relaunch**, takes the early return and schedules nothing. A force-quit
+does not help: launch calls the same `ensureValidSession`.
+
+So the options are to wait ~55 minutes for one more ambiguous single shot, or to
+fix the regression — after which **every** foreground schedules hydration and
+Gate (C) becomes **repeatably observable** instead of once-an-hour.
+
+**The fix is the one already identified in §7.2** — schedule hydration on the
+early-return path — and the re-entrancy guard (C) is what makes it safe, turning
+the re-entrant schedule into a no-op instead of a spin.
+
+**The one-shot no-row window is still INTACT:** `9c5385f6` has no directory row,
+so nothing has been spent.
+
+**Gate (C) remains UNTESTED.** Every token observation so far — 8→9, 9→10,
+10→13, and now 15→16 — measures gate **(A)**. The hydration cycle has not run
+once under Connected mode.
