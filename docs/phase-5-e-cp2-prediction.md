@@ -1,5 +1,11 @@
 # P5-E / CP-2 — SERVER PREDICTION. 2026-09-07
 
+**REVISED 2026-09-07 ON REVIEW — §3.2's ENFORCEMENT WRAPPING WAS A DEFECT AND IS
+WITHDRAWN.** My proposed wrapping would have let the **subscription** kill switch
+switch off **child-safety** privacy. It is replaced by an unconditional conjunct.
+See **§3.4**, which is the authority for the boolean shape; the rest of the design
+is unchanged.
+
 **PREPARATION ONLY. NO PRODUCTION MUTATION. `SELECT`-only measurement plus one
 read-only impersonation probe.** For review.
 
@@ -113,11 +119,10 @@ how the stored-vs-effective distinction drifts, and drift here fails permissive.
 undiscoverable for its own independent reason. `LIMIT 20`, the 2-character floor,
 self-exclusion and token matching are all unchanged.
 
-**Kill switch:** the new conjunct is wrapped the same way D-U6-1 is —
-`((select not public.enforcement_active()) or public.account_privacy_discoverable(ad.user_id))`
-— so a rollback of enforcement rolls back **both** subject-side filters together.
-**Otherwise a kill-switch would only half-roll-back**, which the U7 record already
-names as a mistake.
+**~~Kill switch: wrap the new conjunct the same way D-U6-1 is.~~ WITHDRAWN —
+see §3.4.** The conjunct is **unconditional**. Copying D-U6-1's wrapping was
+reasoning by analogy from an *entitlement* filter to a *child-safety* filter, and
+the two do not share a kill switch.
 
 ### 3.3 `follow_requests_open` — CP-2-R1
 
@@ -140,6 +145,101 @@ server-authoritative home.
 **The gate stays FIRST and unchanged.**
 
 ---
+
+### 3.4 THE KILL SWITCH MUST NOT REACH CHILD SAFETY — CORRECTION
+
+**THE INVARIANT, ADOPTED:** *the kill switch may relax entitlement gating, and
+must never relax child-safety privacy.*
+
+**My §3.2 proposal violated it.** Evaluated mechanically over the full input
+space:
+
+```
+PROPOSED:  gate(E,Vent) AND (NOT E OR Sent) AND (NOT E OR P)
+```
+
+With `E = false` the third conjunct collapses to **TRUE**, so **P — the entire
+privacy decision — is discarded**. A 13–17 member who has never opted in becomes
+**discoverable to any caller, entitled or not**, in **all four** enforcement-off
+combinations. Same for an 18+ member who deliberately opted out.
+
+```
+REVISED:   gate(E,Vent) AND (NOT E OR Sent) AND P          -- P unconditional
+```
+
+**`follow_requests_open` needed no change** — as proposed it is
+`gate AND account_privacy_requests_open(target)`, already an unwrapped conjunct.
+**Only `search_account_directory` was wrong.**
+
+#### Direct answer to the question asked
+
+> **Does `enforcement_active = false` ever make an otherwise protected 13–17
+> member discoverable or open to follow requests?**
+
+**Under the PROPOSED shape: YES — for discovery, in every enforcement-off case.
+Under the REVISED shape: NO, for either surface.** A protected member stays
+protected whatever the enforcement flag says.
+
+#### Why the "half-roll-back" argument does not apply
+
+D-U6-1 is wrapped so that disabling enforcement **restores the pre-enforcement
+world** — correct for a filter whose whole subject is entitlement. **Child-safety
+filtering has no pre-enforcement world to restore to**: it did not exist before
+CP-2 and is not part of the entitlement incident the switch was built for.
+
+**And no second flag is being added.** A boolean that disables child-privacy
+filtering would be **a shippable exception inside the predicate that defines
+child safety** — precisely what **D4 rejected outright** when U5a proposed an
+allowlist inside `connected_member()`, on the grounds that an authority predicate
+must not contain a branch whose safety rests on operational discipline.
+**CP-2's rollback is restoring two function definitions byte-compared — a
+deliberate migration, not a flag anyone can flip.**
+
+#### PRE / POST truth tables
+
+`E` = `enforcement_active()` · `Vent` = viewer entitled · `Sent` = subject
+entitled · `P` = effective privacy (`account_privacy_discoverable`).
+
+**`search_account_directory` — does the subject appear?**
+
+| privacy state | E | Vent | Sent | PRE | PROPOSED | **REVISED** |
+|---|---|---|---|---|---|---|
+| no privacy row | T | T | T | ✅ | ❌ | **❌** |
+| no privacy row | **F** | any | any | ✅ | **⚠️ ✅** | **❌** |
+| 13–17 opted out | T | T | T | ✅ | ❌ | **❌** |
+| 13–17 opted out | **F** | any | any | ✅ | **⚠️ ✅ VIOLATION** | **❌** |
+| 13–17 opted **IN** | T | T | T | ✅ | ✅ | **✅** |
+| 13–17 opted **IN** | F | any | any | ✅ | ✅ | **✅** |
+| 18+ opted in | T | T | T | ✅ | ✅ | **✅** |
+| 18+ opted in | F | any | any | ✅ | ✅ | **✅** |
+| 18+ opted out | T | T | T | ✅ | ❌ | **❌** |
+| 18+ opted out | **F** | any | any | ✅ | **⚠️ ✅** | **❌** |
+| any | T | F | any | ❌ | ❌ | **❌** |
+| any | T | any | F | ❌ | ❌ | **❌** |
+
+**`follow_requests_open` — may a stranger create a follow request?**
+
+| privacy state | E | Vent | PRE | **REVISED** |
+|---|---|---|---|---|
+| no privacy row | T | T | ✅ | **❌** |
+| no privacy row | T | F | ❌ | **❌** |
+| no privacy row | **F** | any | **⚠️ ✅** | **❌** |
+| 13–17 opted out | T | T | ✅ | **❌** |
+| 13–17 opted out | **F** | any | **⚠️ ✅** | **❌** |
+| 13–17 opted **IN** | T | T | ✅ | **✅** |
+| 13–17 opted **IN** | F | any | ✅ | **✅** |
+| 18+ opted in | T/F | T / any | ✅ | **✅** |
+| 18+ opted out | T | T | ✅ | **❌** |
+| 18+ opted out | **F** | any | **⚠️ ✅** | **❌** |
+
+#### A sharper statement of the CP-2-R1 hazard than §2 gave
+
+§2 said the `coalesce(..., true)` defect is *"currently unreachable"* because the
+gate is false for everyone. **That is true only while enforcement is ACTIVE.**
+The table shows `follow_requests_open` returning **TRUE for every subject,
+including row-less ones, to any caller**, the moment `enforcement_enabled` is set
+false. **The hazard is one boolean away, not one subscription away** — which
+strengthens the case for CP-2-R1 rather than weakening it.
 
 ## 4. TEN BEHAVIOURAL PREDICTIONS
 
@@ -201,6 +301,21 @@ states what the *current* deployed code returns under the same fixture.
 | **D11** | `get_account_directory_by_user_ids` for an undiscoverable subject | resolves | **resolves — UNCHANGED** |
 | **D12** | Samuel↔Steve approved follow still present and resolvable | 2 rows | **2 rows** |
 | **D13** | `has_function_privilege(authenticated, account_privacy_discoverable)` | n/a — absent | **FALSE** |
+| **D14** | **kill switch ON** (`enforcement_enabled=false`), 13–17 opted-out subject, searched by an **unentitled** viewer | **FOUND** | **0 rows** |
+| **D15** | **kill switch ON**, 18+ opted-out subject | **FOUND** | **0 rows** |
+| **D16** | **kill switch ON**, `follow_requests_open(no-privacy-row subject)` | **TRUE** | **FALSE** |
+| **D17** | **kill switch ON**, 13–17 opted-**IN** subject | FOUND | **FOUND — the switch does not over-restrict either** |
+
+**D14–D17 EXIST BECAUSE OF §3.4 AND WOULD HAVE PASSED UNDER MY WITHDRAWN
+WRAPPING** — D14, D15 and D16 fail against the PROPOSED shape as well as against
+deployed CP-1, so they discriminate the corrected boolean from the defective one,
+not merely new-from-old. **D17 is the counter-control:** the switch must not make
+an opted-in member vanish either.
+
+**Flipping `enforcement_enabled` is the single most sensitive thing this suite
+does.** It runs **inside the same rolled-back transaction**, is never committed,
+and is invisible to other sessions under read-committed. **It must never be left
+set.**
 
 **D1, D5 and D7 are the load-bearing ones.** D1 and D7 prove absence flipped from
 permissive to protective; **D5 proves `lookup_enabled` became operative at all**,
