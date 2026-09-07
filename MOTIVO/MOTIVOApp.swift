@@ -27,6 +27,7 @@
 // SEARCH-TOKEN: 20260129_090937_14_3H_SignOutFeedReset_SignInReliability
 
 import SwiftUI
+import DeclaredAgeRange
 import CoreData
 import Foundation
 
@@ -79,6 +80,11 @@ struct MOTIVOApp: App {
     /// U5f — owns the attestation invariant and the duplicate suppression.
     @StateObject private var attestation = MembershipAttestationCoordinator()
     @Environment(\.scenePhase) private var scenePhase
+    /// CP-3 Finding A: recovery from `identityWithoutBand`. The declared range is
+    /// re-acquired from Apple rather than persisted, so no band is ever invented
+    /// after process death.
+    @StateObject private var ageBandRecovery = AgeBandRecoveryCoordinator()
+    @Environment(\.requestAgeRange) private var requestAgeRange
     private let ephemeralMediaFlagKey = "ephemeralSessionHasMedia_v1"
 
     init() {
@@ -270,6 +276,12 @@ struct MOTIVOApp: App {
                     connectedMembershipStore.start()
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
 
+                    // CP-3 Finding A — AT LAUNCH, and deliberately NOT gated on
+                    // Connected mode: the member this rescues is precisely the one
+                    // whose Connected state is incomplete, exactly as U5f's
+                    // attestation invariant reasons about its own dormant case.
+                    Task { await recoverAgeBandIfNeeded(reason: "launch") }
+
                     // M7B: AppMode activation must complete before a pending Études avatar can
                     // be promoted into the Connected namespace/backend. AuthManager may discover
                     // the identity before the runtime has switched to Connected, so retry here.
@@ -331,6 +343,11 @@ struct MOTIVOApp: App {
                     guard phase == .active else { return }
                     // Delete Account v2: avoid running liveness work during an in-progress local factory reset.
                     guard !LocalFactoryReset.isInProgress else { return }
+
+                    // CP-3 Finding A — ON EVERY FOREGROUND. Single-flight plus a
+                    // cooldown inside the coordinator keeps a device Apple cannot
+                    // serve from becoming a prompt loop.
+                    Task { await recoverAgeBandIfNeeded(reason: "foreground") }
 
                     // C-45: re-check on every foreground. Apple documents no
                     // notification for the account-deleted case on native apps,
@@ -430,6 +447,23 @@ struct MOTIVOApp: App {
     }
 
     @MainActor
+    /// Bridges the SwiftUI environment action into the coordinator. Apple's
+    /// answer is cached, so the usual case presents no UI; any thrown error is
+    /// `.unavailable` and therefore establishes nothing.
+    private func recoverAgeBandIfNeeded(reason: String) async {
+        await ageBandRecovery.recoverIfNeeded(auth: auth, reason: reason) {
+            do {
+                let response = try await requestAgeRange(
+                    ageGates: DeclaredAgeRangeService.minimumGate,
+                    DeclaredAgeRangeService.adultGate
+                )
+                return DeclaredAgeRangeService.outcome(for: response)
+            } catch {
+                return .unavailable
+            }
+        }
+    }
+
     private func handleMembershipState(_ state: ConnectedMembershipStore.MembershipState) {
         // C-1: the client governs access, and only access. A negative entitlement
         // read withdraws the Connected experience and does nothing else — a

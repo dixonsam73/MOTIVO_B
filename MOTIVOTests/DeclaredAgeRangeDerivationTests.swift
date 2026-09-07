@@ -134,3 +134,60 @@ final class DeclaredAgeRangeDerivationTests: XCTestCase {
         XCTAssertEqual(state?.followRequestsEffective, false)
     }
 }
+
+// MARK: - CP-3 Finding A · recovery gating
+
+@MainActor
+final class AgeBandRecoveryGateTests: XCTestCase {
+
+    private let now = Date(timeIntervalSince1970: 1_000_000)
+
+    /// The rescue must not run for someone who has no identity to rescue.
+    func testRequiresAnIdentityAndAConfiguredBackend() {
+        XCTAssertFalse(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: false, backendConfigured: true,
+            inFlight: false, lastAttemptAt: nil, now: now))
+        XCTAssertFalse(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: true, backendConfigured: false,
+            inFlight: false, lastAttemptAt: nil, now: now))
+    }
+
+    /// The ordinary rescue case: an identity exists and nothing has been tried.
+    func testAttemptsOnAFreshIdentity() {
+        XCTAssertTrue(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: true, backendConfigured: true,
+            inFlight: false, lastAttemptAt: nil, now: now))
+    }
+
+    func testSingleFlightSuppressesAConcurrentAttempt() {
+        XCTAssertFalse(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: true, backendConfigured: true,
+            inFlight: true, lastAttemptAt: nil, now: now))
+    }
+
+    /// THE PROMPT-LOOP GUARD. A device Apple cannot serve must not be re-asked
+    /// on every foreground.
+    func testCooldownPreventsAForegroundPromptLoop() {
+        let justTried = now.addingTimeInterval(-5)
+        XCTAssertFalse(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: true, backendConfigured: true,
+            inFlight: false, lastAttemptAt: justTried, now: now))
+
+        let longAgo = now.addingTimeInterval(-(AgeBandRecoveryCoordinator.cooldown + 1))
+        XCTAssertTrue(AgeBandRecoveryCoordinator.shouldAttempt(
+            hasConnectedIdentity: true, backendConfigured: true,
+            inFlight: false, lastAttemptAt: longAgo, now: now),
+            "a later foreground must still be able to recover")
+    }
+
+    /// NO BAND MAY BE INVENTED. Only a derived band is establishable; every
+    /// refusal stays non-eligible.
+    func testOnlyADerivedBandIsEstablishable() {
+        XCTAssertEqual(AgeBandRecoveryCoordinator.bandToEstablish(from: .band(.band18Plus)), .band18Plus)
+        XCTAssertEqual(AgeBandRecoveryCoordinator.bandToEstablish(from: .band(.band13to17)), .band13to17)
+        XCTAssertNil(AgeBandRecoveryCoordinator.bandToEstablish(from: .ineligible),
+                     "under-13 must never establish a band")
+        XCTAssertNil(AgeBandRecoveryCoordinator.bandToEstablish(from: .unavailable),
+                     "declined / error must never establish a band")
+    }
+}
