@@ -6,14 +6,23 @@
 
 ## 1. REPO / REMOTE
 
-Branch **`feature/solo-connected`** · HEAD **`0a08588`** · **ahead 2, behind 0** ·
-tree clean.
+Branch **`feature/solo-connected`** · origin at **`0a08588`** · tree clean.
 
-**Two unpushed commits** (Samuel pushes from his own shell — `git push` fails from
-this sandbox for environment reasons, not credentials; `fetch` works):
+**HEAD is this handover's own most recent commit**, so do not expect the sha
+below to be the tip — check with `git log --oneline origin/feature/solo-connected..HEAD`
+rather than trusting this line. **This file cannot record its own commit sha, and
+a handover that asserts a repository fact is not evidence of that fact** (C-52).
 
-- `0aae02c` chronology correction
-- `0a08588` feedback-loop mechanism
+**Unpushed at the time of writing: the two handover commits** — `c95ee42` (this
+document) and the reconciliation revision that follows it. Everything else
+(`0aae02c` chronology correction, `0a08588` feedback-loop mechanism) is **already
+on origin**.
+
+Samuel pushes from his own shell — `git push` fails from this sandbox for
+environment reasons, not credentials; `fetch` works.
+
+**No source file has been modified.** Every commit in this series is
+documentation. The implementation described below has NOT begun.
 
 ## 2. PRODUCTION STATE — measured 19:00 UTC
 
