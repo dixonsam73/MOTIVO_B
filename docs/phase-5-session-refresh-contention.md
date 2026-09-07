@@ -1,5 +1,47 @@
 # SESSION REFRESH CONTENTION — DIAGNOSIS. 2026-09-07
 
+> ## ⚠️ CORRECTED 2026-09-07 — READ THIS FIRST
+>
+> **Two characterisations below are SUPERSEDED and wrong.**
+>
+> **1. "37 rotations in 9 minutes" is an ARTEFACT OF MY METHOD.** I took the
+> window from the `auth.sessions` row's `created_at`/`updated_at` and **never
+> listed the token timestamps**. Measured properly, all 38 tokens fall in three
+> events:
+>
+> | tokens | window | duration | corresponds to |
+> |---|---|---|---|
+> | **1** | 13:34:54 | — | SIWA sign-in |
+> | **3** | 13:40:15–13:40:16 | **1.2 s** | CP-3 band write |
+> | **34** | 13:43:47–13:44:08 | **20.5 s** | **purchase + attestation burst** |
+>
+> **The real signature is 34 rotations in 20.5 seconds — ~1.7 per second.** §4's
+> claim that this was *"consistent with ordinary app activity under this design"*
+> at ~1 per 14 seconds is **wrong by a factor of ~24**. This is a **burst**,
+> which points at a **retry loop**, not at ambient RPC volume.
+>
+> **2. "CP-3 materially increases rotation frequency" is WITHDRAWN.** Only **3 of
+> 38** tokens are attributable to CP-3 — the 1.2-second cluster that wrote the
+> band. The 34-token burst sits in the **purchase/attestation** window, a path
+> that **predates CP-3 entirely**. §7's headline is not supported by the measured
+> distribution.
+>
+> **The six-hour interruption in the session is AFTER every token**, so it never
+> entered the record — but it is why I must not assume the day was continuous.
+>
+> **WHAT SURVIVES UNCHANGED**, because it is proven from source rather than from
+> counts: unconditional refresh; `ensureValidBackendSession` rotating on every
+> call; single-flight coalescing being correct; "Already Used" reaching the
+> destructive `signOut()`; and zero test coverage. **The remedy is unchanged; its
+> JUSTIFICATION shifts** — the argument is no longer "CP-3 adds load" but that
+> **a superseded token must never delete an identity**, and that a retry loop can
+> burn 34 tokens in 20 seconds regardless of the caller.
+>
+> **Token #38 (13:44:08) is UNREVOKED**, and a *failed* refresh creates no row —
+> so the record ending there is what a stranded client looks like. See
+> `docs/phase-5-401-auth-challenge-loop.md`.
+
+
 **BLOCKING further CP-3 physical-device acceptance.** Another run while the
 session can self-delete would contaminate the evidence.
 
