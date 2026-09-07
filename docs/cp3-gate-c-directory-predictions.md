@@ -233,3 +233,85 @@ consistent with CLAUDE.md's record that all identities are. So **Q4.6 has a
 visible control**: if `9c5385f6`'s new row lands with a non-NULL
 `entitled_until` while Samuel's stays NULL, the stamping trigger is
 demonstrably reading live membership rather than defaulting.
+
+---
+
+# 7. T1 RESULTS — 21:10:04 UTC, ~1 min after purchase
+
+## 7.1 Q1 PASSES IN FULL — the purchase legitimately restored entitlement
+
+| | prediction | observed | |
+|---|---|---|---|
+| Q1.1 | 1 row, otid reused | **1 row, `2000001228947923` REUSED** | PASS |
+| Q1.2 | `renewal_date > now`, `entitlement_ended_at` NULL | **21:38:54**, entitled **true**, ended **NULL** | PASS |
+| Q1.3 | `pending_cleanup_at` → NULL | **NULL** (was 2026-11-06) | PASS |
+| Q1.4 | `binding_method` stays `purchase` | **`purchase`** | PASS |
+| Q1.5 | binding unchanged | `created_at` == `updated_at` == **13:40:16.990315** | PASS |
+
+`membership.updated_at` **21:09:00.328936**. **Q3 PASSES** — band
+`13:40:16.675419`, 1 row, both `*_changed_at` NULL. **Q6 PASSES** — users 2,
+`dfaf8d18` still 248 tokens / 2026-09-05.
+
+## 7.2 Q4 IS NOT MET, AND THE CAUSE IS A REGRESSION I INTRODUCED
+
+`account_directory` is **still 1 row** and directory INSERT calls are **still
+2795** — so no insert was even attempted.
+
+**Hydration never ran.** It is scheduled from exactly three places
+(`AuthManager:927`, `:1278`, `:1333`) — a **rotating** `refreshSupabaseSession`
+success, the one-time `ensureBackendIdentityIfNeeded` handshake, and
+`supabaseSignIn`. **`applyActivation` schedules nothing**, so *entering
+Connected mode does not itself schedule hydration.*
+
+**My expiry gate's early-return path deliberately does not schedule it.** I
+wrote, in that very block: *"This path deliberately schedules NO hydration:
+nothing changed, so there is nothing new to hydrate from."* **That reasoning was
+wrong.** The *mode* changed — Solo → Connected — which is a new reason to
+hydrate even though the token did not change. I flagged the risk at
+implementation time as "a real, if minor, behavioural narrowing" and then
+under-weighted it.
+
+**THE AFFECTED JOURNEY IS NARROW BUT REAL, AND IT IS THE ONE THIS PROJECT CARES
+MOST ABOUT:** sign in while unentitled, then become entitled **without
+re-authenticating** — a lapsed member resubscribing, and the dormant subscriber
+whose self-healing is U5's stated invariant. A brand-new join is unaffected,
+because `supabaseSignIn` schedules hydration directly.
+
+**It is a latency defect, not a permanent one.** The next *genuine* rotation
+will schedule hydration and publish the row. The access token was minted
+**20:49:10**; at Supabase's default 3600 s lifetime it expires **~21:49:10**,
+and the gate's 60 s skew means a foreground from **~21:48:10** will rotate.
+
+**THE FIX IS ONE LINE AND (C) ALREADY MAKES IT SAFE.** Scheduling hydration on
+the early-return path cannot re-form the loop, because the re-entrancy guard
+turns the re-entrant schedule into a no-op. **That makes (C) load-bearing rather
+than belt-and-braces** — the opposite of §7's original claim that (A) alone
+sufficed. **Not implemented now:** rebuilding mid-run would spend the one-shot
+no-row window on a different binary.
+
+## 7.3 GATE (C) IS STILL UNTESTED, AND ITS WINDOW IS STILL INTACT
+
+Hydration has not run, so the refresh↔hydration cycle has **not** been
+exercised. `9c5385f6` still has **no directory row**, so the single-use no-row
+branch is **still available**.
+
+`account_privacy_self_v1` went **10 → 13 (+3)** while tokens stayed at **39** —
+three further confirmations of gate (A), on the purchase path this time.
+
+## 7.4 THE NEXT EVENT IS A SINGLE, HIGH-VALUE FOREGROUND
+
+**Predictions for one foreground at/after ~21:50 UTC:**
+
+| | prediction | what it settles |
+|---|---|---|
+| R1 | exactly **one** token rotation (39 → 40) | the expiry gate releases correctly at expiry |
+| R2 | hydration runs — `account_privacy_self_v1` **+1 or more** | the no-row branch is reached |
+| R3 | **`account_directory` 1 → 2**, `display_name` "Device A" | **Q4** |
+| R4 | **no sub-second gaps, tokens ≤ 42** | **GATE (C)** — pre-fix this is exactly where 34-in-20.5 s occurred |
+| R5 | `entitled_until` **non-NULL** while Samuel's stays NULL | the stamping trigger reads live membership |
+| R6 | band still `13:40:16.675419` | hydration does not rewrite the band |
+
+**R1–R3 also confirm the §7.2 diagnosis by prediction rather than by argument.**
+And they discriminate: if a rotation happens, hydration runs, and there is
+**still** no directory row, the cause is the display-name guard
+(`AuthManager:739`) and **not** my regression.
