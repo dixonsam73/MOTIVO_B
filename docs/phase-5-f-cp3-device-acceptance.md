@@ -43,6 +43,89 @@ launched. **These are runtime facts, not inferences from §1's signing check.**
 `requestAgeRange` was ever *called*, that Apple returned anything, or that any
 ordering or recovery invariant holds. **No age-range API call has been observed.**
 
+## 1d. THE DECLARED AGE RANGE API RAN ON HARDWARE — 2026-09-07, 10:46 UTC
+
+**Valid CP-3 evidence. Device A, Release build `f27e715`, Sandbox Apple Account
+`sdsongsltd+devicec@gmail.com`, fixture *18+, age confirmed, significant change
+not applicable*.**
+
+| observation | result |
+|---|---|
+| **`requestAgeRange` invoked on real hardware** | **YES** |
+| Apple's system UI appeared **immediately on Continue** | **YES** — *"Age-Appropriate Experiences in Apps"*, offering **Continue** / **Update Birthday** and a close control |
+| the 18+ fixture returned a **shareable range** | **YES** |
+| **bounds derivation produced `band_18_plus`** | **YES** |
+| first authenticated privacy establishment wrote **adult defaults** | **YES** — `lookup_enabled = true`, `lookup_set_under_band = band_18_plus`, **`lookup_changed_at = NULL`**, `follow_requests_enabled = true` |
+
+**`lookup_changed_at = NULL` is the sharp part:** it proves the value is an
+**initial default derived from the band**, not a user choice, which is the
+distinction the whole three-layer model rests on.
+
+**Apple's sheet text is its own, and it is worth recording verbatim in
+substance:** *"Share that you're an adult so you're not limited to child and teen
+content in apps"*, and *"Your device uses your Apple Account information,
+including your date of birth, to determine the age range that can be shared with
+apps."* **Études is not the asker.** It also states a parent or guardian must
+enable the feature for children and teens in a family group.
+
+### WHAT THIS RUN DID NOT ESTABLISH, AND CANNOT
+
+**It did not establish pre-SIWA ordering, and it did not establish
+band-before-directory-publication.** **No SIWA sheet appeared at all**, and the
+membership selection screen followed the age sheet directly.
+
+**The cause is measured, not guessed: Device A retained STEVE's Connected
+identity while being in SOLO.** Solo mode and Connected identity are independent
+— a lapse withdraws *access* and **retains the identity** (C-1/C-26). So
+`hasConnectedIdentity` was **true**, the code took the already-authenticated
+branch, and there was no sign-in to order against and no directory row to create.
+
+**MY PREDICTION THAT SIWA WOULD APPEAR WAS FALSIFIED, AND MY REASONING FOR IT WAS
+WRONG.** I wrote *"Device A in Solo resolves the risk cleanly:
+`hasConnectedIdentity` is false"*. **This project's own record says the
+opposite**, and I had read it. Both ordering discriminators still require a
+**genuinely new identity**.
+
+### The row it created, and its removal
+
+The run wrote a real `account_privacy` row for **Steve** — correct product
+behaviour, wrong subject, caused by the inference above. **Deleted the same day
+by explicit id under guards** (exactly one row, md5 `64ffb132`, `account_id`
+`steveckeabuo`, created today), and the full baseline re-verified:
+`account_privacy` **0**, `auth.users` **2**, directory **2**, approved follows
+**2**, posts **7**, comments **5**, shadow **75**, membership **1**, with Samuel's
+avatar and the mutual approved follow intact in both directions.
+
+## 1e. CLEARING STEVE FROM DEVICE A — ANALYSED, NOT PERFORMED
+
+**The obvious route is safe but INSUFFICIENT, and that is the finding.**
+
+**`AuthManager.signOut()` is purely local** — it deletes the Keychain items
+(`appleUserID`, `displayName`, both Supabase tokens), removes the backend
+UserDefaults keys and clears the bearer token. **It makes no server call and
+deletes no backend identity.** It is reachable from Profile → **Sign out**. So it
+is safe for the fixture.
+
+**But it will NOT produce a new identity.** This project measured on **2026-08-25**
+that **Sign in with Apple returns the SAME `sub`** even after the credential had
+been manually revoked, re-authenticating the existing identity, with `auth.users`
+**not growing**. So after signing out, SIWA on Device A with the same Apple
+Account **re-authenticates Steve** and returns the device to exactly today's
+state.
+
+**Three routes to a genuinely new Études identity:**
+
+| | route | cost |
+|---|---|---|
+| **(a) RECOMMENDED** | sign Device A into a **different Apple Account** — the primary Apple Account is what SIWA uses, and is **separate from the Sandbox Apple Account** driving the age fixture | reconfiguring a burner's Apple Account. **Touches no server state and no fixture** |
+| (b) | delete Steve server-side, so the same `sub` maps to a new `auth.users` row | **FORBIDDEN** while he is half the Phase 4 fixture |
+| (c) | discharge Phase 4's outstanding device verification first, releasing Steve, then (b) | reorders the work |
+
+**A question only the account holder can answer before (a) is actionable:**
+**which Apple Account is Device A's primary account, and is it the one that
+created Steve?** If they differ, a sign-out may already be enough. **I cannot see
+that from here and will not assume it.**
+
 ## 1c. THE REMAINING MATRIX NEEDS PHYSICAL INTERACTION I CANNOT PERFORM
 
 **Stated as a capability limit, not a scheduling excuse.** The simulator control
