@@ -99,7 +99,7 @@ Scored on `auth.refresh_tokens`, never on the UI staying Connected.
 |---|---|---|
 | P1 | `auth.users` stays **2**; no new identity | SIWA minting a third id |
 | P2 | Sign-in adds a **small, bounded** number of tokens to `9c5385f6` (expect 1–2) | tens |
-| P3 | **Five foregrounds over ~5 min add ZERO tokens.** This is the discriminator: pre-fix each attempt past the 60 s cooldown rotated once, so pre-fix predicts **+5** | any increase |
+| P3 | **Five foregrounds add ZERO tokens.** The discriminator: pre-fix each foreground rotated once, so pre-fix predicts **+5** | any increase |
 | P4 | **No gap < 1 s anywhere** in the new tokens | any sub-second gap |
 | P5 | `dfaf8d18`'s token count stays **248** and its last token stays 2026-09-05 | any movement |
 | P6 | `account_privacy` still exactly 1 row, `band_18_plus`, `band_updated_at` **unchanged** at 13:40:16.675419 | a rewrite |
@@ -107,3 +107,52 @@ Scored on `auth.refresh_tokens`, never on the UI staying Connected.
 
 **P3 is the whole discriminator.** P4 catches a slower loop that P3's window
 might straddle.
+
+
+---
+
+## 5. TWO CORRECTIONS TO §2/§4 ABOVE, made before the run
+
+### (a) THE SIWA ROUTE IS NOT ProfileView'S SIGNED-OUT GATE
+
+Stated first as "Profile → Sign in with Apple button". **Wrong, and the device
+disproved it**: in Solo, Profile shows the ordinary local profile card.
+`signedOutGateView` is a **sheet** (`ProfileView:433`) raised only by
+`showConnectedSignInSheet`, and its gate-presented branch (`:1975`) is the
+fresh-install case.
+
+**The correct route is the one the account holder identified:**
+
+```
+Profile → Explore Connected  (showConnectedIntroduction)
+        → "Already have a Connected account?" → SIGN IN   (ConnectedIntroductionView:78)
+        → connectedSignInIntent = .returning   (ProfileView:380)
+        → SIWA sheet → on success, UNWINDS to Profile      (ProfileView:2005)
+```
+
+**TAKE "SIGN IN", NEVER "CONTINUE", and the difference is not cosmetic.**
+
+| | `.returning` — "Sign In" | `.join` — "Continue" |
+|---|---|---|
+| after success | unwinds to Profile (`:2005`) | opens **MembershipSelectionView**, the purchase screen (`:1996`) |
+| age range | **never requested** | `requestAgeRange` fires **before** SIWA (`:383-388`) |
+
+So "Continue" would walk into both a purchase surface (§9 prohibits) and the
+Age Assurance fixture (§10 defers). "Sign In" touches neither. The code says so
+in its own words: *"Returning member: signing in IS the whole errand."*
+
+### (b) THE 60 s COOLDOWN DOES NOT APPLY HERE, so P3 needs no spacing
+
+`AgeBandRecoveryCoordinator.recoverIfNeeded` assigns `lastAttemptAt` **after**
+its already-established short-circuit (`:84-91` returns; `:94` assigns). With
+`band_18_plus` present, `fetchSelf` succeeds and it returns **before** the
+cooldown is ever recorded — so `shouldAttempt` sees `lastAttemptAt == nil` on
+every subsequent call.
+
+**Every foreground therefore drives a `fetchSelf` → preflight →
+`ensureValidBackendSession` → `refreshSupabaseSession`, with nothing throttling
+it.** That strengthens P3 rather than weakening it: pre-fix, five foregrounds
+give five rotations however closely spaced, and no spacing is required.
+
+**It also confirms Apple is never asked while a band exists**, so this run
+cannot disturb `band_18_plus` or consume the Age Assurance fixture.
