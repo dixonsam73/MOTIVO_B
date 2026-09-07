@@ -126,9 +126,35 @@ access token is valid beyond a skew). **This alone fixes both symptoms**: it end
 unconditional rotation *and* starves the loop, because a re-entrant pass finds a
 valid token and rotates nothing.
 
-**(B) Reclassify "Already Used" / 400-refresh as NON-terminal** — re-read the
-Keychain and retry **once**; sign out only if the re-read token also fails.
-**A superseded token must never delete an identity.**
+**(B) Treat "Already Used" as a RECONCILIATION CONDITION** — **not automatic
+success, and not automatic sign-out.** Re-read persisted session state and
+recover **only if a newer usable token/session is actually present**.
+
+**Both failure directions are real, and the earlier phrasing only guarded one:**
+
+- **automatic sign-out** destroys a live session (the observed defect);
+- **automatic success** leaves the client believing it is authenticated with no
+  valid session — the **zombie state** `signOut()` was originally written to
+  prevent. Recovery must be conditional on *evidence*, not on a retry hopefully
+  succeeding.
+
+**When NO newer token is present, do NOT call `signOut()`.** Use
+**`clearConnectedIdentity`**.
+
+> **`signOut()` is `clearConnectedIdentity` PLUS deletion of the per-user
+> attachment *title* mappings (`AuthManager:880-883`) — content the user typed.**
+> `AppleCredentialStateMonitor` already refuses `signOut()` for exactly this
+> reason, citing **invariant 1**: *the local journal is never deleted by any
+> Connected action.*
+>
+> **So the current refresh-failure path can cause SILENT LOSS OF USER-TYPED
+> CONTENT in response to a superseded token.** That is a second, independent
+> defect on the same line, and it is worse than the sign-out itself. The
+> distinction already exists in the codebase as a deliberate primitive — the
+> refresh path simply does not use it.
+
+**A superseded token must never delete an identity, and must never delete
+content.**
 
 **Optional (C):** stop scheduling hydration from the refresh success path, or make
 `AuthManager:611` non-refreshing. (A) makes this unnecessary; it removes the
@@ -136,12 +162,20 @@ coupling.
 
 ## 8. REQUIRED REGRESSION TESTS (land WITH the fix; coverage today is ZERO)
 
-1. **`shouldSignOut(afterRefreshFailure:)`** — "Already Used" 400 → **false**
-   (*fails today; this is the bug*); `URLError.notConnectedToInternet` → false;
-   genuine `invalid_grant` → true.
-2. **`shouldRefresh(accessTokenExpiry:now:skew:)`** — still-valid token → **false**.
-3. **Re-entrancy** — a refresh whose success schedules hydration must produce
+1. **`refreshFailureDisposition(_:) -> {retryWithNewerToken, withdrawIdentity, ignore}`**
+   — a three-way classification, not a boolean, because the boolean is what
+   forced the false choice between "carry on" and "destroy everything":
+   - "Already Used" 400 → **`retryWithNewerToken`** (*fails today; this is the bug*)
+   - `URLError.notConnectedToInternet` → **`ignore`**
+   - genuine `invalid_grant` / revoked → **`withdrawIdentity`**
+2. **No path from a refresh failure calls `signOut()`** — assert
+   `clearConnectedIdentity` is the withdrawal primitive, so attachment titles
+   survive (invariant 1).
+3. **`shouldRefresh(accessTokenExpiry:now:skew:)`** — still-valid token → **false**.
+4. **Re-entrancy** — a refresh whose success schedules hydration must produce
    **no second rotation**.
+5. **Reconciliation** — "Already Used" with **no** newer persisted token must
+   **not** report success, and must **not** destroy content.
 
 ## 9. CONSTRAINTS — PROHIBITED
 
