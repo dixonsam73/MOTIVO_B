@@ -150,6 +150,21 @@ final class AuthManager: NSObject, ObservableObject {
     /// means unknown, which every consumer must treat protectively.
     @Published private(set) var accountPrivacyState: AccountPrivacyService.SelfState?
 
+    /// Re-reads privacy state after an explicit preference change, so the UI
+    /// shows what the SERVER holds rather than what the control was set to.
+    @discardableResult
+    func refreshAccountPrivacyState(reason: String) async -> AccountPrivacyService.SelfState? {
+        switch await AccountPrivacyService.fetchSelf(auth: self, reason: reason) {
+        case .success(let state):
+            accountPrivacyState = state
+            ProfileStore.setDiscoveryModeRaw(state.lookupEffective ? 1 : 0, for: backendUserID)
+            ProfileStore.setLastKnownAgeBand(state.ageBand)
+            return state
+        case .failure:
+            return nil
+        }
+    }
+
     /// Establishes or reconciles the band. Returns true only when the server
     /// holds one.
     ///

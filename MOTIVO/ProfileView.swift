@@ -326,6 +326,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      /// Apple presents its own sheet and returns a RANGE.
      @Environment(\.requestAgeRange) private var requestAgeRange
      @State private var ageRangeRefusedNotice: String?
+     /// Mirrors the server's EFFECTIVE discoverability. Protective when unknown.
+     @State private var discoverabilityOn: Bool = false
+     @State private var discoverabilityBusy: Bool = false
+     @State private var discoverabilityNotice: String?
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
  
@@ -716,10 +720,40 @@ private var sessionSetupSection: some View {
                         .font(.footnote)
                         .foregroundStyle(Theme.Colors.secondaryText)
                  }
-                    .padding(.vertical, Theme.Spacing.s)
-                    .overlay(alignment: .bottom) {
-                        quietDivider()
-                    }
+                 .padding(.vertical, Theme.Spacing.s)
+                 .overlay(alignment: .bottom) {
+                     quietDivider()
+                 }
+
+                 // CP-3: the discoverability preference, written through the ONLY
+                 // client writer of it. Shown only once the server holds an age
+                 // band -- without one the member is undiscoverable anyway and the
+                 // writer would refuse, so offering a control here would be
+                 // offering one that cannot work.
+                 if auth.accountPrivacyState != nil {
+                     VStack(alignment: .leading, spacing: 4) {
+                         Toggle("Let other members find you", isOn: $discoverabilityOn)
+                            .tint(Theme.Colors.accent)
+                            .frame(minHeight: 44, alignment: .center)
+                            .font(Theme.Text.body)
+                            .disabled(discoverabilityBusy)
+                            .onChange(of: discoverabilityOn) { oldValue, newValue in
+                                guard oldValue != newValue else { return }
+                                Task { @MainActor in await applyDiscoverability(newValue) }
+                            }
+
+                         // Neutral and factual: what each position does, and what
+                         // does NOT change either way. No recommendation and no
+                         // nudge in either direction.
+                         Text("When this is on, other members can find you by searching your name, Account ID or instrument. When it is off, they cannot search for you. Either way, people you already share with still see your name on anything you have shared.")
+                            .font(.footnote)
+                            .foregroundStyle(Theme.Colors.secondaryText)
+                     }
+                     .padding(.vertical, Theme.Spacing.s)
+                     .overlay(alignment: .bottom) {
+                         quietDivider()
+                     }
+                 }
                   }
                  Button { showTintModeSelection = true } label: {
                      navigationRow(title: "Journal Tint", value: currentTintMode.displayName)
@@ -1046,6 +1080,31 @@ private var sessionSetupSection: some View {
          // EFFECTIVE value from account_privacy; this no longer forces it on.
          discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
          accountIDText = ProfileStore.accountID(for: auth.backendUserID)
+         hydrateDiscoverabilityControl()
+     }
+
+     /// Writes the discoverability preference through the ONLY client writer of
+     /// it. On failure the control is returned to the server's last known state,
+     /// so the UI never claims a preference the server did not accept.
+     @MainActor
+     private func applyDiscoverability(_ enabled: Bool) async {
+         discoverabilityBusy = true
+         defer { discoverabilityBusy = false }
+         switch await AccountPrivacyService.setLookupEnabled(enabled, auth: auth, reason: "profile") {
+         case .success:
+             let state = await auth.refreshAccountPrivacyState(reason: "discoverability")
+             discoverabilityOn = state?.lookupEffective ?? enabled
+         case .failure:
+             discoverabilityOn = auth.accountPrivacyState?.lookupEffective ?? false
+             discoverabilityNotice = "Couldn’t update that just now. Please try again."
+         }
+     }
+
+     /// Hydrates the control from the server's EFFECTIVE value. Unknown reads as
+     /// off, which is the protective direction.
+     @MainActor
+     private func hydrateDiscoverabilityControl() {
+         discoverabilityOn = auth.accountPrivacyState?.lookupEffective ?? false
      }
 
      /// Asks Apple to share the member's age range and reduces it to a band.

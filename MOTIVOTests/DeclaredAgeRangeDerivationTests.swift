@@ -66,6 +66,42 @@ final class DeclaredAgeRangeDerivationTests: XCTestCase {
         XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: nil, defaultPostingIsPrivate: true))
     }
 
+    // MARK: - The explicit Share matrix
+
+    /// The three cases stated as one table, so the rule is demonstrated rather
+    /// than inferred from two separate tests.
+    func testShareDefaultMatrixIsExplicit() {
+        // 13-17 -> OFF, whatever the member's own posting default says.
+        XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: .band13to17, defaultPostingIsPrivate: false))
+        XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: .band13to17, defaultPostingIsPrivate: true))
+
+        // Unresolved / error / not yet fetched -> OFF.
+        XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: nil, defaultPostingIsPrivate: false))
+        XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: nil, defaultPostingIsPrivate: true))
+
+        // 18+ -> EXACTLY the pre-CP-3 adult behaviour: !defaultPrivacy.
+        XCTAssertTrue(DeclaredAgeRangeService.shareDefaultOn(band: .band18Plus, defaultPostingIsPrivate: false))
+        XCTAssertFalse(DeclaredAgeRangeService.shareDefaultOn(band: .band18Plus, defaultPostingIsPrivate: true))
+    }
+
+    /// THE REGRESSION THIS UNIT MUST NOT CAUSE. D-1 settled that a session
+    /// defaults to Share ON for an adult who has not set Default to Private
+    /// Posts. The protective `@State = false` initialisers are transient only;
+    /// if they ever became the adult outcome, Études would have been quietly
+    /// converted to private-by-default. This asserts the adult path is
+    /// bit-for-bit the old expression.
+    func testAdultProductIsNotConvertedToPrivateByDefault() {
+        for defaultPrivacy in [true, false] {
+            let legacy = !defaultPrivacy                       // the pre-CP-3 rule
+            let now = DeclaredAgeRangeService.shareDefaultOn(band: .band18Plus,
+                                                             defaultPostingIsPrivate: defaultPrivacy)
+            XCTAssertEqual(now, legacy,
+                           "adult Share default must equal !defaultPrivacy (was \(legacy), now \(now))")
+        }
+        XCTAssertTrue(DeclaredAgeRangeService.shareDefaultOn(band: .band18Plus, defaultPostingIsPrivate: false),
+                      "D-1: an adult with no private-posts preference still defaults to sharing ON")
+    }
+
     // MARK: - Band vocabulary
 
     func testBandRawValuesMatchTheServerCheckConstraint() {
