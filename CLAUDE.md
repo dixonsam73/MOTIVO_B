@@ -2921,7 +2921,11 @@ Verification gate after each phase. RC QA confirms an already-tested system.
 
 ## Environment
 
-- iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), deployment target iOS 18.5.
+- iPhone-only (`TARGETED_DEVICE_FAMILY = 1`), **deployment target iOS 26.2**
+  (P5-A2, 2026-09-07; was 18.5). **The whole app requires 26.2, INCLUDING Solo** —
+  the earlier "Solo on 18.5+, Connected on 26+" split is withdrawn. Chosen while
+  Études is pre-release with no installed base, so nobody loses access; it
+  guarantees `DeclaredAgeRange` on every supported installation.
 - Flat source layout via `fileSystemSynchronizedGroups` — everything in
   `MOTIVO/` is auto-included in the app target.
 - Debug and Release use different bundle IDs, and **only Release can transact.**
@@ -2976,8 +2980,9 @@ Verification gate after each phase. RC QA confirms an already-tested system.
   testers actually install. Cut a build at the next clean checkpoint and run QA
   Group B against it.
 - 193 `#if DEBUG` blocks. Always verify Release as well as Debug.
-- **The unit test target RUNS, since 2026-08-23 (C-54), and holds 7 passing
-  tests.** This bullet used to read "an empty template ... compile-clean, not
+- **The unit test target RUNS, since 2026-08-23 (C-54).** It held 7 tests then;
+  **measured 2026-09-07 it runs 49 — 34 XCTest and 15 swift-testing — all
+  passing.** The 7 is historical, not current. This bullet used to read "an empty template ... compile-clean, not
   test-verified", and that **described a symptom without its cause**: the target
   could not be executed at all, because `TEST_HOST` and `@testable import` both
   still named the pre-rename product. Nobody noticed because nobody ran it.

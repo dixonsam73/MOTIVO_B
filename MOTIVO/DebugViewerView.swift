@@ -1182,30 +1182,22 @@ fileprivate struct ShareButton: View {
     let content: String
     var body: some View {
         #if canImport(UIKit)
-        if #available(iOS 16.0, *) {
-            ShareLink(item: content) {
-                Image(systemName: "square.and.arrow.up")
-            }
-        } else {
-            Button {
-                presentActivityVC(text: content)
-            } label: {
-                Image(systemName: "square.and.arrow.up")
-            }
+        // P5-A2: the iOS 26.2 product baseline made the former iOS-16
+        // availability check unconditionally true, so the ShareLink branch is the
+        // only reachable one and the pre-16 UIActivityViewController fallback is
+        // gone with it. Effective behaviour is unchanged: the fallback was already
+        // unreachable on every device Etudes has run on.
+        //
+        // The literal availability syntax is deliberately NOT written here: the
+        // acceptance check greps for it, and a comment carrying the pattern would
+        // defeat the check for the rule it explains (U5c-34 / U5d, C-14).
+        ShareLink(item: content) {
+            Image(systemName: "square.and.arrow.up")
         }
         #else
         Button("") { }
         #endif
     }
-
-    #if canImport(UIKit)
-    private func presentActivityVC(text: String) {
-        let activity = UIActivityViewController(activityItems: [text], applicationActivities: nil)
-        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
-              let root = scene.keyWindow?.rootViewController else { return }
-        root.present(activity, animated: true)
-    }
-    #endif
 }
 
 // MARK: - Debug dump utilities

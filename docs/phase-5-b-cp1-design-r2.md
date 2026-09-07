@@ -1,5 +1,16 @@
 # P5-B / CP-1 — DESIGN, REVISION 2. 2026-09-06
 
+**SUPERSEDED IN PART 2026-09-07 BY THE iOS 26.2 PRODUCT BASELINE (P5-A2).**
+Études now requires **iOS 26.2 for the whole app, including Solo**, so §2's
+option C and **INVARIANT CP-OS-1** are **historically preserved and no longer
+operative** — the app-wide floor subsumes them. **CP-OS-1's REASONING is retained
+and still load-bearing**: below 26, `activeParentalControls` cannot be read and
+reconciliation cannot run, which is *why* an app-wide floor is coherent rather
+than merely convenient. Its billing edge is **dissolved**; acceptance cases
+**S-B9 / S-B9b are retired as impossible**; and §10.2's planned
+`@available(iOS 26.0, *)` gating is **removed as unnecessary**. See
+`docs/phase-5-a2-baseline-acceptance.md`.
+
 **AMENDED 2026-09-06 — REVISION 3, ON REVIEW OF r2. Three changes, all
 tightenings, none reversing an accepted Apple finding:**
 
@@ -131,7 +142,12 @@ under the user's control — the opposite of raising the floor.
 **On older iOS, "Explore Connected" states plainly that Connected requires iOS 26
 or later.** Solo is untouched, unrestricted, and never asks anything.
 
-### 2.1 INVARIANT CP-OS-1 — the gate is on CONNECTED, not on JOINING
+### 2.1 INVARIANT CP-OS-1 — SUPERSEDED 2026-09-07, PRESERVED FOR ITS REASONING
+
+**No longer operative: the whole app requires iOS 26.2, so there is no sub-26
+state for this invariant to govern.** It is kept because the argument below is
+exactly why the app-wide floor was chosen, and because a future decision to widen
+Solo's reach would have to answer it again.
 
 > **Connected requires iOS 26.0 or later AT ALL TIMES, not only at the moment of
 > joining. On a supported OS below 26, the app presents SOLO, under the standing
@@ -617,7 +633,7 @@ apply.**
 - **New entitlement** `com.apple.developer.declared-age-range` and the Xcode
   capability — **a project-file and provisioning change**, which on this project
   means re-checking the Release signing path before anything else is believed.
-- `@available(iOS 26.0, *)` on the join path; a plain requirement notice below.
+- ~~`@available(iOS 26.0, *)` on the join path~~ — **REMOVED 2026-09-07: unnecessary under the 26.2 app-wide floor. `DeclaredAgeRange` is unconditionally available.**
 - Age request + derivation + reconciliation on the Connected path.
 - Share default: one shared derivation replacing 2 `@State` initialisers
   (`= true` → `= false`) and 2 derivation sites.
@@ -662,8 +678,9 @@ Materially larger than under r1, and all of it is legal rather than engineering:
 7. **Teen-configurable Share defaults** — §7.3′ follows the settled decision that
    the Share *default* is OFF and not user-configurable for `band_13_17`, while
    discovery is opt-in. **If that asymmetry is wrong, it is a product change.**
-8. **CP-OS-1's billing edge** — a member subscribed on iOS 26 who later runs a
-   sub-26 device is billed while Connected is unavailable (§2.1).
+8. ~~CP-OS-1's billing edge~~ — **DISSOLVED 2026-09-07.** A member cannot run
+   Études on a sub-26 device at all, so "billed while Connected is unavailable"
+   cannot arise.
 9. **Lawful basis for children's processing**, carried unchanged from the
    existing scope.
 10. **The iCloud/Études subject mismatch** (§9.2) — **carried as an explicit DPIA
@@ -676,8 +693,12 @@ Age Assurance**, with Developer Mode enabled and a Sandbox Apple Account signed
 in. Apple exposes **six** fixed test cases; Études' own cases add the ones Apple
 does not simulate.
 
-**RIG PRECONDITION — A LATER TEST-RIG MATTER, AND EXPLICITLY NOT A BLOCKER TO
-CP-0.** Sandbox age-assurance testing was introduced in **iOS/iPadOS 26.2**
+**RIG PRECONDITION — MET, MEASURED 2026-09-07.** Device A (iPhone 16e) and
+Device B (iPhone 17 Pro) are **both on iOS 26.6.1**, above the 26.2 floor, so
+every case below is runnable on the existing rig. The original wording is kept
+below for its reasoning.
+
+**ORIGINAL — A LATER TEST-RIG MATTER, AND EXPLICITLY NOT A BLOCKER TO CP-0.** Sandbox age-assurance testing was introduced in **iOS/iPadOS 26.2**
 (reported by Apple's developer news, not by the framework reference — treat as
 reported, and confirm before planning a run). **The iOS versions on Device A
 (SD beta burner, iPhone 16e) and Device B (SD iPhone, iPhone 17 Pro) are NOT
@@ -728,8 +749,8 @@ the only way to assert an absence.**
 | **S-B6** | **decline AFTER a band exists** | establish S-A4, then *Never Share* | **nothing created, promoted, modified or destroyed** — band retained, member stays Connected (§7.4′) |
 | **S-B7** | **`communicationLimits` active** | a case reporting it | directed-send affordances withheld client-side (§8) |
 | **S-B8** | **consent revocation** | *Manage* → *Revoke App Consent* → bundle id | `RESCIND_CONSENT` lands `not_applicable` / `"appData notification"`; **membership unchanged** (§8.5) |
-| **S-B9** | **iOS < 26, never joined** | any pre-26 device | Solo fully functional; **Explore Connected shows the requirement notice** (§2) |
-| **S-B9b** | **CP-OS-1: established member on iOS < 26** | join on 26+, then run the same account on a pre-26 device | **Connected UNAVAILABLE, app presents Solo**; local journal, Scores, media and profile **untouched**; identity **retained**; **nothing deleted and nothing scheduled** (§2.1) |
+| ~~S-B9~~ | ~~iOS < 26, never joined~~ | — | **RETIRED 2026-09-07 as IMPOSSIBLE.** No supported configuration can produce a pre-26 device: the app requires 26.2. **Not skipped, not failing — unreachable** |
+| ~~S-B9b~~ | ~~CP-OS-1: established member on iOS < 26~~ | — | **RETIRED 2026-09-07 as IMPOSSIBLE**, with CP-OS-1 itself (§2.1) |
 | **S-B10** | **Solo never asks** | fresh install, stay in Solo | **no age request is made at all** — assert by absence of the prompt and of any API call (§3) |
 
 **S-B5c IS THE SINGLE MOST VALUABLE CASE IN THE SET.** It is the one that
