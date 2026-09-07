@@ -35,7 +35,18 @@ r3, not a settled requirement**, and it deserves an explicit decision:
 | **(b) opt-in** | give teens the same independent control as discovery — **needs a settled product requirement first** |
 | **(c) decouple** | default teens' follow-requests to `true` and protect discovery only |
 
-**Not decided here.** (a) is the current deployed behaviour by default.
+**DISPOSITION RECORDED 2026-09-07, AND DELIBERATELY NARROW.**
+
+> **For Phase 5, retain the deployed 13–17 default `follow_requests_enabled =
+> false` with NO client opt-in control.**
+
+**This is NOT elevated into a permanently settled product rule.** Whether teens
+should ever be able to opt into *inbound* follow requests is **carried to
+P5-G / product / DPIA review**, alongside the other age-assurance questions.
+
+**Why it is worth revisiting rather than closing:** the current posture arrived
+from a symmetry in my r3 design, not from a product decision, and it is the one
+child-privacy default a member cannot change about themselves.
 
 ## 2. THE DISCOVERABILITY CONTROL
 

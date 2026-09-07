@@ -675,15 +675,21 @@ Materially larger than under r1, and all of it is legal rather than engineering:
 6. **Retrospective reach of a protective downgrade** — §7.3′ does **not**
    retroactively unshare existing posts or sever existing approved follows.
    **Whether a child-protective regime requires either is a legal judgement.**
-7. **Teen-configurable Share defaults** — §7.3′ follows the settled decision that
+7. **Teen opt-in to INBOUND follow requests** — Phase 5 retains the deployed
+   `follow_requests_enabled = false` for `band_13_17` with **no client control**,
+   recorded 2026-09-07 as a **narrow Phase 5 disposition, NOT a settled product
+   rule**. It arose from a symmetry in this design rather than from a product
+   decision, and it is the one child-privacy default a member cannot change about
+   themselves. **P5-G owns whether that should change.**
+8. **Teen-configurable Share defaults** — §7.3′ follows the settled decision that
    the Share *default* is OFF and not user-configurable for `band_13_17`, while
    discovery is opt-in. **If that asymmetry is wrong, it is a product change.**
 8. ~~CP-OS-1's billing edge~~ — **DISSOLVED 2026-09-07.** A member cannot run
    Études on a sub-26 device at all, so "billed while Connected is unavailable"
    cannot arise.
-9. **Lawful basis for children's processing**, carried unchanged from the
+10. **Lawful basis for children's processing**, carried unchanged from the
    existing scope.
-10. **The iCloud/Études subject mismatch** (§9.2) — **carried as an explicit DPIA
+11. **The iCloud/Études subject mismatch** (§9.2) — **carried as an explicit DPIA
     residual**, not closable by this API.
 
 ## 11.5 SANDBOX ACCEPTANCE CASES
