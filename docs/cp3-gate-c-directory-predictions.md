@@ -315,3 +315,88 @@ three further confirmations of gate (A), on the purchase path this time.
 And they discriminate: if a rotation happens, hydration runs, and there is
 **still** no directory row, the cause is the display-name guard
 (`AuthManager:739`) and **not** my regression.
+
+---
+
+# 8. T2 RESULTS — 21:51 UTC, after the expiry foreground. R3 FAILS, UNATTRIBUTED
+
+| | prediction | observed | |
+|---|---|---|---|
+| R1 | exactly one rotation 39 → 40 | **40**, last **21:50:33.988** | **PASS** |
+| R2 | privacy path runs | `account_privacy_self_v1` **13 → 15 (+2)** | ran |
+| **R3** | **directory 1 → 2** | **still 1 row; `dir_ins` still 2795** | **FAIL** |
+| R4 | no burst, tokens ≤ 42 | **40**, one token, no sub-second gap | **PASS** |
+| R5 | `entitled_until` non-NULL | no row to carry it | not reached |
+| R6 | band unchanged | **13:40:16.675419** | **PASS** |
+
+**R1 is a genuinely useful positive:** the expiry gate **releases at expiry**.
+It held for an hour, then rotated exactly once when the token aged out. The gate
+is now verified in *both* directions — it does not rotate while valid, and it
+does not fail to rotate when stale.
+
+**Membership is live and reconciling:** `renewal_date` **22:08:56**,
+`entitled_now` **true**, `updated_at` **21:50:35.450** — 1.5 s after the
+rotation, so attestation ran against Apple.
+
+## 8.1 THE §7.2 DIAGNOSIS IS NOT CONFIRMED, AND IS NOW IN DOUBT
+
+§7.4 committed a discriminator: *"if a rotation happens, hydration runs, and
+there is still no directory row, the cause is the display-name guard and not my
+regression."* A rotation happened and there is still no row — **so the
+early-return regression is NOT the whole story.** It may not be the story at all.
+
+**But the discriminator's middle clause is unproven: I cannot show hydration
+ran.** `+2` on `account_privacy_self_v1` is consistent with hydration having run
+(directory read → `ensureAgeBandEstablished`) *and* equally with two
+mode-independent `AgeBandRecoveryCoordinator` foregrounds. **Another
+over-determined count** — the same trap as before, and this time I lacked the
+baseline to escape it.
+
+**The rotation itself does not prove Connected mode either.** It is fully
+explained by mode-independent paths: the recovery coordinator and
+`MembershipAttestationService` both go through `ensureValidBackendSession`, and
+attestation demonstrably ran. `ensureValidSession` — the mode-gated one — would
+have returned early in Solo without refreshing.
+
+## 8.2 CANDIDATE CAUSES, NONE YET EXCLUDED
+
+Both blocked functions guard on `BackendEnvironment.shared.isConnected` —
+`scheduleDirectoryHydrationIfNeeded:519` and
+`publishLocalProfileSnapshotToDirectoryIfPossible:702`.
+
+1. **The client is still in Solo.** `AppMode` resolves from *local StoreKit*, not
+   from the server, so a live server-side membership does not settle it. Would
+   block both functions and explain everything.
+2. **Hydration ran; `ensureAgeBandEstablished` returned false**, hitting the
+   deliberate suppression path (`:595-598`, `connectedSetupIncomplete = true`,
+   no publish). That is the designed band-before-directory behaviour **working**,
+   triggered by transport rather than by a missing band.
+3. **Hydration ran; the directory self-read failed**, taking the `.failure`
+   branch which logs and returns without publishing.
+4. **The display-name guard** (`:739`) — least likely, since the local profile
+   name is visibly "Device A".
+5. **A stuck in-flight claim from my re-entrancy guard.** Unlikely — the `defer`
+   releases on every exit path, including cancellation — but it is my change and
+   it is not excluded by anything measured.
+
+**Cause 1 would mean the run has not yet reached the state Gate (C) needs at
+all.** Gate (C) is still **untested**, and `9c5385f6` still has **no directory
+row**, so the single-use window remains **intact**.
+
+## 8.3 COUNTER BASELINE FOR THE NEXT STEP — T2, 21:53:08 UTC
+
+Captured because §8.1's ambiguity was caused by not having one.
+
+| counter | value |
+|---|---|
+| `posts` SELECT | **19855** |
+| `account_directory` SELECT | **3347** |
+| `account_directory` INSERT | **2795** |
+| `account_privacy_self_v1` | **15** |
+| `9c5385f6` tokens | **40** |
+
+**`posts` SELECT is the mode oracle.** The foreground path fetches the feed only
+when the client considers itself Connected, so a rise proves Connected mode and
+a flat count proves Solo — settling cause 1 without relying on a screenshot.
+`account_directory` SELECT rising with INSERT flat separates causes 3 and 4 from
+cause 2.
