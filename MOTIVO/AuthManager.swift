@@ -211,6 +211,17 @@ final class AuthManager: NSObject, ObservableObject {
     private var directoryHydrationTask: Task<Void, Never>?
     private var lastHydratedDirectoryUserID: String?
 
+    /// The user id whose directory hydration is running right now.
+    ///
+    /// THIS IS WHAT CUTS THE REFRESH/HYDRATION CYCLE'S EDGE, and it is
+    /// deliberately not the same thing as `lastHydratedDirectoryUserID`.
+    /// That field is assigned ONLY in the row-exists branch, so an identity
+    /// with no `account_directory` row never sets it — which is exactly why
+    /// the fresh CP-3 identity looped and the established one did not. A
+    /// re-entrant schedule used to cancel the running hydration and start
+    /// another, which both spun and produced the "Already Used" collisions.
+    private var directoryHydrationInFlightUserID: String?
+
     // Account ID auto-generation backfill (session-liveness anchored, best-effort).
     private var accountIDBackfillTask: Task<Void, Never>?
     private var accountIDBackfillAttemptedUserIDs = Set<String>()
@@ -297,11 +308,18 @@ final class AuthManager: NSObject, ObservableObject {
                 self.backendUserID = derived
             }
         
-        // Phase 14.2.2 — Auth/session liveness: allow NetworkManager to challenge auth on 401/403.
-        // This is intentionally lightweight: refresh once, retry once; otherwise collapse to signed-out.
+        // Phase 14.2.2 — Auth/session liveness: allow NetworkManager to challenge auth on 401.
+        // This is intentionally lightweight: refresh once, retry once; otherwise withdraw.
+        //
+        // `force: true` IS LOAD-BEARING. The server has just rejected this token,
+        // and a token can be rejected while still unexpired by our clock —
+        // server-side revocation, a signing-key rotation, clock skew. Without the
+        // force the expiry gate would see an unexpired token, rotate nothing, and
+        // hand the retry the very token that was refused: a guaranteed second 401,
+        // and the 401 recovery path silently dead.
         NetworkManager.shared.onAuthChallenge = { [weak self] in
             guard let self else { return false }
-            return await self.ensureValidSession(reason: "network-auth-challenge")
+            return await self.ensureValidSession(reason: "network-auth-challenge", force: true)
         }
 
         // Milestone 5C: do not establish or hydrate Connected identity from AuthManager init.
@@ -481,6 +499,19 @@ final class AuthManager: NSObject, ObservableObject {
 
     // MARK: - Directory hydration (ProfileStore defaults)
 
+    /// Releases the in-flight claim, but only if it is still ours.
+    ///
+    /// A cancelled task still runs its `defer`, and cancellation here is
+    /// cooperative — the old task may not exit until after a NEW claim has been
+    /// staked for a different identity. Clearing unconditionally would then
+    /// release somebody else's claim and quietly stop the guard guarding, which
+    /// is the failure mode that would look exactly like the guard not existing.
+    private func releaseDirectoryHydrationClaim(_ userID: String) {
+        if directoryHydrationInFlightUserID == userID {
+            directoryHydrationInFlightUserID = nil
+        }
+    }
+
     /// Hydrate local ProfileStore values (discovery mode + account handle) from the backend account_directory row.
     /// This keeps Profile privacy UI consistent on fresh installs / new devices.
     private func scheduleDirectoryHydrationIfNeeded(reason: String) {
@@ -492,10 +523,26 @@ final class AuthManager: NSObject, ObservableObject {
 
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
 
+        // RE-ENTRANCY GUARD. Hydration reads `account_privacy`, that read
+        // preflights a session refresh, and a successful refresh schedules
+        // hydration -- so hydration can re-enter its own scheduler. Cancelling
+        // and restarting made that a spin; treating it as already-scheduled
+        // makes it a no-op. This is a STRUCTURAL cut: it does not depend on
+        // which session helper the privacy preflight happens to call, so
+        // re-pointing that preflight cannot silently restore the loop.
+        guard directoryHydrationInFlightUserID != bid else {
+            #if DEBUG
+            NSLog("[Auth] directory hydration already in flight user=%@ reason=%@", bid, reason)
+            #endif
+            return
+        }
+
         if lastHydratedDirectoryUserID == bid {
             directoryHydrationTask?.cancel()
+            directoryHydrationInFlightUserID = bid
             directoryHydrationTask = Task { [weak self] in
                 guard let self else { return }
+                defer { self.releaseDirectoryHydrationClaim(bid) }
                 await self.syncPendingLocalAvatarToConnectedIfNeeded(reason: "\(reason)-alreadyHydrated")
                 await self.publishLocalProfileSnapshotToDirectoryIfPossible(userID: bid, reason: "\(reason)-alreadyHydrated")
             }
@@ -504,8 +551,10 @@ final class AuthManager: NSObject, ObservableObject {
 
         self.backendBootstrapState = .checking
         directoryHydrationTask?.cancel()
+        directoryHydrationInFlightUserID = bid
         directoryHydrationTask = Task { [weak self] in
             guard let self else { return }
+            defer { self.releaseDirectoryHydrationClaim(bid) }
             await self.syncPendingLocalAvatarToConnectedIfNeeded(reason: reason)
             await self.hydrateDirectoryStateFromBackend(userID: bid, reason: reason)
         }
@@ -732,7 +781,7 @@ final class AuthManager: NSObject, ObservableObject {
 
     /// Ensures the Supabase session is valid for connected-mode network calls.
     /// - Returns: true if a valid bearer token is available after the check.
-    func ensureValidSession(reason: String) async -> Bool {
+    func ensureValidSession(reason: String, force: Bool = false) async -> Bool {
         // Delete Account v2: suppress auth/identity work during a local factory reset.
         guard !LocalFactoryReset.isInProgress else {
             #if DEBUG
@@ -761,22 +810,28 @@ final class AuthManager: NSObject, ObservableObject {
         }
 
         // If backend isn't configured, collapse state (prevents zombie UI in Connected builds).
+        // WITHDRAWAL, NOT SIGN-OUT: an unconfigured backend is not something the
+        // user asked for, and `signOut()` would additionally destroy the
+        // per-user attachment title mappings. Same rule as the refresh path.
         guard BackendConfig.isConfigured else {
             #if DEBUG
-            NSLog("[Auth] ensureValidSession: BackendConfig not configured; signing out. reason=%@", reason)
+            NSLog("[Auth] ensureValidSession: BackendConfig not configured; withdrawing identity. reason=%@", reason)
             #endif
-            await MainActor.run { self.signOut() }
+            await MainActor.run { self.clearConnectedIdentity(reason: "session-backend-unconfigured") }
             return false
         }
 
         // Coalesce concurrent refresh attempts.
-        if let existing = sessionRefreshInFlight {
+        // A forced refresh must not be answered by an in-flight coalesced one:
+        // that attempt may have begun before the token was rejected, so its
+        // success would not clear the challenge.
+        if !force, let existing = sessionRefreshInFlight {
             return await existing.value
         }
 
         let task = Task<Bool, Never> { [weak self] in
             guard let self else { return false }
-            return await self.refreshSupabaseSession(reason: reason)
+            return await self.refreshSupabaseSession(reason: reason, force: force)
         }
         sessionRefreshInFlight = task
         let ok = await task.value
@@ -784,50 +839,21 @@ final class AuthManager: NSObject, ObservableObject {
         return ok
     }
 
-private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
-    // We must not treat offline / transient transport failures as auth invalidation.
-    // Supabase Swift may wrap URLError inside NSError userInfo; inspect recursively.
-    func extractNSErrorChain(_ error: Error) -> [NSError] {
-        var out: [NSError] = []
-        var current: NSError? = error as NSError
-        var seen = Set<ObjectIdentifier>()
-        while let ns = current {
-            let oid = ObjectIdentifier(ns)
-            if seen.contains(oid) { break }
-            seen.insert(oid)
-            out.append(ns)
-            if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError {
-                current = underlying
-            } else {
-                break
-            }
-        }
-        return out
-    }
+// `isOfflineOrTransientNetworkError` MOVED to SessionRefreshPolicy.swift, unchanged,
+// so the `ignore` disposition is testable with a real URLError.
 
-    for ns in extractNSErrorChain(error) {
-        if ns.domain == NSURLErrorDomain {
-            switch ns.code {
-            case NSURLErrorNotConnectedToInternet,
-                 NSURLErrorTimedOut,
-                 NSURLErrorCannotFindHost,
-                 NSURLErrorCannotConnectToHost,
-                 NSURLErrorNetworkConnectionLost,
-                 NSURLErrorDNSLookupFailed,
-                 NSURLErrorInternationalRoamingOff,
-                 NSURLErrorCallIsActive,
-                 NSURLErrorDataNotAllowed,
-                 NSURLErrorSecureConnectionFailed:
-                return true
-            default:
-                break
-            }
-        }
-    }
-    return false
-}
-
-    private func refreshSupabaseSession(reason: String) async -> Bool {
+    /// Refreshes the stored Supabase session, and is the ONLY place a refresh
+    /// token is spent.
+    ///
+    /// **IT USED TO ROTATE UNCONDITIONALLY, AND THAT CLOSED A FEEDBACK LOOP.**
+    /// A successful refresh schedules directory hydration; CP-3 made hydration
+    /// read `account_privacy`; that read preflights through
+    /// `ensureValidBackendSession`, which lands back here. Measured on Device A
+    /// on 2026-09-07: **34 rotations in 20.5 seconds**. The `shouldRefresh`
+    /// gate below starves it — a re-entrant pass finds a valid token and
+    /// rotates nothing — and `scheduleDirectoryHydrationIfNeeded`'s
+    /// in-flight guard cuts the cycle's edge outright.
+    private func refreshSupabaseSession(reason: String, force: Bool = false) async -> Bool {
         // Delete Account v2: suppress refresh during a local factory reset.
         guard !LocalFactoryReset.isInProgress else {
             #if DEBUG
@@ -840,21 +866,43 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         guard let refreshToken = Keychain.get(Self.supabaseRefreshTokenKeychainKey), !refreshToken.isEmpty else {
             if self.isSigningIn {
                 #if DEBUG
-                NSLog("[Auth] refreshSupabaseSession: missing refresh token while sign-in in flight; not signing out. reason=%@", reason)
+                NSLog("[Auth] refreshSupabaseSession: missing refresh token while sign-in in flight; withdrawing nothing. reason=%@", reason)
                 #endif
                 return false
             }
             #if DEBUG
-            NSLog("[Auth] refreshSupabaseSession: missing refresh token; signing out. reason=%@", reason)
+            NSLog("[Auth] refreshSupabaseSession: missing refresh token; withdrawing identity. reason=%@", reason)
             #endif
-            await MainActor.run { self.signOut() }
+            await MainActor.run { self.clearConnectedIdentity(reason: "refresh-missing-token") }
             return false
         }
+
+        // (A) DO NOT SPEND A TOKEN THAT DOES NOT NEED SPENDING.
+        // A still-valid access token is a valid session; rotating it buys
+        // nothing and, re-entrantly, cost 34 rotations in 20.5s. This path
+        // deliberately schedules NO hydration: nothing changed, so there is
+        // nothing new to hydrate from, and scheduling here would re-form the
+        // loop without the rotation.
+        let heldAccessToken = Keychain.get(Self.supabaseAccessTokenKeychainKey)
+        if !force,
+           !SessionRefreshPolicy.shouldRefresh(
+                accessTokenExpiry: SessionRefreshPolicy.accessTokenExpiry(heldAccessToken),
+                now: Date()),
+           let heldAccessToken, !heldAccessToken.isEmpty {
+            // The bearer may be unset on a cold launch even though the token is
+            // good, so apply it before reporting the session usable.
+            NetworkManager.shared.setBearerToken(heldAccessToken)
+            #if DEBUG
+            NSLog("[Auth] refreshSupabaseSession: access token still valid; no rotation. reason=%@", reason)
+            #endif
+            return true
+        }
+
         guard let url = BackendConfig.apiBaseURL, let key = BackendConfig.apiToken else {
             #if DEBUG
-            NSLog("[Auth] refreshSupabaseSession: BackendConfig missing URL/key; signing out. reason=%@", reason)
+            NSLog("[Auth] refreshSupabaseSession: BackendConfig missing URL/key; withdrawing identity. reason=%@", reason)
             #endif
-            await MainActor.run { self.signOut() }
+            await MainActor.run { self.clearConnectedIdentity(reason: "refresh-backend-unconfigured") }
             return false
         }
 
@@ -888,21 +936,62 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
             #if DEBUG
             NSLog("[Auth] refreshSupabaseSession FAILED: %@ reason=%@", String(describing: error), reason)
             #endif
-            if isOfflineOrTransientNetworkError(error) {
+
+            // (B) A FAILED REFRESH IS A FOUR-WAY DISPOSITION, NOT A BOOLEAN.
+            // The boolean is what forced the false choice between "carry on"
+            // and "destroy everything". Reconciliation evidence is re-read
+            // HERE, after the failure, because a concurrent refresh that won
+            // the race will have replaced the token we presented.
+            let reconciliation = SessionRefreshPolicy.SessionReconciliation(
+                attemptedRefreshToken: refreshToken,
+                persistedRefreshToken: Keychain.get(Self.supabaseRefreshTokenKeychainKey),
+                persistedAccessTokenExpiry: SessionRefreshPolicy.accessTokenExpiry(
+                    Keychain.get(Self.supabaseAccessTokenKeychainKey)),
+                now: Date())
+
+            switch SessionRefreshPolicy.refreshFailureDisposition(error, reconciliation: reconciliation) {
+            case .ignore:
+                // Offline / transient transport. Withdraw nothing. Unchanged.
                 #if DEBUG
-                NSLog("[Auth] refreshSupabaseSession: offline/transient failure; not signing out. reason=%@", reason)
+                NSLog("[Auth] refreshSupabaseSession: offline/transient failure; withdrawing nothing. reason=%@", reason)
                 #endif
                 return false
+
+            case .recoverWithNewerSession:
+                // Our token was superseded and a newer usable session is
+                // actually present — the race was lost, not the credential.
+                if let recovered = Keychain.get(Self.supabaseAccessTokenKeychainKey), !recovered.isEmpty {
+                    NetworkManager.shared.setBearerToken(recovered)
+                }
+                #if DEBUG
+                NSLog("[Auth] refreshSupabaseSession: superseded token; adopted newer session. reason=%@", reason)
+                #endif
+                return true
+
+            case .withdrawIdentity:
+                // Could not confirm authentication and found nothing newer.
+                // NOT `signOut()` — see clearConnectedIdentity's own rule.
+                #if DEBUG
+                NSLog("[Auth] refreshSupabaseSession: unconfirmed session; withdrawing identity. reason=%@", reason)
+                #endif
+                await MainActor.run { self.clearConnectedIdentity(reason: "refresh-unconfirmed") }
+                return false
+
+            case .terminal:
+                #if DEBUG
+                NSLog("[Auth] refreshSupabaseSession: terminal credential failure; withdrawing identity. reason=%@", reason)
+                #endif
+                await MainActor.run { self.clearConnectedIdentity(reason: "refresh-terminal") }
+                return false
             }
-            await MainActor.run { self.signOut() }
-            return false
         }
         #else
-        // If Supabase is not linked, we cannot refresh; sign out to avoid zombie UI.
+        // If Supabase is not linked we cannot refresh. Withdraw the identity to
+        // avoid zombie UI — but withdraw it, never erase content.
         #if DEBUG
-        NSLog("[Auth] refreshSupabaseSession: Supabase module missing; signing out. reason=%@", reason)
+        NSLog("[Auth] refreshSupabaseSession: Supabase module missing; withdrawing identity. reason=%@", reason)
         #endif
-        await MainActor.run { self.signOut() }
+        await MainActor.run { self.clearConnectedIdentity(reason: "refresh-supabase-missing") }
         return false
         #endif
     }
@@ -1014,6 +1103,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         #endif
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
+        directoryHydrationInFlightUserID = nil
         lastHydratedDirectoryUserID = nil
         accountIDBackfillTask?.cancel()
         accountIDBackfillTask = nil
@@ -1062,6 +1152,7 @@ private func isOfflineOrTransientNetworkError(_ error: Error) -> Bool {
         // Cancel any in-flight hydration so it can't write into stores after sign-out/reset.
         directoryHydrationTask?.cancel()
         directoryHydrationTask = nil
+        directoryHydrationInFlightUserID = nil
         lastHydratedDirectoryUserID = nil
         accountIDBackfillTask?.cancel()
         accountIDBackfillTask = nil

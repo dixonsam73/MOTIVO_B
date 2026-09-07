@@ -1921,9 +1921,15 @@ case .failure(let error):
              // to sign out — which by this point has usually already happened.
              //
              // The discriminator is free rather than plumbed: a genuine refresh
-             // failure runs signOut(), so the identity is gone; transient and offline
-             // failures are guarded against that in refreshSupabaseSession and leave
-             // it intact. Neither message may ever suggest re-subscribing —
+             // failure WITHDRAWS the Connected identity, so `hasConnectedIdentity`
+             // is false; transient and offline failures are guarded against that in
+             // refreshSupabaseSession and leave it intact.
+             //
+             // 2026-09-07: that withdrawal is `clearConnectedIdentity`, no longer
+             // `signOut()`. The discriminator is UNAFFECTED — both nil
+             // `currentUserID` — but `signOut()` additionally destroyed the user's
+             // attachment titles, which a refresh failure has no business doing.
+             // Neither message may ever suggest re-subscribing —
              // re-AUTHENTICATION can be required, re-SUBSCRIPTION never.
              deleteAccountErrorMessage = auth.hasConnectedIdentity
                  ? "Couldn’t reach Études Connected. Check your connection and try again."
