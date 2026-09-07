@@ -170,6 +170,80 @@ final class SessionRefreshPolicyTests: XCTestCase {
         }
     }
 
+    // MARK: - The lifecycle invariant the expiry gate broke
+
+    /// **THE REGRESSION TEST.** Not "the early-return line calls schedule" —
+    /// that would pin the implementation. This pins the *lifecycle rule*: a
+    /// session that is usable **without rotating** still owes directory
+    /// hydration.
+    ///
+    /// The journey that broke on hardware, 2026-09-07: an authenticated member
+    /// signs in while unentitled, subscribes later **without re-authenticating**,
+    /// and holds a valid access token throughout. Nothing rotates, so under the
+    /// first gate nothing scheduled, so no directory row was ever published —
+    /// the member stayed invisible for up to a full token lifetime. Measured:
+    /// `posts` SELECT +3 (Connected and authenticated), directory SELECT +0
+    /// (hydration never began), refresh tokens +0 (early return taken).
+    func testAUsableSessionSchedulesHydrationEvenWithoutRotation() {
+        XCTAssertTrue(
+            SessionRefreshPolicy.schedulesDirectoryHydration(after: .alreadyValid),
+            "a still-valid token is a usable session, and eligibility may have changed since it was minted"
+        )
+    }
+
+    /// Every way a session becomes usable owes the same duty. Eligibility —
+    /// Solo → Connected — changes with no token event to report it, so keying
+    /// hydration off *how* the session became usable is the error itself.
+    func testEveryUsableOutcomeSchedulesHydration() {
+        for outcome: SessionRefreshPolicy.SessionUsableOutcome in [.rotated, .alreadyValid, .recoveredNewerSession] {
+            XCTAssertTrue(
+                SessionRefreshPolicy.schedulesDirectoryHydration(after: outcome),
+                "\(outcome) must schedule hydration"
+            )
+        }
+    }
+
+    // MARK: - RETAINED: the preflight cannot recursively schedule another hydration
+
+    /// Hydration reads `account_privacy`; that read preflights a session
+    /// refresh; a usable session schedules hydration. The cycle is real, and
+    /// this guard is the only reason scheduling on every usable outcome is safe
+    /// rather than a reopening of the 34-rotations-in-20.5 s defect.
+    func testHydrationCannotReEnterItselfForTheSameIdentity() {
+        XCTAssertFalse(
+            SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: "user-A", targetUserID: "user-A"),
+            "a hydration already running for this identity must make the re-entrant schedule a no-op"
+        )
+    }
+
+    /// The guard is per-identity: it must not wedge a different user's
+    /// hydration, which would be a new defect wearing the fix's clothes.
+    func testGuardDoesNotBlockADifferentIdentity() {
+        XCTAssertTrue(
+            SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: "user-A", targetUserID: "user-B"))
+    }
+
+    /// Nothing in flight must never block. An empty claim is treated as no
+    /// claim, so a cleared-to-empty field cannot wedge hydration permanently.
+    func testNoClaimNeverBlocks() {
+        XCTAssertTrue(
+            SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: nil, targetUserID: "user-A"))
+        XCTAssertTrue(
+            SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: "", targetUserID: "user-A"))
+    }
+
+    /// The two rules together, as the fix relies on them: scheduling is
+    /// unconditional on outcome, and re-entry is stopped by the guard alone.
+    /// If this pairing is ever broken, either the loop returns or the member
+    /// goes missing from the directory.
+    func testSchedulingIsUnconditionalAndReEntryIsStoppedOnlyByTheGuard() {
+        // Outcome never withholds scheduling …
+        XCTAssertTrue(SessionRefreshPolicy.schedulesDirectoryHydration(after: .alreadyValid))
+        // … so the guard is the sole thing preventing the recursive schedule.
+        XCTAssertFalse(
+            SessionRefreshPolicy.shouldBeginDirectoryHydration(inFlightUserID: "u", targetUserID: "u"))
+    }
+
     // MARK: - §8 · the expiry gate
 
     /// A still-valid token needs no rotation. This is what starves the

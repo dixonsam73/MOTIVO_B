@@ -716,7 +716,7 @@ private var sessionSetupSection: some View {
                      // D-1: the default is ON for sharing, and nothing said so.
                      // Describes what the toggle does, without overstating --
                      // Thoughts START private but remain shareable by choice.
-                     Text("When on, new sessions start with sharing off. Thoughts always start private. You can change sharing for any individual session.")
+                     Text("When on, new sessions start private. Thoughts are always private by default. You can change sharing for each session.")
                         .font(.footnote)
                         .foregroundStyle(Theme.Colors.secondaryText)
                  }
@@ -745,7 +745,7 @@ private var sessionSetupSection: some View {
                          // Neutral and factual: what each position does, and what
                          // does NOT change either way. No recommendation and no
                          // nudge in either direction.
-                         Text("When this is on, other members can find you by searching your name, Account ID or instrument. When it is off, they cannot search for you. Either way, people you already share with still see your name on anything you have shared.")
+                         Text("When this is on, other members can find you by searching your name, account ID or instrument. When it’s off, you won’t appear in search. People you already share with can still see your name on anything you’ve shared.")
                             .font(.footnote)
                             .foregroundStyle(Theme.Colors.secondaryText)
                      }

@@ -530,7 +530,9 @@ final class AuthManager: NSObject, ObservableObject {
         // makes it a no-op. This is a STRUCTURAL cut: it does not depend on
         // which session helper the privacy preflight happens to call, so
         // re-pointing that preflight cannot silently restore the loop.
-        guard directoryHydrationInFlightUserID != bid else {
+        guard SessionRefreshPolicy.shouldBeginDirectoryHydration(
+                inFlightUserID: directoryHydrationInFlightUserID,
+                targetUserID: bid) else {
             #if DEBUG
             NSLog("[Auth] directory hydration already in flight user=%@ reason=%@", bid, reason)
             #endif
@@ -892,6 +894,27 @@ final class AuthManager: NSObject, ObservableObject {
             // The bearer may be unset on a cold launch even though the token is
             // good, so apply it before reporting the session usable.
             NetworkManager.shared.setBearerToken(heldAccessToken)
+
+            // A USABLE SESSION SCHEDULES HYDRATION EVEN WHEN NOTHING ROTATED.
+            //
+            // The first version of this gate returned here without scheduling,
+            // on the reasoning that "nothing changed". Measured wrong on Device
+            // A on 2026-09-07: a member who signs in while unentitled and
+            // subscribes later, without re-authenticating, holds a valid token
+            // throughout -- so nothing rotates, nothing schedules, and no
+            // directory row is ever published until the token ages out.
+            // Eligibility changed even though the token did not, and no token
+            // event reports that.
+            //
+            // Safe only because of the re-entrancy guard, which turns the
+            // hydration-preflight's re-entry into a no-op rather than a spin.
+            if SessionRefreshPolicy.schedulesDirectoryHydration(after: .alreadyValid) {
+                await MainActor.run {
+                    self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-alreadyValid")
+                    self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-alreadyValid")
+                }
+            }
+
             #if DEBUG
             NSLog("[Auth] refreshSupabaseSession: access token still valid; no rotation. reason=%@", reason)
             #endif
@@ -962,6 +985,13 @@ final class AuthManager: NSObject, ObservableObject {
                 // actually present — the race was lost, not the credential.
                 if let recovered = Keychain.get(Self.supabaseAccessTokenKeychainKey), !recovered.isEmpty {
                     NetworkManager.shared.setBearerToken(recovered)
+                }
+                // Same rule as the early return: a usable session schedules.
+                if SessionRefreshPolicy.schedulesDirectoryHydration(after: .recoveredNewerSession) {
+                    await MainActor.run {
+                        self.scheduleDirectoryHydrationIfNeeded(reason: "\(reason)-recovered")
+                        self.scheduleAccountIDBackfillIfNeeded(reason: "\(reason)-recovered")
+                    }
                 }
                 #if DEBUG
                 NSLog("[Auth] refreshSupabaseSession: superseded token; adopted newer session. reason=%@", reason)

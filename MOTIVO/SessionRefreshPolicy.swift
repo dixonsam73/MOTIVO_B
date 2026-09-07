@@ -75,6 +75,73 @@ enum SessionRefreshPolicy {
         return nil
     }
 
+    // MARK: - (A2) What a SUCCESSFUL refresh owes the rest of the app
+
+    /// How a session came to be usable.
+    enum SessionUsableOutcome: Equatable {
+        /// The refresh token was spent and a new session was issued.
+        case rotated
+        /// The held access token was still valid, so nothing was spent.
+        case alreadyValid
+        /// Our token was superseded and a newer persisted session was adopted.
+        case recoveredNewerSession
+    }
+
+    /// Whether a usable session obliges the caller to schedule directory
+    /// hydration.
+    ///
+    /// **THE ANSWER IS ALWAYS YES, AND THAT IS THE POINT.**
+    ///
+    /// The first version of the expiry gate returned early on `alreadyValid`
+    /// **without** scheduling, reasoning that "nothing changed, so there is
+    /// nothing new to hydrate from". **That was wrong, and it was measured
+    /// wrong on hardware on 2026-09-07.** Hydration is not a consequence of the
+    /// *token* changing; it is a consequence of the *client* needing its
+    /// directory state, and the thing that changes is the app's ELIGIBILITY —
+    /// Solo → Connected — which no token event reports.
+    ///
+    /// The lifecycle that broke: a member signs in while unentitled, later
+    /// subscribes **without re-authenticating**, and their access token is still
+    /// valid throughout. Nothing rotates, so nothing schedules, so no directory
+    /// row is ever published and the member stays invisible until the token
+    /// happens to age out — up to a full token lifetime later. That is exactly
+    /// the lapsed-member-returns journey U5's self-healing invariant exists to
+    /// serve. Measured on Device A: `posts` SELECT +3 (Connected and
+    /// authenticated), directory SELECT +0 (hydration never began), refresh
+    /// tokens +0 (the early return was taken).
+    ///
+    /// **Scheduling on every usable outcome is safe ONLY because of the
+    /// re-entrancy guard** — see `shouldBeginDirectoryHydration`. Hydration
+    /// preflights a session refresh, so a refresh that schedules hydration can
+    /// be re-entered by it. The guard makes the re-entrant schedule a no-op
+    /// instead of a cancel-and-restart spin. **That is what makes this a
+    /// one-line fix rather than a reopening of the 34-rotations-in-20.5 s
+    /// defect**, and it is why the guard is load-bearing rather than
+    /// belt-and-braces.
+    static func schedulesDirectoryHydration(after outcome: SessionUsableOutcome) -> Bool {
+        switch outcome {
+        case .rotated, .alreadyValid, .recoveredNewerSession:
+            return true
+        }
+    }
+
+    /// Whether a directory hydration may begin for `targetUserID`.
+    ///
+    /// **THE CYCLE'S EDGE.** Hydration reads `account_privacy`; that read
+    /// preflights `ensureValidBackendSession`; a usable session schedules
+    /// hydration. So hydration can re-enter its own scheduler, and before this
+    /// guard the scheduler answered by **cancelling the running hydration and
+    /// starting another**, which spun and produced the "Already Used" refresh
+    /// collisions.
+    ///
+    /// Structural rather than incidental: it does not depend on which session
+    /// helper the privacy preflight happens to call, so re-pointing that
+    /// preflight cannot silently restore the loop.
+    static func shouldBeginDirectoryHydration(inFlightUserID: String?, targetUserID: String) -> Bool {
+        guard let inFlightUserID, !inFlightUserID.isEmpty else { return true }
+        return inFlightUserID != targetUserID
+    }
+
     // MARK: - (B) What a refresh FAILURE means
 
     /// What the client should do about a refresh that did not succeed.

@@ -117,7 +117,42 @@ is S-9b "$(code $A 'defer \{ self\.releaseDirectoryHydrationClaim\(bid\) \}')" "
 # claim -- which would look exactly like the guard not existing.
 is S-9c "$(code $A 'if directoryHydrationInFlightUserID == userID')" "1" \
         "the claim is released only by its owner"
-is S-10 "$(code $A 'guard directoryHydrationInFlightUserID != bid else')" "1" "re-entrancy guard present"
+# The guard now routes through the PURE predicate, so the deployed condition and
+# the unit-tested rule cannot drift apart. S-12f pins the call; this pins that
+# the scheduler still guards at all.
+is S-10 "$(code $A 'guard SessionRefreshPolicy\.shouldBeginDirectoryHydration')" "1" \
+        "re-entrancy guard present, via the pure rule"
+
+# ===== 4b. A USABLE SESSION SCHEDULES HYDRATION, HOWEVER IT BECAME USABLE
+#
+# The first gate returned early WITHOUT scheduling, on the reasoning "nothing
+# changed, so there is nothing new to hydrate from". Measured wrong on Device A
+# 2026-09-07: a member who signs in unentitled and subscribes later, without
+# re-authenticating, holds a valid token throughout -- so nothing rotated,
+# nothing scheduled, and no directory row was published until the token aged
+# out. ELIGIBILITY changed and no token event reports that.
+#
+# Three schedule sites in refreshSupabaseSession now: rotated, alreadyValid,
+# recoveredNewerSession.
+# Five CALL sites: three in refreshSupabaseSession (rotated, alreadyValid,
+# recoveredNewerSession) plus the identity handshake and sign-in. The bare
+# regex would also catch the declaration, so it is anchored on `self.`.
+is S-12 "$(code $A 'self\.scheduleDirectoryHydrationIfNeeded\(reason:')" "5" \
+        "hydration schedule CALL sites in AuthManager"
+is S-12a "$(code $A 'private func scheduleDirectoryHydrationIfNeeded')" "1" "its declaration"
+is S-12b "$(code $A 'schedulesDirectoryHydration\(after: \.alreadyValid\)')" "1" \
+         "the valid-token path schedules"
+is S-12c "$(code $A 'schedulesDirectoryHydration\(after: \.recoveredNewerSession\)')" "1" \
+         "the recovery path schedules"
+
+# The rule is a POLICY DECISION, not an inline condition, so the lifecycle
+# invariant is unit-testable rather than only inspectable.
+is S-12d "$(code $P 'static func schedulesDirectoryHydration')" "1" "the rule is pure and testable"
+is S-12e "$(code $P 'static func shouldBeginDirectoryHydration')" "1" "the guard is pure and testable"
+
+# And the guard routes through it, so the two cannot drift apart.
+is S-12f "$(code $A 'SessionRefreshPolicy\.shouldBeginDirectoryHydration')" "1" \
+         "the scheduler consults the pure guard"
 
 # ===== 5. THE POLICY IS PURE
 #

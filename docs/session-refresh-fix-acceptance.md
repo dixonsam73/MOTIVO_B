@@ -119,3 +119,83 @@ re-run. Environmental; this change touches no local-stack path.
 - **A hung hydration now blocks re-scheduling for that identity** until the task
   exits or the identity is withdrawn, where before a re-schedule would cancel and
   restart. Bounded by `URLSession`'s own timeouts, and stated rather than glossed.
+
+---
+
+# 6. THE VALID-TOKEN HYDRATION FIX — 2026-09-08
+
+## 6.1 What was wrong
+
+§7.2/§9 of `docs/cp3-gate-c-directory-predictions.md` records it, measured on
+hardware: **a foreground in Connected mode with a still-valid access token did
+not schedule directory hydration.** The expiry gate returned early, and that
+early return deliberately scheduled nothing.
+
+**My reasoning when I wrote it — "nothing changed, so there is nothing new to
+hydrate from" — was wrong.** Hydration is not a consequence of the *token*
+changing. It is a consequence of the client needing its directory state, and
+what changes is **eligibility** — Solo → Connected — which **no token event
+reports**.
+
+**The broken lifecycle:** a member signs in while unentitled, subscribes later
+**without re-authenticating**, and holds a valid token throughout. Nothing
+rotates ⇒ nothing schedules ⇒ no directory row is published until the token
+happens to age out, up to a full token lifetime later. That is the
+lapsed-member-returns journey U5's self-healing invariant exists to serve.
+
+**Measured, T2→T3 on Device A:** `posts` SELECT **+3** (Connected and
+authenticated, since the feed fetch sits behind `guard ok`), `account_directory`
+SELECT **+0** (hydration never began — `fetchSelfRow` is its first act), refresh
+tokens **+0** (the early return was taken).
+
+## 6.2 The fix
+
+**A usable session schedules hydration however it became usable.** The rule is a
+pure decision — `SessionRefreshPolicy.schedulesDirectoryHydration(after:)` over
+`.rotated | .alreadyValid | .recoveredNewerSession` — rather than an inline
+condition, so the **lifecycle invariant** is unit-testable instead of merely
+inspectable. `refreshSupabaseSession` now schedules on all three; call sites went
+**3 → 5**.
+
+**It is safe only because of the re-entrancy guard**, which is now also a pure
+rule (`shouldBeginDirectoryHydration(inFlightUserID:targetUserID:)`) that the
+scheduler consults, so the deployed condition and the tested rule cannot drift.
+Hydration preflights a session refresh, so a refresh that schedules hydration can
+be re-entered by it; the guard makes that a no-op instead of a
+cancel-and-restart spin.
+
+**This settles a question left open in §3 of this file.** The handover claimed
+gate (A) alone sufficed and (C) was optional. The opposite is true: **(C) is what
+makes (A) survivable.** Without the guard, this fix would reopen the
+34-rotations-in-20.5 s defect.
+
+## 6.3 Evidence
+
+- Debug **and** Release build clean.
+- `MOTIVOTests` **87 passed / 0 failed / 0 skipped** (81 before, **+6**).
+- `supabase/tests/p5/session-refresh-acceptance.sh` **34/34**.
+- **Non-vacuity, measured against the pre-fix tree:** schedule call sites
+  **3 → 5**; `schedulesDirectoryHydration(after: .alreadyValid)` **0 → 1**.
+- `u5-client-acceptance` **28/2, identical to its HEAD baseline** — unmoved.
+- `u8-acceptance` **25/5, identical to its HEAD baseline.** Those 5 are D-series
+  scope-containment assertions diffed against `57ab5fa`; they were already
+  failing at HEAD and inflate with every later commit.
+
+## 6.4 A TEST WAS RE-POINTED, AND IT IS DECLARED RATHER THAN BURIED
+
+`U8-B5` and `U8-B6` pinned the **exact previous wording** of the two Profile
+privacy helpers, which the account holder revised on 2026-09-08. Both literals
+were re-pointed to the new text. **Re-pointed, not relaxed:** what they protect
+is that the setting explains itself and that the Thoughts case is stated, and
+both still hold. `U8-A1` — which forbids the false *"never shared"* framing —
+was **not** touched and still passes, because the new wording says
+*default*-private, which is what Thoughts actually are.
+
+## 6.5 What is still NOT established
+
+**Gate (C) remains untested on hardware.** Every token observation so far —
+8→9, 9→10, 10→13, 15→16 — measures gate **(A)**. The hydration cycle has not run
+once under Connected mode, because until this fix it was never scheduled.
+
+**The no-directory-row state of `9c5385f6` is preserved and is the fixture for
+that test.** Nothing in this unit touched the device or the server.

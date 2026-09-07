@@ -41,8 +41,15 @@ has U8-B1 "shared with your followers by default" "$A" "About states the sharing
 has U8-B2 "Default to Private Posts" "$A" "…and names WHERE to change it"
 has U8-B3 "Thoughts start private" "$A" "…and that Thoughts start private"
 has U8-B4 "shared with your followers by default" "$C" "Explore Connected states the default too"
-has U8-B5 "When on, new sessions start with sharing off." "$P" "the setting itself now explains what it does"
-has U8-B6 "Thoughts always start private" "$P" "…including the Thoughts case"
+# COPY REVISED 2026-09-08 by the account holder; these two literals are
+# RE-POINTED, not relaxed. What B5/B6 protect is that the setting explains
+# ITSELF and that the Thoughts case is stated — both still hold:
+#   "When on, new sessions start private. Thoughts are always private by
+#    default. You can change sharing for each session."
+# U8-A1 still forbids the false "never shared" framing, and still passes: the
+# new wording says default-private, which is what Thoughts actually are.
+has U8-B5 "new sessions start private" "$P" "the setting itself now explains what it does"
+has U8-B6 "Thoughts are always private by default" "$P" "…including the Thoughts case"
 
 # ===== 3. ACCURATE CLAIMS THAT MUST SURVIVE
 echo; echo "-- C  accurate claims are retained, not lost in the edit --"
