@@ -156,3 +156,49 @@ give five rotations however closely spaced, and no spacing is required.
 
 **It also confirms Apple is never asked while a band exists**, so this run
 cannot disturb `band_18_plus` or consume the Age Assurance fixture.
+
+---
+
+# 6. RESULTS — measured 2026-09-07 20:52 UTC
+
+Device A rebuilt at `445750f`-era HEAD, signed in via **Explore Connected →
+Sign In** (`.returning`) at **20:49:10**, then foregrounded **five times**.
+
+| # | Prediction | Observed | |
+|---|---|---|---|
+| P1 | `auth.users` stays 2 | **2** | **PASS** — SIWA returned the same `sub`; no identity minted |
+| P2 | sign-in adds 1–2 tokens | **+1** (20:49:10.037) | **PASS** |
+| **P3** | **five foregrounds add ZERO tokens** | **ZERO** (38 → 39 total, the 1 being the sign-in) | **PASS — the discriminator.** Pre-fix predicted **+5** |
+| P4 | no gap < 1 s | **25 501.84 s** (~7.08 h) from the previous token | **PASS** |
+| P5 | `dfaf8d18` unmoved | **248 tokens, last 2026-09-05 16:44:36, 19 sessions, `last_update` 2026-09-05** | **PASS** — Samuel untouched |
+| P6 | band unchanged | `band_updated_at` **13:40:16.675419**, identical to baseline; both `*_changed_at` still NULL | **PASS** |
+| P7 | no directory row for the fresh identity | `account_directory` still **1** (Samuel) | **PASS** |
+
+**The signature is gone.** Baseline: 34 of 37 gaps under 1 s, median 0.14 s,
+uniform 0.12–0.13 s tail. This run: one token, next-gap seven hours. The old
+sub-second gaps still visible in the table are **historical rows from 13:44**,
+not new ones.
+
+A new session `fa7c2149` was minted; the previous `88227e65` and its orphan
+live token #38 remain. Expected — a fresh SIWA starts a session rather than
+resuming one — and it is why `live` went 1 → 2 without a rotation.
+
+## 6.1 THE ZERO IS OVER-DETERMINED, AND THAT IS NOT YET RESOLVED
+
+**P3 passing is consistent with two different worlds**: the expiry gate saw a
+fresh token and correctly rotated nothing, **or** the refresh path was never
+entered on foreground at all. Both produce exactly zero.
+
+Only the first is a pass. **Scoring P3 without separating them would repeat the
+"Find People returns nothing" error** recorded in the Phase 4 device QA — a zero
+read as evidence for one cause when two were sufficient.
+
+`pg_stat_statements` shows `account_privacy_self_v1` at **8 PostgREST calls**
+cumulative, which cannot be attributed to this run without a delta.
+**RESOLUTION: record 8, foreground once more, re-read.** 8 → 9 proves the read
+path executes on foreground, which makes the zero rotations a measured pass.
+No change proves the coordinator never ran, and P3 is then unscored — not
+failed, and certainly not passed.
+
+**Gate (C), the refresh↔hydration cycle, remains unreachable in Solo and is
+NOT addressed by any of this.**
