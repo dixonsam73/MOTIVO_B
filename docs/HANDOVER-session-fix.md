@@ -150,17 +150,33 @@ recover **only if a newer usable token/session is actually present**.
 **When NO newer token is present, do NOT call `signOut()`.** Use
 **`clearConnectedIdentity`**.
 
-> **`signOut()` is `clearConnectedIdentity` PLUS deletion of the per-user
-> attachment *title* mappings (`AuthManager:880-883`) — content the user typed.**
-> `AppleCredentialStateMonitor` already refuses `signOut()` for exactly this
-> reason, citing **invariant 1**: *the local journal is never deleted by any
-> Connected action.*
+> **VERIFIED IN SOURCE, not inferred.** `refreshSupabaseSession`'s `catch`
+> (`AuthManager:886`) returns early **only** for
+> `isOfflineOrTransientNetworkError`, then falls through to **`signOut()` at
+> `AuthManager:897`**. An *Already Used* 400 is not a transient network error, so
+> it takes that branch. `signOut()`'s body does remove
+> `AttachmentTitlePersistenceKeys.audioNamespacedKey` / `videoNamespacedKey` —
+> **per-user attachment *title* mappings, content the user typed.**
+>
+> **`AuthManager` ALREADY CARRIES THE RULE, ~100 LINES BELOW THE VIOLATION, IN
+> THE SAME FILE.** `clearConnectedIdentity`'s doc comment (`AuthManager:995`)
+> reads: **"PREFER THIS OVER `signOut()` FOR ANY NON-USER-INITIATED
+> WITHDRAWAL."** It then names the exact triggers it had in mind — *"Apple
+> revoking a credential, a server-side expiry"* — and calls destroying those
+> titles *"silent data loss the user never asked for."*
+>
+> **A superseded refresh token is squarely a non-user-initiated withdrawal.** So
+> this is not a missing precedent to be argued for; it is **a standing rule this
+> file states about itself and one of its own functions breaks.**
+> `AppleCredentialStateMonitor:43-52` is the second site, obeying the rule and
+> citing **invariant 1** — *the local journal is never deleted by any Connected
+> action.*
 >
 > **So the current refresh-failure path can cause SILENT LOSS OF USER-TYPED
 > CONTENT in response to a superseded token.** That is a second, independent
-> defect on the same line, and it is worse than the sign-out itself. The
-> distinction already exists in the codebase as a deliberate primitive — the
-> refresh path simply does not use it.
+> defect on the same line, and it is worse than the sign-out itself. **Do not
+> re-derive whether `clearConnectedIdentity` is the right primitive — the file
+> already answers that.**
 
 **A superseded token must never delete an identity, and must never delete
 content.**
