@@ -322,8 +322,6 @@ struct AppSetUpView: View {
                 userID: backendID,
                 displayName: trimmedName,
                 accountID: nil,
-                lookupEnabled: true,
-                followRequestsEnabled: true,
                 location: nil,
                 instruments: instrumentsSorted
             )
@@ -334,8 +332,6 @@ struct AppSetUpView: View {
                     userID: backendID,
                     displayName: trimmedName,
                     localAccountID: ProfileStore.accountID(for: backendID),
-                    lookupEnabled: true,
-                    followRequestsEnabled: true,
                     location: nil,
                     instruments: instrumentsSorted
                 ) {

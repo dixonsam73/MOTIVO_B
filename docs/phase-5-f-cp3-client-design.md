@@ -42,7 +42,18 @@ live.** It sets CP-3's hardest constraint:
 > publish — inside `AuthManager`'s post-sign-in path, not merely "before
 > purchase".**
 
-## 2. A SECOND MEASURED CORRECTION: THE DISCOVERY TOGGLE EXISTS AND HAS NEVER WORKED
+## 2. A SECOND MEASURED CORRECTION — AND THIS SECTION IS ITSELF CORRECTED
+
+**AMENDED 2026-09-07 during implementation.** This section said a wired toggle
+"never persisted the member's choice". **Closer measurement showed something
+slightly different and worth stating exactly:** `ProfileView` carries the comment
+*"Connected discovery is no longer user-configurable"* and **hard-forces
+`DiscoveryMode.search` at two sites**. So the control was **withdrawn from the
+UI**, and the local state was pinned ON — while the writer separately discarded
+its argument. **Same net effect (no user control, permanent discoverability),
+different mechanism**, and the mechanism is what the next person implements from.
+
+### The original text follows
 
 C-41 recorded `lookup_enabled` as *vestigial client plumbing*. **It is not.**
 

@@ -118,6 +118,7 @@
 import StoreKit
 import UIKit
  import SwiftUI
+import DeclaredAgeRange
  import CoreData
 import Foundation
  import AuthenticationServices
@@ -321,6 +322,10 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
      /// credential. Only what happens on completion differs.
      private enum ConnectedSignInIntent { case returning, join }
      @State private var connectedSignInIntent: ConnectedSignInIntent = .returning
+     /// Apple's system age-range request. Études never asks the member their age;
+     /// Apple presents its own sheet and returns a RANGE.
+     @Environment(\.requestAgeRange) private var requestAgeRange
+     @State private var ageRangeRefusedNotice: String?
      @State private var showTintModeSelection: Bool = false
     @State private var signedOutGateWasVisible: Bool = false
  
@@ -372,22 +377,31 @@ fileprivate enum DiscoveryMode: Int, CaseIterable, Identifiable {
                             showConnectedSignInSheet = true
                         },
                         onContinue: {
-                            // B-24 / D2: SIWA BEFORE PURCHASE for every new join.
-                            // Forced rather than chosen — the binding token must
-                            // exist before StoreKit can carry it into the
-                            // transaction, and a purchase made without one lands
-                            // in the legacy-claim path instead of being bound at
-                            // source. An already-authenticated member skips
-                            // straight through, so a returning member who taps
-                            // Continue sees no extra step.
-                            if auth.hasConnectedIdentity {
-                                showMembershipSelection = true
-                            } else {
-                                connectedSignInIntent = .join
-                                showConnectedSignInSheet = true
+                            // CP-3: Apple's declared age range is requested BEFORE
+                            // Sign in with Apple, so an ineligible or undisclosed
+                            // result turns the member away WITHOUT minting an
+                            // identity that would then need deleting. The band is
+                            // held in memory only until an identity exists.
+                            Task { @MainActor in
+                                switch await requestDeclaredAgeRange() {
+                                case .band(let band):
+                                    auth.pendingAgeBand = band
+                                    continueToConnectedJoin()
+                                case .ineligible:
+                                    ageRangeRefusedNotice = "Études Connected is for ages 13 and over."
+                                case .unavailable:
+                                    ageRangeRefusedNotice = "Études needs Apple to share your age range before Connected can be set up. You can change this in Settings, under your Apple Account."
+                                }
                             }
                         }
                     )
+                    .alert("Connected isn’t available",
+                           isPresented: Binding(get: { ageRangeRefusedNotice != nil },
+                                                set: { if !$0 { ageRangeRefusedNotice = nil } })) {
+                        Button("OK", role: .cancel) { ageRangeRefusedNotice = nil }
+                    } message: {
+                        Text(ageRangeRefusedNotice ?? "")
+                    }
                 }
                 .navigationDestination(isPresented: $showMembershipSelection) {
                     MembershipSelectionView(
@@ -1028,10 +1042,47 @@ private var sessionSetupSection: some View {
          refreshAvatarDisplay()
          self.locationText = ProfileStore.location(for: auth.backendUserID)
 
-         // Connected discovery is no longer user-configurable; keep local legacy state aligned for compatibility.
-         discoveryModeRawPerUser = DiscoveryMode.search.rawValue
-         ProfileStore.setDiscoveryModeRaw(DiscoveryMode.search.rawValue, for: auth.backendUserID)
+         // CP-3: discovery is server-authoritative. AuthManager hydrates the
+         // EFFECTIVE value from account_privacy; this no longer forces it on.
+         discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
          accountIDText = ProfileStore.accountID(for: auth.backendUserID)
+     }
+
+     /// Asks Apple to share the member's age range and reduces it to a band.
+     /// Any thrown error -- including `.notAvailable` and `.invalidRequest` --
+     /// is `.unavailable`: never a band, and never eligibility.
+     @MainActor
+     private func requestDeclaredAgeRange() async -> DeclaredAgeRangeOutcome {
+         do {
+             let response = try await requestAgeRange(
+                 ageGates: DeclaredAgeRangeService.minimumGate,
+                 DeclaredAgeRangeService.adultGate
+             )
+             return DeclaredAgeRangeService.outcome(for: response)
+         } catch {
+             return .unavailable
+         }
+     }
+
+     /// B-24 / D2: SIWA BEFORE PURCHASE for every new join. Forced rather than
+     /// chosen -- the binding token must exist before StoreKit can carry it into
+     /// the transaction, and a purchase made without one lands in the
+     /// legacy-claim path instead of being bound at source. An already-
+     /// authenticated member skips straight through.
+     @MainActor
+     private func continueToConnectedJoin() {
+         if auth.hasConnectedIdentity {
+             Task { @MainActor in
+                 // The band must reach authenticated server state before any
+                 // directory publication. For an identity that already exists
+                 // this is a reconcile; for a new one it is the establishment.
+                 _ = await auth.ensureAgeBandEstablished(reason: "join")
+                 showMembershipSelection = true
+             }
+         } else {
+             connectedSignInIntent = .join
+             showConnectedSignInSheet = true
+         }
      }
 
      private func clearUserPresentedStateForSignOut() {
@@ -1393,8 +1444,6 @@ private var sessionSetupSection: some View {
              userID: backendID,
              displayName: display,
              accountID: acctOrNil,
-             lookupEnabled: enabled,
-             followRequestsEnabled: followRequestsEnabled,
              location: locOrNil,
              instruments: instrumentsSorted
          )
@@ -1406,8 +1455,6 @@ case .success:
     await attemptAccountIDAutoGenerationIfNeeded(
         backendID: backendID,
         displayName: display,
-        lookupEnabled: enabled,
-        followRequestsEnabled: followRequestsEnabled,
         location: locOrNil,
         instruments: instrumentsSorted
     )
@@ -1425,8 +1472,6 @@ case .failure(let error):
     private func attemptAccountIDAutoGenerationIfNeeded(
         backendID: String,
         displayName: String,
-        lookupEnabled: Bool,
-        followRequestsEnabled: Bool,
         location: String?,
         instruments: [String]
     ) async {
@@ -1455,8 +1500,6 @@ case .failure(let error):
             userID: trimmedBackendID,
             displayName: trimmedDisplayName,
             localAccountID: storedAccountID,
-            lookupEnabled: lookupEnabled,
-            followRequestsEnabled: followRequestsEnabled,
             location: location,
             instruments: instruments
         )
@@ -1931,8 +1974,7 @@ private func initials(from string: String) -> String {
                     discoveryModeRawPerUser = DiscoveryMode.search.rawValue
                     locationText = ProfileStore.location(for: nil)
                 } else {
-                    discoveryModeRawPerUser = DiscoveryMode.search.rawValue
-                    ProfileStore.setDiscoveryModeRaw(DiscoveryMode.search.rawValue, for: auth.backendUserID)
+                    discoveryModeRawPerUser = ProfileStore.discoveryModeRaw(for: auth.backendUserID)
                     accountIDText = ProfileStore.accountID(for: auth.backendUserID)
                     locationText = ProfileStore.location(for: auth.backendUserID)
                 }

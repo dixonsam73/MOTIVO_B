@@ -80,6 +80,25 @@ struct ProfileStore {
         return 1
     }
 
+    /// CP-3: device-level mirror of the server-authoritative age band, kept in
+    /// sync by AuthManager and read ONLY to pick a Share default in views that
+    /// have no AuthManager in scope.
+    ///
+    /// NOT authority. The server decides everything that matters; this exists so
+    /// a local UI default does not have to guess. Absence reads as nil and every
+    /// consumer must treat nil protectively.
+    private static let ageBandKey = "accountPrivacy.ageBand_v1"
+
+    static func lastKnownAgeBand() -> AgeBand? {
+        guard let raw = UserDefaults.standard.string(forKey: ageBandKey) else { return nil }
+        return AgeBand(rawValue: raw)
+    }
+
+    static func setLastKnownAgeBand(_ band: AgeBand?) {
+        if let band { UserDefaults.standard.set(band.rawValue, forKey: ageBandKey) }
+        else { UserDefaults.standard.removeObject(forKey: ageBandKey) }
+    }
+
     static func setDiscoveryModeRaw(_ raw: Int, for backendUserID: String?) {
         guard let bid = backendUserID?.trimmingCharacters(in: .whitespacesAndNewlines), !bid.isEmpty else { return }
         UserDefaults.standard.set(raw, forKey: discoveryModeKey(for: bid))

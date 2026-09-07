@@ -232,7 +232,8 @@ struct PostRecordDetailsView: View {
     @State var userActivities: [UserActivity] = []
     @State var activityChoice: String = "core:0"
     @State var selectedCustomName: String = ""
-    @State private var isPublic: Bool = true
+    // CP-3: initialises FALSE so the pre-derivation window is protective.
+    @State private var isPublic: Bool = false
     @State private var mood: Int = 5
     @State private var effort: Int = 5
     @State private var notes: String = ""
@@ -306,7 +307,9 @@ struct PostRecordDetailsView: View {
             isPublic = UserDefaults.standard.bool(forKey: draftIsPublicKey)
         } else {
             // Brand new draft — honour the user's default posting preference.
-            isPublic = !fetchDefaultPostingIsPrivate()
+            isPublic = DeclaredAgeRangeService.shareDefaultOn(
+                band: ProfileStore.lastKnownAgeBand(),
+                defaultPostingIsPrivate: fetchDefaultPostingIsPrivate())
         }
     }
 

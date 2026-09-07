@@ -319,14 +319,18 @@ public final class AccountDirectoryService {
 
     /// Upsert the caller's account_directory row (owner-only via RLS).
     /// - Important: This is the only write surface for Phase 12C.
-    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, lookupEnabled: Bool, followRequestsEnabled: Bool? = nil, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
+    /// CP-3: `lookupEnabled` and `followRequestsEnabled` are GONE, not defaulted.
+    /// They were dead parameters that read as controls -- discarded here and
+    /// hard-coded in the payload -- so a shipped, server-hydrated discovery
+    /// toggle never once persisted the member's choice. Those preferences now
+    /// live in `account_privacy` and are written only by AccountPrivacyService.
+    /// Ordinary profile publishing therefore cannot touch them: the columns are
+    /// no longer sent at all.
+    public func upsertSelfRow(userID: String, displayName: String, accountID: String?, location: String? = nil, instruments: [String]? = nil) async -> Result<Void, Error> {
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else {
             return .failure(NSError(domain: "AccountDirectoryService", code: 1, userInfo: [NSLocalizedDescriptionKey: "empty userID"]))
         }
-
-        let effectiveLookupEnabled = true
-        let effectiveFollowRequestsEnabled = true
 
         if let explicitAccountID = sanitizedAccountID(accountID) {
             return await upsertSelfRowOnce(
@@ -334,8 +338,6 @@ public final class AccountDirectoryService {
                 displayName: displayName,
                 accountIDToWrite: explicitAccountID,
                 includeAccountID: true,
-                lookupEnabled: effectiveLookupEnabled,
-                followRequestsEnabled: effectiveFollowRequestsEnabled,
                 location: location,
                 instruments: instruments
             )
@@ -348,8 +350,6 @@ public final class AccountDirectoryService {
             displayName: displayName,
             accountIDToWrite: nil,
             includeAccountID: false,
-            lookupEnabled: effectiveLookupEnabled,
-            followRequestsEnabled: effectiveFollowRequestsEnabled,
             location: location,
             instruments: instruments
         )
@@ -358,7 +358,7 @@ public final class AccountDirectoryService {
     /// Best-effort auto-generation/backfill for a missing account_id.
     /// Returns the generated account_id on success, or nil when generation is skipped/failed.
     @discardableResult
-    public func autoGenerateAccountIDIfMissing(userID: String, displayName: String, localAccountID: String?, lookupEnabled: Bool, followRequestsEnabled: Bool? = nil, location: String? = nil, instruments: [String]? = nil) async -> String? {
+    public func autoGenerateAccountIDIfMissing(userID: String, displayName: String, localAccountID: String?, location: String? = nil, instruments: [String]? = nil) async -> String? {
         let uid = userID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !uid.isEmpty else { return nil }
 
@@ -394,8 +394,6 @@ public final class AccountDirectoryService {
         guard let effectiveDisplayName = trimmedNonEmpty(currentRow.displayName) else { return nil }
         guard let base = autoAccountIDBase(from: effectiveDisplayName) else { return nil }
 
-        let effectiveLookupEnabled = true
-        let effectiveFollowRequestsEnabled = true
         let effectiveLocation = currentRow.location ?? location
         let effectiveInstruments = currentRow.instruments ?? instruments
 
@@ -406,8 +404,6 @@ public final class AccountDirectoryService {
                 displayName: effectiveDisplayName,
                 accountIDToWrite: candidate,
                 includeAccountID: true,
-                lookupEnabled: effectiveLookupEnabled,
-                followRequestsEnabled: effectiveFollowRequestsEnabled,
                 location: effectiveLocation,
                 instruments: effectiveInstruments
             )
@@ -426,12 +422,14 @@ public final class AccountDirectoryService {
         return nil
     }
 
-    private func upsertSelfRowOnce(userID: String, displayName: String, accountIDToWrite: String?, includeAccountID: Bool, lookupEnabled: Bool, followRequestsEnabled: Bool?, location: String?, instruments: [String]?) async -> Result<Void, Error> {
+    private func upsertSelfRowOnce(userID: String, displayName: String, accountIDToWrite: String?, includeAccountID: Bool, location: String?, instruments: [String]?) async -> Result<Void, Error> {
+        // CP-3: the two privacy columns are NOT sent. They are dead in the
+        // directory (CP-2 stopped reading them) and authoritative in
+        // account_privacy. Omitting them is what makes "profile publishing does
+        // not mutate a privacy preference" structural rather than remembered.
         var payload: [String: Any] = [
             "user_id": userID,
             "display_name": displayName,
-            "lookup_enabled": true,
-            "follow_requests_enabled": true,
             "location": sanitizedLocation(location) ?? NSNull()
         ]
 

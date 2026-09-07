@@ -130,6 +130,61 @@ final class AuthManager: NSObject, ObservableObject {
     @Published private(set) var isSigningIn: Bool = false
     @Published private(set) var backendBootstrapState: BackendBootstrapState = .unknown
 
+    // MARK: - CP-3 · age band and privacy state
+
+    /// The band Apple returned, held BEFORE Sign in with Apple runs.
+    ///
+    /// IN MEMORY ONLY. It is never written to disk and never sent anywhere until
+    /// an authenticated identity exists to attach it to. An under-13, a decline
+    /// or an error never sets it, so no state is created for a member who was
+    /// refused Connected.
+    var pendingAgeBand: AgeBand?
+
+    /// TRUE when Sign in with Apple minted an identity but the band could not be
+    /// established. A REAL, REACHABLE STATE: the identity outlives the failure,
+    /// so it cannot be modelled as "nothing happened". While set, directory
+    /// publication is suppressed and Connected setup is incomplete.
+    @Published private(set) var connectedSetupIncomplete: Bool = false
+
+    /// Server-authoritative privacy state, including the EFFECTIVE values. Nil
+    /// means unknown, which every consumer must treat protectively.
+    @Published private(set) var accountPrivacyState: AccountPrivacyService.SelfState?
+
+    /// Establishes or reconciles the band. Returns true only when the server
+    /// holds one.
+    ///
+    /// Safe to call repeatedly: an existing row short-circuits, and the writer is
+    /// insert-if-absent, so a retry after an ambiguous failure returns the
+    /// surviving row rather than writing a second one. An unchanged band leaves
+    /// `band_updated_at` and every preference exactly where they were.
+    @discardableResult
+    func ensureAgeBandEstablished(reason: String) async -> Bool {
+        switch await AccountPrivacyService.fetchSelf(auth: self, reason: "\(reason)-check") {
+        case .success(let state):
+            accountPrivacyState = state
+            ProfileStore.setLastKnownAgeBand(state.ageBand)
+            pendingAgeBand = nil
+            connectedSetupIncomplete = false
+            return true
+        case .failure(.noBandEstablished):
+            break                     // expected on a first join; fall through to write
+        case .failure:
+            return false              // transport/session trouble is NOT "no band"
+        }
+
+        guard let band = pendingAgeBand else { return false }
+        switch await AccountPrivacyService.upsertBand(band, auth: self, reason: reason) {
+        case .success(let state):
+            accountPrivacyState = state
+            ProfileStore.setLastKnownAgeBand(state.ageBand)
+            pendingAgeBand = nil
+            connectedSetupIncomplete = false
+            return true
+        case .failure:
+            return false
+        }
+    }
+
     /// Incremented whenever a Sign in with Apple flow completes successfully.
     /// Observers must key off this rather than a change of `currentUserID`: the
     /// Keychain survives app deletion, so on a reinstall the Apple user ID is
@@ -466,14 +521,11 @@ final class AuthManager: NSObject, ObservableObject {
             }
 
             let localAccountID = ProfileStore.accountID(for: bid)
-            let lookupEnabled = ProfileStore.discoveryModeRaw(for: bid) == 1
 
             guard let generated = await AccountDirectoryService.shared.autoGenerateAccountIDIfMissing(
                 userID: bid,
                 displayName: self.displayName ?? "",
                 localAccountID: localAccountID,
-                lookupEnabled: lookupEnabled,
-                followRequestsEnabled: nil,
                 location: nil,
                 instruments: nil
             ) else { return }
@@ -517,6 +569,19 @@ final class AuthManager: NSObject, ObservableObject {
             guard let row else {
                 self.backendBootstrapState = .newAccount
                 self.backendAvatarKey = nil
+                // CP-3 ORDERING INVARIANT. The FIRST account_directory INSERT
+                // happens here -- before binding, before purchase, before
+                // AppSetUpView. CP-1's trigger refuses it when no account_privacy
+                // row exists, and the failure branch below logs only under
+                // #if DEBUG, so an unguarded attempt fails INVISIBLY and leaves a
+                // Connected member with no directory row. Suppressing the publish
+                // is the difference between a known incomplete setup and an
+                // invisible one.
+                guard await ensureAgeBandEstablished(reason: reason) else {
+                    self.connectedSetupIncomplete = true
+                    return
+                }
+                self.connectedSetupIncomplete = false
                 await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
                 #if DEBUG
                 NSLog("[Auth] directory hydration no-row user=%@ reason=%@", userID, reason)
@@ -524,9 +589,18 @@ final class AuthManager: NSObject, ObservableObject {
                 return
             }
 
-            // Backend is canonical for privacy defaults. Map lookup_enabled -> DiscoveryMode rawValue.
-            let discoveryRaw = row.lookupEnabled ? 1 : 0
-            ProfileStore.setDiscoveryModeRaw(discoveryRaw, for: userID)
+            // CP-3: hydrate discoverability from account_privacy, NOT from
+            // account_directory.lookup_enabled, which CP-2 made a dead column.
+            // The EFFECTIVE value is used, so the child-safety override is never
+            // reimplemented on the client, where drift would fail permissive.
+            if case .success(let privacy) = await AccountPrivacyService.fetchSelf(auth: self, reason: "hydrate") {
+                ProfileStore.setDiscoveryModeRaw(privacy.lookupEffective ? 1 : 0, for: userID)
+                ProfileStore.setLastKnownAgeBand(privacy.ageBand)
+                self.accountPrivacyState = privacy
+            } else {
+                self.accountPrivacyState = nil
+                ProfileStore.setLastKnownAgeBand(nil)
+            }
 
             // Store handle/account_id (lowercased); empty clears.
             ProfileStore.setAccountID(row.accountID ?? "", for: userID)
@@ -544,6 +618,11 @@ final class AuthManager: NSObject, ObservableObject {
 
             lastHydratedDirectoryUserID = userID
             self.backendBootstrapState = .existingAccount
+            // An existing directory row is not blocked by CP-1's trigger (it
+            // fires BEFORE INSERT only, and an upsert onto an existing row is an
+            // update in effect), so publishing may proceed. The band is still
+            // reconciled, because Apple owns ageing and may report a new range.
+            _ = await ensureAgeBandEstablished(reason: reason)
             await publishLocalProfileSnapshotToDirectoryIfPossible(userID: userID, reason: reason)
             #if DEBUG
             NSLog("[Auth] directory hydration applied user=%@ reason=%@ lookup=%@ account_id=%@",
@@ -615,8 +694,6 @@ final class AuthManager: NSObject, ObservableObject {
             userID: userID,
             displayName: displayNameToPublish,
             accountID: accountIDOrNil,
-            lookupEnabled: true,
-            followRequestsEnabled: true,
             location: locationOrNil,
             instruments: instrumentsToPublish
         )

@@ -219,7 +219,8 @@ struct AddEditSessionView: View {
     }
 
 
-    @State private var isPublic: Bool = true
+    // CP-3: initialises FALSE so the pre-derivation window is protective.
+    @State private var isPublic: Bool = false
     @State private var notes: String = ""
     @State private var areNotesPrivate_edit: Bool = false
 
@@ -1826,7 +1827,9 @@ VStack(alignment: .leading, spacing: Theme.Spacing.section) {
             // New mode defaults
             timestamp = Date()
             durationSeconds = 0
-            isPublic = isThoughtMode ? false : !fetchDefaultPostingIsPrivate()
+            isPublic = isThoughtMode ? false : DeclaredAgeRangeService.shareDefaultOn(
+                band: ProfileStore.lastKnownAgeBand(),
+                defaultPostingIsPrivate: fetchDefaultPostingIsPrivate())
 
             // Threads v1 (owner-only metadata)
             threadLabel = sanitizeThreadLabel_v1(threadLabelPrefill)
