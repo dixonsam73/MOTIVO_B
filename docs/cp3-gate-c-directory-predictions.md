@@ -189,3 +189,47 @@ column is dead by CP-2.
 
 **Not in scope, deliberately:** teen / under-13 / decline / recovery; account
 deletion or reset; any manual server repair; Device B; Restore Purchases.
+
+---
+
+# 6. FRESH PRE-PURCHASE CENSUS — T0 = 2026-09-07 21:07:10 UTC
+
+**This supersedes §1 as the scoring authority.** §1 is retained as the earlier
+reading, not deleted. Preconditions confirmed by the account holder: Sandbox
+account `sdsongsltd+devicec@gmail.com`; Age Assurance **User 18+, age confirmed,
+significant change not applicable**. Explore Connected not entered; nothing
+purchased.
+
+| measure | T0 value |
+|---|---|
+| `auth.users` | **2** |
+| posts / comments / follows | **6 / 1 / 0** |
+| `9c5385f6` refresh tokens | **39** (2 live), last **20:49:10.037** |
+| `9c5385f6` sessions | **2**, last update **20:49:09.999** |
+| `dfaf8d18` refresh tokens | **248** (19 live), last **2026-09-05 16:44:36.294** |
+| `dfaf8d18` sessions | **19**, last update **2026-09-05 16:44:36.297** |
+| `account_privacy` | 1 row · `band_18_plus` · `band_updated_at` **13:40:16.675419** · `lookup_enabled` **true** · `follow_requests_enabled` true · both `*_changed_at` **NULL** |
+| `account_directory` | **1** row — `dfaf8d18` · `samueldixon` · "Samuel Dixon" · London · `lookup_enabled` true · `entitled_until` **NULL** · `avatar_version` NULL |
+| `membership` | otid **2000001228947923** · Sandbox · `purchase` · `renewal_date` **19:43:57 (expired)** · `entitlement_ended_at` 19:43:57 · `pending_cleanup_at` **2026-11-06 19:43:57** · retry false |
+| `membership_binding` | `created_at` == `updated_at` == **13:40:16.990315** |
+| `pg_stat_statements` | `account_directory` INSERTs **2795** · `account_privacy_self_v1` **10** · `stats_reset` 2025-12-30 (**not reset**; deltas valid) |
+
+## 6.1 AN UNPROMPTED THIRD CONFIRMATION OF GATE (A)
+
+`account_privacy_self_v1` was **9** at 20:57 and is **10** at 21:07, while
+`9c5385f6`'s refresh tokens stayed at **39** and its session `updated_at` stayed
+at 20:49:09.999.
+
+**Nobody asked for that foreground.** It arrived incidentally while the account
+holder was checking Settings, and it reproduces the 8→9 result exactly: the
+authenticated privacy preflight executed, and the expiry gate rotated nothing.
+An unprompted repeat on a run nobody staged is stronger evidence than the
+staged one.
+
+## 6.2 ONE PREDICTION SHARPENED BY THE CENSUS
+
+Samuel's directory row carries `entitled_until` **NULL** — he is unentitled,
+consistent with CLAUDE.md's record that all identities are. So **Q4.6 has a
+visible control**: if `9c5385f6`'s new row lands with a non-NULL
+`entitled_until` while Samuel's stays NULL, the stamping trigger is
+demonstrably reading live membership rather than defaulting.
