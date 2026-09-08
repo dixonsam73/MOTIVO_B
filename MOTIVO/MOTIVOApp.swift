@@ -415,16 +415,6 @@ struct MOTIVOApp: App {
                         attestation.reset()
                     }
                 }
-                // P5-G/D1. Without this, withholding would never reach AppMode
-                // until some unrelated event fired. Mapped to the BOOL and
-                // de-duplicated so it publishes only on a real change — a raw
-                // `accountPrivacyState` subscription would add a re-render
-                // source to the root scene, which is C-55's exact shape.
-                .onReceive(auth.$accountPrivacyState
-                            .map { $0?.ageEligibilityWithheld ?? false }
-                            .removeDuplicates()) { _ in
-                    appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
-                }
                 .onReceive(auth.$backendUserID.removeDuplicates()) { backendUserID in
                     appModeManager.applyActivation(auth: auth, isEntitled: connectedMembershipStore.isEntitled)
 

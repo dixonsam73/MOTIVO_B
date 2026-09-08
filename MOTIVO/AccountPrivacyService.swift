@@ -40,18 +40,9 @@ enum AccountPrivacyService {
         /// What the member chose (or the initial default derived from the band).
         let lookupEnabled: Bool
         let followRequestsEnabled: Bool
-        /// What the server will actually act on, after the child-safety override
-        /// AND after age-eligibility withholding.
+        /// What the server will actually act on, after the child-safety override.
         let lookupEffective: Bool
         let followRequestsEffective: Bool
-        /// P5-G/D1. TRUE when the latest conclusive Apple result does not
-        /// establish Connected eligibility.
-        ///
-        /// **NOT a claim that the member is under 13.** Per Q5 the range
-        /// describes the Apple Account signed in to iCloud on the device, which
-        /// is neither bound nor verified against this Études identity, and that
-        /// account can change.
-        let ageEligibilityWithheld: Bool
     }
 
     enum Failure: Error, Equatable {
@@ -111,19 +102,6 @@ enum AccountPrivacyService {
     static func setFollowRequestsEnabled(_ enabled: Bool, auth: AuthManager, reason: String) async -> Result<Void, Failure> {
         await callVoid(rpc: "account_privacy_set_follow_requests_v1",
                        body: ["p_enabled": enabled], auth: auth, reason: reason)
-    }
-
-    /// P5-G/D1. Records that the latest conclusive Apple result does not
-    /// establish eligibility.
-    ///
-    /// **THERE IS DELIBERATELY NO INVERSE.** The RPC is parameterless, so this
-    /// cannot pass `false`, and nothing else can clear withholding: it is
-    /// cleared ONLY as a side effect of `upsertBand` succeeding with a real
-    /// band. So no client call can restore eligibility without an actual Apple
-    /// result having been obtained.
-    static func withholdAgeEligibility(auth: AuthManager, reason: String) async -> Result<Void, Failure> {
-        await callVoid(rpc: "account_privacy_withhold_age_eligibility_v1",
-                       body: [:], auth: auth, reason: reason)
     }
 
     // MARK: - Read
@@ -201,17 +179,12 @@ enum AccountPrivacyService {
               let lookup = row["o_lookup_enabled"] as? Bool,
               let lookupEffective = row["o_lookup_effective"] as? Bool,
               let requests = row["o_follow_requests_enabled"] as? Bool,
-              let requestsEffective = row["o_follow_requests_effective"] as? Bool,
-              // STRICT, like every other field: a response without the
-              // withholding column is a shape we do not recognise, and
-              // defaulting it to `false` would silently grant eligibility.
-              let withheld = row["o_age_eligibility_withheld"] as? Bool
+              let requestsEffective = row["o_follow_requests_effective"] as? Bool
         else { return nil }
         return SelfState(ageBand: band,
                          lookupEnabled: lookup,
                          followRequestsEnabled: requests,
                          lookupEffective: lookupEffective,
-                         followRequestsEffective: requestsEffective,
-                         ageEligibilityWithheld: withheld)
+                         followRequestsEffective: requestsEffective)
     }
 }

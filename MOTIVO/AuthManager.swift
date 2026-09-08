@@ -146,22 +146,6 @@ final class AuthManager: NSObject, ObservableObject {
     /// publication is suppressed and Connected setup is incomplete.
     @Published private(set) var connectedSetupIncomplete: Bool = false
 
-    /// P5-G/D1. TRUE when the server says the latest conclusive Apple result
-    /// does not establish Connected eligibility.
-    ///
-    /// **DERIVED, never separately stored.** One source of truth, and it
-    /// survives process death because the SERVER holds it — no age-derived fact
-    /// is persisted on the device.
-    ///
-    /// **UNKNOWN RESOLVES *NOT* WITHHELD, DELIBERATELY (register §H5).**
-    /// AppMode is a REVERSIBLE UI decision and may rest on client-side evidence
-    /// (invariant 3); the irreversible half — who is discoverable and who may be
-    /// contacted — is enforced SERVER-SIDE regardless of what any client
-    /// believes. Resolving unknown as withheld would drop every offline launch
-    /// to Solo for no safety gain, because the server refuses discovery and
-    /// contact throughout either way.
-    var ageEligibilityWithheld: Bool { accountPrivacyState?.ageEligibilityWithheld ?? false }
-
     /// Server-authoritative privacy state, including the EFFECTIVE values. Nil
     /// means unknown, which every consumer must treat protectively.
     @Published private(set) var accountPrivacyState: AccountPrivacyService.SelfState?
@@ -199,68 +183,6 @@ final class AuthManager: NSObject, ObservableObject {
     /// The distinction is live, not pedantic: the server CAN move a band, and
     /// P5-G/Q1 decided that periodic re-derivation SHOULD move it, bidirectionally.
     /// The reason no band moves today is this fetch-first short-circuit.
-    /// P5-G/D1. Writes an already-derived band UNCONDITIONALLY.
-    ///
-    /// **The difference from `ensureAgeBandEstablished` is the whole point.**
-    /// That function fetches first and RETURNS ON SUCCESS WITHOUT WRITING,
-    /// which is correct for establishment and is exactly why no band was ever
-    /// re-derived before D1. Refresh must write, because the value it carries
-    /// is newer than the row.
-    ///
-    /// The write also clears any age-eligibility withholding server-side, which
-    /// is the only route by which withholding is ever cleared.
-    @discardableResult
-    func ensureAgeBandRefreshed(reason: String) async -> Bool {
-        guard let band = pendingAgeBand else { return false }
-        switch await AccountPrivacyService.upsertBand(band, auth: self, reason: reason) {
-        case .success(let state):
-            accountPrivacyState = state
-            ProfileStore.setLastKnownAgeBand(state.ageBand)
-            pendingAgeBand = nil
-            connectedSetupIncomplete = false
-            return true
-        case .failure:
-            return false
-        }
-    }
-
-    /// P5-G/D1. THE SINGLE PLACE a refresh outcome is applied.
-    ///
-    /// Both callers — the automatic coordinator and the member's explicit
-    /// "Check Again" — route through here, so the asymmetric policy cannot drift
-    /// between them.
-    @discardableResult
-    func applyAgeRefresh(outcome: DeclaredAgeRangeOutcome,
-                         reason: String,
-                         now: Date = Date()) async -> AgeBandRefreshDecision {
-        let decision = AgeBandRefreshPolicy.decide(outcome: outcome)
-        switch decision {
-        case .establish(let band):
-            pendingAgeBand = band
-            _ = await ensureAgeBandRefreshed(reason: reason)
-        case .withhold:
-            _ = await AccountPrivacyService.withholdAgeEligibility(auth: self, reason: reason)
-            await reloadAccountPrivacyState(reason: reason)
-        case .retainSilently:
-            // Deliberately nothing. Apple being unavailable, or a person
-            // declining, is not evidence about anybody's age and must never
-            // erase or downgrade an established band.
-            break
-        }
-        if let userID = currentUserID {
-            AgeBandRefreshPolicy.record(decision: decision, userID: userID, now: now)
-        }
-        return decision
-    }
-
-    /// P5-G/D1. Re-reads server privacy state after a withholding write, so
-    /// `ageEligibilityWithheld` and therefore `AppMode` reflect it immediately.
-    func reloadAccountPrivacyState(reason: String) async {
-        if case .success(let state) = await AccountPrivacyService.fetchSelf(auth: self, reason: "reload-\(reason)") {
-            accountPrivacyState = state
-        }
-    }
-
     @discardableResult
     func ensureAgeBandEstablished(reason: String) async -> Bool {
         switch await AccountPrivacyService.fetchSelf(auth: self, reason: "\(reason)-check") {
