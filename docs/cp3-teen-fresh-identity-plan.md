@@ -1561,3 +1561,93 @@ concluding anything.**
 
 **No device action is proposed now.** This is the sequence for when the account
 holder chooses to resume.
+
+---
+
+# 23. THE PREFLIGHT FAILED IN A DECISIVE WAY — 2026-09-08 16:54
+
+**Setup, all verified:** fresh band-less identity
+`6fd0a833-9e12-4dbb-a8e4-b4b01f706ea2` (16:52:00); `account_privacy` **0 rows**;
+writer **4**; Age Assurance set to **`Under 13, significant change approved`**
+and **confirmed by the account holder as still set**.
+
+**Predicted:** the coordinator reaches Apple, gets an under-13 range,
+`.ineligible` → `bandToEstablish` **nil** → **no write**.
+
+**Observed:** writer **4 → 5**, `account_privacy` **0 → 1**, and the row is
+
+```
+age_band  band_18_plus     band_updated_at  2026-09-08 16:54:51.484
+```
+
+**MY PREDICTION FAILED, AND THE FAILURE IS THE FINDING.**
+
+## 23.1 What is now established
+
+**With `Under 13` selected and verified still selected, the recovery
+coordinator's `requestAgeRange` returned an 18+ range.** Not `.ineligible`, not
+`.unavailable` — a band, which it then correctly wrote.
+
+**This is NOT the fixture-persistence problem.** The fixture did not unset. It is
+set, it was checked, and it was ignored **by this call site**.
+
+## 23.2 THE CONTRAST, SAME DEVICE, SAME FIXTURE VALUE
+
+| call site | trigger | fixture | Apple returned |
+|---|---|---|---|
+| **`ProfileView` Continue** (12:52, and 09:52) | **explicit user tap** | `Under 13` | **under-13 range** → `.ineligible` → the refusal alert |
+| **`AgeBandRecoveryCoordinator`** (16:54) | **`.onAppear` / `scenePhase`** | `Under 13`, **verified still set** | **18+ range** → `band_18_plus` written |
+
+**Both call sites are View-scoped since the wiring fix.** The difference that
+remains is **interactive versus non-interactive invocation.**
+
+## 23.3 THE WITHDRAWN HYPOTHESIS NOW HAS DIRECT BEHAVIOURAL SUPPORT
+
+§18.1 withdrew the interactive/non-interactive hypothesis on the account
+holder's instruction — correctly, because at that time it was invented to explain
+a symptom whose premise (an active fixture) was false.
+
+**The premise is no longer false.** The fixture is active and verified, and the
+two paths disagree. The account holder's own condition was *"unless independent
+framework evidence supports it"*; **what exists now is independent BEHAVIOURAL
+evidence on this device.**
+
+**I am not reviving it unilaterally, and I am not claiming a mechanism.** What is
+measured is the contrast. **Why** a non-interactive request would be served the
+account-level cached value (*"Last shared: 18 or older"*) rather than the sandbox
+fixture is **not established**, and I will not guess at it again.
+
+## 23.4 THE DECISIVE EXPERIMENT IS FREE, AND NEEDS NO NEW IDENTITY
+
+**`ProfileView`'s Continue calls `requestDeclaredAgeRange()` BEFORE
+`continueToConnectedJoin()`.** So with `Under 13` still selected, tapping
+Continue **right now** must show the refusal alert — **regardless of the
+`band_18_plus` row that already exists**, because `.ineligible` returns before
+the band is ever consulted.
+
+> **If Continue shows "Études Connected is for ages 13 and over." within minutes
+> of the coordinator having written `band_18_plus` from the SAME fixture on the
+> SAME device, the two call sites demonstrably disagree.**
+
+**It costs nothing:** `.ineligible` refuses before any server contact — proven
+twice, with `writer` and `privacy_read` both unmoved.
+
+**And a null result is equally informative:** if Continue *also* now yields a
+band and routes to Membership Selection, then the fixture stopped being honoured
+for **both** paths between 12:52 and now, and the interactive/non-interactive
+framing is wrong.
+
+## 23.5 COST AND STATE
+
+**Third identity spent; the teen band has still never been produced.** The
+blocker has moved again — from fixture *persistence* to fixture *honouring*, for
+one specific call site.
+
+**No further deletion is proposed.** Deleting a fourth identity would repeat the
+same experiment with the same expected outcome. **The cheap same-device contrast
+in §23.4 should be run first**, because it costs nothing and it discriminates.
+
+Current state: `auth.users` **2** · `account_privacy` **1** (`6fd0a833`,
+`band_18_plus`) · directory **1** · membership/binding **0/0** · shadow **34** ·
+writer **5** · privacy_read **62** · tokens **249** (no rotation — the token was
+two minutes old and the gate held) · Samuel **248 / 19**.
