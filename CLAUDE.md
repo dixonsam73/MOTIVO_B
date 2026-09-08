@@ -2526,7 +2526,55 @@ returned by both RPCs, **no backfill (all 17 rows NULL)**, G10 untouched.
 **A defect I introduced was caught by the snapshot:** the new trigger function
 inherited Supabase's default grants where `tg_set_entitled_until` is revoked;
 fixed, and the trigger re-tested afterwards.
-`docs/phase-5-scope.md` — **PHASE 5 UNIT ORDER, 2026-09-06. NOT STARTED.**
+`docs/phase-5-scope.md` — **PHASE 5 UNIT ORDER. IN PROGRESS — "NOT STARTED" WAS
+TRUE ON 2026-09-06 AND IS NOW FALSE; corrected 2026-09-08.** **P5-A, P5-C (CP-0),
+P5-D (CP-1 apply), P5-E (CP-2) and P5-F (CP-3) are COMPLETE.** **THE NEXT UNIT IS
+P5-G (CP-4) — DPIA and legal confirmations.**
+
+**CP-3 / P5-F CLOSED 2026-09-08 CARRYING TWO LIMITATIONS, and their wording is
+load-bearing** — `docs/cp3-disposition.md` is the closure record and
+`docs/phase-5-scope.md` §4 the authoritative summary.
+
+**(1) TEEN DEFAULTS ARE *NOT* DEVICE-VERIFIED.** No end-to-end device
+observation exists of a real Apple 13-17 range establishing `band_13_17`, and
+therefore none of the teen default row or the teen discovery opt-in chain. It is
+blocked by **nondeterministic Apple Sandbox Age Assurance fixture behaviour** —
+the fixture was once set, verified by leaving and re-entering the Settings
+screen, and found **unset ~2 minutes later with no deletion, install, sign-in or
+app interaction at all**; Apple documents no reset or re-arm procedure; and
+**three disposable identities were spent without the teen band ever being
+produced once.** Teen derivation and defaults are covered by the **client unit
+suite** and the **deployed branchless server expression** — **coverage, NOT
+hardware verification, and never to be restated as such.** Closed to further
+experimentation.
+
+**(2) STRONG BAND-BEFORE-DIRECTORY ORDERING remains blocked by U6b/D4 Sandbox
+enforcement** and is a **named carried obligation**. `connected_member()` is
+Production-only, so a Sandbox membership can never publish a directory row, and a
+refusal could not be attributed anyway — the CP-1 trigger and `enforcement_gate`
+would both be refusing indistinguishably. **Do not weaken enforcement or add a
+test-only carve-out to discharge it.**
+
+**HARDWARE-VERIFIED at closure:** band establishment (3×, both routes); the adult
+default row (3×, identical); **Finding-A's View-context recovery wiring** on the
+same identity and server state that had failed it — writer flat before, +1 after;
+the existing-band short-circuit; the under-13 refusal **before any server
+contact**; `identityWithoutBand` created rather than reconstructed (2×); **the
+discovery writer end to end** — `account_privacy_set_lookup_v1` never-called → 1,
+the neighbouring follow-requests preference byte-identical, and explicit OFF
+persisting through hydration **with no second write**; the deletion blast radius
+(3×); and purchase integrity. **Also device-verified for the behaviours
+exercised: the session-refresh defect, the refresh↔hydration feedback-loop fix
+(Gate C — 10 preflights, 0 rotations, against 34-in-20.5 s pre-fix), and the
+resubscription/hydration regression.**
+
+**`lookup_enabled = false` on `6fd0a833` is deliberate and must NOT be restored**
+— it is the surviving evidence of an explicit user preference.
+
+**PHASE 4 IS NOT CLOSED BY THIS.** Its carried device and ASC obligations remain
+separate. **H-1 (ProfileView "Connected" section grouping) is logged-only** in
+`docs/phase-5-ui-housekeeping.md` and is **not part of CP-3 closure**.
+
 Carries the **children's privacy workstream CP-0…CP-5** (moved here, NOT Phase 4)
 alongside the existing 19 Phase 5 register rows and the playback-speed work.
 **The critical ordering is CP-1 DESIGN → CP-0 reset → CP-1 APPLY → CP-2 → CP-3**

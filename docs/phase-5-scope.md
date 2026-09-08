@@ -54,7 +54,7 @@ product work. **Nothing below is implemented.**
 | ~~**P5-C**~~ | 🔴 **CP-0 — reset** | **EXECUTED AND VERIFIED 2026-09-06.** 15 dormant beta identities deleted by explicit id; 21 of 21 predicted figures matched, independently re-verified. `auth.users` 17→2, posts 101→7, comments 5→5, approved follows 2, storage 13→9 objects, **0 dangling references**. Samuel and Steve and their mutual approved follow intact. Storage needed a **retry**: the first pass deleted 3 of 4 while every operation reported HTTP 200 — a missing trailing newline in a staged file, recovered per procedure without touching the database transaction. `docs/phase-5-c-cp0-acceptance.md` | done |
 | **P5-D** | 🔴 **CP-1 — apply** | apply the schema designed in P5-B, against the clean population | P5-C |
 | **P5-E** | 🔴 **CP-2 — server** | discovery clause on **`search_account_directory`**, **and REQUIREMENT CP-2-R1 — binding**: `follow_requests_open`'s `coalesce(..., true)` must be changed so a **missing or unresolved row resolves CLOSED**, never open. Recorded in CP-2's predicted surface and acceptance criteria, not as an incidental finding | P5-D |
-| **P5-F** | **CP-3 — client** | band question at sign-up; Share default derived from the **server-side** band; discoverability control; neutral just-in-time explanation; no nudging | P5-D, P5-E |
+| ~~**P5-F**~~ | **CP-3 — client** | **COMPLETE 2026-09-08 — CLOSED WITH TWO LIMITATIONS PRESERVED VERBATIM (§4 below).** Share default derived from the server-side band; discoverability control; neutral explanation; no nudging. **Hardware-verified:** band establishment (3×, both routes), the adult default row (3×, identical), Finding-A's View-context recovery wiring on the same fixture that failed it, the existing-band short-circuit, the under-13 refusal *before any server contact*, `identityWithoutBand` created rather than reconstructed (2×), **the discovery writer end to end** including explicit-OFF persistence through hydration **with no second write**, hydration read-path correctness, the deletion blast radius (3×) and purchase integrity. **`docs/cp3-disposition.md` is the closure record** | P5-D, P5-E |
 | **P5-G** | 👤🚪 **CP-4** | **DPIA** and legal confirmations | designs P5-B…P5-F settled; **runs in parallel** |
 | **P5-H** | 👤🚪 **CP-5** | resolve `[AGE]` → publish `etudes.app/privacy` → **then** publish the ASC labels | P5-G |
 | **P5-I** | **C-34 — TTL half** | avatar cache TTL; completes the work whose version-signal half shipped in Phase 4 | none |
@@ -194,3 +194,84 @@ uploading as `application/octet-stream` and being refused by the bucket's
 `allowed_mime_types` — is **exactly the failure P4-U6 hit in its own test
 fixture** (`docs/phase-4-u6-acceptance.md` §4). The register row is confirmed by
 an independent observation.
+
+
+---
+
+# 4. CP-3 / P5-F CLOSURE — 2026-09-08. TWO LIMITATIONS, PRESERVED VERBATIM
+
+**CP-3 is closed.** The full record is `docs/cp3-disposition.md`; this section is
+the authoritative summary and its wording is not to be softened.
+
+## 4.1 LIMITATION 1 — TEEN DEFAULTS ARE **NOT** DEVICE-VERIFIED
+
+> **No end-to-end device observation exists of a real Apple 13-17 range
+> establishing `band_13_17`**, and therefore none of the teen default row or the
+> teen discovery opt-in chain.
+>
+> **End-to-end teen hardware acceptance is blocked by nondeterministic Apple
+> Sandbox Age Assurance fixture behaviour.** Teen derivation and defaults remain
+> covered by the **client unit suite** and by the **deployed branchless server
+> expression**. **That is coverage, not hardware verification, and it must never
+> be restated as hardware verification.**
+
+**Evidence for the cause, strongest first.** On 2026-09-08 the fixture was set,
+**verified by leaving and re-entering the Settings screen**, measured server-side
+— and found **unset ~2 minutes later with no deletion, no install, no sign-in and
+no app interaction**. Three earlier clearings each had a lifecycle event to argue
+about; **this one has none.** Apple documents no reset, re-arm or
+force-re-evaluation procedure and no way to prove the returned value; independent
+developer reports describe the same nondeterminism, **including for `child
+13-15`**, with an Apple engineer unable to reproduce and no resolution.
+**Three disposable identities were spent and the teen band was never produced
+once.**
+
+**Closed to further experimentation.** Do not resume fixture work, and do not
+delete further identities chasing it.
+
+## 4.2 LIMITATION 2 — STRONG BAND-BEFORE-DIRECTORY ORDERING REMAINS BLOCKED
+
+> **Blocked by U6b / D4 Sandbox enforcement**, and carried as a **named
+> obligation**. `connected_member()` means Production entitlement only, so a
+> Sandbox membership can never publish a directory row — and a refusal could not
+> be attributed anyway, since the CP-1 trigger and `enforcement_gate` would both
+> be refusing indistinguishably.
+>
+> **Do NOT weaken enforcement and do NOT add a test-only carve-out merely to
+> discharge it.**
+
+## 4.3 ALSO MARKED DEVICE-VERIFIED, for the behaviours exercised
+
+- **The session-refresh defect** — a superseded token no longer reaches the
+  destructive `signOut()`.
+- **The refresh↔hydration feedback-loop fix** — Gate (C): 10 preflights,
+  4 hydrations, **0 rotations**, where the pre-fix build produced 34 rotations in
+  20.5 s.
+- **The resubscription/hydration regression** — hydration now begins with an
+  already-valid token, measured as `dir_select` rising while tokens do not.
+- **Finding-A's View-context recovery wiring** — writer flat before, **+1
+  after**, on the same identity and server state that had failed.
+
+## 4.4 State left behind, deliberately
+
+**`lookup_enabled = false` on `6fd0a833` is NOT to be restored.** It is genuine
+evidence of an explicit user preference surviving hydration, and the value of the
+row is that nobody set it back.
+
+## 4.5 What this closure does NOT do
+
+**Phase 4 is NOT formally closed.** Its previously carried device and App Store
+Connect obligations remain separate and outstanding.
+
+**H-1 (the ProfileView "Connected" section grouping) remains logged-only** in
+`docs/phase-5-ui-housekeeping.md`, is Phase-5 UI housekeeping, and is **not part
+of CP-3 closure**.
+
+## 4.6 A RECORD INCONSISTENCY, FLAGGED RATHER THAN QUIETLY FIXED
+
+**§2's table still marks P5-B as "DESIGNED, HELD FOR REVIEW".** P5-D applied that
+design and is recorded as live and verified, and P5-E and P5-F have since
+completed on top of it — so the design was evidently accepted in practice.
+**The row is left as written rather than back-dated**, because a durable document
+asserting a fact is not evidence of that fact (C-52), and whether a formal review
+occurred is not something this session can establish.
