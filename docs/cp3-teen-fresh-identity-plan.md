@@ -1238,3 +1238,83 @@ fixture.**
 
 **Nothing has been mutated. No deletion is proposed here** — this is the
 investigation that was asked for, and the plan waits on the account holder.
+
+---
+
+# 19. TEEN RUN — BASELINE AND THE STEP-7 ORDERING QUESTION. 2026-09-08 12:48:06 UTC
+
+## 19.1 TEEN-BASE
+
+| measure | value |
+|---|---|
+| `auth.users` | **2** |
+| `account_privacy` | **1** row — `c584db5b`, **`band_18_plus`** (the spent fixture) |
+| `account_directory` | **1** (Samuel) |
+| `membership` / `membership_binding` | **0 / 0** |
+| `shadow_enforcement_stat` / `membership_notification` | **34 / 104** |
+| **`account_privacy_upsert_v1` (writer)** | **3** |
+| `account_privacy_self_v1` | **54** |
+| `account_directory` INSERT | **2795** |
+| tokens `c584db5b` / `dfaf8d18` | **2 / 248** |
+
+**Fixture state is now an explicit precondition**, per the tightening — to be
+re-verified after every lifecycle event, never set once and trusted.
+
+## 19.2 STEP 7 — THE ORDERING HAZARD, AND IT IS NEW SINCE THE FIX
+
+**Leaving Études after SIWA is no longer harmless.** Before the wiring fix,
+returning to the app fired a recovery attempt that could not write. **It can now.**
+On the new band-less identity, a foreground would run
+`AgeBandRecoveryTrigger` → `recoverIfNeeded` → `.noBandEstablished` → **call
+Apple** → with a live 13-15 fixture, **write `band_13_17`**.
+
+**That is not a disaster — same writer, same defaults — but it would establish
+the band by the COORDINATOR rather than by Continue**, which is not the route
+this run chose, and it could beat Continue to it. **It must be a conscious
+choice, not a side effect of checking a setting.**
+
+### The measurement that settles the safe ordering
+
+**SIWA itself fires no recovery attempt. This is measured, not assumed.**
+`account_privacy_self_v1` was **48** at MID-BASE *before* the returning-path
+sign-in and **48** at the midpoint *after* it. A recovery attempt reads
+`fetchSelf` **before** it reaches the part that was broken — so had it fired, the
+counter would have moved regardless of the wiring defect. **It did not.**
+
+**Therefore there is no lifecycle event between a pre-SIWA fixture check and
+Continue**, and a post-SIWA re-check is unnecessary — while a post-SIWA *trip to
+Settings* would itself trigger establishment.
+
+### Recommended ordering — the fixture check moves BEFORE SIWA
+
+| | action | fixture check | safe? |
+|---|---|---|---|
+| a | **Delete** (in-app) | — | — |
+| b | Go to Settings, **confirm 13-15 reads back**, return to Études | **← the re-check** | **SAFE — no identity exists, so recovery's first guard (`hasConnectedIdentity`) fails** |
+| c | Explore Connected → **Sign In** (returning path) | — | fires no recovery (measured) |
+| d | **Do NOT leave Études** | — | leaving here would establish the band via the coordinator |
+| e | Explore Connected → **Continue** | — | establishes `band_13_17` via the proven interactive route |
+| f | Back out at membership selection **without purchasing**; stop | — | — |
+
+**This satisfies the tightening in full:** the fixture is re-verified *after* the
+deletion — the lifecycle event — and **no further lifecycle event occurs before
+establishment**, so there is nothing left to invalidate it.
+
+**If a post-SIWA re-check is preferred anyway**, that is coherent — but then the
+return to Études **is** the establishment step, via the coordinator, and Continue
+becomes unnecessary. **Say which, and I will predict for that route instead.**
+Do not do both.
+
+## 19.3 STEP 2 — the free pre-flight, and what it must NOT move
+
+Set **`Under 13`**, then Explore Connected → **Continue**. Expect
+**"Études Connected is for ages 13 and over."**
+
+**Note the current identity now HAS a band**, which changes nothing: `.ineligible`
+refuses **before** `continueToConnectedJoin()` is called at all, so the existing
+`band_18_plus` row is never consulted.
+
+**Predicted: every TEEN-BASE value unchanged** — writer **3**, privacy_read
+**54**, `account_privacy` still 1 row still `band_18_plus`, directory 1,
+`dir_ins` 2795, tokens 2 / 248. **A refusal that moves any counter would itself
+be a finding.**
