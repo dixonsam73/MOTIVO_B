@@ -601,3 +601,71 @@ it) and is **not** an assertion — reading is not writing.
    background → foreground.
 
 **The midpoint and the recovery measurements are kept separate, as directed.**
+
+---
+
+# 12. MIDPOINT ESTABLISHED — 2026-09-08 10:20:23 UTC
+
+**`identityWithoutBand` is CREATED, not reconstructed.** All six predictions pass,
+with independent corroboration.
+
+**The new identity is `c584db5b-5648-4755-9063-5c24763f8819`**, created
+2026-09-08 10:19:33.729844, first sign-in 10:19:33.779196.
+
+| | prediction | observed | |
+|---|---|---|---|
+| **M-1** | `auth.users` 1 → 2, new id ≠ `dfaf8d18` and ≠ `9c5385f6` | **2**, `c584db5b…` | **PASS** |
+| **M-2** | `account_privacy` **0 rows** | **0** | **PASS — midpoint NOT pre-empted** |
+| **M-3** | `account_directory` 1, Samuel only | **1** | **PASS** |
+| **M-4** | `membership` 0, `membership_binding` 0 | **0 / 0** | **PASS** |
+| **M-5** | writer still exactly **2** | **2** | **PASS** |
+| **M-6** | small bounded, no sub-second gaps, no ≥5 per 10 s | **1 token, 1 session** | **PASS** |
+
+## 12.1 A PREDICTION OF MINE WAS WRONG, AND BEING WRONG STRENGTHENS THE RESULT
+
+**I predicted `account_privacy_self_v1` would move.** It did **not** — still
+**48**. *(It was explicitly recorded as not an assertion, so nothing is being
+reinterpreted after the fact.)*
+
+**The reason matters.** `supabaseSignIn` schedules hydration, but
+`scheduleDirectoryHydrationIfNeeded` guards on `isConnected`, which is **false**
+in Solo — so `fetchSelf` was never called. **The recovery coordinator has
+provably not run at all.**
+
+**Three independent statements, not one:**
+
+- **M-2** — no `account_privacy` row exists;
+- **M-5** — no write was ever *attempted*;
+- **flat read counter** — nothing even *looked*.
+
+## 12.2 The §11.1 residual risk did NOT materialise — now measured
+
+Dismissing Apple's SIWA sheet produced **no `scenePhase` transition**, so recovery
+did not pre-empt the midpoint. **Measured, where §11.1 could only flag it as
+unexcludable.**
+
+## 12.3 D15's precedent confirmed a second time
+
+The **same primary Apple Account**, after a real account deletion, produced a
+**brand-new backend identity** — `9c5385f6` → `c584db5b` — exactly as `cfadb7cb`
+→ `5ae3faab` did on 2026-08-15. **Deletion frees the `sub`; revocation alone does
+not.** The account holder's correction to the matrix is now twice-measured.
+
+## 12.4 Minimum-possible footprint
+
+Exactly **1 refresh token** and **1 session** for the new identity, both stamped
+at the sign-in instant. **No gaps exist to be pathological.** Samuel unchanged at
+**248 / 19**.
+
+## 12.5 Client state — recorded, not scored
+
+Études landed on **PracticeTimerView**. Same shape as the previously logged
+post-sign-in deviation (`ProfileView:1975`'s gate branch returning early before
+the `.returning` unwind at `:2005`). **Out of scope, unchanged, still logged.**
+
+## 12.6 NEXT — one transition, nothing else
+
+Predictions T-1…T-9 (§7.4) stand unmodified, with the writer's baseline now
+pinned: **`account_privacy_upsert_v1` must go 2 → 3, exactly +1.**
+
+**Not started. Awaiting the account holder.**
