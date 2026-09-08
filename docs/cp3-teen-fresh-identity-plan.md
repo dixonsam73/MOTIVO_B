@@ -952,3 +952,98 @@ over the top and letting **this same untouched `identityWithoutBand`** take one
 background→foreground — the exact experiment that failed at `d03324f`. **A
 structural suite proves the wiring changed; only the device can prove the band
 gets written.**
+
+---
+
+# 16. FINDING-A HARDWARE VERIFICATION — BASELINE LOCKED 2026-09-08 12:23:50 UTC
+
+Repo `792bfbc`, local == origin, tree clean.
+
+## 16.1 FA-BASE
+
+| measure | value |
+|---|---|
+| `auth.users` | **2** |
+| **`account_privacy`** | **0 rows** |
+| `account_directory` | **1** (Samuel) |
+| `membership` / `membership_binding` | **0 / 0** |
+| `shadow_enforcement_stat` / `membership_notification` | **34 / 104** |
+| **`account_privacy_upsert_v1` (writer)** | **2** |
+| `account_privacy_self_v1` | **51** |
+| `account_directory` INSERT | **2795** |
+| `c584db5b` tokens | **1**, last **10:19:33**, **age 124.3 min** |
+| `dfaf8d18` tokens | **248** |
+
+**This is the SAME identity and the SAME server state that failed at `d03324f`** —
+not a recreated fixture. That is what makes the comparison decisive.
+
+**Two changes since the failure, both consequential:**
+
+**(a) `account_privacy_self_v1` moved 50 → 51.** A *third* recovery attempt has
+happened during ordinary phone use, and it **read and did not write** — the same
+broken signature again. Unasked-for corroboration of the defect.
+
+**(b) The access token is now 124 minutes old — EXPIRED.** At the failure it was
+five minutes old and the expiry gate correctly held. **So this run should rotate
+exactly once**, and my earlier "no rotation" expectation would now be wrong.
+
+## 16.2 THE INSTALL ITSELF WILL FIRE THE LAUNCH TRIGGER
+
+Installing from Xcode **launches the app**, and `AgeBandRecoveryTrigger`'s
+`.onAppear` runs at launch. **So the band may be established by the install
+itself, before the deliberate background→foreground.**
+
+**Both are passes** — launch and foreground go through the same View-scoped
+wiring — but they are different observations, and the failure at `d03324f` was on
+a *foreground*. **So measure after the install-launch, then again after the
+transition.** One extra round trip buys clean attribution; without it a pass
+cannot be assigned to a trigger.
+
+## 16.3 PREDICTIONS
+
+| | prediction | falsifier |
+|---|---|---|
+| **FA-1** | Apple's real action is reached and **returns a band** — evidenced by the writer moving, **not** by any sheet appearing | writer flat |
+| **FA-2** | **`account_privacy_upsert_v1` 2 → 3, exactly +1** | 2 (no write) or ≥4 (retry storm) |
+| **FA-3** | `account_privacy` **0 → 1**, `user_id` = `c584db5b…`, `age_band` = **`band_13_17`** | absent, or `band_18_plus` |
+| **FA-4** | `lookup_enabled` = **false** | true — a minor defaulted discoverable |
+| **FA-5** | `follow_requests_enabled` = **false** | true |
+| **FA-6** | both `*_set_under_band` = **`band_13_17`** | `band_18_plus` |
+| **FA-7** | both `*_changed_at` = **NULL** | stamped — a default recorded as a choice |
+| **FA-8** | `account_directory` **1**, `dir_ins` **2795** — no publication (hydration is `isConnected`-gated and the client is Solo) | a second row |
+| **FA-9** | `membership` **0**, `membership_binding` **0** | anything manufactured |
+| **FA-10** | tokens **1 → 2**, exactly **+1** (the 124-minute token ages out once). **Zero sub-second gaps**, no ≥5 in any 10 s window | a storm |
+| **FA-11** | Samuel **248** tokens, directory row unchanged, `auth.users` **2** | any movement |
+
+**The signature to look for.** The failing runs were **reads up, writer flat**.
+A success is **`privacy_read` +2 with `writer` +1** — the coordinator's own
+`fetchSelf`, then `ensureAgeBandEstablished`'s check, then the write. *(The read
+delta is corroboration, not an assertion.)*
+
+**FA-4 through FA-7 are the protective inversion**, read against the measured
+adult row from the deleted identity: `band_18_plus`, both **true**, both
+`set_under_band` `band_18_plus`, both `changed_at` NULL.
+
+## 16.4 PHYSICAL SEQUENCE
+
+0. **Confirm the scheme's Run action is Release** before installing. Debug uses a
+   different bundle id, which is a *different app* with no identity — it would
+   look like the fixture had vanished. *(Verified in the project earlier; worth
+   one glance.)*
+1. **Install the current build over the existing installation.** **No delete, no
+   reset** — the identity lives in the Keychain and the container must survive.
+2. **Age Assurance stays at `13 - 15, significant change approved`.** Change
+   nothing in Settings.
+3. **Let the app finish launching, then STOP and tell me.** I measure — this
+   attributes any result to the **launch** trigger.
+4. **One controlled background → foreground.**
+5. **Stop and tell me.** I measure again.
+
+**If Apple presents system UI:** stop and **describe it before interacting**. If
+it is plainly the standard *"share your age range with Études"* prompt, sharing
+is the intended flow and consistent with Études already being listed `Shared`;
+**anything else, do not tap.** **Presentation is not success** — success is the
+writer moving, and a sheet could appear and still yield nothing.
+
+**Not to be followed by Share-default or discovery-opt-in testing.** Measure,
+stop, report.
