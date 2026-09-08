@@ -520,3 +520,84 @@ Age Assurance fixture is still **Under 13**.
 the fixture change to **13–15**, then the **returning-path** sign-in, then the
 **midpoint measurement of §7.3 before any foreground**. **Not started, and not to
 be started without direction.**
+
+---
+
+# 11. MIDPOINT BASELINE — LOCKED 2026-09-08 10:15:19 UTC
+
+| measure | locked value |
+|---|---|
+| `auth.users` | **1** — `dfaf8d18…` only |
+| **`account_privacy`** | **0 rows** |
+| `account_directory` | **1** (Samuel) |
+| `membership` / `membership_binding` | **0 / 0** |
+| `shadow_enforcement_stat` | **34** |
+| `posts` / `membership_notification` | **6 / 104** |
+| `auth.sessions` / `auth.refresh_tokens` **totals** | **19 / 248** — all Samuel's |
+| **`account_privacy_upsert_v1` (writer)** | **2** |
+| `account_privacy_set_lookup_v1` | **never called** |
+| `account_privacy_self_v1` | **48** |
+| `account_directory` INSERT / SELECT | **2795 / 3366** |
+
+**Totals equal Samuel's**, so any session or token appearing is unambiguously the
+new identity's — no attribution work needed.
+
+## 11.1 A RISK TO THE MIDPOINT, AND THE INSTRUCTION IT FORCES
+
+**`AgeBandRecoveryCoordinator` fires on EVERY foreground** and is gated only on
+`hasConnectedIdentity` (`:50`). **Before** sign-in that guard is false, so
+returning from Settings after the fixture change is **safe**. **After** sign-in
+it is true — and the coordinator would immediately call Apple and **write the
+band**, destroying the midpoint before it can be measured.
+
+> **AFTER SIWA COMPLETES, DO NOT LEAVE ÉTUDES.** No backgrounding, no switching
+> to Settings, no locking the screen, until I confirm the midpoint is measured.
+> Navigation *inside* the app is fine — `scenePhase` does not change for that.
+
+**A residual risk I cannot exclude:** Sign in with Apple presents a system sheet,
+and I cannot prove from here whether its dismissal produces a `scenePhase`
+transition. If it does, recovery may fire before I measure.
+
+**That is a named alternative outcome, not a failure.** It would show as
+`account_privacy` already holding **1 row** at the midpoint. If so I will record
+that the platform pre-empted the midpoint, and Finding-A's *recovery* would still
+be evidenced — only the *"created rather than reconstructed"* proof would be lost.
+**I will report it as such rather than presenting a pre-empted midpoint as a
+clean one.**
+
+## 11.2 MIDPOINT PREDICTIONS
+
+| | prediction | falsifier |
+|---|---|---|
+| **M-1** | `auth.users` **1 → 2**; the new `id` is **neither** `dfaf8d18…` **nor** `9c5385f6…` | a reused uuid — which would contradict the D15 precedent and be a finding in its own right |
+| **M-2** | `account_privacy` **0 rows** — none for the new identity, none at all | any row ⇒ midpoint pre-empted (§11.1) |
+| **M-3** | `account_directory` **1** — Samuel only | any second row |
+| **M-4** | `membership` **0**, `membership_binding` **0** | anything manufactured |
+| **M-5** | **`account_privacy_upsert_v1` still exactly 2** | any increase ⇒ a band write was attempted |
+| **M-6** | sessions/tokens rise by a **small bounded** amount for the new identity; **no sub-second gaps**, no ≥5 tokens in any 10 s window | a burst |
+
+**M-5 is the sharpest.** M-2 shows no row exists *now*; **M-5 shows none was ever
+attempted** — together they establish `identityWithoutBand` was **created**, not
+reconstructed after the fact.
+
+**`account_privacy_self_v1` is expected to MOVE** (sign-in and any preflight read
+it) and is **not** an assertion — reading is not writing.
+
+## 11.3 PHYSICAL STEPS
+
+1. **Settings → Developer → Sandbox Apple Account → Manage → Age Assurance →
+   `13 - 15, significant change approved`.** *(Returning to Études afterwards is
+   safe: no identity yet, so the coordinator's first guard fails.)*
+2. **Open Études; complete onboarding if it asks.** Local only — no identity, no
+   server effect.
+3. **Profile → Explore Connected → "Already have a Connected account?" → Sign In.**
+   **NOT "Continue"** — `.returning` never calls `requestAgeRange` and never sets
+   `pendingAgeBand` (`ProfileView:380`), which is what leaves the identity
+   band-less.
+4. **Complete SIWA.**
+5. **STOP. Stay in Études.** Do not background, do not open Settings, do not lock
+   the screen. Tell me what screen Études shows.
+6. I measure the midpoint and report. **Only then** the single
+   background → foreground.
+
+**The midpoint and the recovery measurements are kept separate, as directed.**
