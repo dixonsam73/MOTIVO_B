@@ -1141,3 +1141,100 @@ return a teen range at all**.
 the measurement; with a band present it would now only exercise the
 short-circuit. Device untouched otherwise: Age Assurance still 13-15, Études
 still `Shared`, no purchase, no deletion.
+
+---
+
+# 18. CORRECTED SCORING — the fixture was NOT set. 2026-09-08
+
+**The account holder checked Device A directly: there is currently NO Age
+Assurance developer fixture selected at all.** FA-3's precondition was therefore
+absent, and `band_18_plus` is exactly what the device's ordinary state should
+produce — the account-level record still reads *"Last shared: 18 or older on
+7 September 2026"*.
+
+## 18.1 THE INTERACTIVE/NON-INTERACTIVE HYPOTHESIS IS WITHDRAWN
+
+**I invented a mechanism to explain a symptom without first checking the
+premise.** The premise — that 13-15 was active — was false, and once it is
+corrected the observation needs no special mechanism at all.
+
+**This is C-47's recorded lesson, repeated:** *"Check the premise before
+explaining the symptom. An attachment title appeared to vanish and produced a
+confident, fully-reasoned, wrong mechanism — including an exhaustive proof that
+nothing had deleted it, which was true and beside the point."* **Withdrawn, and
+not to be researched or designed around on the basis of this run.**
+
+## 18.2 RE-SCORED
+
+| | scoring |
+|---|---|
+| **Finding-A View-context wiring** | **HARDWARE-VERIFIED.** Same genuine `identityWithoutBand`, same server state: writer **flat at 2** before the fix, **2 → 3** after. **Unaffected by the fixture question** — the discriminator was *whether a band was written at all*, which does not depend on which band Apple returned. Had the fixture been unset at `d03324f` too, a working wiring would still have produced `band_18_plus`; it produced nothing |
+| **`band_18_plus`** | **CONSISTENT with the actual device configuration.** Not an anomaly |
+| **FA-3 … FA-6** | **PRECONDITION ABSENT — NOT FAILED PREDICTIONS AGAINST THE PRODUCT.** The intended 13-15 fixture was never active, so the protective inversion was never presented to the code. Recorded as **untested** |
+| **FA-1, FA-2, FA-7 … FA-11** | **PASS**, unchanged |
+| **Teen defaults** | **UNTESTED** |
+
+**FA-7's pass survives and is worth keeping:** both `*_changed_at` are NULL, so
+the adult defaults were written **as defaults, not as choices** — correct
+regardless of band.
+
+## 18.3 WHAT CAN AND CANNOT BE SAID ABOUT THE FIXTURE UNSETTING
+
+**Apple documents nothing about persistence.** The Sandbox testing page covers
+the procedure and the six test cases, and says **nothing** about whether a
+selection survives an app reinstall, a device restart, a Sandbox Apple Account
+sign-out, or an Xcode build. There is no documented prerequisite tying the
+selection to the account being signed in beyond the setup steps.
+
+**It has now been observed unset at least twice.** The 2026-09-07 handover
+recorded *"its Age Assurance fixture is currently UNSET and must be re-set before
+any teen/under-13 work"* — so this is a **recurrence, not a one-off.**
+
+**Temporal correlation, offered as such and NOT as a mechanism:** the selection
+was confirmed as `13 - 15` at roughly 10:30, and the only intervening device
+events before it was found unset at ~12:35 were **the Xcode install of the fixed
+build and the app launch**. **The install is the prime suspect on timing alone. I
+cannot show a mechanism, and I am not going to assert one** — that is the mistake
+§18.1 just withdrew.
+
+**The selection lives under `Sandbox Apple Account → Manage`**, so it is
+plausibly bound to that account's session state. **Whether the Sandbox Apple
+Account is still signed in is the first thing to look at**, and it is an
+observation, not a mutation.
+
+## 18.4 THE CHEAPEST RELIABLE PLAN FOR THE TEEN RUN
+
+**Two realisations make this much cheaper than the last attempt.**
+
+**(1) The teen tests do not need the recovery coordinator.** Finding-A is
+verified and needs no re-run. The teen discriminators are about the **defaults
+the server writer applies for a teen band**, and `account_privacy_upsert_v1` is
+the single writer **whatever route reaches it**.
+
+**(2) `ProfileView`'s Continue is the route with demonstrated fixture-honouring
+behaviour** — the Under-13 refusal fired through it **twice**, interactively and
+visibly. For a band-less identity it calls `requestAgeRange`, then
+`ensureAgeBandEstablished`, which writes the band. **So Continue can establish
+the teen band directly**, and we would then back out of the membership screen
+without purchasing.
+
+**The verification discipline that was missing last time: check the fixture at
+every step, because it has now vanished at least twice.**
+
+| step | action | why |
+|---|---|---|
+| **0** | **Observation only** — is the Sandbox Apple Account still signed in, and does Age Assurance show unset? | the selection lives under that account |
+| **1** | Set the fixture to **`Under 13`**, then Explore Connected → **Continue** | **the free pre-flight.** The refusal alert proves the selection is being **honoured right now**. It writes nothing — proven twice — and `.ineligible` refuses before any server contact |
+| **2** | Set the fixture to **`13 - 15`** and **re-open Settings to confirm it reads back** | a selection that does not read back is not set |
+| **3** | **Install nothing.** No Xcode build between here and the end | the install is the prime suspect |
+| **4** | Delete the identity, **re-confirm the fixture**, sign in (returning path), **re-confirm the fixture** | catches a mid-sequence reset before it costs the run |
+| **5** | Establish the band via **Continue** (proven route), then back out **without purchasing** | avoids depending on the coordinator, and on the unanswered non-interactive question |
+| **6** | Measure the teen row, then Share-default OFF locally | the actual discriminators |
+
+**Step 1 is the whole improvement.** Last time the fixture was trusted on a
+single reading taken two hours and one app install earlier. **A pre-flight that
+costs nothing and writes nothing removes the failure mode that spent the last
+fixture.**
+
+**Nothing has been mutated. No deletion is proposed here** — this is the
+investigation that was asked for, and the plan waits on the account holder.
