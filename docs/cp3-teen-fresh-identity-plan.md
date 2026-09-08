@@ -1651,3 +1651,130 @@ Current state: `auth.users` **2** · `account_privacy` **1** (`6fd0a833`,
 `band_18_plus`) · directory **1** · membership/binding **0/0** · shadow **34** ·
 writer **5** · privacy_read **62** · tokens **249** (no rotation — the token was
 two minutes old and the gate held) · Samuel **248 / 19**.
+
+---
+
+# 24. THE CALL-SITE CONTRAST IS FALSIFIED. THE BLOCKER IS APPLE'S SANDBOX FIXTURE. 2026-09-08
+
+**Free contrast result: Continue reached Membership Selection** with `Under 13`
+still displayed. **So both call sites behaved adult within minutes of each
+other.** §23's interactive/non-interactive framing is **withdrawn** — it survived
+one measurement and died on the next, which is why it was tested for free before
+anything was built on it.
+
+**What remains, narrower and better supported:**
+
+- the Sandbox fixture **has** demonstrably controlled `requestAgeRange` — the
+  under-13 refusal was hardware-observed, twice;
+- **seeing `Under 13` selected in Developer Settings is NOT sufficient evidence
+  that Apple will return it**;
+- both current call sites behaved consistently with the **normal/cached adult
+  account range**;
+- **therefore the remaining teen hardware tests are blocked by unreliable,
+  unobservable Apple Sandbox fixture state — not by demonstrated Études
+  behaviour.**
+
+## 24.1 IS THERE A DOCUMENTED DETERMINISTIC RESET? — **NO**
+
+**Apple's own documentation.** `Testing age assurance in sandbox` describes only
+how to **select** a scenario (Settings → Developer → Sandbox Apple Account →
+Manage → Age Assurance). It documents **no** reset, clear, re-arm or
+force-re-evaluation procedure; **no** way to verify which value the API will
+return; and **no** statement about propagation delay. The `DeclaredAgeRange`
+reference and the age-assurance Q&A add nothing on persistence either.
+
+**Independent developer reports describe our exact symptoms**, on Apple's own
+forums:
+
+- values **not updating immediately**, reflected only on **subsequent app
+  relaunches**;
+- `AgeRangeService.Error.notAvailable` returned persistently after the first
+  popup, **across different bundle IDs and different sandbox test accounts**;
+- a developer asking how to test **"without erasing the device"** — the only
+  reset anyone names;
+- **one report with Age Assurance set to `child 13-15` specifically** — our case;
+- an Apple engineer replying *"I'm not seeing this behavior"*, with **no official
+  resolution in the thread**.
+
+> **ANSWER: there is no documented deterministic way to reset or re-arm the Age
+> Assurance fixture, and no way to prove its RETURNED value before spending an
+> identity. Third-party reports describe the same nondeterminism we measured,
+> including for 13-15.**
+
+**One lead exists and is recorded as a lead only:** the forum reports say a
+changed value may only be reflected on a **subsequent app relaunch** — we have
+only ever foregrounded. **Third-party, not Apple documentation, and not a
+proposal.**
+
+## 24.2 WHAT COVERAGE ALREADY EXISTS FOR THE TEEN DEFAULTS
+
+### The server writer is one expression, and its adult half is hardware-verified three times
+
+Deployed `account_privacy_upsert_v1`:
+
+```sql
+values (v_uid, p_age_band,
+        (p_age_band='band_18_plus'), p_age_band,     -- lookup_enabled, lookup_set_under_band
+        (p_age_band='band_18_plus'), p_age_band)     -- follow_requests_enabled, follow_requests_set_under_band
+```
+
+**There is no teen branch.** The same expression produces both rows; only the
+input differs. Evaluated against the live database:
+
+| input | `lookup_enabled` | `follow_requests_enabled` |
+|---|---|---|
+| `band_13_17` | **false** | **false** |
+| `band_18_plus` | **true** | **true** |
+
+`*_set_under_band` is written as `p_age_band` itself, and neither `*_changed_at`
+appears in the insert, so both are **NULL**. **That is the complete predicted
+teen row**, derived from the deployed function rather than from a test.
+
+**And the adult half of that same expression has been observed on hardware three
+times** — `9c5385f6`, `44d633fc`, `6fd0a833`, all `true / true /
+band_18_plus / band_18_plus / NULL / NULL`.
+
+### The client half is unit-tested
+
+`MOTIVOTests` carries **16 tests** in `DeclaredAgeRangeDerivationTests`,
+including Apple's **six documented sandbox fixtures**, boundary values, the
+regulatory-override over-block, `testTeenAndUnknownDefaultOff`,
+`testShareDefaultMatrixIsExplicit`, `testOnlyADerivedBandIsEstablishable`, and
+the coordinator's single-flight and cooldown.
+
+### The genuine gap: `account_privacy_set_lookup_v1` has NEVER been called
+
+Its `pg_stat_statements` entry is **null**. **Zero coverage, unit or device.**
+
+**But it is band-agnostic except for one stamp:**
+
+```sql
+set lookup_enabled = p_enabled, lookup_set_under_band = ap.age_band, lookup_changed_at = now()
+```
+
+It reads the band **from the row**, so exercising it on an **adult** identity
+would cover the writer, the RPC, the `lookup_changed_at` stamp and the
+`set_under_band` stamp — **everything except the literal value `band_13_17`,
+which is copied, not computed.** **That needs a purchase (Connected-only
+control) but NOT a teen band.**
+
+## 24.3 THE DISPOSITION QUESTION, STATED FAIRLY
+
+**What would remain unverified if CP-3 were dispositioned with the hardware
+limitation recorded:**
+
+- the **end-to-end device path** from a real Apple teen range to a teen row;
+- the teen **discovery opt-in** chain end to end.
+
+**What is already covered:** the derivation (16 unit tests over Apple's own
+fixtures), the share default (pure, teen → OFF explicitly), the server defaults
+(one deployed expression, teen half evaluated, adult half hardware-verified 3×),
+the effective/override logic (deployed and readable), band establishment
+(hardware-verified 3×), Finding-A recovery (hardware-verified), and the
+short-circuit (hardware-verified).
+
+**Three beta identities have been spent and the teen band has never been
+produced — not once, in any attempt.** The evidence now says that is Apple's test
+machinery, not Études.
+
+**No purchase, deletion or fixture change has been made, and none is proposed.**
