@@ -1010,6 +1010,277 @@ gated on identity.
 
 ---
 
+## H. D1 DELTA AND TEST MATRIX — PROPOSED 2026-09-08, NOT IMPLEMENTED
+
+**§G6's client-only residual is REJECTED by the account holder and is superseded
+here.** Withholding becomes **server-persisted effective state**. Three required
+changes are worked below, followed by the complete delta and the test matrix.
+
+### H1 — Can an existing field carry this? **NO. Checked, not assumed.**
+
+`account_privacy` has nine columns. Every candidate fails:
+
+| candidate | why it cannot carry it |
+|---|---|
+| `age_band` | needs a third value — **excluded by decision**, and it would change CP-1's domain, the branchless default expression and both override predicates |
+| `lookup_enabled` / `follow_requests_enabled` | **destructive preference rewrite — forbidden by Q1** |
+| `lookup_set_under_band` / `follow_requests_set_under_band` | hold a band value; a sentinel would corrupt the override predicate that reads them |
+| `band_updated_at` / `*_changed_at` | timestamps; cannot encode a two-valued safety state |
+
+**A new column is required.** Proposed:
+
+```sql
+alter table public.account_privacy
+  add column age_eligibility_withheld boolean not null default false;
+```
+
+**`NOT NULL DEFAULT false` is deliberate.** It is strictly two-valued, so it can
+never introduce the NULL-resolves-permissive hazard CP-2-R1 was filed for, and the
+default applies to the existing row with no backfill. **No timestamp column is
+added** — minimisation; `band_updated_at` already records band movement, and when
+withholding was set is not needed for any decision.
+
+**WHAT THE COLUMN MEANS, and this wording is load-bearing.** It does **not** mean
+"this Études identity is under 13". It means **the latest conclusive Apple result
+does not currently establish Connected eligibility.** Q5's limitation stays
+explicit: the result describes the Apple Account signed in to iCloud on the
+device, which is not bound or verified against the Études identity.
+
+### H2 — Predicate delta: TWO functions, and the consumers need no edit
+
+**Verified by reading the deployed definitions:** `search_account_directory` calls
+`account_privacy_discoverable(ad.user_id)`, and `follow_requests_open` calls
+`account_privacy_requests_open(target_user_id)`. **Neither inlines the rule**, so
+changing the two helpers propagates to both consumers with zero edits to them —
+the payoff of CP-2's helper split.
+
+Each helper gains one conjunct inside the existing sub-select:
+
+```sql
+select p.lookup_enabled
+   and not p.age_eligibility_withheld            -- NEW
+   and not (p.age_band = 'band_13_17'
+            and p.lookup_set_under_band = 'band_18_plus')
+```
+
+**It inherits the right properties for free.** The `coalesce(..., false)` wrapper
+is untouched, so a missing row still resolves CLOSED. And the discovery conjunct
+in `search_account_directory` is deliberately **not** wrapped in
+`enforcement_active()`, so **the kill switch cannot relax withholding** — the
+existing comment already states the rule this change relies on.
+
+### H3 — Write path: one line changed, one tiny RPC added
+
+**`account_privacy_upsert_v1` — one line in the `on conflict` clause:**
+
+```sql
+on conflict (user_id) do update
+   set age_band = excluded.age_band,
+       age_eligibility_withheld = false,          -- NEW: a valid band clears it
+       band_updated_at = case when ap.age_band = excluded.age_band
+                              then ap.band_updated_at else now() end;
+```
+
+**`account_privacy_withhold_age_eligibility_v1()` — new, parameterless,
+UPDATE-only:**
+
+```sql
+update public.account_privacy ap
+   set age_eligibility_withheld = true
+ where ap.user_id = auth.uid();
+if not found then raise exception 'no age band declared' using errcode='23514'; end if;
+```
+
+**The asymmetry is the safety property.** A client can SET withholding but can
+**never clear it** — clearing happens only as a side effect of presenting a
+conclusive valid band. So no client call can restore eligibility without a real
+Apple result. **UPDATE-only** means it can never create a row, mirroring U4's
+canonical-writer discipline. It takes no parameter, so there is no value for a
+caller to get wrong.
+
+### H4 — `account_privacy_self_v1` gains a column, and this needs care
+
+It must return the flag so the client can drive activation and UX. **`CREATE OR
+REPLACE FUNCTION` CANNOT change a return type**, so this is a **`DROP FUNCTION`
+then `CREATE`**, with the `GRANT EXECUTE` re-applied afterwards — a real
+operational step, and exactly the kind of detail that is discovered at the wrong
+moment if it is not written down first.
+
+**B-23 FIDELITY: the change must land in `supabase/migrations/` as well as being
+applied to production.** P4-U7 already recorded that U5's server half was applied
+from `supabase/sql/` and never added to `migrations/`, so every local rehearsal
+afterwards rehearsed the wrong object — a six-column RPC against production's
+seven. **This change is the same shape and must not repeat it.**
+
+### H5 — Client delta
+
+- **`SelfState`** gains `ageEligibilityWithheld: Bool`, decoded from the new
+  column.
+- **`AccountPrivacyService`** gains `withholdAgeEligibility(auth:reason:)`, the
+  wrapper for the new RPC.
+- **`ProductionAppModeActivation.resolve`** gains one guard term, before the
+  entitlement term:
+  `guard !auth.ageEligibilityWithheld else { return .solo }`.
+- **`AuthManager.ageEligibilityWithheld`** is **derived from
+  `accountPrivacyState`, not a separate stored flag** — one source of truth, and
+  it survives process death because the server holds it. No local persistence of
+  an age-derived fact.
+
+**`accountPrivacyState == nil` (unknown) resolves NOT withheld for the MODE
+decision.** This is deliberate and is invariant 3 applied: mode is a **reversible
+UI decision** and may rest on client-side evidence, whereas the irreversible
+half — who is discoverable and who may be contacted — is now **server-enforced by
+H2 regardless of what any client believes**. Resolving unknown as withheld would
+drop every offline launch to Solo, which is a large regression for no safety gain.
+
+**Residual, stated rather than hidden:** on an offline relaunch a withheld member
+may see Connected UI until hydration completes. Bounded, reversible, and the
+server refuses discovery and contact throughout. **Caching the flag locally to
+close it is explicitly rejected** — it would persist an age-derived fact on the
+device for a cosmetic gain.
+
+### H6 — UX delta, after inspecting the actual routing
+
+**INSPECTED, AND THE NAIVE FIX WOULD HAVE BEEN A DEFECT.** `connectedPromoSection`
+is shown whenever `!canShowConnectedAccountManagement`, so a withheld member in
+Solo **would be offered "Explore Connected"** — a purchase funnel that cannot
+resolve age eligibility. That is the conflation to avoid.
+
+**But `eraseAllEtudesDataButton` renders INSIDE that same section
+(`ProfileView:879`).** Hiding the section would remove the member's
+account-deletion route — **a third route to C-35**, arriving through the UI rather
+than through a guard.
+
+**So the minimal change is surgical: within `connectedPromoSection`, replace only
+the "Explore Connected" button when withheld, and leave `eraseAllEtudesDataButton`
+exactly where it is.**
+
+**Reuse existing neutral wording — no new child-safety settings surface, no new
+screen.** The replacement row carries the string already in the source at
+`ProfileView:395`: **"Études Connected is for ages 13 and over."** It states the
+product rule and asserts nothing about the member.
+
+**The replaced row IS the explicit retry path**, so no extra control is invented:
+it stays a `Button` whose action performs an immediate refresh bypassing the
+automatic throttle. Same row, different label and action.
+
+### H7 — Throttle: exactly two local timestamps
+
+**Persisted-server withholding removes the earlier need for fast retry**, because
+the state now survives relaunch on its own. So the coarse intervals are safe.
+
+| key | stamped when | gates |
+|---|---|---|
+| `p5g.ageBand.refreshedAt.<uid>` | **only** on a conclusive `.band(...)` | the **30-day** product cadence |
+| `p5g.ageBand.attemptedAt.<uid>` | on `.unavailable`, `.declinedSharing`, unknown, error, **and `.ineligible`** | the **24-hour** coarse retry |
+
+An automatic refresh runs only when **both** are due. **No server refusal counter,
+no history, no DOB, no provenance** — two local timestamps and nothing else.
+
+**Explicit user-initiated retry (H6's row) bypasses both**, subject only to the
+existing in-memory single-flight, and stamps whichever key its outcome implies.
+
+**Deletion and reset:** both keys are per-identity and must be cleared by
+`LocalFactoryReset` and on sign-out of that identity. They are operational
+timestamps containing no age data. **They must be added to the erase sweep
+deliberately** — this is the C-28/C-48 class of question, and a key that outlives
+an erase is exactly what those findings were about.
+
+**Reinstall / new device:** both keys are absent, so one refresh happens at first
+launch. Harmless (§E1), and correct — a new device re-derives promptly, which is
+the right direction under Q5. Hydration alone already restores the *withheld
+state* from the server, independently of the timestamps.
+
+**Multiple devices: still no coordination, and now genuinely unnecessary.** The
+withheld state is server-side, so every device agrees on the state; only refresh
+*timing* differs per device. Apple's cache is account-wide and synced, and a
+duplicate write is value-idempotent.
+
+### H8 — Rollback
+
+Ordered, and it restores the pre-change world exactly:
+
+1. restore the two helper bodies (`CREATE OR REPLACE`, no signature change);
+2. restore `account_privacy_upsert_v1` (`CREATE OR REPLACE`, no signature change);
+3. `DROP FUNCTION account_privacy_withhold_age_eligibility_v1()`;
+4. `DROP FUNCTION account_privacy_self_v1()` and re-create the six-column form,
+   **re-applying its GRANT**;
+5. optionally `ALTER TABLE ... DROP COLUMN age_eligibility_withheld` — the column
+   is inert once nothing reads it, so dropping it is cleanup rather than rollback.
+
+**Step 4 is the one with a client dependency:** a shipped client expecting seven
+columns must not meet a six-column function. **Roll the server back only with the
+matching client, or leave `self_v1` at seven columns and roll back 1-3 only** —
+which is a complete behavioural rollback on its own, since the flag then affects
+nothing.
+
+### H9 — TEST MATRIX
+
+**Server — predicates (local stack, then production structural):**
+
+| # | case | expect |
+|---|---|---|
+| S1 | `discoverable`, withheld **false**, adult, lookup on | **true** |
+| S2 | `discoverable`, withheld **true**, adult, lookup on | **false** |
+| S3 | `requests_open`, withheld **true**, adult, requests on | **false** |
+| S4 | missing `account_privacy` row | **false** (CP-2-R1 unchanged) |
+| S5 | withheld **true**, `enforcement_enabled = false` | **still false** — the kill switch must not relax it |
+| S6 | `search_account_directory` for a withheld subject | **zero rows**, via the helper, with **no edit to the consumer** |
+| S7 | teen override still applies independently of withholding | unchanged |
+
+**Server — writers:**
+
+| # | case | expect |
+|---|---|---|
+| W1 | `upsert_v1` with a valid band on a withheld row | band written, **withheld cleared** |
+| W2 | `upsert_v1` with the **same** band | **idempotent** — `band_updated_at` unmoved, withheld cleared |
+| W3 | `withhold_v1` on an existing row | withheld **true**, band and **all four preference columns byte-identical** |
+| W4 | `withhold_v1` with **no** row | raises `23514`, **creates nothing** |
+| W5 | `withhold_v1` twice | idempotent |
+| W6 | no client role holds direct DML on the column | grants unchanged; RLS still on, zero policies |
+| W7 | `self_v1` returns seven columns including the flag | and its GRANT survives the DROP/CREATE |
+
+**Client — refresh state machine:**
+
+| # | refresh outcome, band established | band write | withhold call | `refreshedAt` | `attemptedAt` |
+|---|---|---|---|---|---|
+| C1 | `.band` unchanged | upsert | — | **stamp** | — |
+| C2 | `.band` changed | upsert | — | **stamp** | — |
+| C3 | `.unavailable` | **none** | **none** | — | **stamp** |
+| C4 | `.declinedSharing` | **none** | **none** | — | **stamp** |
+| C5 | thrown error | **none** | **none** | — | **stamp** |
+| C6 | `.ineligible` | **none** | **withhold** | — | **stamp** |
+
+**Client — activation, UX and the traps:**
+
+| # | case | expect |
+|---|---|---|
+| A1 | withheld true | mode **`.solo`** |
+| A2 | withheld true **and** entitled | mode `.solo`, **and never purchase copy** |
+| A3 | withheld true | **"Delete Account & All Études Data" still present and functional** — C-35 |
+| A4 | withheld true | `eraseAllEtudesDataButton` **still rendered** in the promo section |
+| A5 | withheld true | "Explore Connected" **replaced** by the neutral row |
+| A6 | withheld true | refresh **still runs** — **not gated on `AppMode`**, or withholding is permanent (`C5f-12`) |
+| A7 | `accountPrivacyState == nil` | **not** withheld for the mode decision; offline launch unaffected |
+| A8 | explicit retry row | bypasses **both** throttles |
+| A9 | `LocalFactoryReset` | **both** keys cleared |
+
+**Reclassification (both directions, prospective):**
+
+| # | case | expect |
+|---|---|---|
+| R1 | adult → 13-17 | adult-set preferences **withheld in effect**, values **unrewritten** |
+| R2 | 13-17 → adult | overrides **evaporate**, preserved preferences **effective again** |
+| R3 | adult → 13-17 → adult | **round-trips**; `set_under_band` never rewritten |
+| R4 | any transition | **posts and approved follows untouched** |
+| R5 | withheld → valid band | **withholding cleared**, preferences intact |
+
+**Non-vacuity:** every server assertion must be run against the **pre-change**
+functions and observed to fail, as U2c and P4-U2a did. An assertion that passes
+before the change tests nothing.
+
+---
+
 ## 4. WHAT THE DPIA MUST CARRY VERBATIM
 
 **CP-3 closed with two limitations, and the DPIA must reflect the first as

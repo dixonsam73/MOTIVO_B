@@ -57,10 +57,16 @@ enum AccountPrivacyService {
 
     // MARK: - Writes
 
-    /// Establishes or reconciles the band. Insert-if-absent on the server, so a
-    /// retry after an ambiguous failure returns the existing row rather than
-    /// writing a second one, and an unchanged band leaves `band_updated_at`
-    /// exactly where it was.
+    /// Establishes or reconciles the band.
+    ///
+    /// **NOT insert-if-absent** — corrected P5-G, 2026-09-08. This was a THIRD
+    /// instance of the same wrong description, missed when the other two were
+    /// fixed. `account_privacy_upsert_v1` updates `age_band` on conflict and
+    /// stamps `band_updated_at` only on a real change. So a retry after an
+    /// ambiguous failure returns the existing row rather than writing a second
+    /// one, and an unchanged band leaves `band_updated_at` exactly where it was —
+    /// both true, but they follow from the `on conflict` clause, not from the
+    /// writer declining to update.
     static func upsertBand(_ band: AgeBand, auth: AuthManager, reason: String) async -> Result<SelfState, Failure> {
         await call(rpc: "account_privacy_upsert_v1",
                    body: ["p_age_band": band.rawValue],
