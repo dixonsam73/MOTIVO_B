@@ -63,11 +63,22 @@ needed for both directions are in place. `*_set_under_band` is what makes the
 upward direction computable without having stored a second copy of the
 preference.
 
-**THE REFRESH CADENCE IS DELIBERATELY NOT DECIDED HERE.** "Declaration
-anniversary" is **not** adopted as product policy. The least intrusive
-Apple-supported refresh opportunity is to be determined during implementation and
-recorded then. **Do not hard-code a cadence into the DPIA either** — describe the
-protection, not an unchosen interval.
+**CADENCE DECIDED 2026-09-08: 30 DAYS.**
+
+**Its purpose is NOT to approximate Apple's declaration anniversary — which we
+cannot know (§E5) and must not try to model.** It is to **bound the lag between
+Apple beginning to return a changed range and Études observing it**, without
+needless API activity. Thirty days gives a reasonable bound at negligible cost,
+given that Apple anticipates frequent calls (§E1) and a change can surface at most
+once a year anyway (§E2).
+
+**Store only the minimum operational timestamp needed to enforce the throttle,
+scoped to the Études identity. No DOB, no declaration anniversary, no
+`ageRangeDeclaration` provenance.** The timestamp records *when Études last
+asked*, which is neither an age nor provenance.
+
+**The DPIA describes the protection and the 30-day bound — never Apple's internal
+cache policy as if it were ours.**
 
 ### A2 — Q2 AS DECIDED
 
@@ -837,6 +848,165 @@ Under *Ask First*, an anniversary-crossing refresh **can** present a prompt. Thi
 is Apple's own UX, is bounded to roughly once a year by the anniversary rule, and
 cannot be avoided by any app that refreshes at all. **The alternative — never
 refreshing — is what Q1 decided against.**
+
+---
+
+## G. THE MINIMAL D1 STATE MACHINE — PROPOSED 2026-09-08, NOT IMPLEMENTED
+
+**Accepted in principle: View-scoped repeated `requestAgeRange`, coarse
+per-identity local throttle, no server schema change, band updates only from
+successful range results. Cadence 30 days.** This section refines the
+refresh-result policy and the throttle semantics, and proposes the under-13
+mechanism. **One item needs review before coding — §G6.**
+
+### G1 — Refresh-result policy. `.ineligible` AND `.unavailable` ARE NOT COLLAPSED
+
+**The existing enum already separates them and needs no change.**
+`DeclaredAgeRangeOutcome` distinguishes `.ineligible` ("Apple told us, and the
+answer is below our minimum") from `.unavailable` ("we were not told" — decline,
+unknown response, or error). Establishment collapses them **in effect** because
+both refuse Connected; **refresh must not.**
+
+For an identity that ALREADY has a band:
+
+| refresh result | band write | throttle stamp | Connected access |
+|---|---|---|---|
+| `.band(b)` — valid 13-17 or 18+ | **upsert `b`** — idempotent when unchanged | **STAMP** | unchanged by this term |
+| `.unavailable` — declined, unknown, error | **none** | **NO STAMP** | **unchanged — band retained** |
+| `.ineligible` — genuine under-13 bounds | **none** | **NO STAMP** | **WITHHELD — §G3** |
+
+**`.unavailable` never erases or downgrades an established band.** Apple being
+temporarily unavailable, or a person declining, is not evidence about age.
+
+**Idempotency is a property of the deployed writer, verified not assumed:**
+`on conflict` sets `age_band = excluded.age_band` and preserves `band_updated_at`
+when the band is unchanged, and **`account_privacy` carries no triggers at all**,
+so a repeat upsert of the same band changes no observable value.
+
+### G2 — Why `.ineligible` must NOT be silently ignored, contradicting an earlier argument of mine
+
+**§F4 argued a refresh `.ineligible` can never be genuine because age only
+increases. THAT ARGUMENT IS WITHDRAWN — it is unsound, and Q5 is why.** The band
+is an assertion about **the Apple Account signed in to iCloud on the device**, not
+about the Études identity. **That Apple Account can change.** So an under-13
+result is a real, reachable state and must be handled, not reasoned away.
+
+**But it is AMBIGUOUS, and the ambiguity decides the design.** An under-13 refresh
+means either *this member is a child* or *the device's Apple Account is now a
+child's*. Études cannot tell which. **So it must fail closed for ACCESS while
+refusing to record an age claim it cannot justify** — recording "this member is
+under 13" on that evidence would be manufacturing age state.
+
+### G3 — The under-13 mechanism: ONE non-persisted flag and ONE guard term
+
+**The smallest mechanism that satisfies the constraints, with no persisted state
+and no schema change.**
+
+`ProductionAppModeActivation.resolve` is today a three-term AND. Add a fourth,
+driven by a non-persisted `@Published` flag on `AuthManager` — the same shape as
+the existing `connectedSetupIncomplete`, which already models "identity exists but
+Connected setup is incomplete" without persistence:
+
+```
+guard BackendConfig.isConfigured else { return .solo }
+guard !auth.ageEligibilityWithheld else { return .solo }   // NEW
+guard isEntitled else { return .solo }
+guard auth.hasConnectedIdentity else { return .solo }
+return .connected
+```
+
+**It is NOT conflated with subscription lapse, on three counts.** The flag is a
+*separate, directly inspectable* value from `connectedMembershipStore.isEntitled`,
+so copy and support can distinguish them. It is placed **before** the entitlement
+term, so when both hold the age reason is the operative one. And it must **never**
+route to purchase copy — an age-withheld member must not be invited to subscribe.
+
+**Name it for the access decision, not the age.** `ageEligibilityWithheld`, never
+`isUnder13` — the flag records what Études *did*, which is all it can justify.
+
+**Nothing is deleted and nothing is manufactured.** The identity, the membership
+row, posts, follows, the directory row, the local journal and the established band
+all survive untouched. Falling to Solo is the existing, settled withdrawal
+semantics.
+
+**C-35 IS NOT RE-CREATED, VERIFIED RATHER THAN ASSUMED.** Account deletion is
+gated on `auth.hasConnectedIdentity` (`ProfileView:1828`, and the button label at
+`:940`), **not** on `AppMode`, precisely because this trap has been sprung twice.
+An age-withheld member therefore keeps the full "Delete Account & All Études Data"
+route without re-subscribing and without regaining Connected.
+
+**Refresh must NOT be gated on `AppMode`.** Gating it would make the withheld
+state permanent — the member could never be re-evaluated back to Connected. This
+is exactly the `C5f-12` lesson, and it must be asserted the same way.
+
+### G4 — Throttle semantics, precisely
+
+**What stamps.** Only a **conclusive** refresh — a `.band(...)` result, changed or
+unchanged. That is the only outcome meaning "we now hold current information".
+
+**What does not stamp.** `.unavailable`, `.declinedSharing`, unknown responses,
+thrown errors, **and `.ineligible`**. All leave the previous stamp intact so the
+next eligible opportunity retries. Hammering is prevented by the **existing**
+in-memory single-flight and 60-second cooldown, not by a new mechanism.
+
+**`.ineligible` deliberately does not stamp**, so a withheld member converges back
+within one foreground once the Apple Account situation changes, rather than
+waiting up to 30 days. Apple's own cache makes the repeated call cheap and silent.
+
+**Reinstall / device change.** The stamp lives in `UserDefaults`, keyed per Études
+identity, so it is per-install. Reinstall or a new device loses it and performs one
+extra refresh on first launch. **That is a feature, not a cost:** a new device
+re-derives promptly, which is the correct direction given Q5's device-bound
+concern. Per-identity keying stops one identity inheriting another's throttle on a
+shared device. **It must be cleared by account deletion and Erase All** — it is an
+operational timestamp, not user content, and it contains no age data.
+
+**Multiple devices for one identity: DO NOTHING.** No distributed coordination, no
+shared cursor, no server column. Each device throttles independently and may call
+Apple within 30 days of its *own* last call. Apple's cache is account-wide and
+**synced across devices** (§E4), so the extra calls are cheap and return the same
+value, and a duplicate write is value-idempotent (§G1). **Building coordination
+here would add server state and complexity for no product benefit.**
+
+### G5 — Reclassification stays prospective
+
+Unchanged from §F3 and re-stated because it is the point of the unit: **adult →
+teen** makes the child discovery/contact overrides effective; **teen → adult**
+makes them evaporate and the preserved underlying preferences effective again;
+**posts and approved follows are untouched** — measured in §1, only three database
+objects consult `account_privacy`, and none of them governs content or
+relationships. **No preference is ever destructively rewritten.**
+
+### G6 — THE ONE ITEM FOR REVIEW BEFORE CODING
+
+**An age-withheld member remains DISCOVERABLE server-side.** The flag is
+client-side, so `account_privacy.age_band` still reads `band_18_plus` and
+`search_account_directory` still returns them. Client access is withdrawn; server
+visibility is not.
+
+**Closing that would require persisting an age-derived state** — a third band
+value or an `age_withheld_at` column — which is a schema change, changes CP-1's
+`NOT NULL` domain and the branchless default expression, and **records a claim
+about a minor that §G2 says we cannot justify.**
+
+**RECOMMENDATION: accept the residual and do not persist.** The ambiguity is real,
+the access control fails closed, and nothing is destroyed. **A tempting middle
+path must be rejected explicitly:** calling the existing
+`account_privacy_set_lookup_v1(false)` would need no schema change — but it
+**destructively rewrites the member's own preference**, which Q1 forbids outright.
+**Do not do it.**
+
+**If the account holder wants server-side effect, that is a new persisted state
+and returns for review as its own decision.**
+
+### G7 — Scope of the change, if approved
+
+One `@Published` flag, one guard term, one throttle key, and the refresh branch in
+the existing `AgeBandRecoveryCoordinator` / `AgeBandRecoveryTrigger`. **No server
+schema change, no new RPC, no new UI surface, no new prompt surface.** The
+assertions that matter: refresh is not gated on `AppMode`; `.unavailable` and
+`.ineligible` never write a band; only `.band(...)` stamps; and deletion remains
+gated on identity.
 
 ---
 
