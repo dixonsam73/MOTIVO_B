@@ -516,3 +516,100 @@ test**:
 it writes to the server). **The Under-13 fixture stays as it is**, since it is
 inert while a band row exists and would be the correct starting state for either
 outcome.
+
+---
+
+# 9. DISCRIMINATOR 5 RE-EVALUATED FROM THE MEASURED UI. 2026-09-08 08:24
+
+## 9.1 The real control exists, and it is per-app
+
+Observed by the account holder:
+
+```
+Apple Account → Personal Information → Age Range for Apps
+    Share with Apps : Ask First
+    Études          : Shared
+      → Age Range — Shared
+        "Last shared: 18 or older on 7 September 2026"
+```
+
+**This is the user-facing surface Apple's documentation alludes to**, and it is
+distinct from both the Sandbox developer fixture and `Revoke App Consent`.
+`.declinedSharing` therefore moves from *"candidate route, unconfirmed"* to
+**a reachable control**.
+
+## 9.2 IT ALSO CORROBORATES §7.2, VISIBLY
+
+**"Last shared: 18 or older on 7 September 2026" is still the ADULT value**,
+while the Under-13 fixture is active and demonstrably returned an under-13 range
+minutes ago.
+
+So the **Sandbox developer fixture and the user-facing shared record are
+decoupled**: the fixture governs what `requestAgeRange` returns without updating
+the account-level record. That is exactly what §7.2 measured, now with a visible
+corroboration rather than only an inference — and it further narrows the claim:
+the fixture **overrides** the cached value; it does not **replace** it.
+
+## 9.3 AGE CONFIRMATION IS IRRELEVANT — SOURCE-BACKED, NOT ASSUMED
+
+The separate `Age Confirmation — Not Confirmed` control (the UK-law "Confirm You
+Are 18+" flow) **must not be touched.**
+
+`ageRangeDeclaration` — the field carrying `selfDeclared` / `confirmed` /
+`guardianDeclared` — **appears nowhere in the app except the comment stating it
+is never inspected** (`DeclaredAgeRangeService:30`). Every decision Études makes
+comes from `range.lowerBound` and `range.upperBound` alone, via
+`derive(lowerBound:upperBound:)`.
+
+**So no evidence requires changing Age Confirmation, and it is a real Apple
+Account change with real consequences. Leave it alone.** The account holder's
+assumption was correct.
+
+## 9.4 D5-BASE2 — 08:24:25 UTC
+
+| measure | value |
+|---|---|
+| `auth.users` / `account_privacy` / `account_directory` | **2 / 1 / 1** |
+| `band_updated_at` | **2026-09-07 13:40:16.675419** |
+| `membership_binding.updated_at` | **2026-09-07 13:40:16.990315** |
+| `membership_notification` | **104** |
+| tokens `9c5385f6` / `dfaf8d18` | **42 / 248** |
+| **`account_privacy_upsert_v1` (writer)** | **2** |
+| `account_privacy_self_v1` | **45** |
+| `account_directory` INSERT | **2795** |
+
+## 9.5 ACTION 1 OF 2 — stop sharing, and nothing else
+
+> **Apple Account → Personal Information → Age Range for Apps → Études.
+> Use whatever control that screen offers to STOP SHARING the age range with
+> Études. Change nothing else. Then report what the control was called and what
+> the screen shows afterwards.**
+
+**Do not tap Continue in Études yet. Do not touch `Share with Apps` (leave it on
+Ask First). Do not touch Age Confirmation.**
+
+**Predicted effect on the server: NONE.** This is an Apple Account setting; no
+Études code runs. Every value in §9.4 must be unchanged when I re-measure —
+**including `membership_notification` at 104**, which is the tripwire proving no
+`RESCIND_CONSENT` was fired by mistake.
+
+**Reversibility, stated plainly:** this changes a real privacy setting on the
+primary Apple Account, scoped to Études alone. With `Share with Apps` on **Ask
+First**, the next request should prompt again, so re-sharing restores it. It is
+reversible, but it is not nothing, and it is the only way to reach the branch.
+
+## 9.6 WHAT ACTION 2 WILL BE, so the destination is known
+
+Explore Connected → **Continue**, with predictions recorded first. Two outcomes,
+both informative:
+
+- **Apple returns `.declinedSharing`** → alert *"Études needs Apple to share your
+  age range before Connected can be set up…"* → **discriminator 5's strongest
+  branch PASSES**, with the same no-server-contact proof as discriminator 4.
+- **Apple re-prompts** (consistent with *Ask First*) → decline on the sheet to
+  reach the same place. **If the prompt is accepted instead**, the Under-13
+  fixture is still active, so the result is `.ineligible` — the already-passed
+  refusal, harmless, and the test can simply be repeated.
+
+**The other two branches remain classified device-unreachable (§8.3) and are not
+being manufactured.**
