@@ -751,3 +751,105 @@ product.
   incidentally reconfirmed once more.
 - **No protective default was written on a doubtful input**, which is the
   behaviour CP-3 wants: an unresolved age answer must establish **nothing**.
+
+---
+
+# 14. FINDING: THE RECOVERY PATH'S `requestAgeRange` IS READ FROM `App` SCOPE
+
+## 14.1 The trace, step by step
+
+**Was `requestAgeRange` reached? YES, necessarily — established, not assumed.**
+
+`account_privacy_self_v1` is `STABLE SECURITY DEFINER`, plain SQL, **no guards
+and no enforcement gate**, and for an identity with no row it returns **zero
+rows**. The client maps an empty row set to **`.noBandEstablished`**
+(`AccountPrivacyService`: `isEmptyRowSet(data) ? .noBandEstablished : …`). And
+`pg_stat_statements` proves the statement **executed twice**.
+
+So `fetchSelf` returned `.noBandEstablished` → the switch **breaks** → **`requestRange()` is called.** The three candidates resolve:
+
+| candidate | verdict |
+|---|---|
+| `fetchSelf` → `.noBandEstablished`, proceeds to Apple | **THIS ONE** |
+| transport/read failure → early return **before** Apple | **excluded** — the RPC is guard-free, executed, and returns `[]`, which maps to `.noBandEstablished`, not to a failure |
+| Apple called, returned a non-band | **the observable**, and the question becomes *why* |
+
+**And any band result would have written.** `bandToEstablish` maps `.band(x)` → x,
+`pendingAgeBand` is set, and `ensureAgeBandEstablished` would `upsertBand`.
+**Writer +0 ⇒ no band came back.** With the fixture at **13-15** and Études
+listed **Shared**, a correct action should have returned bounds — from cache if
+need be, **which is also why no sheet is expected**.
+
+## 14.2 THE TWO CALL SITES READ THE ACTION FROM DIFFERENT SCOPES
+
+| call site | declares at | scope | on device |
+|---|---|---|---|
+| `AgeBandRecoveryCoordinator` | `MOTIVOApp:87` | **`struct MOTIVOApp: App`** (`:67`) — **an App, not a View** | **no sheet, no band, silent** |
+| `ProfileView`'s Continue | `ProfileView:327` | **a `View`** | **works — the under-13 alert fired twice, and the fixture change was honoured** |
+
+**`requestAgeRange` presents system UI and needs a presentation context.**
+`@Environment(\.scenePhase)` resolves in `App` scope; **a presentation-requiring
+action is a different matter.** A throw is caught at `MOTIVOApp:461` and mapped
+to `.unavailable` — **silently**, which is exactly the observable: no sheet, no
+band, no write, no error surfaced.
+
+## 14.3 CERTAINTY, STATED HONESTLY
+
+**Established:** the RPC executed twice; the writer never ran; no sheet appeared;
+the fixture is 13-15; Études is `Shared`; the two call sites read the action from
+different scopes; **the View-scope one demonstrably works on this device.**
+
+**Inferred, not proven:** that the App-scope action *throws*. I have not observed
+the throw — the `catch` is silent and the build is Release. What is shown is that
+the observable is **consistent with it and inconsistent with every alternative I
+can check**: a band would have written, a decline contradicts `Shared`, and an
+`.ineligible` contradicts the 13-15 fixture.
+
+## 14.4 WHY NO TEST CAUGHT THIS, AND IT IS A KNOWN FAILURE MODE
+
+`recoverIfNeeded(auth:reason:now:requestRange:)` takes the range provider **as a
+parameter**, and the five unit tests pass a **stub**. The defect is in the
+**wiring at the call site**, which no unit test touches — the suite validated the
+coordinator's logic and could never validate where its input comes from.
+
+**This project has already recorded this exact lesson**, from C-44:
+
+> *"A probe validates a mechanism, not the presentation context it ships in.
+> Where a probe's environment differs from the shipping call site, that
+> difference is untested surface."*
+
+**Finding-A was `fixed locally, NOT device-verified` in the handover, and this is
+what that gap was hiding.**
+
+## 14.5 CONSEQUENCE
+
+**As shipped, Finding-A's recovery cannot establish a band.** An
+`identityWithoutBand` would stay band-less across every launch and foreground —
+which is precisely the state Finding-A exists to repair. **The short-circuit half
+works** (verified extensively on the adult identity); **the recovery half does
+not.**
+
+**Recorded as a CP-3 finding to be diagnosed, exactly as directed for
+writer-class failures. Not fixed here.**
+
+**Likely shape of the fix, not implemented:** read `requestAgeRange` in a **View**
+and hand it to the coordinator, rather than reading it in the `App`. `ProfileView`
+already demonstrates the working pattern.
+
+## 14.6 THE MINIMUM NEXT OBSERVATION — and what it costs
+
+**The fixture's purpose was to test Finding-A recovery. It has now done that, and
+the answer is that recovery is broken.** Preserving it further protects a test
+whose result is already in.
+
+| option | what it settles | cost |
+|---|---|---|
+| **A. Cold launch** (force-quit, reopen) | fires the **launch** site (`:283`) — but that reads the **same App-scope action**, so it should fail identically. Strengthens the pattern; **cannot prove the diagnosis** | free; fixture preserved |
+| **B. Explore Connected → Continue** | uses **ProfileView's View-scope action** with the *same* fixture and consent. **If a band comes back, the contrast is decisive**: the same request succeeds from a View and fails from the App | it **writes `band_13_17`** via the join path, so the teen band is established by a working route — and Finding-A's recovery is not demonstrated by the coordinator, **which it already cannot be** |
+
+**Recommendation: B.** It is the only option that *discriminates* rather than
+repeats, and it simultaneously unblocks the teen sequence — teen defaults, Share
+default OFF, and the discovery opt-in — all of which need a band that the
+coordinator cannot currently write.
+
+**Not executed. No device action requested until the account holder decides.**
