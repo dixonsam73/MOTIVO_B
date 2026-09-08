@@ -613,3 +613,111 @@ both informative:
 
 **The other two branches remain classified device-unreachable (§8.3) and are not
 being manufactured.**
+
+---
+
+# 10. CORRECTION: THERE IS NO PER-APP REVOCATION. 2026-09-08 08:29
+
+**§9.5 asked for something that does not exist.** The Études screen under
+`Age Range for Apps` is **informational only** — it displays *Age Range: Shared*
+and the last-shared line and offers no control. **I inferred a per-app
+revocation from a per-app listing**, which is the same error as inferring
+behaviour from a symbol's name. Withdrawn.
+
+**The only lever is the global `Share with Apps`**, changing *Ask First* → **Never**,
+which the account holder reports turns the Études sharing state off. That is a
+**global** Apple Account preference affecting **every** app, not just Études —
+materially broader than what §9.5 proposed, and it must be described as such.
+
+## 10.1 APPLE'S DOCUMENTATION CANNOT ANSWER EITHER QUESTION
+
+Checked directly, not inferred:
+
+- **`AgeRangeService.Response.declinedSharing`** is defined only as *"Indicates
+  the person declined to share their age range with your app."* Apple does
+  **not** say whether that covers a **global Settings refusal** or only a
+  **declined prompt**.
+- **`requestAgeRange(ageGates:_:_:in:)`**'s discussion covers the system sheet
+  and regulatory overrides, and says **nothing** about behaviour when sharing is
+  disabled in Settings, when `declinedSharing` is returned without prompting, or
+  how the Settings preference relates to a request.
+- **The Sandbox testing documentation** says nothing about precedence between a
+  Sandbox age fixture and the account-level sharing preference.
+
+**So both questions are unanswerable from documentation, and I am not going to
+assert an answer.** The semantic reading of `declinedSharing` plausibly covers a
+global refusal — **plausible is not established.**
+
+## 10.2 THE CURRENT FIXTURE STATE MAKES THE EXPERIMENT SELF-ANSWERING
+
+**This is the useful part, and it is luck worth exploiting:** the Under-13
+Sandbox fixture is still active. So with `Share with Apps = Never`, the two
+competing hypotheses produce **two visibly different alerts**:
+
+| if… | Apple returns | Études maps to | **alert shown** |
+|---|---|---|---|
+| **the global refusal takes precedence** | `.declinedSharing` | `.unavailable` | **"Études needs Apple to share your age range before Connected can be set up. You can change this in Settings, under your Apple Account."** |
+| **the Sandbox fixture overrides it** | bounds —, 12 | `.ineligible` | **"Études Connected is for ages 13 and over."** |
+
+**One tap distinguishes them, and both results are worth having:**
+
+- **Refusal wins** → `.declinedSharing` is genuinely produced → **discriminator
+  5's strongest branch PASSES**, and the precedence question is answered.
+- **Fixture wins** → the Sandbox fixture always supplies a value, so
+  `.declinedSharing` is **DEVICE-UNREACHABLE on this rig** → discriminator 5
+  closes as **unreachable rather than untested**, joining the other two branches,
+  and the precedence question is *still* answered.
+- **A system sheet appears instead** → report it and stop; that is a third fact
+  and I will not pre-judge it.
+
+## 10.3 D5-BASE3 — 08:29:37 UTC
+
+| measure | value |
+|---|---|
+| `auth.users` / `account_privacy` / `account_directory` | **2 / 1 / 1** |
+| band / `band_updated_at` | `band_18_plus` / **2026-09-07 13:40:16.675419** |
+| `lookup_changed_at` | NULL |
+| `membership_binding.updated_at` | **2026-09-07 13:40:16.990315** |
+| `membership_notification` | **104** |
+| tokens `9c5385f6` / `dfaf8d18` | **42 / 248** |
+| **`account_privacy_upsert_v1` (writer)** | **2** |
+| `account_privacy_self_v1` | **45** |
+| `account_directory` INSERT | **2795** |
+
+## 10.4 PREDICTIONS
+
+**For the setting change alone (no Études interaction):**
+
+| | prediction |
+|---|---|
+| **G-1** | **zero server effect** — every value in §10.3 unchanged, including `membership_notification` at **104** |
+
+**For the subsequent Continue tap, whichever branch wins:**
+
+| | prediction |
+|---|---|
+| **G-2** | `account_privacy_upsert_v1` stays **2** — no band written on any branch |
+| **G-3** | `account_privacy_self_v1` stays **45** and tokens stay **42** — **no server contact at all**, since both `.unavailable` and `.ineligible` refuse before `continueToConnectedJoin()` |
+| **G-4** | `account_directory` rows **1**, `dir_ins` **2795** |
+| **G-5** | band, binding, `auth.users`, and `dfaf8d18` all unchanged |
+
+**G-3 is the same proof that made discriminator 4 strong**, and it holds on every
+branch here — which is why this experiment is safe regardless of which hypothesis
+wins.
+
+## 10.5 THE ACTION, AND ITS COST STATED HONESTLY
+
+> **Set `Share with Apps` from *Ask First* to *Never*.** Change nothing else —
+> not Age Confirmation, not the Sandbox fixture. **Then tell me, before opening
+> Études**, so I can verify G-1.
+
+**This is a GLOBAL preference affecting every app on the account, not just
+Études.** It is reversible by setting it back to *Ask First*, and the account
+holder has already offered to do exactly that afterwards. **Restoring *Ask First*
+may leave Études showing as not-shared until something asks again** — which is
+what *Ask First* means, and is not damage.
+
+**If that global scope is not acceptable, say so and discriminator 5 closes as
+device-unreachable.** That is a legitimate outcome, not a gap: two of its three
+branches are already classified unreachable, and the mapping of all three to
+`.unavailable` is pure and unit-tested.
