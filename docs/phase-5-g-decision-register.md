@@ -1439,6 +1439,156 @@ third would make I7 the next unit — still not periodic polling.**
 
 ---
 
+## J. MEMBER-INITIATED RECHECK — SCOPE ONLY, NOT BUILT. 2026-09-08
+
+**MINIMAL is adopted. CONTINUOUS is reverted (`cbaeeed`).** This replaces the
+trapped-teen problem — the only ordinary reclassification, 13-17 → 18+ — with a
+deliberate member action. **Scoped, deliberately not overbuilt.**
+
+### J1 — What it is
+
+One action, offered **only** to an identity whose stored band is `band_13_17`,
+letting the member ask Apple for their current age range again. It re-uses the
+existing View-scoped `requestAgeRange` and the existing
+`DeclaredAgeRangeService.outcome(for:)` mapping. **No second age-range mechanism.**
+
+### J2 — Semantics
+
+| result | behaviour |
+|---|---|
+| **18+** | `account_privacy_upsert_v1` updates the band. The child override stops matching, so the **preserved adult-set preferences become effective automatically** — no preference is written, nothing is un-done by hand |
+| **still 13-17** | idempotent. `on conflict` writes the same band, `band_updated_at` does not move, no behavioural change |
+| **unavailable / declined / error** | **retain the teen band and every protection.** Apple being unreachable is not evidence about age |
+| **Under-13** | **DO NOT INVENT BEHAVIOUR. Flagged to C4.** On a voluntary recheck by an established 13-17 member this is an identity/account anomaly, not ageing, and the right response is a legal/scope question rather than an engineering guess |
+
+### J3 — Cost: ZERO server delta
+
+**Verified against the deployed objects, not assumed.** `upsert_v1` already
+updates `age_band` on conflict; the read-time override is already
+`not (age_band='band_13_17' and set_under_band='band_18_plus')`, so it evaporates
+the moment the band leaves `band_13_17`. **No new column, no new RPC, no
+predicate change, no withholding state, no polling, no DOB and no provenance.**
+
+Teen → adult is a **widening**, which is why it needs none of the machinery a
+downgrade would.
+
+### J4 — Placement: fold into H-1, do not create a surface
+
+**H-1 is already logged** (`docs/phase-5-ui-housekeeping.md`): move *Default to
+Private Posts* and *Let other members find you* out of the ordinary Settings list
+into a **"Connected"** section above *Account*. **This action belongs there**, in
+that same section, shown only when the band is `band_13_17`.
+
+**That keeps the promise made when MINIMAL was chosen: no new settings surface and
+no new child-safety vocabulary.** It also puts the action next to the two
+preferences whose effectiveness it restores, which is where a member would look.
+
+**H-1 was scoped as presentation-only with zero behaviour change.** Adding this
+action changes that, so **H-1's acceptance score must be re-derived rather than
+carried** — the same rule P5-H is already under for the ASC mapping.
+
+### J5 — Explicitly NOT in scope
+
+No automatic refresh on any schedule. No throttle timestamps. No withheld state.
+No AppMode term. No change to `search_account_directory`,
+`follow_requests_open`, or either helper predicate. **If any of those reappear,
+this is no longer MINIMAL.**
+
+---
+
+## K. C4 — `RESCIND_CONSENT`: WHAT IS ESTABLISHED, AND WHAT IS NOT
+
+**Investigated 2026-09-08 from Apple's documentation and this repository.
+Applicability is NOT established and is deliberately left to LEGAL.**
+
+### K1 — What it means and when Apple sends it. **ESTABLISHED**
+
+`RESCIND_CONSENT` is a documented **App Store Server Notifications V2**
+`notificationType`, read from Apple's own reference:
+
+> *"A notification type that indicates the parent or guardian has withdrawn
+> consent for a child's app usage."*
+
+So it arrives on the **same V2 channel** Études already operates an endpoint for —
+not a separate API and not a client callback.
+
+### K2 — Is handling it mandatory for Études? **NOT ESTABLISHED — LEGAL**
+
+Apple's requirement is stated **in the context of apps distributed in
+jurisdictions with app-store age-assurance laws** — Texas SB2420 from
+2026-01-01, with Utah, Louisiana and Brazil following: *"Developers must
+configure their apps to receive App Store server notifications when a parent or
+guardian withdraws consent."*
+
+**Whether Études is within that scope is a legal and distribution question, not a
+technical one**, and Apple explicitly refuses to answer it: *"For questions about
+your compliance obligations, consult your legal counsel."*
+
+**THE EXISTENCE OF A NOTIFICATION TYPE IS NOT AN ÉTUDES IMPLEMENTATION
+REQUIREMENT**, and this section deliberately stops short of treating it as one.
+
+### K3 — What Apple itself does. **ESTABLISHED**
+
+> *"When a parent or guardian revokes consent for their child to access an app,
+> **Apple will prevent the app from launching**."*
+
+**The platform enforces access.** Any Études work would be about *server-side*
+state (what remains visible to others), never about blocking the app.
+
+### K4 — What further developer action is required. **PARTIALLY ESTABLISHED**
+
+Apple says to use the notification to "handle consent revocations" and **does not
+specify a server-side response**. What Études would do with it — for instance
+withdrawing Connected visibility — is **our design decision, not an Apple
+instruction**, and it only arises if K2 resolves in scope.
+
+### K5 — The production URL claim, corrected and made precise
+
+**My earlier phrasing conflated two different things, and the question was
+fair.**
+
+- **What exists and works:** the Edge Function `appstore_notifications_v1`,
+  deployed and verified end to end — Apple's own test notification landed through
+  it (U4/B-28). **That is the ingestion endpoint.**
+- **What is recorded as unset:** the **App Store Connect** setting — *App
+  Information → App Store Server Notifications (V2) → **Production Server URL***,
+  as distinct from the **Sandbox Server URL**, which `CLAUDE.md` records as SET to
+  that endpoint on 2026-08-20 (S2b).
+
+**I did not measure the ASC setting and cannot: it is not readable from this
+repository or from the database.** The claim rests on `CLAUDE.md`'s operational
+table, dated 2026-08-16/20 — *"Production notification URL: Unset — Until its
+later authorised step"*. **It is a project record, not an observation of mine, and
+the account holder should confirm it in ASC before anything is built on it.**
+
+**Why it matters if it is still unset:** Apple's documented rule is that a
+Production URL set with no Sandbox URL sends **both** environments to production;
+with **Production unset, production notifications are delivered nowhere.** So on
+a released build, a `RESCIND_CONSENT` would not reach Études at all.
+
+### K6 — Would our endpoint handle it today? **NO**
+
+Swept the function sources: **`RESCIND_CONSENT` appears nowhere in
+`supabase/functions/`.** The ingestion path maps subscription lifecycle types
+only.
+
+**One thing deliberately NOT claimed:** whether such a notification would be
+recorded as `ignored`/unmapped or rejected structurally. Its payload shape is not
+the subscription shape, and **I have not tested it** — asserting a behaviour I
+have not observed is exactly what this project keeps filing findings about.
+
+### K7 — Required Études work
+
+**None is established.** *Contingent on K2 resolving in scope*, it would be:
+(i) set the Production Server URL in ASC — an account-holder action, adjacent to
+**C-31**; (ii) map `RESCIND_CONSENT` in `appstore_notifications_v1`; (iii) decide
+the server-side response. **All three are gated on LEGAL and none is authorised.**
+
+**This remains push-based. It is not, and does not become, an argument for
+periodic re-derivation.**
+
+---
+
 ## 4. WHAT THE DPIA MUST CARRY VERBATIM
 
 **CP-3 closed with two limitations, and the DPIA must reflect the first as
