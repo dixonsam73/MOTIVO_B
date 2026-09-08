@@ -340,3 +340,109 @@ with the deletion continuing regardless, which is the settled semantics.
    midpoint measurement of §7.3 — each as its own step.
 
 **NOT AUTHORISED AND NOT TO BE EXECUTED UNTIL THE ACCOUNT HOLDER SAYS SO.**
+
+---
+
+# 9. FINAL PRE-DELETE CENSUS — LOCKED 2026-09-08 10:09:05 UTC
+
+**Deletion authorised by the account holder. I do not execute it.**
+
+## 9.1 The two identities
+
+| id | created | last sign-in | |
+|---|---|---|---|
+| `dfaf8d18-ca27-4e5a-b46f-3c75801492f0` | 2026-07-23 13:42:16 | 2026-09-02 11:14:38 | **Samuel — CONTROL, must not move** |
+| `9c5385f6-7bb6-4044-b252-ffe841626b62` | 2026-09-07 13:34:54 | 2026-09-07 20:49:09 | **to be deleted** |
+
+## 9.2 The orphan check is SYSTEMATIC, not a hand-picked list
+
+**16 foreign keys reference `auth.users`, and every one is `ON DELETE CASCADE`:**
+`account_directory`, `account_privacy`, `follows` (both columns), `membership`,
+`membership_binding`, `membership_binding_conflict`, `shadow_enforcement_stat`,
+and nine `auth.*` tables including `identities`, `sessions` and
+`one_time_tokens`.
+
+**`posts`, `post_comments`, `connected_attachments` and `post_comment_views` have
+NO foreign key to `auth.users`** — consistent with the record that
+`sender_user_id` is NOT NULL with no FK. **They do not cascade** and are the only
+places a genuine orphan could arise. For this identity they are all **zero**, so
+nothing should change; they are checked anyway, because "nothing to remove" and
+"removed correctly" are different claims.
+
+## 9.3 What `9c5385f6` holds, per cascade table
+
+| table | rows |
+|---|---|
+| `account_privacy` | **1** |
+| `membership` | **1** |
+| `membership_binding` | **1** |
+| `membership_binding_conflict` | **0** |
+| **`shadow_enforcement_stat`** | **4** |
+| `account_directory` | **0** — never published |
+| `follows` | **0** |
+| `auth.identities` | **1** |
+| `auth.sessions` | **2** |
+| `auth.refresh_tokens` | **43** |
+
+**`shadow_enforcement_stat` was NOT in the earlier prediction and is added here.**
+It cascades, so **4 of its 38 rows will disappear**. Precedent exists: CP-0 took
+that table 79 → 75 for the same reason.
+
+## 9.4 Totals to compare against
+
+| measure | locked value |
+|---|---|
+| `auth.users` | **2** |
+| `account_privacy` / `account_directory` | **1 / 1** |
+| `membership` / `membership_binding` | **1 / 1** |
+| **`shadow_enforcement_stat`** | **38** |
+| `posts` / `post_comments` / `follows` | **6 / 1 / 0** |
+| `connected_attachments` / `post_comment_views` | **25 / 3** |
+| `storage.objects` | **8** |
+| `membership_notification` | **104** |
+| `dfaf8d18` sessions / tokens | **19 / 248** |
+| `account_privacy_upsert_v1` / `set_lookup_v1` / `self_v1` | **2 / never called / 46** |
+| `account_directory` INSERT | **2795** |
+
+## 9.5 PREDICTED POST-DELETION STATE
+
+| measure | before | **predicted after** |
+|---|---|---|
+| `auth.users` | 2 | **1** |
+| `account_privacy` | 1 | **0** — FK cascade, no explicit step |
+| `membership` / `membership_binding` | 1 / 1 | **0 / 0** |
+| **`shadow_enforcement_stat`** | 38 | **34** |
+| `account_directory` | 1 | **1 — Samuel only** |
+| `posts` / `post_comments` / `follows` | 6 / 1 / 0 | **6 / 1 / 0 — UNCHANGED** |
+| `connected_attachments` / `post_comment_views` | 25 / 3 | **25 / 3 — UNCHANGED** |
+| `storage.objects` | 8 | **8 — UNCHANGED** |
+| `membership_notification` | 104 | **104 — history is not deleted** |
+| `dfaf8d18` sessions / tokens | 19 / 248 | **19 / 248 — UNCHANGED** |
+| `9c5385f6` identities / sessions / tokens | 1 / 2 / 43 | **0 / 0 / 0** |
+
+**Writer counters may move** — deletion runs through the Edge Function, and any
+foreground before it can preflight. **They are not assertions here**; the
+assertion is that `account_privacy` reaches **0 rows**.
+
+## 9.6 THE LOCAL/CLIENT ASSERTION IS CORRECTED
+
+**Per direction: do NOT require the client to land in Solo.** Onboarding has been
+observed after this destructive lifecycle before (C-49's shape), and either is
+legitimate.
+
+> **The load-bearing client assertion is that the Connected identity and
+> account-management state are GONE** — no Connected account management, no
+> Connected identity. **Whatever screen Études lands on is RECORDED, not scored.**
+
+## 9.7 SIWA REVOCATION IS RECORDED SEPARATELY FROM DELETION SUCCESS
+
+**These are two different outcomes and must not be merged.** Apple's
+revocation/re-authorisation may appear and may succeed, or may fail benignly —
+the documented precedent is `1001` **cancelled**, after which **the account
+deletion continued regardless**, which is the settled semantics.
+
+**Deletion success is judged on §9.5's server state alone.** The revocation
+outcome is recorded as its own fact, whichever way it goes, and **a failed or
+cancelled revocation does not make the deletion a failure.**
+
+**CENSUS LOCKED. Awaiting the account holder's execution.**
