@@ -121,8 +121,19 @@ enum ProductionAppModeActivation {
     /// `auth.hasConnectedIdentity`, which account deletion consumes on its own,
     /// without the entitlement (C-35). One definition, so the deletion gate and
     /// the mode resolver cannot drift apart.
+    ///
+    /// P5-G/D1 adds the age-eligibility term, and its POSITION is deliberate:
+    /// it sits BEFORE the entitlement term so that when both hold, the age
+    /// reason is the operative one. A withheld member must never be routed into
+    /// purchase copy — buying a subscription cannot resolve age eligibility.
+    ///
+    /// **THIS DOES NOT GATE ACCOUNT DELETION.** Deletion is gated on
+    /// `auth.hasConnectedIdentity` at `ProfileView.performDeleteAccount`, never
+    /// on `AppMode`, precisely because C-35 was sprung twice. A withheld member
+    /// keeps the full delete route without re-subscribing.
     static func resolve(auth: AuthManager, isEntitled: Bool) -> AppMode {
         guard BackendConfig.isConfigured else { return .solo }
+        guard !auth.ageEligibilityWithheld else { return .solo }
         guard isEntitled else { return .solo }
         guard auth.hasConnectedIdentity else { return .solo }
         return .connected

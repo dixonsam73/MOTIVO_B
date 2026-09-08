@@ -849,19 +849,68 @@ private var sessionSetupSection: some View {
          }
      }
 
+     /// P5-G/D1. Static neutral copy, plus a separate explicit action.
+     ///
+     /// **The copy is NOT the retry path.** It states the product rule and
+     /// asserts nothing about the member; "Check Again" is a distinct, clearly
+     /// labelled control. The existing under-13 wording is reused verbatim so no
+     /// new child-safety vocabulary is invented, and there is no new screen and
+     /// no new settings surface.
+     private var ageEligibilityWithheldRow: some View {
+         VStack(alignment: .leading, spacing: 8) {
+             Text("Études Connected is for ages 13 and over.")
+                 .font(Theme.Text.body)
+                 .fixedSize(horizontal: false, vertical: true)
+                 .frame(maxWidth: .infinity, alignment: .leading)
+
+             Button {
+                 // Bypasses BOTH automatic throttles. A deliberate check is never
+                 // refused because an earlier automatic one failed, and it can
+                 // never reach purchase: this action only re-reads Apple.
+                 Task { @MainActor in
+                     await auth.applyAgeRefresh(outcome: await requestDeclaredAgeRange(),
+                                                reason: "check-again")
+                 }
+             } label: {
+                 Text("Check Again")
+                     .frame(maxWidth: .infinity, alignment: .leading)
+                     .frame(minHeight: 44, alignment: .center)
+             }
+             .buttonStyle(.plain)
+             .contentShape(Rectangle())
+             .accessibilityAddTraits(.isButton)
+             .font(Theme.Text.body)
+         }
+         .padding(.vertical, 4)
+         .overlay(alignment: .bottom) { quietDivider() }
+     }
+
      private var connectedPromoSection: some View {
          Section(header: Text("Account").sectionHeader()) {
              VStack(spacing: 0) {
-                 Button { showConnectedIntroduction = true } label: {
-                     navigationRow(title: "Explore Connected")
-                 }
-                 .buttonStyle(.plain)
-                 .contentShape(Rectangle())
-                 .accessibilityAddTraits(.isButton)
-                 .frame(minHeight: 44, alignment: .center)
-                 .font(Theme.Text.body)
-                 .overlay(alignment: .bottom) {
-                     quietDivider()
+                 // P5-G/D1. While age eligibility is withheld, the purchase
+                 // affordance is REPLACED — buying a subscription cannot resolve
+                 // age eligibility, so routing a withheld member into Explore
+                 // Connected would be actively misleading.
+                 //
+                 // ONLY THIS BUTTON IS REPLACED. `eraseAllEtudesDataButton`
+                 // lives further down THIS SAME SECTION, and hiding the section
+                 // would remove the member's account-deletion route — a third
+                 // route to C-35, arriving through the UI instead of a guard.
+                 if auth.ageEligibilityWithheld {
+                     ageEligibilityWithheldRow
+                 } else {
+                     Button { showConnectedIntroduction = true } label: {
+                         navigationRow(title: "Explore Connected")
+                     }
+                     .buttonStyle(.plain)
+                     .contentShape(Rectangle())
+                     .accessibilityAddTraits(.isButton)
+                     .frame(minHeight: 44, alignment: .center)
+                     .font(Theme.Text.body)
+                     .overlay(alignment: .bottom) {
+                         quietDivider()
+                     }
                  }
 
                  Button { showAboutEtudes = true } label: {

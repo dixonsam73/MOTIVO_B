@@ -63,6 +63,14 @@ enum LocalFactoryReset {
             }
         }
 
+        // P5-G/D1. The domain wipe above ALREADY removes these — they are
+        // ordinary keys in the app's own domain. The explicit sweep is here so
+        // the guarantee survives a future narrowing of that wipe, and so the
+        // erase path names them: a local key outliving an erase is the C-28/C-48
+        // class of defect, and "it happens to be covered" is not the same
+        // statement as "it is swept".
+        AgeBandRefreshPolicy.clearAll()
+
         // Re-apply bundled backend config (if present) so AppSetup gating can work immediately without restart.
         BackendConfig.bootstrapFromBundleIfNeededForFactoryReset()
 

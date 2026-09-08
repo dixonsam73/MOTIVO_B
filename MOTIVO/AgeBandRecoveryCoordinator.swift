@@ -81,13 +81,17 @@ final class AgeBandRecoveryCoordinator: ObservableObject {
                                  lastAttemptAt: lastAttemptAt,
                                  now: now) else { return }
 
-        // Already established? Short-circuit BEFORE asking Apple.
+        // Already established? Then this is a REFRESH, not a recovery.
         //
         // A transport or session failure is NOT "no band" -- reading it as one
         // would re-ask Apple on every foreground during an outage. Only an
-        // explicit `noBandEstablished` proceeds.
+        // explicit `noBandEstablished` falls through to establishment.
         switch await AccountPrivacyService.fetchSelf(auth: auth, reason: "recovery-\(reason)") {
         case .success:
+            // P5-G/D1. An established band is re-derived on the product cadence
+            // so a reclassification is observed. Apple provides no change
+            // signal, so asking is the only mechanism (register §E2).
+            await refreshIfDue(auth: auth, reason: reason, now: now, requestRange: requestRange)
             return
         case .failure(.noBandEstablished):
             break
@@ -106,5 +110,50 @@ final class AgeBandRecoveryCoordinator: ObservableObject {
         // enforces that independently.
         auth.pendingAgeBand = band
         _ = await auth.ensureAgeBandEstablished(reason: "recovery-\(reason)")
+    }
+
+    // MARK: - P5-G / D1 — periodic re-derivation
+
+    /// Re-derives an ALREADY-ESTABLISHED band when the automatic throttle says
+    /// it is due, and applies the result asymmetrically.
+    ///
+    /// **NOT GATED ON `AppMode`, and that is load-bearing.** A withheld member
+    /// is in Solo precisely because eligibility was withdrawn; gating refresh on
+    /// Connected being active would make withholding PERMANENT and unrecoverable
+    /// — the `C5f-12` failure, one unit later.
+    func refreshIfDue(auth: AuthManager,
+                      reason: String,
+                      now: Date = Date(),
+                      requestRange: () async -> DeclaredAgeRangeOutcome) async {
+        guard let userID = auth.currentUserID else { return }
+        guard AgeBandRefreshPolicy.isAutomaticRefreshDue(
+                lastConclusiveAt: AgeBandRefreshPolicy.lastConclusive(userID: userID),
+                lastAttemptAt: AgeBandRefreshPolicy.lastAttempt(userID: userID),
+                now: now) else { return }
+        await performRefresh(auth: auth, reason: "auto-\(reason)", now: now, requestRange: requestRange)
+    }
+
+    /// The member-initiated "Check Again". Bypasses BOTH automatic throttles;
+    /// only the in-memory single-flight still applies, so a deliberate check is
+    /// never refused because an earlier one failed.
+    func refreshNow(auth: AuthManager,
+                    reason: String,
+                    now: Date = Date(),
+                    requestRange: () async -> DeclaredAgeRangeOutcome) async {
+        await performRefresh(auth: auth, reason: "explicit-\(reason)", now: now, requestRange: requestRange)
+    }
+
+    private func performRefresh(auth: AuthManager,
+                                reason: String,
+                                now: Date,
+                                requestRange: () async -> DeclaredAgeRangeOutcome) async {
+        guard let userID = auth.currentUserID else { return }
+        guard !inFlight else { return }
+        inFlight = true
+        defer { inFlight = false }
+
+        _ = userID
+        // One policy, one application point — see `AuthManager.applyAgeRefresh`.
+        await auth.applyAgeRefresh(outcome: await requestRange(), reason: reason, now: now)
     }
 }
