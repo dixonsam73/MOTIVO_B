@@ -279,3 +279,76 @@ expected exception to declare in advance: **if option (b) is taken,
 `pending_cleanup_at` WILL differ**, and that is the cancellation, not the
 under-13 refusal. **The writer counter `account_privacy_upsert_v1` must still be
 exactly 2**, and the band, directory, binding and identity counts unchanged.
+
+---
+
+# 6. S1-BASE2 — RE-BASELINE, 2026-09-08 08:09:46 UTC. Solo, Explore Connected visible
+
+## 6.1 The lapse is GENUINE SERVER-SIDE, not a client mode flip
+
+| | |
+|---|---|
+| `entitled_now` | **false** |
+| `renewal_date` / `entitlement_ended_at` | **07:44:29** — exactly the predicted period end |
+| `updated_at` | **07:45:00.732713**, ~31 s after it |
+| `pending_cleanup_at` | **2026-11-07 07:44:29** — re-armed ~60 days out, as predicted |
+
+**Checked deliberately**, because a client showing Solo while the server still
+believed the identity entitled would be a different finding, and the probe must
+not be scored on an unverified premise. Voluntary cancellation behaved exactly as
+the subscription table specifies: entitled through the paid-through date, then
+expired.
+
+**Incidental, recorded not chased: NO notification ingested for this
+cancellation** — `membership_notification` has no row after 07:00. The state was
+applied by **attestation's own live Apple read**, which is the designed
+authority; notifications schedule and never execute. Sandbox delivers each
+notification once with no retries, so a miss is unremarkable.
+
+## 6.2 S1-BASE2 — the values the probe is scored against
+
+| measure | S1-BASE (07:03) | **S1-BASE2 (08:09)** | |
+|---|---|---|---|
+| `auth.users` | 2 | **2** | unchanged |
+| `account_privacy` rows / band | 1 / `band_18_plus` | **1 / `band_18_plus`** | unchanged |
+| `band_updated_at` | 2026-09-07 13:40:16.675419 | **2026-09-07 13:40:16.675419** | **unchanged** |
+| `lookup_changed_at` / `follow_requests_changed_at` | NULL / NULL | **NULL / NULL** | unchanged |
+| `account_directory` rows | 1 | **1** | unchanged |
+| `membership_binding.updated_at` | 2026-09-07 13:40:16.990315 | **2026-09-07 13:40:16.990315** | unchanged |
+| **`account_privacy_upsert_v1` (WRITER)** | 2 | **2** | **unchanged** |
+| `account_privacy_set_lookup_v1` | never called | **never called** | unchanged |
+| `account_directory` INSERT | 2795 | **2795** | **unchanged — no row has ever been published** |
+| `account_directory` SELECT | 3356 | **3364** | +8 hydrations |
+| `account_privacy_self_v1` | 34 | **45** | +11 preflights |
+| `posts` SELECT | — | **19870** | |
+| tokens `9c5385f6` / `dfaf8d18` | 41 / 248 | **42 / 248** | **+1 / unchanged** |
+
+**A FREE ELEVENTH CONFIRMATION OF GATE (C):** across that hour — 11 privacy
+preflights and 8 directory hydrations — **exactly one token rotation**, an hour
+after the previous one, i.e. ordinary expiry-driven renewal. **No burst, no
+sub-second gap.** The pre-fix binary would have rotated on every one of those 11.
+
+## 6.3 PREDICTIONS FOR THE UNDER-13 PROBE — restated against S1-BASE2
+
+Fixture already set to **`Under 13, significant change approved`** (lowerBound —,
+upperBound 12, `guardianDeclared`). Action: **Explore Connected → Continue**,
+then stop.
+
+| | prediction | falsifier |
+|---|---|---|
+| **P-A** | alert **"Connected isn't available"**, message **"Études Connected is for ages 13 and over."** | any other message |
+| **P-B** | **no `MembershipSelectionView`, no purchase sheet** — `continueToConnectedJoin()` is never called on `.ineligible` | either appears |
+| **P-C** | **`account_privacy_upsert_v1` stays exactly 2** | any increase — a band write |
+| **P-D** | `auth.users` **2** · privacy **1** row · `band_updated_at` **2026-09-07 13:40:16.675419** · both `*_changed_at` NULL | any change |
+| **P-E** | `account_directory` rows **1**, `dir_ins` **2795** | any increase |
+| **P-F** | `membership_binding.updated_at` **2026-09-07 13:40:16.990315**; `auth.users` unchanged | any movement |
+| **P-G** | `dfaf8d18` **248** tokens | any movement |
+
+**THE ALTERNATIVE OUTCOME IS INFORMATIVE, NOT A FAILURE.** If
+`MembershipSelectionView` appears instead, Apple served the **cached adult
+answer** and the fixture switch is inert for this app — which is precisely the
+§1 caching question, answered by measurement. **Back out without purchasing.**
+P-C through P-G must hold in that case too, since `ensureAgeBandEstablished`
+short-circuits on the existing row either way.
+
+**Either result answers something worth knowing. Neither writes anything.**
