@@ -1555,11 +1555,16 @@ fair.**
   as distinct from the **Sandbox Server URL**, which `CLAUDE.md` records as SET to
   that endpoint on 2026-08-20 (S2b).
 
-**I did not measure the ASC setting and cannot: it is not readable from this
-repository or from the database.** The claim rests on `CLAUDE.md`'s operational
-table, dated 2026-08-16/20 — *"Production notification URL: Unset — Until its
-later authorised step"*. **It is a project record, not an observation of mine, and
-the account holder should confirm it in ASC before anything is built on it.**
+**MEASURED IN APP STORE CONNECT BY THE ACCOUNT HOLDER, 2026-09-08. THIS
+SUPERSEDES THE DATED RECORD AND IS AUTHORITATIVE:**
+
+- **Production Server URL — UNSET.** ASC shows *Set Up URL*.
+- **Sandbox Server URL — configured** to the deployed
+  `appstore_notifications_v1` endpoint.
+
+The dated `CLAUDE.md` entry agreed, but it was a project record rather than an
+observation; it is now a measurement. **Production is deliberately NOT to be
+configured yet.**
 
 **Why it matters if it is still unset:** Apple's documented rule is that a
 Production URL set with no Sandbox URL sends **both** environments to production;
@@ -1586,6 +1591,124 @@ the server-side response. **All three are gated on LEGAL and none is authorised.
 
 **This remains push-based. It is not, and does not become, an argument for
 periodic re-derivation.**
+
+---
+
+## L. IS `appstore_notifications_v1` SAFE TO EXPOSE TO PRODUCTION TRAFFIC? 2026-09-08
+
+**Assessed by reading the deployed source and the production data. The
+conclusion is: SAFE ON UNKNOWN TYPES, BUT DO NOT ENABLE THE PRODUCTION URL YET —
+for a reason that has nothing to do with `RESCIND_CONSENT`.**
+
+### L1 — Unknown and unmapped types are handled gracefully. **ESTABLISHED**
+
+Three independent guards, none of which assumes a subscription payload:
+
+- **The nested-JWS loop guards on shape**: `if (typeof data[field] !== "string")
+  continue`. A notification carrying neither `signedTransactionInfo` nor
+  `signedRenewalInfo` simply skips it — **no throw, no inner-failure flag**.
+- **`deriveFromNotification` returns rather than raises** on every missing piece:
+  `payload.data === undefined` → `unsupported`; `!transaction` →
+  `not_applicable`; missing `notificationUUID` or `signedDate` → `unsupported`.
+  The B-27 comment says so in its own words — these are *"ordinary Apple traffic,
+  NOT rejects"*.
+- **Unmapped outcomes answer 200**, so Apple does not retry. An unknown type
+  therefore cannot produce a retry storm or fill the Tier-2 reject aggregate.
+
+**AND THIS IS ALREADY PROVEN IN PRODUCTION, not merely reasoned.** Apple's own
+`TEST` notification — a correctly signed, real delivery carrying **no
+transaction**, structurally the same class as `RESCIND_CONSENT` — landed as
+`TEST`/`ignored` and sits in the table today. **A non-subscription payload has
+already traversed this endpoint safely.**
+
+**What is NOT claimed:** I have not tested a real `RESCIND_CONSENT` payload, so
+its exact recorded disposition is reasoned from the code and the `TEST`
+precedent, not observed. It would be **recorded and ignored** — and **no action
+would be taken on it**, which matters only if C4 says action is owed.
+
+### L2 — THE ACTUAL BLOCKER, and it is not about consent at all
+
+**`APPLE_ASSN_ALLOWED_ENVIRONMENTS` gates the entire production stream, and its
+code default is `"Sandbox"`.** A verified notification whose environment is not
+in the allowlist is recorded `unsupported` and answered **200** — *"a decision,
+not a failure"*.
+
+The secret **is set**, and its digest is **identical** to
+`APPLE_ATTEST_ALLOWED_ENVIRONMENTS`, which the record documents as Sandbox-only.
+**Values are hashed, so this is a strong inference and not a measurement** — but
+it points the same way as the default, and **both readings give the same
+consequence.**
+
+**SO IF THE PRODUCTION URL WERE ENABLED TODAY, EVERY PRODUCTION NOTIFICATION
+WOULD BE RECORDED, REFUSED AND ANSWERED 200.** Membership would never update from
+production notifications, Apple would never retry, and **the endpoint would look
+perfectly healthy from outside** — the exact silent-success failure shape this
+project has repeatedly been caught by.
+
+**Corroborated by the data: 112 notifications ingested, ALL Sandbox, ZERO
+Production.** The production path has never carried a single notification.
+
+### L3 — What enabling the URL does and does not change
+
+**Exposure does not change.** The endpoint is already public and unauthenticated,
+and the Sandbox URL already points at it. Enabling Production adds **traffic**,
+not **reachability**, so Tier 1/2/3 bounding is unaffected.
+
+Apple's routing rule cuts the safe way here: the hazard is a Production URL set
+while Sandbox is unset, which sends **both** environments to production. **That is
+not our configuration.**
+
+### L4 — Recommendation
+
+**DO NOT enable the Production Server URL as part of P5-G.** It is not needed by
+any P5-G decision, and it carries a prerequisite of its own: **decide and set
+`APPLE_ASSN_ALLOWED_ENVIRONMENTS` first**, deliberately, with a prediction —
+otherwise the first real production notification is silently discarded.
+
+It belongs with the production-launch work alongside **C-31**, not here.
+
+---
+
+## M. MINIMUM REMAINING P5-G CLOSURE LIST
+
+### M1 — AH decisions COMPLETE. Nothing outstanding
+
+Q1 **MINIMAL** — no periodic re-derivation; the 30-day cadence is **withdrawn**
+and the CONTINUOUS implementation **reverted** (`cbaeeed`). Q2, Q3, Q4, Q5 as
+recorded in §A. Q6 **A only**, B rejected on the §B analysis. The
+member-initiated recheck is **scoped** in §J.
+
+### M2 — Technical housekeeping still required BEFORE closure
+
+1. **Push the seven commits.** They exist only locally.
+2. **Record the MINIMAL outcome in `docs/phase-5-scope.md` §2's P5-G row**, so
+   the phase table does not still imply periodic re-derivation.
+3. **Correct §A5/C2's DPIA wording — a DIRECT CONSEQUENCE OF THE REVERT.** A5
+   currently says the band must **not** be described as "point-in-time / not
+   revisited", *because Q1 required periodic re-derivation*. **Q1 no longer does.**
+   Under MINIMAL the band **is** established once and re-derived **only** if the
+   member deliberately asks. **Sending the superseded wording to LEGAL would
+   misdescribe the product.**
+
+**That is the whole list. None of it is implementation.**
+
+### M3 — Genuine LEGAL / external confirmations
+
+| | |
+|---|---|
+| **C1** | Final refusal wording and jurisdictional adequacy. Must describe **Apple sharing** an age range, never Études asking |
+| **C2** | DPIA adequacy of the residual-assurance characterisation — **re-worded per M2.3**: Apple Account active at request time, not bound or verified to the Études identity, no DOB or provenance stored, **established once and re-derived only on deliberate member action** |
+| **C3** | The DPIA carries §4's teen limitation **verbatim** |
+| **C4** | Scope and ongoing duty: is Études within the app-store age-assurance laws; does any impose an **ongoing** duty beyond establishment; does `RESCIND_CONSENT` handling bind Études; **and what an Under-13 result on a voluntary recheck should mean** (§J2), which is an identity anomaly rather than ageing |
+
+### M4 — Carried obligations that do NOT block P5-G
+
+- **Q6/A execution** — establish Samuel's band through the ordinary path. Decided, unexecuted, a production mutation.
+- **§J implementation**, folded into **H-1**, with H-1's acceptance re-derived.
+- **Production ASSN Server URL**, gated on §L2's secret decision. Belongs with **C-31**.
+- **P5-H** — must **re-derive** the ASC mapping, not republish it. Not started.
+- **Phase 4 exit**: conditions 2, 6's ASC half, 8, and C-34's avatar verification.
+- **B-34** observability limitation; **G7**, earliest 2026-11-01.
 
 ---
 
