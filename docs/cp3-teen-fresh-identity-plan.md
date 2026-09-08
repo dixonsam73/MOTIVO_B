@@ -200,3 +200,143 @@ weakened.**
 deletion) and §2's fixture choice. **The deletion happens only on explicit
 authorisation**, and I will take a fresh census immediately before it — the
 inventory in §3 is dated the moment anything else happens.
+
+---
+
+# 7. REVISED PER ACCOUNT-HOLDER DIRECTION. 2026-09-08 10:04
+
+## 7.1 The pre-qualification purchase is DROPPED
+
+§1's recommendation is **withdrawn**. **The teen explicit-opt-in test is itself
+the intended device exercise of `account_privacy_set_lookup_v1`.** If the writer
+fails there it is a **CP-3 finding to be diagnosed**, not a reason to have spent
+an extra purchase and lifecycle beforehand. Recorded so the earlier
+recommendation is not re-proposed later.
+
+## 7.2 UI gating for the discovery control — CHECKED IN SOURCE, to be confirmed on device
+
+Not assumed:
+
+```swift
+public var canShowConnectedAccountManagement: Bool { mode == .connected }
+
+static func resolve(auth: AuthManager, isEntitled: Bool) -> AppMode {
+    guard BackendConfig.isConfigured else { return .solo }
+    guard isEntitled          else { return .solo }      // ← entitlement required
+    guard auth.hasConnectedIdentity else { return .solo }
+    return .connected
+}
+```
+`AppModeManager:109`, `:124-129`
+
+Both privacy controls sit inside `canShowConnectedAccountManagement`, and
+`applyDiscoverability` → `setLookupEnabled` has **exactly one call site**
+(`ProfileView:742`, the toggle's `onChange`) — **there is no second surface**.
+
+**So source says an entitlement is required.** Per direction this is **not
+treated as settled**: after teen establishment, **look at Profile first**. If the
+controls are visible in Solo, no purchase is needed and the source reading is
+wrong. **Only if they are absent does a purchase enter the plan**, and it is
+scoped then, not now.
+
+## 7.3 THE MIDPOINT IS THE LOAD-BEARING MEASUREMENT — accepted, and it is the right one
+
+**Stop after Sign In, before ANY background/foreground.** This is what proves we
+**created** `identityWithoutBand` rather than **reconstructed** it after recovery
+— a distinction that would be unrecoverable once the coordinator has run.
+
+| midpoint check | predicted |
+|---|---|
+| **M-1** | `auth.users` **1 → 2**, and the new row's `id` is **NOT** `9c5385f6…` and **NOT** `dfaf8d18…` |
+| **M-2** | `account_privacy` **0 rows for the new id** (and **0 rows total**, since the adult row is gone) |
+| **M-3** | `account_directory` **1 row — Samuel only**; none for the new id |
+| **M-4** | `membership` **0**, `membership_binding` **0** — nothing manufactured |
+| **M-5** | `account_privacy_upsert_v1` **unchanged from the pre-deletion value** — no band writer call attributable to the new identity |
+
+**M-5 is the sharpest of the five**: M-2 shows no row *now*, while M-5 shows none
+was ever *attempted*.
+
+## 7.4 PREDICTIONS FOR THE ONE TRANSITION
+
+Background → foreground, exactly once, with the **13–15** fixture:
+
+| | prediction |
+|---|---|
+| **T-1** | Apple's range is requested on real hardware — the coordinator reaches `requestRange` because `fetchSelf` returns `.noBandEstablished` |
+| **T-2** | `account_privacy` **1 row**, `age_band` = **`band_13_17`** |
+| **T-3** | `lookup_enabled` = **false** |
+| **T-4** | `follow_requests_enabled` = **false** |
+| **T-5** | `lookup_set_under_band` = **`band_13_17`** and `follow_requests_set_under_band` = **`band_13_17`** |
+| **T-6** | `lookup_changed_at` **NULL** and `follow_requests_changed_at` **NULL** — defaults, not choices |
+| **T-7** | **no directory publication** — `account_directory` stays **1**, `dir_ins` unchanged |
+| **T-8** | **no pathological session/token behaviour** — a small bounded number of tokens, **zero sub-second gaps**, no ≥5 in any 10 s window |
+| **T-9** | `account_privacy_upsert_v1` **+1 exactly** — one establishment, not a retry storm |
+
+**Adult comparison, measured, so the teen values are read against something
+real:** `band_18_plus` · both `enabled` **true** · both `set_under_band`
+**`band_18_plus`** · both `changed_at` **NULL**.
+
+**T-3/T-4 are the protective inversion** — the same columns that read `true` for
+an adult must read `false` for a 13–17 band, from the same writer, with no client
+involvement.
+
+## 7.5 Then, separately: Share default OFF
+
+Local only. Create a new session; **Share initialises OFF** because
+`shareDefaultOn(band: .band13to17, …)` returns false for any non-adult band,
+reading `ProfileStore.lastKnownAgeBand()`. **No entitlement, no server call.**
+
+## 7.6 Then: the discovery opt-in chain
+
+**OFF by default → explicit ON → `lookup_changed_at` stamped → survives
+foreground/profile hydration → still ON.** Route determined by §7.2's on-device
+check, not by assumption.
+
+---
+
+# 8. FRESH CENSUS — 2026-09-08 10:04:37 UTC
+
+| measure | value |
+|---|---|
+| `auth.users` | **2** |
+| `account_privacy` / `account_directory` | **1 / 1** |
+| `membership` / `membership_binding` | **1 / 1** |
+| `posts` / `post_comments` / `follows` | **6 / 1 / 0** |
+| `membership_notification` | **104** |
+| `9c5385f6` sessions / tokens | **2 / 43** |
+| `dfaf8d18` sessions / tokens | **19 / 248** |
+
+## 8.1 DELETION PREDICTION
+
+| measure | before | **after** |
+|---|---|---|
+| `auth.users` | 2 | **1** |
+| `account_privacy` | 1 | **0** — by FK cascade, not an explicit step |
+| `membership` | 1 | **0** |
+| `membership_binding` | 1 | **0** |
+| `account_directory` | 1 | **1** (Samuel) |
+| `posts` / `post_comments` / `follows` | 6 / 1 / 0 | **6 / 1 / 0 — UNCHANGED** |
+| `membership_notification` | 104 | **104 — deletion does not remove history** |
+| `dfaf8d18` sessions / tokens | 19 / 248 | **19 / 248 — UNCHANGED** |
+| `9c5385f6` sessions / tokens | 2 / 43 | **0 / 0** |
+
+**Device-side:** the app returns to Solo with no identity; Profile's destructive
+action reverts to **"Erase All Études Data"**; the local journal is **untouched**
+(invariant 1).
+
+**Flagged, not predicted:** Apple SIWA credential revocation during deletion may
+or may not succeed (C-44). It has previously failed benignly as `1001` cancelled
+with the deletion continuing regardless, which is the settled semantics.
+**Either outcome is acceptable and neither blocks the run.**
+
+## 8.2 PHYSICAL STEPS — DELETION ONLY, ON EXPLICIT AUTHORISATION
+
+1. **Tell me immediately before.** I take a final census; §8's numbers are stale
+   the moment anything else happens.
+2. Études → Profile → **Delete Account & All Études Data** → confirm.
+3. **Stop.** Report what the app shows and whether an Apple re-authorisation
+   sheet appeared. I measure §8.1.
+4. **Only then** the fixture change, and the returning-path sign-in, and the
+   midpoint measurement of §7.3 — each as its own step.
+
+**NOT AUTHORISED AND NOT TO BE EXECUTED UNTIL THE ACCOUNT HOLDER SAYS SO.**
