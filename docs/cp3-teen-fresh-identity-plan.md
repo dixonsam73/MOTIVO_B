@@ -1047,3 +1047,97 @@ writer moving, and a sheet could appear and still yield nothing.
 
 **Not to be followed by Share-default or discovery-opt-in testing.** Measure,
 stop, report.
+
+---
+
+# 17. RESULT — 2026-09-08 12:31. THE WIRING FIX IS DEVICE-VERIFIED. THE BAND VALUE IS NOT WHAT WAS PREDICTED
+
+## 17.1 THE DECISIVE COMPARISON PASSES
+
+**Same identity, same server state, same trigger, one code change:**
+
+| | before the fix (`d03324f`) | **after the fix** |
+|---|---|---|
+| `account_privacy_self_v1` | 48 → 50 (**+2**) | 51 → **54** (+3) |
+| **`account_privacy_upsert_v1`** | 2 → **2 (+0)** | **2 → 3 (+1)** |
+| `account_privacy` rows | **0** | **1** |
+
+**FA-1 and FA-2 PASS.** Reading `requestAgeRange` from a **View** reached Apple
+and established a band where the App-scope read never did. **The band was written
+by the LAUNCH trigger** — row `band_updated_at` **12:30:51.055**, 1.6 s after the
+token rotation at 12:30:49.444, on the install-launch.
+
+**That is the whole point of the fix, and it is now hardware-verified on the very
+fixture that failed.**
+
+## 17.2 BUT THE BAND IS `band_18_plus`, NOT `band_13_17`
+
+```
+age_band                        band_18_plus     ← predicted band_13_17
+lookup_enabled                  true             ← predicted false
+follow_requests_enabled         true             ← predicted false
+lookup_set_under_band           band_18_plus     ← predicted band_13_17
+follow_requests_set_under_band  band_18_plus     ← predicted band_13_17
+lookup_changed_at               NULL             ← predicted NULL  ✓
+follow_requests_changed_at      NULL             ← predicted NULL  ✓
+```
+
+**FA-3 fails on the VALUE** (the row exists, for the right identity, but with the
+wrong band). **FA-4, FA-5 and FA-6 fail — but only as CONSEQUENCES of the band,
+not as independent defects.**
+
+**Given `band_18_plus`, every one of those values is CORRECT.** They match the
+adult row from the deleted identity **exactly**: both flags `true`, both
+`set_under_band` `band_18_plus`, both `changed_at` NULL. **The defaults logic
+behaved correctly for the band it was handed.**
+
+**So the protective inversion was NOT tested — not because it is broken, but
+because no teen band was ever produced.** Those three must be recorded as
+**untested**, not as failed.
+
+## 17.3 WHY APPLE RETURNED 18+ IS UNKNOWN, AND I AM NOT GOING TO GUESS
+
+The Sandbox fixture is **13-15**. Apple returned **18+**.
+
+**This is in tension with §7.2**, where the **Under-13** fixture *did* govern,
+returning an under-13 range despite the same cached adult record — so the fixture
+demonstrably overrode the cache **then**.
+
+**One difference worth naming, as a hypothesis and nothing more:** the under-13
+observations came through **`ProfileView`'s Continue — an explicit, interactive
+user action**. This one came through the **recovery coordinator at launch — a
+non-interactive request, with no sheet presented**. It is *possible* that
+interactive requests re-evaluate while non-interactive ones are served from the
+cached share (**"Last shared: 18 or older on 7 September 2026"**, still the
+account-level record). **That is untested speculation and must not be recorded as
+a finding.**
+
+## 17.4 THE REMAINING FA PREDICTIONS ALL PASS
+
+| | prediction | observed | |
+|---|---|---|---|
+| FA-7 | both `*_changed_at` NULL | **NULL / NULL** | **PASS** |
+| FA-8 | directory 1, `dir_ins` 2795 | **1 / 2795** | **PASS** — no publication, as Solo requires |
+| FA-9 | membership 0, binding 0 | **0 / 0** | **PASS** |
+| FA-10 | tokens 1 → 2 exactly, no sub-second gaps | **2**, single gap **7875.66 s** | **PASS** |
+| FA-11 | Samuel untouched | **248 tokens**, name unchanged, shadow **34**, users **2** | **PASS** |
+
+**FA-10 is a clean confirmation of the expiry gate in both directions once more:**
+a 124-minute-old token rotated **exactly once**, 1.6 s before the write.
+
+## 17.5 THE COST: THE `identityWithoutBand` FIXTURE IS NOW SPENT
+
+**A band now exists for `c584db5b…`, so recovery will short-circuit forever on
+this identity.** `upsertBand` is insert-if-absent, and no client path rewrites an
+established band — by design.
+
+**Finding-A's recovery half is verified and needs this fixture no longer.** But
+the **teen** discriminators — 13–17 Share default OFF, discovery default OFF,
+explicit opt-in and persistence — now require **another fresh identity**, i.e.
+**another deletion**, and their blocker is no longer wiring but **getting Apple to
+return a teen range at all**.
+
+**Nothing further has been done.** No foreground transition was performed after
+the measurement; with a band present it would now only exercise the
+short-circuit. Device untouched otherwise: Age Assurance still 13-15, Études
+still `Shared`, no purchase, no deletion.
