@@ -208,3 +208,74 @@ answer** and the fixture switch is inert for this app — which is exactly the
 
 **Not to be followed automatically by Revoke App Consent or Step 2.** Step 1 is
 measured and reported first.
+
+---
+
+# 5. STEP 1 IS UNREACHABLE FROM THE CURRENT STATE — re-evaluated 2026-09-08 07:21
+
+**The account holder is right, and it is an either/or in source, not a nuance:**
+
+```swift
+if appModeManager.canShowConnectedAccountManagement { appSettingsSection }  // Manage Membership
+else { connectedPromoSection }                                              // Explore Connected
+```
+`ProfileView:353-358`
+
+**Explore Connected exists only while NOT Connected**, and Device A is Connected
+on the live Sandbox purchase. **Force-quitting would not help** — the StoreKit
+entitlement is still live, so the app re-resolves Connected on relaunch. That
+was correctly anticipated and is not worth spending an action to discover.
+
+**MY STEP-1 INSTRUCTION WAS WRITTEN AGAINST YESTERDAY'S DEVICE STATE.** I scoped
+the route while Device A was in Solo and did not re-check it after the
+repurchase I myself asked for. The fixture change is harmless (see below), but
+the route was wrong.
+
+## 5.1 THE UNDER-13 FIXTURE IS INERT RIGHT NOW, AND THAT IS STRUCTURAL
+
+With a band row present **Apple is never asked**: `AgeBandRecoveryCoordinator`
+returns on `fetchSelf` `.success` before `requestRange` (`:84-91`), and
+`ensureAgeBandEstablished` returns on the same branch before `upsertBand`. The
+**only** unconditional caller is `ConnectedIntroductionView`'s Continue — which
+is exactly the control that is currently hidden.
+
+**So the under-13 fixture can sit where it is indefinitely without risk.** It
+cannot reach a decision, and it cannot write a band. No hurry to revert it.
+
+## 5.2 SOLO IS REQUIRED, AND THERE ARE TWO WAYS THERE
+
+Entitlement at 07:21: **live**, `renewal_date` **07:44:29**, last renewed
+07:18:23 — roughly 30-minute accelerated cycles. Purchase was ~06:40, so Apple's
+~12-renewal sandbox cap puts the **natural lapse at roughly 12:40–13:00 UTC**.
+
+| option | time to Solo | cost |
+|---|---|---|
+| **(a) Wait for the natural lapse** | **~5.5 hours** | none |
+| **(b) Cancel the Sandbox subscription** | **~23 minutes** — access runs to the period end, **07:44:29** | writes ordinary membership lifecycle state |
+
+**(b) is the project's own documented tool for this**, recorded in `CLAUDE.md`'s
+Environment section: *"To observe a lapse rather than re-purchase, cancel the
+subscription. Access runs to the period end."*
+
+**What (b) mutates, stated plainly:** `membership.updated_at`, `renewal_date`,
+`entitlement_ended_at` and `pending_cleanup_at` will move, and a
+`DID_CHANGE_RENEWAL_STATUS` then `EXPIRED`/`VOLUNTARY` will ingest. **That is an
+organic product-path lifecycle event, not manual repair** — and `membership` is
+already being rewritten every ~30 minutes by renewals, so cancelling changes the
+trajectory rather than introducing a new class of write. **`account_privacy`,
+`account_directory`, `membership_binding` and both identities are untouched
+either way.**
+
+**Nothing remaining needs the entitlement.** Gate (C) is verified; criterion 3 is
+structurally unavailable on a Sandbox membership; every remaining category-A test
+requires **Solo**. The entitlement has discharged its duties and is now the
+obstacle.
+
+## 5.3 THE BASELINE STANDS
+
+§4's S1-BASE (07:03:16) remains valid for the non-mutation proof — with one
+expected exception to declare in advance: **if option (b) is taken,
+`membership.updated_at`, `renewal_date`, `entitlement_ended_at` and
+`pending_cleanup_at` WILL differ**, and that is the cancellation, not the
+under-13 refusal. **The writer counter `account_privacy_upsert_v1` must still be
+exactly 2**, and the band, directory, binding and identity counts unchanged.
