@@ -535,7 +535,14 @@ that the DPIA may state, and that it suffices to state, that:
 limitation **verbatim**. **A DPIA implying teen protections are device-verified
 would misstate the evidence.**
 
-**NOT required from LEGAL:** Q1, Q2, Q3 and Q6 are settled product/privacy policy
+**C4 — scope and ongoing duty (added 2026-09-08, see §I).** Is Études in scope of
+the app-store age-assurance laws (Texas SB2420 and successors)? If so, does any
+impose an **ongoing** age-assurance duty beyond establishment? And does
+`RESCIND_CONSENT` handling bind Études? **Apple explicitly refers this to counsel**
+— *"For questions about your compliance obligations, consult your legal counsel."*
+**Q1's periodic re-derivation is provisional pending this.**
+
+**NOT required from LEGAL:** Q2, Q3 and Q6 are settled product/privacy policy
 and need no external confirmation.
 
 ---
@@ -1278,6 +1285,157 @@ nothing.
 **Non-vacuity:** every server assertion must be run against the **pre-change**
 functions and observed to fail, as U2c and P4-U2a did. An assertion that passes
 before the change tests nothing.
+
+---
+
+## I. NECESSITY REVIEW — IS PERIODIC RE-DERIVATION NEEDED AT ALL? 2026-09-08
+
+**Conducted from sources and the corrected age asymmetry, NOT from the
+implementation.** `c5440d8` exists and works; **that is not evidence for shipping
+it**, and it is deliberately given no weight below.
+
+### I0 — THE ASYMMETRY, AND IT REFRAMES EVERYTHING
+
+**Age moves in one direction.** Under-13 never establishes Connected; 13-17 may
+become 18+; 18+ stays 18+. **So the only ORDINARY reclassification is
+13-17 → 18+**, and the cost of observing it late is that a member keeps **more
+restrictive** child protections for longer. **It does not expose a child to adult
+defaults.**
+
+**This inverts the case for polling.** The failure mode of never re-deriving is
+**over-protection**, which is a PRODUCT defect, not a child-safety defect.
+
+**18+ → child is not ageing at all.** It is an Apple-Account or
+identity-assurance anomaly (Q5). §G2 was right that it is *reachable*; it must
+not be the *primary justification* for permanent architecture unless a concrete
+authority says Études must treat a changed Apple Account, or corrected Apple
+data, as an age downgrade of an existing Études identity. **No such authority was
+found — see I2.**
+
+### I1 — What Apple REQUIRES after initial establishment
+
+**Nothing about re-checking.** Apple's *Declared Age Range* reference, its
+*Requesting people share their age range* article, and its dedicated
+**Age assurance developer Q&A** are silent on re-checking or re-requesting after
+an age range has been obtained. **This is absence of a stated requirement, not
+proof that no obligation exists** — which is exactly why I4 exists.
+
+**What Apple DOES require is push-shaped, not poll-shaped:**
+
+- *"Developers must configure their apps to receive App Store server
+  notifications when a parent or guardian withdraws consent"* — `RESCIND_CONSENT`.
+- *"When a parent or guardian revokes consent for their child to access an app,
+  **Apple will prevent the app from launching**."* — **the platform enforces
+  access; the developer's duty is to receive and respond server-side.**
+- Significant app changes require consent via PermissionKit; **age-rating changes
+  are automatically significant**.
+
+**And Apple twice refers the obligation question to counsel:** *"developers are
+responsible for their own age restrictions… For questions about your compliance
+obligations, consult your legal counsel."*
+
+### I2 — What LAW requires. **NOT CONCLUSIVELY ANSWERABLE HERE**
+
+The driver is the app-store age-assurance wave — **Texas SB2420, effective
+2026-01-01**, with Utah, Louisiana and Brazil following; the categories are
+under-13 / 13-15 / 16-17 / over-18. Apple's own material states **no periodic
+re-check requirement**, and no source consulted imposes one.
+
+**But whether Études is in scope, and what "reasonable" ongoing assurance means
+for it, is a legal determination I am not in a position to make** — and Apple
+explicitly declines to make it for us. **This is a LEGAL question (C4 below).**
+
+### I3 — What Apple merely SUPPORTS
+
+Repeated calls are anticipated and cheap: *"the API will be called often… apps
+won't need to worry that calling the API will prompt the user too many times."*
+
+**"Apple supports frequent calls" DOES NOT ENTAIL "Études must poll every 30
+days."** That inference is invalid, and it is the one this review was asked to
+refuse. Apple's model is **pull at the point of need**, plus **push for consent
+events**.
+
+### I4 — What is therefore OUR OWN CHOICE
+
+Everything in CONTINUOUS. **No authority requires it.** It is defence-in-depth
+against an anomaly class (I0), bought with permanent schema, predicate, RPC,
+client and UX surface.
+
+---
+
+## I5 — THE COMPARISON
+
+| | **MINIMAL** | **CONTINUOUS** |
+|---|---|---|
+| **Compliance risk** | No identified requirement is unmet. Residual: an unquantified "ongoing assurance" duty, which is **I2/LEGAL**, and which polling would not clearly discharge either | Discharges no cited requirement. **Buys no compliance certainty**, because the uncertainty is legal, not technical |
+| **Child safety** | Under-13 refused at establishment; 13-17 protections server-enforced; **Apple blocks launch on consent revocation**. The un-covered case is the Apple-Account anomaly | Adds cover for the anomaly **only when a device happens to refresh**. A child using an adult's Études identity on a device where the adult's Apple Account is still signed in is **not** caught either way — so the protection is partial and somewhat arbitrary |
+| **Data minimisation** | Best. No new column, no new persisted safety state, no local timestamps | Worse: a persisted eligibility-withheld flag, two local timestamps per identity, and a new client-callable RPC |
+| **Product / UX** | **Real defect: a member who joined at 13-17 stays restricted after turning 18, indefinitely.** Discovery off, inbound requests closed, with no route out | Fixes that — but only after up to 30 days, and introduces a withheld state, a replaced purchase affordance, and a Check Again recovery path that must never reach purchase |
+| **Cost** | Zero server delta. Zero new state | Column + 2 predicates + 1 RPC + `self_v1` DROP/CREATE with grant re-apply, client state machine, throttles, AppMode term, UX branch, erase-sweep change — **all permanently maintained** |
+| **Authority making it necessary** | — | **NONE FOUND** |
+
+### I6 — THE OPTION THAT DOMINATES BOTH, and it is nearly free
+
+MINIMAL's only real cost is the **trapped 13-17 member**. That does **not** need
+polling to fix:
+
+**MINIMAL + MEMBER-INITIATED RE-DERIVATION.** Re-request Apple's range when the
+member asks — at the natural moment, such as opening the discovery setting.
+**Server delta: ZERO.** `account_privacy_upsert_v1` already updates the band on
+conflict, and the read-time override already evaporates when the band leaves
+`band_13_17`, restoring the preserved preference automatically. **Verified
+against the deployed predicates, and it needs no withholding state**, because
+teen → adult is a widening, not a restriction.
+
+**It fixes the ordinary transition (I0), at the moment the member actually cares,
+with no polling, no persisted safety state and no schema change.**
+
+### I7 — RESCIND_CONSENT: a real obligation, and it is NOT polling
+
+**This is the substantive finding of the review.** Apple states a developer duty
+to receive consent-withdrawal notifications, and the platform blocks app launch
+itself. It is **push-based** and arrives on the App Store Server Notifications
+endpoint Études already operates.
+
+**Études would currently see nothing and do nothing:** the **production**
+notification URL is still unset, and `appstore_notifications_v1` **does not map
+`RESCIND_CONSENT` at all** — verified by sweeping the function sources.
+
+**So the genuinely evidence-backed gap is here, not in periodic re-derivation.**
+It is also a better use of effort by every measure in I5. **Whether it binds
+Études depends on scope, which is I2/LEGAL.**
+
+---
+
+## I8 — RECOMMENDATION: **MINIMAL** (adopting I6), with one narrow question to LEGAL
+
+**Strongest evidence FOR MINIMAL:** no Apple or legal source found imposes
+periodic re-derivation; the only ordinary reclassification fails
+**over-protectively**; Apple enforces the severe case (consent revocation) at the
+platform level; and it is the most data-minimising option, which is the correct
+default for a children's-privacy feature.
+
+**Strongest evidence AGAINST MINIMAL:** the absence of a stated requirement is not
+a stated absence of requirement (I1), and pure MINIMAL leaves a member restricted
+after turning 18 — which **I6 fixes at zero server cost**.
+
+**Strongest evidence FOR CONTINUOUS:** it is the only option covering the
+Apple-Account anomaly without member action.
+
+**Strongest evidence AGAINST CONTINUOUS:** **no authority requires it**; it
+addresses the direction age does not move; its protection is partial and arbitrary
+even for the anomaly; and it is the least data-minimising option — permanent
+safety state and local timestamps added to a children's-privacy surface **to
+defend a case nobody has asked us to defend**.
+
+**DO NOT SHIP `c5440d8`'s D1 half.** Retain **Finding A** — the
+production-transcribed CP-1/CP-2 fidelity migration — which stands on its own and
+is unrelated to this decision.
+
+**TO LEGAL, added as C4:** is Études in scope of the app-store age-assurance
+laws; if so, does any of them impose an ONGOING age-assurance duty beyond
+establishment; and does `RESCIND_CONSENT` handling bind Études? **A "yes" to the
+third would make I7 the next unit — still not periodic polling.**
 
 ---
 
