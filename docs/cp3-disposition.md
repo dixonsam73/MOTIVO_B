@@ -173,3 +173,159 @@ that says no obligation may be ownerless.
 They are not, and §1 is the wording to carry.
 
 **The decision is the account holder's.** This is a proposal.
+
+---
+
+# 4. DISCOVERY-WRITER ACCEPTANCE — PASSED. 2026-09-08 17:15–17:16
+
+## 4.1 Pre-toggle: hydration/UI correctness with NO write
+
+Server held `lookup_enabled = true`; the control rendered **ON**; and
+**`account_privacy_set_lookup_v1` was still never-called.** Read-path
+correctness established **before** anything mutated — the redundant ON write
+avoided, per the account holder's sequencing.
+
+Purchase integrity at that moment: `membership` **1** (Sandbox,
+`binding_method` **`purchase`** — bound at source, no legacy claim);
+**`membership_binding` reused, not re-bound** (`created_at == updated_at` =
+16:57:34.469118); `upsert_v1` **unchanged at 5** — the purchase wrote no band.
+
+## 4.2 The single ON → OFF transition — all eleven pass
+
+| | prediction | observed | |
+|---|---|---|---|
+| **D-1** | `set_lookup_v1` **never-called → exactly 1** | **1** | **PASS** |
+| D-2 | `lookup_enabled` true → false | **false** | PASS |
+| D-3 | `lookup_changed_at` NULL → non-NULL | **17:15:05.447486** | PASS |
+| D-4 | `lookup_set_under_band` stays `band_18_plus` | **`band_18_plus`** | PASS |
+| **D-5** | follow-requests trio **byte-identical** | **true / NULL / `band_18_plus`** | **PASS** |
+| D-6 | `age_band`, `band_updated_at` unchanged | **`band_18_plus` / 16:54:51.48418** | PASS |
+| D-7 | `upsert_v1` stays 5 | **5** | PASS |
+| D-8 | no directory publication | **1 / 2795** | PASS |
+| D-9 | binding not re-bound | **unchanged** | PASS |
+| D-10 | tokens/sessions bounded | **249 / 20**, no rotation | PASS |
+| D-11 | Samuel untouched | **248 / 19**, `Samuel Dixon` | PASS |
+
+**D-1 is the headline: a counter that had never moved in this project's history
+went from `null` to exactly 1.** One call, no retry.
+
+**D-5 is the sharpest correctness result.** The deployed writer's `SET` list
+names only the three lookup columns, and the follow-requests trio came back
+byte-identical; `set_follow_requests_v1` also remains **never called**.
+
+**D-7 and D-4 together:** a preference change did not touch the band writer, and
+`lookup_set_under_band` was **copied** from `ap.age_band` rather than recomputed
+— exactly as the deployed SQL reads.
+
+## 4.3 Persistence — the explicit choice is read back, not re-asserted
+
+After one background→foreground: `lookup_enabled` still **false**,
+`lookup_changed_at` **unmoved** at 17:15:05.447486, and **`set_lookup_v1` still
+1 — no second write.** Directory, binding, band, tokens and Samuel all unchanged.
+
+**No second write is the load-bearing part.** A client that re-asserted what it
+had just read would be the exact shape of the hard-coded `lookupEnabled: true`
+literal CP-3 removed. It did not recur.
+
+## 4.4 What this run does NOT establish
+
+**It is an ADULT-band exercise.** `lookup_set_under_band` was verified to copy
+`ap.age_band`, but the value copied was `band_18_plus`. **The teen literal
+`band_13_17` is copied, not computed** — so the mechanism is verified and the
+teen value is not device-observed.
+
+---
+
+# 5. A FURTHER SANDBOX OBSERVATION, AND IT IS THE CLEANEST ONE
+
+**2026-09-08 ~17:08–17:12.** The fixture was set to `18+, age confirmed`,
+**verified by leaving and re-entering the screen**, measured server-side at
+17:10 — and found **unset** at ~17:12.
+
+**No deletion. No install. No sign-in. No app interaction. Only time and a
+screen re-entry.**
+
+**This is cleaner than the three earlier clearings**, which each had a lifecycle
+event to argue about. It has none. And it **retroactively explains the teen
+failures without any of the hypotheses raised and withdrawn during this work**:
+the 13-15 selections that "read back" had most likely unset again before
+`requestAgeRange` was called, and both call sites returning adult is simply
+consistent with **no fixture being set at request time**.
+
+**Signing out of the Sandbox account was considered and rejected:** it risks the
+`+devicec` tester carrying the subscription history and `originalTransactionId`
+— a different tester yields a different otid and a second `membership` row —
+for a fixture this run did not need.
+
+---
+
+# 6. FINAL CP-3 DISPOSITION
+
+## 6.1 Hardware-verified
+
+- **Band establishment**, three times, by **both** routes — the recovery
+  coordinator (post-fix) and Continue/join.
+- **The adult default row**, three times, identical:
+  `true / true / band_18_plus / band_18_plus / NULL / NULL`.
+- **Finding-A recovery wiring** — the View-scope fix, on the *same* identity and
+  server state that had failed: **writer flat before, +1 after**.
+- **Finding-A short-circuit** — band present ⇒ read, no Apple call, no write.
+- **Under-13 refusal**, twice, proven to occur **before any server contact**.
+- **`identityWithoutBand` created, not reconstructed** — twice, by midpoint.
+- **The discovery writer, end to end** — never-called → 1, correct row delta,
+  neighbouring preference untouched, and the choice **persisting across
+  hydration without a second write**.
+- **Hydration/UI read-path correctness** — the control rendered the server's
+  value with the writer provably uncalled.
+- **The deletion lifecycle** — `account_privacy` and `membership_binding`
+  cascade; blast radius predicted and matched **three times**, including a count
+  that moved once and correctly did not the next time.
+- **Purchase integrity** — `binding_method` `purchase`, binding reused not
+  re-bound.
+- **Gate (C)** and the session-management fix.
+
+## 6.2 Covered structurally / unit / server-side
+
+- **Derivation** — 16 unit tests over Apple's six documented fixtures,
+  boundaries, and the regulatory over-block.
+- **Share default** — pure and explicit: teen and every unknown → **OFF**.
+- **Server defaults** — **one deployed expression with NO teen branch**; the teen
+  half evaluated live (`false / false`), the adult half hardware-verified 3×.
+- **Child-safety effective override** — deployed and readable.
+- **Age-range wiring** — 35 structural assertions, non-vacuity measured.
+- **Session-refresh policy** — 87 unit tests, 34 structural.
+
+## 6.3 Blocked, and by what
+
+| blocked | by | proposed status |
+|---|---|---|
+| teen range → `band_13_17` end to end; the teen default row on device; the teen opt-in chain | **Apple's Sandbox fixture machinery** — no documented reset, nondeterministic honouring, corroborated by third-party reports **and by §5's clean observation** | **recorded limitation** |
+| directory publication; **strong band-before-directory ordering** | **U6b enforcement + D4** — `connected_member()` is Production-only, so a Sandbox membership can never publish | **named blocked obligation** |
+
+## 6.4 WHAT MUST NOT BE CLAIMED
+
+> **Teen defaults are NOT device-verified.** No end-to-end observation of a real
+> Apple 13-17 range establishing `band_13_17` exists, and therefore none of the
+> teen default row or the teen discovery opt-in chain.
+>
+> **The teen behaviour is covered by the client unit suite and by a deployed
+> server expression that has no teen branch and whose adult half is
+> hardware-verified three times. That is coverage, not device verification, and
+> the distinction must survive into the record.**
+
+## 6.5 RECOMMENDATION
+
+**CP-3 can reasonably close** with §6.3's two limitations recorded and §6.4's
+wording carried verbatim.
+
+The one gap that was **deterministic and uncovered** — the discovery writer — is
+now closed on hardware. What remains is a **test-environment** limitation with
+strong compensating coverage, and an **enforcement** boundary that is deliberate
+and must not be weakened.
+
+**Precedent:** this project has closed a phase carrying named, owned obligations
+before — Phase 3 closed carrying four, on its own rule that forcing an obligation
+to fit a phase boundary is the opposite of the discipline that says no obligation
+may be ownerless.
+
+**The decision is the account holder's.**
