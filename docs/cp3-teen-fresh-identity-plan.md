@@ -446,3 +446,77 @@ outcome is recorded as its own fact, whichever way it goes, and **a failed or
 cancelled revocation does not make the deletion a failure.**
 
 **CENSUS LOCKED. Awaiting the account holder's execution.**
+
+---
+
+# 10. DELETION VERIFIED — 2026-09-08. ALL PREDICTIONS MATCH
+
+**Reported by the account holder:** Apple's sheet **appeared and completed**;
+Études landed on **onboarding**.
+
+## 10.1 Every predicted number matched, nothing repaired forward
+
+| measure | locked | predicted | **observed** | |
+|---|---|---|---|---|
+| `auth.users` | 2 | 1 | **1** | PASS |
+| `account_privacy` | 1 | **0** | **0** | PASS — by FK cascade |
+| `membership` | 1 | 0 | **0** | PASS |
+| `membership_binding` | 1 | 0 | **0** | PASS |
+| **`shadow_enforcement_stat`** | 38 | **34** | **34** | **PASS** |
+| `account_directory` | 1 | 1 | **1** | PASS |
+| `posts` / `post_comments` / `follows` | 6 / 1 / 0 | unchanged | **6 / 1 / 0** | PASS |
+| `connected_attachments` / `post_comment_views` | 25 / 3 | unchanged | **25 / 3** | PASS |
+| `storage.objects` | 8 | unchanged | **8** | PASS |
+| `membership_notification` | 104 | unchanged | **104** | PASS |
+| `dfaf8d18` sessions / tokens | 19 / 248 | unchanged | **19 / 248** | PASS |
+
+**`shadow_enforcement_stat` 38 → 34 is the sharpest of these.** It was **absent
+from the first blast-radius prediction** and added only when the FK enumeration
+surfaced it; it then landed on the predicted value exactly. **A count that was
+nearly missed and then matched is better evidence than one that was obvious.**
+
+## 10.2 The identity is gone, and the residue sweep is systematic
+
+`auth.users` holds **only** `dfaf8d18`. Every cascade table returns **zero** rows
+for `9c5385f6`: `account_privacy`, `membership`, `membership_binding`,
+`membership_binding_conflict`, `account_directory`, `shadow_enforcement_stat`,
+`follows`, `auth.identities`, `auth.sessions`, `auth.refresh_tokens`.
+
+**The four NON-cascading tables were swept separately by prefix**, because they
+would not have cascaded and are the only place an orphan could live:
+`posts.owner_user_id` **0**, `post_comments.author_user_id` **0**,
+`connected_attachments` (sender or recipient) **0**,
+`post_comment_views.viewer_user_id` **0**, and `storage.objects` names containing
+the uid **0**.
+
+**No orphan or residual state attributable to the deleted identity.**
+
+## 10.3 Samuel is untouched, verified on content not just counts
+
+`dfaf8d18`: **19** sessions, **248** refresh tokens — both unmoved — and his
+directory row reads **byte-identical**: `Samuel Dixon | samueldixon | London`.
+
+## 10.4 The two client facts, recorded separately as required
+
+| | |
+|---|---|
+| **Apple SIWA revocation** | **appeared and completed.** Recorded as its own fact. Unlike the documented `1001` benign-cancellation precedent, this one succeeded |
+| **Études landed on** | **onboarding** — **recorded, not scored**, exactly as directed |
+
+**The load-bearing client assertion holds:** the Connected identity and
+account-management state are gone. Onboarding is a legitimate post-destructive
+landing and matches the C-49 shape observed before.
+
+**Deletion success was judged on server state alone**, and the revocation outcome
+did not enter that judgement — it simply happens to have succeeded this time.
+
+## 10.5 STATE NOW
+
+**Production holds exactly one identity — Samuel — and no `account_privacy` row
+at all.** The Device A Apple Account has no Études backend identity, and the
+Age Assurance fixture is still **Under 13**.
+
+**The `identityWithoutBand` fixture has NOT yet been created.** The next step is
+the fixture change to **13–15**, then the **returning-path** sign-in, then the
+**midpoint measurement of §7.3 before any foreground**. **Not started, and not to
+be started without direction.**
