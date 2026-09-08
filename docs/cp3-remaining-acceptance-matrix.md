@@ -422,3 +422,97 @@ but the distinction is not claimed.
 
 **Stopping here as instructed. Step 2 not attempted. The Under-13 fixture is left
 as-is — it is structurally inert while a band row exists.**
+
+---
+
+# 8. DISCRIMINATOR 5 — SCOPED. 2026-09-08 08:15
+
+## 8.1 THREE INPUTS, ONE OUTCOME — and they are NOT equivalent
+
+Études refuses all three identically, which is correct product behaviour and
+**exactly why they must not be treated as one test**:
+
+| input | source | maps to |
+|---|---|---|
+| **`.declinedSharing`** | Apple's own enum — the person declined to share | `.unavailable` (`DeclaredAgeRangeService:99-100`) |
+| **`@unknown default`** | a response shape this OS/SDK does not know | `.unavailable` (`:103-105`) |
+| **thrown error** | framework/transport failure | `.unavailable` (`ProfileView:1121-1123`, `catch`) |
+
+All three surface the same alert. **So observing the alert proves only that
+*one* of them occurred — it cannot say which.** Any claim about a specific branch
+needs the branch to be independently forced.
+
+## 8.2 `Revoke App Consent` DOES SOMETHING ELSE ENTIRELY. MY EARLIER GUESS WAS WRONG
+
+I previously called it *"the documented lever most likely to clear the cached
+consent"*. **It is not a client-side age-range control at all.** Per Apple's
+Sandbox testing documentation it is a **server-notification simulator**:
+
+- you enter **your app's Bundle ID** and tap **Revoke Consent**;
+- the system confirms *"Notification Triggered — A notification will be sent to
+  the developer server soon"*;
+- with ASSN v2 enabled, the **server** receives a **`RESCIND_CONSENT`**
+  notification carrying an `appData` object with `bundleId` and `environment`.
+
+It simulates **a parent or guardian revoking access to the app on behalf of their
+child**. It says nothing about, and does nothing to, what `requestAgeRange`
+returns on the device.
+
+**Two consequences.** It is **useless for discriminator 5**, and using it **would
+write to the server** — our Sandbox notification URL is configured, so a
+`RESCIND_CONSENT` row would land in `membership_notification` (currently **104**).
+**It must not be used casually.** *(Separately: `RESCIND_CONSENT` handling is a
+real, untested ingestion path and worth its own scoped unit later — recorded, not
+proposed.)*
+
+## 8.3 REACHABILITY OF EACH BRANCH
+
+| branch | classification | why |
+|---|---|---|
+| **`.declinedSharing`** | **B — candidate route, unconfirmed** | **No documented Sandbox fixture produces it.** All six return bounds (under 13, 13-15, 16-17, 18+ ×3), and Apple's own table has no declined row. The genuine article needs the *user-facing* control — Apple states *"people can manage their cached responses in the Settings app"* — which is **distinct from** the developer fixture and from Revoke App Consent. **I cannot confirm from the documentation that such a per-app control exists or that withdrawing it yields `.declinedSharing`.** That is a question for the device, not for me to assert |
+| **framework / transport error** | **DEVICE-UNREACHABLE** | Nothing supported makes `requestAgeRange` throw. Forcing it means removing the `com.apple.developer.declared-age-range` entitlement or otherwise breaking the build — **fixture manufacture, and it changes the binary under test**. Declared unreachable rather than simulated |
+| **`@unknown default`** | **STRUCTURALLY UNREACHABLE** | It fires only if Apple adds a response case this SDK does not know. Unreachable by construction on a current OS, and correctly so |
+
+**Two of the three branches are unreachable on this rig, and I am classifying
+them as such rather than manufacturing an equivalent.** The mapping of all three
+to `.unavailable` is already pure and unit-tested; what device testing could add
+is only that the wiring carries a real Apple `.declinedSharing` through — and
+only if the branch can be produced at all.
+
+## 8.4 D5-BASE — fresh baseline, 08:15:30 UTC
+
+| measure | value |
+|---|---|
+| `auth.users` | **2** |
+| `account_privacy` | 1 row · `band_18_plus` · `band_updated_at` **2026-09-07 13:40:16.675419** · `lookup_changed_at` NULL |
+| `account_directory` | **1** row |
+| `membership_binding.updated_at` | **2026-09-07 13:40:16.990315** |
+| **`membership_notification`** | **104** — the tripwire for any accidental `RESCIND_CONSENT` |
+| tokens `9c5385f6` / `dfaf8d18` | **42 / 248** |
+| **`account_privacy_upsert_v1` (writer)** | **2** |
+| `account_privacy_self_v1` | **45** |
+| `account_directory` INSERT / SELECT | **2795 / 3364** |
+
+## 8.5 MINIMUM PHYSICAL ACTION — one look, no taps
+
+**The strongest reachable case is `.declinedSharing`, and whether it is reachable
+at all is currently unknown.** So the minimum action is **an inspection, not a
+test**:
+
+> **Look for a user-facing control that governs whether Études may receive the
+> age range** — under Settings → *Apple Account* → the age-range / age-sharing
+> section, or Settings → Études, or wherever this device surfaces the "manage
+> your cached responses" Apple describes. **Do not change anything yet. Report
+> what exists.**
+
+- **If such a control exists** → withdrawing it, then Explore Connected →
+  Continue, is the real `.declinedSharing` test, and I will predict it properly
+  before you touch it.
+- **If it does not exist** → `.declinedSharing` joins the other two as
+  **device-unreachable on this rig**, discriminator 5 is closed as
+  *unreachable rather than untested*, and no further device action is spent.
+
+**Explicitly NOT the action:** `Revoke App Consent` (§8.2 — wrong mechanism, and
+it writes to the server). **The Under-13 fixture stays as it is**, since it is
+inert while a band row exists and would be the correct starting state for either
+outcome.
