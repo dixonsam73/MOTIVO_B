@@ -168,10 +168,21 @@ final class AuthManager: NSObject, ObservableObject {
     /// Establishes or reconciles the band. Returns true only when the server
     /// holds one.
     ///
-    /// Safe to call repeatedly: an existing row short-circuits, and the writer is
-    /// insert-if-absent, so a retry after an ambiguous failure returns the
-    /// surviving row rather than writing a second one. An unchanged band leaves
-    /// `band_updated_at` and every preference exactly where they were.
+    /// Safe to call repeatedly: an existing row short-circuits HERE, in this
+    /// function, before the writer is reached at all.
+    ///
+    /// **The writer is NOT insert-if-absent** -- that description was wrong and is
+    /// corrected (P5-G, 2026-09-08). `account_privacy_upsert_v1` is an upsert whose
+    /// `on conflict` sets `age_band = excluded.age_band`, stamping `band_updated_at`
+    /// only when the band actually CHANGES. It never writes a second row and never
+    /// rewrites a preference. So a retry after an ambiguous failure returns the
+    /// surviving row, and an unchanged band leaves `band_updated_at` and every
+    /// preference exactly where they were -- both true, but they follow from the
+    /// `on conflict` clause, NOT from the writer refusing to update.
+    ///
+    /// The distinction is live, not pedantic: the server CAN move a band, and
+    /// P5-G/Q1 decided that periodic re-derivation SHOULD move it, bidirectionally.
+    /// The reason no band moves today is this fetch-first short-circuit.
     @discardableResult
     func ensureAgeBandEstablished(reason: String) async -> Bool {
         switch await AccountPrivacyService.fetchSelf(auth: self, reason: "\(reason)-check") {

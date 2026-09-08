@@ -74,6 +74,25 @@ enum AccountPrivacyService {
     }
 
     /// The ONLY client writer of the follow-request preference.
+    ///
+    /// ── IT HAS NO CALLER, AND THAT IS A DECISION — P5-G / Q2, 2026-09-08 ────
+    ///
+    /// **DO NOT "FINISH" THIS WIRING.** The account holder decided that a 13-17
+    /// member **cannot enable inbound follow requests**, and that **no
+    /// follow-request control is to be added**. Relationship initiation *by
+    /// another member* stays closed; the young member may still initiate
+    /// relationships themselves.
+    ///
+    /// The reason of record: Études has no moderation, no reporting surface and
+    /// no guardian channel, so inbound contact from a stranger to a minor would
+    /// have no mitigating control behind it.
+    ///
+    /// So this function and its deployed RPC are **dead by decision, not by
+    /// omission**. An absent caller is exactly the shape that gets "helpfully"
+    /// completed by a later reader, which is why the reason is recorded here
+    /// rather than only in the register. See `docs/phase-5-g-decision-register.md`
+    /// §A2. The function is retained rather than deleted so the decision stays
+    /// visible at the place someone would otherwise re-add it.
     static func setFollowRequestsEnabled(_ enabled: Bool, auth: AuthManager, reason: String) async -> Result<Void, Failure> {
         await callVoid(rpc: "account_privacy_set_follow_requests_v1",
                        body: ["p_enabled": enabled], auth: auth, reason: reason)

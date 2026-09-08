@@ -64,8 +64,13 @@ final class AgeBandRecoveryCoordinator: ObservableObject {
     /// Re-acquires the range and retries establishment, once.
     ///
     /// Idempotent: an identity that already has a band short-circuits before any
-    /// Apple call, and the server writer is insert-if-absent, so a concurrent or
-    /// repeated attempt cannot create a second row or move `band_updated_at`.
+    /// Apple call, so the writer is not reached on that path.
+    ///
+    /// **The writer is NOT insert-if-absent** -- corrected P5-G, 2026-09-08.
+    /// `account_privacy_upsert_v1` updates `age_band` on conflict and stamps
+    /// `band_updated_at` only on a real change. A concurrent or repeated attempt
+    /// therefore cannot create a second row, and cannot move `band_updated_at`
+    /// while the band is unchanged -- which is what this call site relies on.
     func recoverIfNeeded(auth: AuthManager,
                          reason: String,
                          now: Date = Date(),
