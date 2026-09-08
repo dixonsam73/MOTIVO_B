@@ -669,3 +669,85 @@ Predictions T-1…T-9 (§7.4) stand unmodified, with the writer's baseline now
 pinned: **`account_privacy_upsert_v1` must go 2 → 3, exactly +1.**
 
 **Not started. Awaiting the account holder.**
+
+---
+
+# 13. RECOVERY MEASUREMENT — 2026-09-08 10:24:44. NO BAND WAS ESTABLISHED
+
+One background → foreground. Deltas from the midpoint:
+
+| measure | midpoint | **after** | Δ | |
+|---|---|---|---|---|
+| `account_privacy` rows | 0 | **0** | **+0** | **T-2…T-6 NOT MET** |
+| **`account_privacy_self_v1`** | 48 | **50** | **+2** | the coordinator **did run and did read** |
+| **`account_privacy_upsert_v1`** | 2 | **2** | **+0** | **T-9 NOT MET — no write attempted** |
+| `account_directory` rows / INSERT | 1 / 2795 | **1 / 2795** | +0 | **T-7 PASS** |
+| tokens / sessions (new identity) | 1 / 1 | **1 / 1** | +0 | **T-8 PASS** |
+| `membership` / `binding` | 0 / 0 | **0 / 0** | +0 | PASS |
+| Samuel tokens | 248 | **248** | +0 | PASS |
+
+**The recovery path executed and declined to write.** Reads moved; the writer did
+not. That is the coordinator behaving **correctly for some input it received** —
+`bandToEstablish` maps `.ineligible` and `.unavailable` to **nil**, and a nil band
+returns without writing. **Only a derived band may ever be written**, which is the
+protective design working, not failing.
+
+**So the question is not "why did the writer not fire" — it is "what did Apple
+return".**
+
+## 13.1 T-1 IS THE ONE THAT MATTERS AND IT IS UNRESOLVED
+
+**T-1 predicted "Apple's range is requested on real hardware."** Whether
+`requestRange()` was reached at all cannot be settled from the server:
+
+- **one** attempt that got a nil band returns **before** `ensureAgeBandEstablished`, costing **1** read;
+- **two** attempts of that shape cost **2** reads;
+- **one** attempt that reached `ensureAgeBandEstablished` also costs **2** reads — but that path would then have called `upsertBand` unless its own `fetchSelf` returned a non-`noBandEstablished` failure.
+
+**+2 is consistent with more than one story, and I am not going to pick one.**
+
+## 13.2 CANDIDATE CAUSES — NONE EXCLUDED, AND ONE IS OUR OWN DOING
+
+1. **The Age Assurance fixture is still `Under 13`.** Then `.ineligible` → nil
+   band → no write, and the coordinator is simply correct.
+2. **Apple presented its system sheet and it was not completed.** `Share with
+   Apps` is on **Ask First**, and **our own discriminator-5 excursion set it to
+   `Never` and back** — which the account holder observed *"turns off the Études
+   sharing state"*. If Études' per-app consent was cleared by that excursion,
+   Apple **must prompt again**, and a prompt arriving during a
+   background→foreground is easy to miss or dismiss. **That would be
+   cross-contamination from our own earlier test**, and it is the hypothesis I
+   consider most likely.
+3. **`fetchSelf` returned a transport failure** rather than `.noBandEstablished`,
+   so the coordinator returned early — deliberately, since *"transport or session
+   trouble is NOT no band"*.
+
+**This is not diagnosable from the server. The decisive facts are on the device.**
+
+## 13.3 WHAT I NEED BEFORE ANY FURTHER DEVICE ACTION
+
+**No instruction to act — three observations only:**
+
+1. **Did an Apple system sheet appear at any point** during or after the
+   background→foreground, and if so what did it say and what happened to it?
+2. **What does Settings → Developer → Sandbox Apple Account → Manage → Age
+   Assurance read right now?** — confirming whether it is `13 - 15, significant
+   change approved` or still `Under 13`.
+3. **What does Apple Account → Personal Information → Age Range for Apps show
+   for Études now?** — is it still listed as **Shared**, or has our `Never`
+   excursion left it unshared?
+
+**Observation 3 is the sharpest**, because it would confirm or kill hypothesis 2
+outright — and hypothesis 2 is a defect in **our test sequencing**, not in the
+product.
+
+## 13.4 WHAT IS ALREADY SAFE TO SAY
+
+- **The midpoint stands.** `identityWithoutBand` remains established and
+  **undisturbed** — still 0 privacy rows, still writer at 2. Nothing about this
+  result weakens §12.
+- **T-7 and T-8 pass:** no directory publication, and **no token rotation at
+  all** — the expiry gate held on a five-minute-old token, so Gate (C) is
+  incidentally reconfirmed once more.
+- **No protective default was written on a doubtful input**, which is the
+  behaviour CP-3 wants: an unresolved age answer must establish **nothing**.
