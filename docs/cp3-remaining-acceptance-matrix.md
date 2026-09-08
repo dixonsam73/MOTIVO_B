@@ -124,11 +124,87 @@ future teen work.** Cost: zero.
 
 ### What would unblock the four C items — stated, NOT proposed
 
-A **second, genuinely fresh identity** (a different Apple ID, so SIWA returns a
-new `sub`) carrying a **teen** Age Assurance fixture. That single fixture would
-make 1, 2, 3 and the recovery half of 6 achievable in one run, and — **only if
-additionally Production-entitled** — discriminator 7.
+**CORRECTED 2026-09-08. My first version said this needed "a different Apple ID,
+so SIWA returns a new `sub`". THAT IS WRONG, and this project had already
+measured the opposite.**
 
-**That is fixture manufacture and account creation, which the current
-instruction excludes.** Recorded so the cost is visible when it is next weighed,
-not as a recommendation.
+**Revocation and deletion are different lifecycles, and only one of them frees
+the `sub`:**
+
+- **Credential revocation alone re-authenticates the EXISTING identity.** SIWA
+  returned the **same `sub`** after a manual revocation and `auth.users` **did
+  not grow** (`CLAUDE.md:625`).
+- **Deleting the backend row frees it.** After D15 deleted `cfadb7cb` through
+  the real account-deletion path, a subsequent SIWA **on the same Apple Account**
+  minted a **new** backend identity `5ae3faab…` (`CLAUDE.md:2350`).
+
+**So the fresh identity needs a backend DELETION, not a different Apple
+Account.** The recorded option is therefore:
+
+> **Once the current adult fixture has discharged its remaining duties**,
+> deliberately delete/reset that disposable beta identity **through the real
+> account-deletion lifecycle**, then reuse **Device A's existing primary Apple
+> Account** with a **teen** Age Assurance fixture to establish a fresh Études
+> identity.
+
+**Do NOT change Apple's primary account merely to obtain another identity.**
+
+That single fixture would make 1, 2, 3 and the recovery half of 6 achievable in
+one run, and — **only if additionally Production-entitled** — discriminator 7.
+
+**THIS IS NOT AUTHORISATION TO DELETE `9c5385f6` NOW**, and it is sequenced
+strictly after the zero-cost tests below.
+
+---
+
+# 4. STEP 1 — NON-MUTATION BASELINE, captured 2026-09-08 07:03:16 UTC
+
+Taken **before** the fixture is changed, so a refusal can be proved to have
+written nothing.
+
+| measure | S1-BASE |
+|---|---|
+| `auth.users` | **2** |
+| `account_privacy` | **1** row · `band_18_plus` · `band_updated_at` **2026-09-07 13:40:16.675419** · `lookup_changed_at` NULL · `follow_requests_changed_at` NULL |
+| `account_directory` | **1** row |
+| `membership` | 1 row · `updated_at` **2026-09-08 06:53:03.488676** · `renewal_date` **07:14:29** |
+| `membership_binding` | `updated_at` **2026-09-07 13:40:16.990315** |
+| refresh tokens | `9c5385f6` **41** · `dfaf8d18` **248** |
+| **`account_privacy_upsert_v1` (THE WRITER)** | **2** |
+| `account_privacy_set_lookup_v1` (discovery writer) | **never called** (null) |
+| `account_privacy_self_v1` (read) | **34** |
+| `account_directory` INSERT / SELECT | **2795** / **3356** |
+
+**The writer counter is the sharp instrument.** `account_privacy_upsert_v1` is
+the only path that can write a band. If the under-13 refusal behaves as designed
+it must stay at **2** — a value that cannot be argued with, unlike a row that
+merely still looks the same.
+
+## 4.1 THE FIXTURE, AND THE PREDICTION
+
+**Select exactly: `Under 13, significant change approved`** — Apple's own label,
+in Settings → Developer → Sandbox Apple Account → *account* → Manage → Age
+Assurance. It returns **lowerBound —, upperBound 12, `guardianDeclared`**.
+
+`DeclaredAgeRangeService.derive(lowerBound: nil, upperBound: 12)` → **`.ineligible`**,
+which our unit suite already asserts. Samuel's current fixture is
+*"18+, age confirmed, significant change not applicable"*, which is the same
+picker — so the labels are known to be readable as written.
+
+**Predicted, on Explore Connected → Continue:**
+
+| | prediction |
+|---|---|
+| **P-A** | the alert **"Connected isn't available"** with the message **"Études Connected is for ages 13 and over."** |
+| **P-B** | `continueToConnectedJoin()` is never called ⇒ **no `MembershipSelectionView`, no purchase sheet** |
+| **P-C** | `account_privacy_upsert_v1` stays at **2** — nothing written |
+| **P-D** | `auth.users` **2**, `account_privacy` 1 row, `band_updated_at` unchanged, `account_directory` 1 row, `membership_binding` unchanged |
+| **P-E** | `dir_ins` stays **2795** |
+
+**THE ALTERNATIVE OUTCOME IS ALSO INFORMATIVE AND IS NOT A FAILURE.** If
+`MembershipSelectionView` appears instead, Apple served the **cached adult
+answer** and the fixture switch is inert for this app — which is exactly the
+§1 question, answered. **Back out without purchasing;** it still writes nothing.
+
+**Not to be followed automatically by Revoke App Consent or Step 2.** Step 1 is
+measured and reported first.
