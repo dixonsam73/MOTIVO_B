@@ -1408,3 +1408,79 @@ outcome is recorded separately from deletion success**, which is judged on serve
 state alone.
 
 **AWAITING AUTHORISATION. Nothing executed.**
+
+---
+
+# 21. DELETION VERIFIED, AND THE FIXTURE UNSET AGAIN — 2026-09-08 12:57
+
+## 21.1 Deletion: every prediction matched
+
+| measure | locked | predicted | observed | |
+|---|---|---|---|---|
+| `auth.users` | 2 | 1 | **1** | PASS |
+| `account_privacy` | 1 | **0** | **0** | PASS — FK cascade |
+| `account_directory` | 1 | 1 | **1** | PASS |
+| membership / binding | 0/0 | 0/0 | **0/0** | PASS |
+| **`shadow_enforcement_stat`** | 34 | **34** | **34** | **PASS** |
+| posts / comments / follows | 6/1/0 | unchanged | **6/1/0** | PASS |
+| `connected_attachments` / `post_comment_views` / storage | 25/3/8 | unchanged | **25/3/8** | PASS |
+| notifications | 104 | 104 | **104** | PASS |
+| `c584db5b` identities/sessions/tokens | 1/1/2 | 0/0/0 | **0/0/0** | PASS |
+| Samuel | 248/19 | unchanged | **248/19** | PASS |
+
+**`shadow_enforcement_stat` holding at 34 is the sharpest.** Last retirement it
+went 38 → 34 because that identity owned four rows; **this one owned none, and I
+predicted it would NOT move.** A count that moved last time and correctly did not
+this time is better evidence than one that never moves.
+
+**Residue sweep clean** — zero for `c584db5b` across identities, sessions,
+tokens, `account_privacy`, and the non-cascading tables. Samuel verified on
+content: `Samuel Dixon`, 248 tokens, 19 sessions.
+
+Apple's SIWA sheet **appeared and completed** (own fact, kept separate); Études
+landed on **onboarding** (recorded, not scored).
+
+## 21.2 THE FIXTURE UNSET ACROSS THE DELETION — AND THIS TIME THE ATTRIBUTION IS SHARP
+
+**`13 - 15` was set at ~12:53 and verified reading back. The deletion ran at
+~12:57. It is now unset — about five minutes later, WITH NO INSTALL.**
+
+**That kills the install hypothesis as a necessary cause.** Step 4 held: no build
+and no install occurred. The only intervening event was the **account deletion,
+including Apple's SIWA revocation sheet**.
+
+### Reconciling both occurrences
+
+| | occurrence 1 | occurrence 2 |
+|---|---|---|
+| fixture set | ~10:16, **after** that deletion | ~12:53, **before** this deletion |
+| survived SIWA **sign-in**? | **yes** — confirmed 13-15 at 10:30, after the 10:19 sign-in | n/a |
+| survived account **deletion**? | not tested — it was set afterwards | **NO** |
+| found unset | by 12:35, after an install | ~12:58, **no install** |
+
+**Coherent reading, offered as a working rule rather than a mechanism: the
+fixture survives a SIWA sign-in but does NOT survive the account-deletion
+lifecycle.** Occurrence 1 never tested that, because the fixture was set after
+its deletion. Occurrence 2 tested it directly and it failed.
+
+**I am not claiming Apple's revocation clears it** — that is a mechanism I have
+not shown, and inventing one is the mistake of §18.1. What is measured is the
+before/after.
+
+### The practical rule, which the plan already half-had
+
+> **SET THE AGE ASSURANCE FIXTURE AFTER THE DELETION, NEVER BEFORE.**
+
+The plan's step 4 already re-checked after deletion — **which is precisely why
+this cost nothing.** Had the check not been there, the fresh sign-in would have
+been spent on an unset fixture and produced a second `band_18_plus`, retiring a
+second identity for nothing.
+
+**The account holder's tightening — treat fixture state as an explicit
+precondition re-verified after every lifecycle event — is what caught this. It
+has now paid for itself once, measurably.**
+
+## 21.3 NOTHING IS LOST
+
+The deletion is clean, the identity is gone, and **no sign-in has happened yet**.
+Setting the fixture now puts the run exactly where it should be.
