@@ -721,3 +721,92 @@ what *Ask First* means, and is not damage.
 device-unreachable.** That is a legitimate outcome, not a gap: two of its three
 branches are already classified unreachable, and the mapping of all three to
 `.unavailable` is pure and unit-tested.
+
+---
+
+# 11. RESULT — 2026-09-08 09:54. THE SANDBOX FIXTURE WINS
+
+**G-1 PASSED**: across the 82 minutes between setting `Share with Apps = Never`
+and opening Études, **every** value was byte-identical to D5-BASE3 — including
+`membership_notification` at **104**, proving no accidental `RESCIND_CONSENT`.
+Tokens and privacy reads were also flat, confirming the app was genuinely idle,
+so anything moving afterwards is attributable to the interaction.
+
+**Observed on the tap: *"Études Connected is for ages 13 and over."***
+
+That is the **`.ineligible`** alert, which is reachable **only** from
+`derive(lowerBound:upperBound:)` — i.e. **Apple returned an under-13 RANGE, not
+`.declinedSharing`**, despite the account-level `Share with Apps` being **Never**.
+
+## 11.1 What is established, and what is only inferred
+
+**ESTABLISHED:** with `Share with Apps = Never` **and** the Under-13 Sandbox
+fixture active, `requestAgeRange` returned **bounds**, not a decline.
+
+**NOT ESTABLISHED — two mechanisms share that observable, and I am not choosing
+between them:**
+
+1. the Sandbox age fixture **takes precedence over** the account preference; or
+2. the account preference **does not propagate** to the sandbox-fixture path at all.
+
+**Operationally they are the same**: with a Sandbox fixture set,
+**`.declinedSharing` cannot be produced on this rig.**
+
+## 11.2 THE DEEPER LIMIT: DISCRIMINATOR 5 IS NOT DEVICE-DISTINGUISHABLE AT ALL
+
+This is the account holder's own framing, turned on the result.
+
+**Even reaching the `.unavailable` alert would not establish `.declinedSharing`.**
+The shipping client collapses **three distinct inputs into one outcome and one
+alert** (§8.1): `.declinedSharing`, `@unknown default`, and any thrown error.
+From outside, the alert proves *"one of three"* and can never prove *"this one"*.
+
+**Distinguishing them requires instrumentation** — a log line naming the branch —
+which carries this project's standing removal condition and has not been
+authorised. **So `.declinedSharing` is not device-establishable on the shipping
+binary, by construction and not by circumstance.**
+
+**Discriminator 5's final classification:**
+
+| branch | classification |
+|---|---|
+| `.declinedSharing` | **DEVICE-UNREACHABLE** with a Sandbox fixture set, **and NOT DISTINGUISHABLE** from the other two even if reached |
+| framework / transport error | **DEVICE-UNREACHABLE** (§8.3) |
+| `@unknown default` | **STRUCTURALLY UNREACHABLE** (§8.3) |
+
+**Closed as UNREACHABLE, not as untested or failed.** The mapping of all three to
+`.unavailable` is pure and already unit-tested; only the device wiring is
+unverified, and it cannot be verified without instrumentation.
+
+## 11.3 A PREDICTION OF MINE WAS WORDED WRONG — G-3
+
+**G-3 said "`account_privacy_self_v1` stays 45 and tokens stay 42".** Observed:
+**46 and 43**, both **+1**.
+
+**That is not a behavioural surprise; it is my wording.** I wrote G-3 against an
+already-warm app, and this tap followed **82 minutes idle**, so opening Études
+ran the launch/foreground `AgeBandRecoveryCoordinator` — one `fetchSelf` and,
+because the token was over an hour old, one rotation.
+
+**G-3's INTENT holds, and structurally rather than by argument:** the
+`.ineligible` path **cannot** reach `fetchSelf`, because `continueToConnectedJoin()`
+is called **only** in the `.band` case (`ProfileView:391-393`). So the `+1` is
+necessarily the recovery coordinator, and the refusal itself still made **no
+server contact**. **One rotation, not a burst — Gate (C) still holding.**
+
+**G-2, G-4, G-5 all PASS:** writer **2**, directory **1 / 2795**,
+`band_updated_at` **2026-09-07 13:40:16.675419**, binding unchanged,
+`auth.users` **2**, `dfaf8d18` **248**.
+
+## 11.4 NEXT — restore, and one optional experiment of modest value
+
+**Restore `Share with Apps` to *Ask First*.** It has yielded everything it can.
+
+**Optional, and honestly bounded:** the **`.unavailable` alert has never been
+seen on device**. Unsetting the Sandbox Age Assurance fixture *might* reach it,
+since no fixture value would be available to supply.
+
+**What that would and would not buy:** it would verify the `.unavailable`
+**outcome wiring and copy** on device. It would **NOT** establish
+`.declinedSharing`, for the reason in §11.2. **Recorded as optional; not
+recommended as necessary.**
