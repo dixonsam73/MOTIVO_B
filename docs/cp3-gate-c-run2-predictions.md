@@ -259,3 +259,75 @@ entitlement, or an explicit tester carve-out **outside** the entitlement
 predicate — which is the U6b decision D4 already anticipated and deliberately
 deferred. **Weakening enforcement or manufacturing membership state for a test
 is not on the table.**
+
+---
+
+# 6. M2 — 06:50:42 UTC. THE ISOLATED SINGLE-TRANSITION OBSERVATION
+
+One background → foreground, nothing else. Deltas from M1 (06:44:56):
+
+| counter | M1 | M2 | Δ | reads as |
+|---|---|---|---|---|
+| `posts` SELECT | 19859 | **19860** | **+1** | Connected and authenticated; `ensureValidSession` returned **true** |
+| **`account_directory` SELECT** | 3350 | **3352** | **+2** | **hydration BEGAN** |
+| `account_privacy_self_v1` | 25 | **28** | **+3** | three preflights |
+| **`9c5385f6` tokens** | 41 | **41** | **+0** | **no rotation** — last token still **06:28:32.385** |
+| `account_directory` INSERT | 2795 | **2795** | +0 | RLS-denied, as established in §5.3 |
+
+**CRITERION 1 IS NOW CONFIRMED IN ISOLATION.** A single background→foreground,
+with a token minted at 06:28:32 and still valid at 06:50, produced **hydration
+without any rotation**. The pre-fix binary produced `dir_select` **+0** on
+exactly this transition (2026-09-07, T2→T3). The lifecycle the fix addresses —
+authenticated identity + valid token + Connected eligibility → prompt hydration
+— is **hardware-verified**.
+
+## 6.1 THE WHOLE-RUN FIGURE IS THE HEADLINE
+
+Across T0 → M2 (06:29:41 → 06:50:42), covering an app install, a repurchase,
+Connected activation and a foreground:
+
+| | |
+|---|---|
+| privacy preflights | **+10** |
+| directory hydrations | **+4** |
+| **token rotations** | **0** |
+| sub-second gaps | **none — there are no new tokens at all** |
+| last token | still **06:28:32.385**, one token serving the entire run |
+
+**Pre-fix, every one of those ten preflights rotated unconditionally, and each
+rotation re-scheduled a hydration that cancelled and restarted the running one.**
+That is the mechanism that produced **34 rotations in 20.5 s at 0.12–0.13 s
+spacing**. The same ten preflights now produce **zero**.
+
+**GATE (C) IS HARDWARE-VERIFIED.**
+
+## 6.2 One observation recorded, not a defect
+
+Hydration runs about **twice per foreground** (`dir_select` +2 for one
+transition). That is the deliberate consequence of scheduling on **every** usable
+session outcome: the foreground's own `ensureValidSession` schedules one, and a
+subsequent preflight schedules another once the first has released its claim.
+
+**Bounded, sequential and harmless** — the guard prevents concurrent re-entry,
+not sequential re-runs, and no rotation results from any of it. Recorded as a
+mild redundancy worth knowing about, **not** filed as a defect and **not**
+worth trading against the loop protection.
+
+## 7. FINAL SCORING
+
+| # | criterion | result |
+|---|---|---|
+| 1 | hydration begins promptly with an already-valid token | **PASS** — twice, in isolation at M2 |
+| 2 | **Gate (C)** — the privacy preflight does not recreate the loop | **PASS — hardware-verified.** 10 preflights, 0 rotations |
+| 3 | directory publication | **NOT ACHIEVABLE on this fixture** — RLS-denied by `enforcement_gate`, by design (§5.3). Neither pass nor fail |
+| 4 | token behaviour bounded, no sub-second burst | **PASS** — 41 → 41 |
+| 5 | `band_updated_at` unchanged | **PASS** — 2026-09-07 13:40:16.675419 |
+| 6 | Samuel untouched | **PASS** — 248 tokens, 2026-09-05, row unchanged |
+
+**Still NOT established:** band-before-directory **ordering** (weak here, and the
+strong test needs a fresh identity), and **whether the client attempted the
+denied INSERT** (B-34: a denied write leaves no telemetry).
+
+**Fixture preserved:** `9c5385f6` retains `band_18_plus` and no directory row,
+and §5.5 shows it cannot lose that state while its membership is Sandbox and
+enforcement is on.
