@@ -352,3 +352,66 @@ P-C through P-G must hold in that case too, since `ensureAgeBandEstablished`
 short-circuits on the existing row either way.
 
 **Either result answers something worth knowing. Neither writes anything.**
+
+---
+
+# 7. STEP 1 RESULT — 2026-09-08 08:12:09 UTC. DISCRIMINATOR 4 PASSES
+
+Device: alert **"Études Connected is for ages 13 and over."**
+
+| | prediction | observed | |
+|---|---|---|---|
+| P-A | that exact refusal message | **as predicted** | **PASS** |
+| P-B | no `MembershipSelectionView`, no purchase sheet | none appeared | **PASS — and see §7.1** |
+| **P-C** | **`account_privacy_upsert_v1` stays 2** | **2** | **PASS** |
+| P-D | users 2 · privacy 1 row · `band_18_plus` · `band_updated_at` 2026-09-07 13:40:16.675419 · both `*_changed_at` NULL | all as predicted | **PASS** |
+| P-E | directory rows 1, `dir_ins` 2795 | **1 / 2795** | **PASS** |
+| P-F | binding `updated_at` 2026-09-07 13:40:16.990315 | unchanged | **PASS** |
+| P-G | `dfaf8d18` 248 tokens | **248** | **PASS** |
+
+## 7.1 A RESULT STRONGER THAN PREDICTED: NO SERVER CALL AT ALL
+
+**`account_privacy_self_v1` stayed at 45** and `9c5385f6`'s token count stayed at
+**42**.
+
+That is not merely "nothing was written". `continueToConnectedJoin()` calls
+`ensureAgeBandEstablished`, which calls `fetchSelf`, which would have incremented
+the read counter and preflighted a session refresh. **Neither moved, so the
+refusal is proven to have occurred strictly before ANY server contact** — P-B is
+established server-side rather than only from the screen.
+
+**An under-13 answer costs Apple one call and stops. No identity is touched, no
+session is spent, and nothing reaches the backend.** That is the behaviour CP-3's
+design intends: turn the member away *without* minting anything that would then
+need deleting.
+
+## 7.2 THE CACHING QUESTION IS ANSWERED BY MEASUREMENT
+
+**Apple returned the under-13 range despite this app holding a previously cached
+ADULT answer, and `Revoke App Consent` was never used.**
+
+So **changing the Sandbox Age Assurance fixture does change what
+`requestAgeRange` returns**, live, for an app that already held a cached
+response. §1's trap — a teen test silently scored against a stale adult answer —
+**does not apply on this device with this Sandbox account.**
+
+**This is the precondition for every remaining teen discriminator**, and it is
+now empirical rather than assumed. Apple's documentation still does not promise
+it; what we have is a measurement on this device, this app and this Sandbox
+account, which is the level at which it will be relied upon.
+
+**One thing is NOT established:** whether Apple re-presented its system sheet or
+served the new fixture value without prompting. It was not observed and it
+changes no conclusion — **the returned value tracked the fixture either way** —
+but the distinction is not claimed.
+
+## 7.3 STATUS CHANGES
+
+| | was | now |
+|---|---|---|
+| **Discriminator 4 — under-13 refusal** | class **A**, untested | **PASSED, device-verified** |
+| §1 fixture-vs-cache behaviour | unknown, flagged as a trap | **answered: the fixture governs** |
+| Discriminator 5 — unavailable/declined | **A/B** | **still A/B, deliberately not pre-judged.** Apple's six documented fixtures all return bounds, so `.declinedSharing` may not be reachable by fixture switching at all; `Revoke App Consent` remains the candidate lever, and that is Step 2 |
+
+**Stopping here as instructed. Step 2 not attempted. The Under-13 fixture is left
+as-is — it is structurally inert while a band row exists.**
