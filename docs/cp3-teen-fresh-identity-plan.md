@@ -853,3 +853,102 @@ default OFF, and the discovery opt-in — all of which need a band that the
 coordinator cannot currently write.
 
 **Not executed. No device action requested until the account holder decides.**
+
+---
+
+# 15. THE WIRING FIX — IMPLEMENTED, NOT DEVICE-VERIFIED. 2026-09-08
+
+## 15.1 Mechanism wording, kept honest
+
+**What is established:** the shipped recovery wiring **does not establish a band
+on-device**. Reads moved `48 → 50`, the writer stayed at **2**, no sheet
+appeared, with the fixture at 13-15 and Études `Shared`.
+
+**What is the leading source-level explanation, not a direct observation:**
+`@Environment(\.requestAgeRange)` read from **`App` scope** lacks a presentation
+context. **The thrown error was never directly observed** — the `catch` is silent
+and the device runs Release. That wording is carried into the source comment
+itself, so the code does not overclaim either.
+
+## 15.2 The architecture, verified before changing anything
+
+`requestAgeRange` is a SwiftUI **environment action that presents system UI**.
+`ProfileView` already demonstrates the working pattern: declare it in a **View**
+(`:327`) and call it there (`:1116`). **The fix reuses exactly that**, rather
+than introducing a second mechanism.
+
+**`AgeBandRecoveryTrigger`** — a `ViewModifier` that declares its own
+`@Environment(\.requestAgeRange)`, owns the launch and foreground triggers, and
+hands the action to the coordinator. Attached to the root view via
+`.ageBandRecovery(coordinator:auth:)`.
+
+**Against each constraint:**
+
+| constraint | how it is met |
+|---|---|
+| recovery still belongs to the coordinator | the modifier only calls `coordinator.recoverIfNeeded`; **all** policy stays inside it |
+| action from a valid View presentation context | declared in a `ViewModifier`; the App declares **none** |
+| nothing persisted | no `UserDefaults`, `Keychain`, `ProfileStore`, Core Data, and it never touches `pendingAgeBand` |
+| existing-band short-circuit unchanged | untouched in the coordinator |
+| unavailable/ineligible/error fail-closed | unchanged: `catch → .unavailable`, and only `bandToEstablish` may yield a band |
+| single-flight / cooldown unchanged | untouched in the coordinator |
+| no new UI | the modifier renders nothing; asserted for `Text`, `Button`, `.sheet`, `.alert`, `NavigationStack` |
+
+**One deliberate detail:** the coordinator is held as a plain `let`, **not** an
+`@ObservedObject`. The modifier only calls a method, and subscribing would add a
+re-render source to the root view for no benefit — **which is the shape of
+C-55**.
+
+## 15.3 THE REGRESSION IS STRUCTURAL, AND THAT IS THE POINT
+
+`supabase/tests/p5/cp3-agerange-wiring.sh` — **35 assertions**.
+
+**A stubbed provider cannot catch this defect, by construction: it replaces the
+very thing that was broken.** Five coordinator unit tests passed throughout while
+the shipped path could not establish a band. So the regression asserts the
+**wiring** — which scope reads the action, which types may call it, and that
+nothing was smuggled in to work around it. Same idiom as C5f-12.
+
+**Non-vacuity, measured against the pre-fix tree:**
+
+| assertion | pre-fix | post-fix |
+|---|---|---|
+| **W-1** `@Environment(\.requestAgeRange)` in `MOTIVOApp` | **1** | **0** |
+| W-1b any `requestAgeRange` reference in the App | **3** | **0** |
+| W-1d the App-scope bridge `recoverAgeBandIfNeeded` | **3** | **0** |
+| **W-3** files calling `requestAgeRange(` | `MOTIVOApp.swift ProfileView.swift` | **`AgeBandRecoveryTrigger.swift ProfileView.swift`** |
+
+**W-3 is the durable one:** it pins that every caller is a View-layer type, so a
+future call added from `App` scope — the exact defect — fails immediately.
+W-4b/W-4c additionally forbid "fixing" it by moving the environment read *into*
+the coordinator, which would restore an App-shaped problem and destroy its
+testability.
+
+## 15.4 Evidence
+
+- **Debug and Release both build clean.**
+- **`MOTIVOTests` 87 passed / 0 failed / 0 skipped** — unchanged; the coordinator's
+  logic was not touched.
+- **`cp3-agerange-wiring` 35/35**; **`session-refresh-acceptance` 34/34.**
+
+## 15.5 THE FIXTURE IS EXACTLY PRESERVED — verified read-only after the work
+
+| | |
+|---|---|
+| fresh identity | **`c584db5b-5648-4755-9063-5c24763f8819`** present |
+| `account_privacy` | **0 rows** |
+| `account_privacy_upsert_v1` | **2** |
+| `membership` / `membership_binding` | **0 / 0** |
+| `account_directory` | **1** — Samuel only |
+| `auth.users` | **2** |
+
+Device untouched: no Explore Connected, no purchase, no deletion, no band
+manufactured. Age Assurance remains **13-15**; Études remains **`Shared`**.
+
+## 15.6 NOT DEVICE-VERIFIED
+
+**This fix has not been run on hardware.** The decisive test is installing it
+over the top and letting **this same untouched `identityWithoutBand`** take one
+background→foreground — the exact experiment that failed at `d03324f`. **A
+structural suite proves the wiring changed; only the device can prove the band
+gets written.**
